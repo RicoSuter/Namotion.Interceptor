@@ -21,6 +21,7 @@ namespace Namotion.Proxy.Tests.Handlers
             var person = new Person();
             person.SetContext(context);
 
+            var x = person.FullName; // touch
             person.FirstName = "Rico";
             person.LastName = "Suter";
 

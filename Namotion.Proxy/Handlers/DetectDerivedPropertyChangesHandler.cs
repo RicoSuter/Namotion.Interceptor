@@ -2,18 +2,14 @@
 
 namespace Namotion.Proxy.Handlers;
 
-public class DetectDerivedPropertyChangesHandler : IProxyReadHandler
-{
-    private record struct TrackedProperty(IProxy Proxy, string PropertyName);
+public record struct TrackedProperty(IProxy Proxy, string PropertyName);
 
+public class DetectDerivedPropertyChangesHandler : IProxyReadHandler, IProxyWriteHandler
+{
     [ThreadStatic]
     private static Stack<HashSet<TrackedProperty>>? _currentTouchedProperties;
 
-    ///// <summary>
-    ///// Gets the properties which are used to calculate the value of this derived property.
-    ///// </summary>
-    //[JsonIgnore]
-    //public IReadOnlyCollection<TrackedProperty> RequiredProperties { get; internal set; } = ImmutableHashSet<TrackedProperty>.Empty;
+    public bool IsDerived => true;
 
     public object? GetProperty(ProxyReadHandlerContext context, Func<ProxyReadHandlerContext, object?> next)
     {
@@ -23,7 +19,26 @@ public class DetectDerivedPropertyChangesHandler : IProxyReadHandler
         return result;
     }
 
-    public bool IsDerived => true;
+    public void SetProperty(ProxyWriteHandlerContext context, Action<ProxyWriteHandlerContext> next)
+    {
+        next.Invoke(context);
+
+        var usedByProperties = context.Proxy.GetUsedByProperties();
+        if (usedByProperties.Any())
+        {
+            lock (usedByProperties)
+            {
+                foreach (var usedByProperty in usedByProperties)
+                {
+                    var changedContext = new ProxyChangedHandlerContext(context.Context, usedByProperty.Proxy, usedByProperty.PropertyName, null, null); // TODO: how to provide current and new value?
+                    foreach (var handler in context.Context.GetHandlers<IProxyChangedHandler>())
+                    {
+                        handler.RaisePropertyChanged(changedContext);
+                    }
+                }
+            }
+        }
+    }
 
     private void TryStartRecordingTouchedProperties()
     {
@@ -44,26 +59,23 @@ public class DetectDerivedPropertyChangesHandler : IProxyReadHandler
         {
             var newProperties = _currentTouchedProperties!.Pop();
 
-            var previouslyRequiredProperties = context.Proxy.Data["RequiredProperties"] as HashSet<TrackedProperty>;
-            if (previouslyRequiredProperties != null)
+            var previouslyRequiredProperties = context.Proxy.GetRequiredProperties();
+            foreach (var previouslyRequiredProperty in previouslyRequiredProperties)
             {
-                foreach (var previouslyRequiredProperty in previouslyRequiredProperties)
+                if (!newProperties.Contains(previouslyRequiredProperty))
                 {
-                    if (!newProperties.Contains(previouslyRequiredProperty))
-                    {
-                        var usedByProperties = previouslyRequiredProperty.Proxy.Data.GetOrAdd("UsedByProperties", () => new HashSet<TrackedProperty>()) as HashSet<TrackedProperty>;
-                        lock (usedByProperties!)
-                            usedByProperties.Remove(previouslyRequiredProperty);
-                    }
+                    var usedByProperties = previouslyRequiredProperty.Proxy.GetUsedByProperties();
+                    lock (usedByProperties)
+                        usedByProperties.Remove(previouslyRequiredProperty);
                 }
             }
 
-            context.Proxy.Data["RequiredProperties"] = newProperties;
+            context.Proxy.SetRequiredProperties(newProperties);
 
             foreach (var newlyRequiredProperty in newProperties)
             {
-                var usedByProperties = newlyRequiredProperty.Proxy.Data.GetOrAdd("UsedByProperties", () => new HashSet<TrackedProperty>()) as HashSet<TrackedProperty>;
-                lock (usedByProperties!)
+                var usedByProperties = newlyRequiredProperty.Proxy.GetUsedByProperties();
+                lock (usedByProperties)
                     usedByProperties.Add(new TrackedProperty(context.Proxy, context.PropertyName));
             }
         }
