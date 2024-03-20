@@ -4,19 +4,48 @@ namespace Namotion.Proxy.Handlers;
 
 public record struct TrackedProperty(IProxy Proxy, string PropertyName);
 
-public class DetectDerivedPropertyChangesHandler : IProxyReadHandler, IProxyWriteHandler
+public class DetectDerivedPropertyChangesHandler : IProxyReadHandler, IProxyWriteHandler, IProxyPropertyRegistryHandler
 {
     [ThreadStatic]
     private static Stack<HashSet<TrackedProperty>>? _currentTouchedProperties;
+    private readonly bool _initiallyReadAllProperties;
 
-    public bool IsDerived => true;
+    public DetectDerivedPropertyChangesHandler(bool initiallyReadAllProperties)
+    {
+        _initiallyReadAllProperties = initiallyReadAllProperties;
+    }
+
+    public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+    {
+        if (_initiallyReadAllProperties)
+        {
+            foreach (var property in proxy.Properties.Where(p => p.IsDerived))
+            {
+                property.ReadValue();
+            }
+        }
+    }
+
+    public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+    {
+    }
 
     public object? GetProperty(ProxyReadHandlerContext context, Func<ProxyReadHandlerContext, object?> next)
     {
-        TryStartRecordingTouchedProperties();
-        var result = next(context);
-        StoreTouchedProperties(context);
-        return result;
+        if (context.IsPropertyDerived)
+        {
+            TryStartRecordTouchedProperties();
+            var result = next(context);
+            StoreRecordedTouchedProperties(context);
+            TouchProperty(context);
+            return result;
+        }
+        else
+        {
+            var result = next(context);
+            TouchProperty(context);
+            return result;
+        }
     }
 
     public void SetProperty(ProxyWriteHandlerContext context, Action<ProxyWriteHandlerContext> next)
@@ -40,46 +69,43 @@ public class DetectDerivedPropertyChangesHandler : IProxyReadHandler, IProxyWrit
         }
     }
 
-    private void TryStartRecordingTouchedProperties()
+    private void TryStartRecordTouchedProperties()
     {
-        if (IsDerived)
+        if (_currentTouchedProperties == null)
         {
-            if (_currentTouchedProperties == null)
-            {
-                _currentTouchedProperties = new Stack<HashSet<TrackedProperty>>();
-            }
+            _currentTouchedProperties = new Stack<HashSet<TrackedProperty>>();
+        }
 
-            _currentTouchedProperties.Push(new HashSet<TrackedProperty>());
+        _currentTouchedProperties.Push(new HashSet<TrackedProperty>());
+    }
+
+    private void StoreRecordedTouchedProperties(ProxyReadHandlerContext context)
+    {
+        var newProperties = _currentTouchedProperties!.Pop();
+
+        var previouslyRequiredProperties = context.Proxy.GetRequiredProperties();
+        foreach (var previouslyRequiredProperty in previouslyRequiredProperties)
+        {
+            if (!newProperties.Contains(previouslyRequiredProperty))
+            {
+                var usedByProperties = previouslyRequiredProperty.Proxy.GetUsedByProperties();
+                lock (usedByProperties)
+                    usedByProperties.Remove(previouslyRequiredProperty);
+            }
+        }
+
+        context.Proxy.SetRequiredProperties(newProperties);
+
+        foreach (var newlyRequiredProperty in newProperties)
+        {
+            var usedByProperties = newlyRequiredProperty.Proxy.GetUsedByProperties();
+            lock (usedByProperties)
+                usedByProperties.Add(new TrackedProperty(context.Proxy, context.PropertyName));
         }
     }
 
-    private void StoreTouchedProperties(ProxyReadHandlerContext context)
+    private void TouchProperty(ProxyReadHandlerContext context)
     {
-        if (IsDerived)
-        {
-            var newProperties = _currentTouchedProperties!.Pop();
-
-            var previouslyRequiredProperties = context.Proxy.GetRequiredProperties();
-            foreach (var previouslyRequiredProperty in previouslyRequiredProperties)
-            {
-                if (!newProperties.Contains(previouslyRequiredProperty))
-                {
-                    var usedByProperties = previouslyRequiredProperty.Proxy.GetUsedByProperties();
-                    lock (usedByProperties)
-                        usedByProperties.Remove(previouslyRequiredProperty);
-                }
-            }
-
-            context.Proxy.SetRequiredProperties(newProperties);
-
-            foreach (var newlyRequiredProperty in newProperties)
-            {
-                var usedByProperties = newlyRequiredProperty.Proxy.GetUsedByProperties();
-                lock (usedByProperties)
-                    usedByProperties.Add(new TrackedProperty(context.Proxy, context.PropertyName));
-            }
-        }
-
         if (_currentTouchedProperties?.TryPeek(out var touchedProperties) == true)
         {
             touchedProperties.Add(new TrackedProperty(context.Proxy, context.PropertyName));

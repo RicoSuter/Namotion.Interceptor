@@ -4,7 +4,7 @@ namespace Namotion.Proxy.Handlers;
 
 internal class UsePropertyRegistryHandlersHandler : IProxyWriteHandler
 {
-    private const string ReferenceCountKey = $"Namotion.Proxy.Handlers.{nameof(UsePropertyRegistryHandlersHandler)}";
+    private const string ReferenceCountKey = "Namotion.Proxy.Handlers.ReferenceCount";
 
     public void SetProperty(ProxyWriteHandlerContext context, Action<ProxyWriteHandlerContext> next)
     {
@@ -31,9 +31,10 @@ internal class UsePropertyRegistryHandlersHandler : IProxyWriteHandler
         var count = proxy.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
         if (count == 1)
         {
+            var registryContext = new ProxyPropertyRegistryHandlerContext(context.Context, context.Proxy);
             foreach (var handler in context.Context.GetHandlers<IProxyPropertyRegistryHandler>())
             {
-                handler.AttachProxy(context, proxy);
+                handler.AttachProxy(registryContext, proxy);
             }
         }
     }
@@ -43,9 +44,10 @@ internal class UsePropertyRegistryHandlersHandler : IProxyWriteHandler
         var count = proxy.Data.AddOrUpdate(ReferenceCountKey, -1, (_, count) => (int)count! - 1) as int?;
         if (count == 0)
         {
+            var registryContext = new ProxyPropertyRegistryHandlerContext(context.Context, context.Proxy);
             foreach (var handler in context.Context.GetHandlers<IProxyPropertyRegistryHandler>())
             {
-                handler.DetachProxy(context, proxy);
+                handler.DetachProxy(registryContext, proxy);
             }
         }
     }

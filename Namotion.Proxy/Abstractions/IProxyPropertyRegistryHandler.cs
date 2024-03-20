@@ -2,7 +2,13 @@
 
 public interface IProxyPropertyRegistryHandler : IProxyHandler
 {
-    public void AttachProxy(ProxyWriteHandlerContext context, IProxy proxy);
+    public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy);
 
-    public void DetachProxy(ProxyWriteHandlerContext context, IProxy proxy);
+    public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy);
+}
+
+public record struct ProxyPropertyRegistryHandlerContext(
+    IProxyContext Context,
+    IProxy Proxy)
+{
 }

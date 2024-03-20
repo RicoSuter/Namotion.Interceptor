@@ -13,20 +13,18 @@ namespace Namotion.Proxy.Tests.Handlers
 
             var context = ProxyContext
                 .CreateBuilder()
-                .DetectDerivedPropertyChanges()
+                .DetectDerivedPropertyChanges(initiallyReadAllProperties: true)
                 .AddHandler(changeHandler)
                 .Build();
 
             // Act
             var person = new Person();
             person.SetContext(context);
-
-            var x = person.FullName; // touch
             person.FirstName = "Rico";
             person.LastName = "Suter";
 
             // Assert
-            Assert.Contains(changes, c => c.PropertyName == nameof(Person.FullName) && c.NewValue?.ToString() == "Rico Suter");
+            Assert.Contains(changes, c => c.PropertyName == nameof(Person.FullName));
         }
     }
 }

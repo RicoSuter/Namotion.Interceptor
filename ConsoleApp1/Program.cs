@@ -17,12 +17,14 @@ namespace ConsoleApp1
                 .AddHandler(new LogPropertyChangesHandler("2"))
                 .Build();
 
-            var person = new Person(context);
-            person.FirstName = "Rico";
-            person.LastName = "Suter";
-            person.Mother = new Person
+            var person = new Person(context)
             {
-                FirstName = "Susi"
+                FirstName = "Rico",
+                LastName = "Suter",
+                Mother = new Person
+                {
+                    FirstName = "Susi"
+                }
             };
 
             Console.WriteLine(person.FirstName);

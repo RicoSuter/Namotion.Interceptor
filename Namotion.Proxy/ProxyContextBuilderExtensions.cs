@@ -18,11 +18,11 @@ public static class ProxyContextBuilderExtensions
             .TryAddSingleHandler(new AutomaticallyAssignContextToPropertyValuesHandler());
     }
 
-    public static IProxyContextBuilder DetectDerivedPropertyChanges(this IProxyContextBuilder builder)
+    public static IProxyContextBuilder DetectDerivedPropertyChanges(this IProxyContextBuilder builder, bool initiallyReadAllProperties)
     {
         return builder
             .UsePropertyChangedHandlers()
-            .TryAddSingleHandler(new DetectDerivedPropertyChangesHandler());
+            .TryAddSingleHandler(new DetectDerivedPropertyChangesHandler(initiallyReadAllProperties));
     }
 
     /// <summary>

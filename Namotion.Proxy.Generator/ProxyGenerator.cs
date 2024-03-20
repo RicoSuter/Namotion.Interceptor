@@ -29,7 +29,8 @@ public class ProxyGenerator : IIncrementalGenerator
                             .Select(p => new
                             {
                                 Property = p,
-                                Type = model.GetTypeInfo(p.Type, ct)
+                                Type = model.GetTypeInfo(p.Type, ct),
+                                IsDerived = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) != true
                             })
                             .ToArray()
                     };
@@ -67,6 +68,27 @@ namespace {namespaceName}
 
         ConcurrentDictionary<string, object?> IProxy.Data => _data;
 
+        IEnumerable<PropertyInfo> IProxy.Properties
+        {{
+            get
+            {{
+";
+                foreach (var property in cls.Properties)
+                {
+                    var symbolDisplayFormat = new SymbolDisplayFormat(typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
+                    var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
+
+                    generatedCode +=
+$@"
+                yield return new PropertyInfo(nameof({property.Property.Identifier.Value}), {(property.IsDerived ? "true" : "false")}, () => {property.Property.Identifier.Value});
+";
+                }
+
+                    generatedCode +=
+$@"
+            }}
+        }}
+
         public {newClassName}(IProxyContext? context = null)
         {{
             _context = context;
@@ -74,10 +96,8 @@ namespace {namespaceName}
 ";
                 foreach (var property in cls.Properties)
                 {
-                    var symbolDisplayFormat = new SymbolDisplayFormat(
-typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
-
-                    string fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
+                    var symbolDisplayFormat = new SymbolDisplayFormat(typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
+                    var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
 
                     generatedCode +=
 $@"
@@ -89,12 +109,12 @@ $@"
                     {
                         generatedCode +=
 $@"
-            get => GetProperty<{fullyQualifiedName}>(nameof({property.Property.Identifier.Value}), () => base.{property.Property.Identifier.Value});
+            get => GetProperty<{fullyQualifiedName}>(nameof({property.Property.Identifier.Value}), {(property.IsDerived ? "true" : "false")}, () => base.{property.Property.Identifier.Value});
 ";
 
                     }
 
-                    if (property.Property.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true)
+                    if (property.IsDerived == false)
                     {
                         generatedCode +=
 $@"
@@ -109,11 +129,11 @@ $@"
                 }
 
                 generatedCode +=
-    $@"
+$@"
 
-        private T GetProperty<T>(string propertyName, Func<object?> readValue)
+        private T GetProperty<T>(string propertyName, bool isDerived, Func<object?> readValue)
         {{
-            return _context is not null ? (T?)_context.GetProperty(this, propertyName, readValue)! : (T?)readValue()!;
+            return _context is not null ? (T?)_context.GetProperty(this, propertyName, isDerived, readValue)! : (T?)readValue()!;
         }}
 
         private void SetProperty<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)

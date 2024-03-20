@@ -8,6 +8,7 @@ public interface IProxyReadHandler : IProxyHandler
 public record struct ProxyReadHandlerContext(
     IProxyContext Context,
     IProxy Proxy,
-    string PropertyName)
+    string PropertyName,
+    bool IsPropertyDerived)
 {
 }
