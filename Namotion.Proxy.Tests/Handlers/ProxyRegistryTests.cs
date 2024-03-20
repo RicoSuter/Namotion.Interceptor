@@ -59,6 +59,9 @@ namespace Namotion.Proxy.Tests.Handlers
             // Assert
             Assert.Equal(3, attaches.Count);
             Assert.Empty(detaches);
+
+            var registry = context.GetHandlers<IProxyRegistry>().Single();
+            Assert.Equal(3, registry.KnownProxies.Count());
         }
 
         [Fact]
@@ -93,6 +96,9 @@ namespace Namotion.Proxy.Tests.Handlers
             // Assert
             Assert.Equal(3, attaches.Count);
             Assert.Empty(detaches);
+
+            var registry = context.GetHandlers<IProxyRegistry>().Single();
+            Assert.Equal(3, registry.KnownProxies.Count());
         }
 
         [Fact]
@@ -128,6 +134,9 @@ namespace Namotion.Proxy.Tests.Handlers
             // Assert
             Assert.Equal(3, attaches.Count);
             Assert.Equal(2, detaches.Count);
+
+            var registry = context.GetHandlers<IProxyRegistry>().Single();
+            Assert.Single(registry.KnownProxies);
         }
     }
 }
