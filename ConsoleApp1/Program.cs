@@ -1,6 +1,6 @@
 ﻿using Namotion.Proxy;
+using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Handlers;
-using System.Collections.Concurrent;
 
 namespace ConsoleApp1
 {
@@ -8,14 +8,18 @@ namespace ConsoleApp1
     {
         static void Main(string[] args)
         {
-            var context = new ProxyContext([
-                new LogPropertyChangesHandler("1"),
-                new ProxyPropertyValueHandler(),
-                new AutoProxyContextHandler(),
-                new LogPropertyChangesHandler("2")]);
+            var context = ProxyContext
+                .CreateBuilder()
+                .AddHandler(new LogPropertyChangesHandler("1"))
+               
+                .CheckPropertyEqualityBeforeAssignment()
+                .AutomaticallyAssignContextToPropertyValues()
+              
+                .AddHandler(new LogPropertyChangesHandler("2"))
+                .Build();
 
             var person = new Person();
-            context.RegisterProxy(person); // TODO: better api
+            person.SetContext(context); // TODO: better api
             person.FirstName = "Rico";
             person.LastName = "Suter";
             person.Mother = new Person { FirstName = "Susi" };

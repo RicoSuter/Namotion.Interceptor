@@ -1,4 +1,4 @@
-﻿using Namotion.Proxy.Handlers;
+﻿using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy;
 
@@ -6,14 +6,14 @@ public class ProxyContext : IProxyContext
 {
     private readonly IEnumerable<IProxyHandler> _handlers;
 
+    public static ProxyContextBuilder CreateBuilder()
+    {
+        return new ProxyContextBuilder();
+    }
+
     public ProxyContext(IEnumerable<IProxyHandler> handlers)
     {
         _handlers = handlers;
-    }
-
-    public void RegisterProxy(IProxy proxy)
-    {
-        proxy.Context = this;
     }
 
     public IEnumerable<THandler> GetHandlers<THandler>()
@@ -40,7 +40,7 @@ public class ProxyContext : IProxyContext
 
     public void SetProperty(IProxy proxy, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
     {
-        var context = new ProxyWriteHandlerContext(this, proxy, propertyName, null, readValue);
+        var context = new ProxyWriteHandlerContext(this, proxy, propertyName, null, GetReadValueFunctionWithCache(readValue));
 
         foreach (var handler in GetHandlers<IProxyWriteHandler>().Reverse())
         {
@@ -52,5 +52,21 @@ public class ProxyContext : IProxyContext
         }
 
         writeValue.Invoke(newValue);
+    }
+
+    private static Func<object?> GetReadValueFunctionWithCache(Func<object?> readValue)
+    {
+        // TODO: do we need a lock?
+        var isRead = false;
+        object? previousValue = null;
+        return () =>
+        {
+            if (isRead == false)
+            {
+                previousValue = readValue();
+                isRead = true;
+            }
+            return previousValue;
+        };
     }
 }

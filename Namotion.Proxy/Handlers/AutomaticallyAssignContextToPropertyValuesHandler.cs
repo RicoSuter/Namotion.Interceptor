@@ -1,6 +1,8 @@
-﻿namespace Namotion.Proxy.Handlers;
+﻿using Namotion.Proxy.Abstractions;
 
-public class AutoProxyContextHandler : IProxyPropertyHandler
+namespace Namotion.Proxy.Handlers;
+
+internal class AutomaticallyAssignContextToPropertyValuesHandler : IProxyPropertyRegistryHandler
 {
     public void AttachProxy(ProxyWriteHandlerContext context, IProxy proxy)
     {

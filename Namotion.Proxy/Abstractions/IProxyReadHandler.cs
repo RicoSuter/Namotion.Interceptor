@@ -1,4 +1,4 @@
-﻿namespace Namotion.Proxy.Handlers;
+﻿namespace Namotion.Proxy.Abstractions;
 
 public interface IProxyReadHandler : IProxyHandler
 {

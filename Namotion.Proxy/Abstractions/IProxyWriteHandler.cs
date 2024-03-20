@@ -1,4 +1,4 @@
-﻿namespace Namotion.Proxy.Handlers;
+﻿namespace Namotion.Proxy.Abstractions;
 
 public interface IProxyWriteHandler : IProxyHandler
 {
@@ -10,6 +10,6 @@ public record struct ProxyWriteHandlerContext(
     IProxy Proxy,
     string PropertyName,
     object? NewValue,
-    Func<object?> ReadValue)
+    Func<object?> GetValueBeforeWrite)
 {
 }
