@@ -8,12 +8,12 @@ public interface IProxy
 
     ConcurrentDictionary<string, object?> Data { get; }
 
-    IEnumerable<PropertyInfo> Properties { get; }
+    IReadOnlyDictionary<string, PropertyInfo> Properties { get; }
 }
 
 public record struct PropertyInfo(
     string PropertyName,
     bool IsDerived,
-    Func<object?> ReadValue)
+    Func<object?, object?> ReadValue)
 {
 }

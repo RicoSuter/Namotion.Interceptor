@@ -22,9 +22,9 @@ public class ProxyContext : IProxyContext
         return _handlers.OfType<THandler>();
     }
 
-    public object? GetProperty(IProxy proxy, string propertyName, bool isDerived, Func<object?> readValue)
+    public object? GetProperty(IProxy proxy, string propertyName, Func<object?> readValue)
     {
-        var context = new ProxyReadHandlerContext(this, proxy, propertyName, isDerived);
+        var context = new ProxyReadHandlerContext(this, proxy, propertyName);
 
         foreach (var handler in GetHandlers<IProxyReadHandler>().Reverse())
         {

@@ -19,9 +19,9 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
     {
         if (_initiallyReadAllProperties)
         {
-            foreach (var property in proxy.Properties.Where(p => p.IsDerived))
+            foreach (var property in proxy.Properties.Where(p => p.Value.IsDerived))
             {
-                property.ReadValue();
+                property.Value.ReadValue(proxy);
             }
         }
     }
@@ -32,12 +32,16 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
 
     public object? GetProperty(ProxyReadHandlerContext context, Func<ProxyReadHandlerContext, object?> next)
     {
-        if (context.IsPropertyDerived)
+        if (context.Proxy.Properties[context.PropertyName].IsDerived)
         {
             TryStartRecordTouchedProperties();
+
             var result = next(context);
+            context.Proxy.SetLastKnownValue(context.PropertyName, result);
+
             StoreRecordedTouchedProperties(context);
             TouchProperty(context);
+
             return result;
         }
         else
@@ -59,8 +63,12 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
             {
                 foreach (var usedByProperty in usedByProperties)
                 {
-                    // TODO: how to provide current and new value?
-                    var changedContext = new ProxyChangedHandlerContext(context.Context, usedByProperty.Proxy, usedByProperty.PropertyName, null, null);
+                    var oldValue = usedByProperty.Proxy.GetLastKnownValue(usedByProperty.PropertyName);
+                    var newValue = usedByProperty.Proxy
+                        .Properties[usedByProperty.PropertyName]
+                        .ReadValue(usedByProperty.Proxy);
+
+                    var changedContext = new ProxyChangedHandlerContext(context.Context, usedByProperty.Proxy, usedByProperty.PropertyName, oldValue, newValue);
                     foreach (var handler in context.Context.GetHandlers<IProxyChangedHandler>())
                     {
                         handler.RaisePropertyChanged(changedContext);

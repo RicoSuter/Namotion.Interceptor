@@ -67,11 +67,10 @@ namespace {namespaceName}
         }}
 
         ConcurrentDictionary<string, object?> IProxy.Data => _data;
+        IReadOnlyDictionary<string, PropertyInfo> IProxy.Properties => _properties;
 
-        IEnumerable<PropertyInfo> IProxy.Properties
+        private static IReadOnlyDictionary<string, PropertyInfo> _properties = new Dictionary<string, PropertyInfo>
         {{
-            get
-            {{
 ";
                 foreach (var property in cls.Properties)
                 {
@@ -80,14 +79,16 @@ namespace {namespaceName}
 
                     generatedCode +=
 $@"
-                yield return new PropertyInfo(nameof({property.Property.Identifier.Value}), {(property.IsDerived ? "true" : "false")}, () => {property.Property.Identifier.Value});
+            {{
+                ""{property.Property.Identifier.Value}"",       
+                new PropertyInfo(nameof({property.Property.Identifier.Value}), {(property.IsDerived ? "true" : "false")}, (o) => (({newClassName})o).{property.Property.Identifier.Value})
+            }},
 ";
                 }
 
                     generatedCode +=
 $@"
-            }}
-        }}
+        }};
 
         public {newClassName}(IProxyContext? context = null)
         {{
@@ -112,7 +113,7 @@ $@"
                     {
                         generatedCode +=
 $@"
-            get => GetProperty<{fullyQualifiedName}>(nameof({property.Property.Identifier.Value}), {(property.IsDerived ? "true" : "false")}, () => base.{property.Property.Identifier.Value});
+            get => GetProperty<{fullyQualifiedName}>(nameof({property.Property.Identifier.Value}), () => base.{property.Property.Identifier.Value});
 ";
 
                     }
@@ -134,9 +135,9 @@ $@"
                 generatedCode +=
 $@"
 
-        private T GetProperty<T>(string propertyName, bool isDerived, Func<object?> readValue)
+        private T GetProperty<T>(string propertyName, Func<object?> readValue)
         {{
-            return _context is not null ? (T?)_context.GetProperty(this, propertyName, isDerived, readValue)! : (T?)readValue()!;
+            return _context is not null ? (T?)_context.GetProperty(this, propertyName, readValue)! : (T?)readValue()!;
         }}
 
         private void SetProperty<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)

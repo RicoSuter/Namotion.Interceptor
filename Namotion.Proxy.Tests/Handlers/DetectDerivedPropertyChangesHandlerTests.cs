@@ -24,7 +24,10 @@ namespace Namotion.Proxy.Tests.Handlers
             person.LastName = "Suter";
 
             // Assert
-            Assert.Contains(changes, c => c.PropertyName == nameof(Person.FullName));
+            Assert.Contains(changes, c => 
+                c.PropertyName == nameof(Person.FullName) &&
+                c.OldValue?.ToString() == "Rico " && 
+                c.NewValue?.ToString() == "Rico Suter");
         }
     }
 }
