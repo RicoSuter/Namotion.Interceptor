@@ -8,7 +8,7 @@
             // Arrange
             var context = ProxyContext
                 .CreateBuilder()
-                .WithAutomaticContextAssignment()
+                .WithRegistry()
                 .Build();
 
             // Act
@@ -25,7 +25,7 @@
             // Arrange
             var context = ProxyContext
                 .CreateBuilder()
-                .WithAutomaticContextAssignment()
+                .WithRegistry()
                 .Build();
 
             // Act
@@ -58,7 +58,7 @@
             // Arrange
             var context = ProxyContext
                 .CreateBuilder()
-                .WithAutomaticContextAssignment()
+                .WithRegistry()
                 .Build();
 
             // Act
@@ -93,7 +93,7 @@
             // Arrange
             var context = ProxyContext
                 .CreateBuilder()
-                .WithAutomaticContextAssignment()
+                .WithRegistry()
                 .Build();
 
             // Act

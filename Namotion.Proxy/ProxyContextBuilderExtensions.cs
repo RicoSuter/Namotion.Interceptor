@@ -9,7 +9,7 @@ public static class ProxyContextBuilderExtensions
     {
         return builder
             .WithPropertyValueEqualityCheck()
-            .WithAutomaticContextAssignment()
+            .WithRegistry()
             .WithParents()
             .WithDerivedPropertyChangeDetection(initiallyReadAllProperties: true);
     }
@@ -18,20 +18,6 @@ public static class ProxyContextBuilderExtensions
     {
         return builder
             .TryAddSingleHandler(new PropertyValueEqualityCheckHandler());
-    }
-
-    public static IProxyContextBuilder WithAutomaticContextAssignment(this IProxyContextBuilder builder)
-    {
-        return builder
-            .TryAddSingleHandler(new AutomaticContextAssignmentHandler())
-            .WithPropertyRegistryHandlers();
-    }
-
-    public static IProxyContextBuilder WithParents(this IProxyContextBuilder builder)
-    {
-        return builder
-            .TryAddSingleHandler(new ParentsHandler())
-            .WithPropertyRegistryHandlers();
     }
 
     public static IProxyContextBuilder WithDerivedPropertyChangeDetection(this IProxyContextBuilder builder, bool initiallyReadAllProperties)
@@ -63,9 +49,17 @@ public static class ProxyContextBuilderExtensions
     /// </summary>
     /// <param name="builder"></param>
     /// <returns></returns>
-    public static IProxyContextBuilder WithPropertyRegistryHandlers(this IProxyContextBuilder builder)
+    public static IProxyContextBuilder WithRegistry(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new PropertyRegistryHandlersHandler());
+            .TryAddSingleHandler(new AutomaticContextAssignmentHandler())
+            .TryAddSingleHandler(new ProxyRegistry());
+    }
+
+    public static IProxyContextBuilder WithParents(this IProxyContextBuilder builder)
+    {
+        return builder
+            .TryAddSingleHandler(new ParentsHandler())
+            .WithRegistry();
     }
 }

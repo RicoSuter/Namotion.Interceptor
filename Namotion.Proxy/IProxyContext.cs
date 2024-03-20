@@ -4,6 +4,7 @@ namespace Namotion.Proxy;
 
 public interface IProxyContext
 {
+    // TODO: Move to another interface
     IEnumerable<THandler> GetHandlers<THandler>()
         where THandler : IProxyHandler;
 
