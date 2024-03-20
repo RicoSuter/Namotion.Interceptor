@@ -67,9 +67,9 @@ namespace {namespaceName}
 
         ConcurrentDictionary<string, object?> IProxy.Data => _data;
 
-        public {newClassName}(IProxy? proxy = null)
+        public {newClassName}(IProxyContext? context = null)
         {{
-            _context = proxy?.Context;
+            _context = context;
         }}
 ";
                 foreach (var property in cls.Properties)
@@ -80,11 +80,30 @@ typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTyp
                     string fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
 
                     generatedCode +=
-    $@"
+$@"
         public override {fullyQualifiedName} {property.Property.Identifier.Value}
         {{
+";
+                    if (property.Property.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
+                        property.Property.ExpressionBody.IsKind(SyntaxKind.ArrowExpressionClause))
+                    {
+                        generatedCode +=
+$@"
             get => GetProperty<{fullyQualifiedName}>(nameof({property.Property.Identifier.Value}), () => base.{property.Property.Identifier.Value});
+";
+
+                    }
+
+                    if (property.Property.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true)
+                    {
+                        generatedCode +=
+$@"
             set => SetProperty(nameof({property.Property.Identifier.Value}), value, () => base.{property.Property.Identifier.Value}, v => base.{property.Property.Identifier.Value} = ({fullyQualifiedName})v!);
+"; 
+                    }
+
+                    generatedCode +=
+$@"
         }}
 ";
                 }

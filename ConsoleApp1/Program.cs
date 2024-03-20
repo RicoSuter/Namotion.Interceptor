@@ -1,6 +1,5 @@
 ﻿using Namotion.Proxy;
 using Namotion.Proxy.Abstractions;
-using Namotion.Proxy.Handlers;
 
 namespace ConsoleApp1
 {
@@ -11,18 +10,20 @@ namespace ConsoleApp1
             var context = ProxyContext
                 .CreateBuilder()
                 .AddHandler(new LogPropertyChangesHandler("1"))
-               
+
                 .CheckPropertyEqualityBeforeAssignment()
                 .AutomaticallyAssignContextToPropertyValues()
-              
+
                 .AddHandler(new LogPropertyChangesHandler("2"))
                 .Build();
 
-            var person = new Person();
-            person.SetContext(context); // TODO: better api
+            var person = new Person(context);
             person.FirstName = "Rico";
             person.LastName = "Suter";
-            person.Mother = new Person { FirstName = "Susi" };
+            person.Mother = new Person
+            {
+                FirstName = "Susi"
+            };
 
             Console.WriteLine(person.FirstName);
         }
@@ -34,6 +35,8 @@ namespace ConsoleApp1
         public virtual string FirstName { get; set; }
 
         public virtual string? LastName { get; set; }
+
+        public virtual string FullName => $"{FirstName} {LastName}";
 
         public virtual Person? Father { get; set; }
 

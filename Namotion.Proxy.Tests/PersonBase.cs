@@ -7,6 +7,8 @@
 
         public virtual string? LastName { get; set; }
 
+        public virtual string FullName => $"{FirstName} {LastName}";
+
         public virtual Person? Father { get; set; }
 
         public virtual Person? Mother { get; set; }

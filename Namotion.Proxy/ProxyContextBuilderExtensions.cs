@@ -18,6 +18,13 @@ public static class ProxyContextBuilderExtensions
             .TryAddSingleHandler(new AutomaticallyAssignContextToPropertyValuesHandler());
     }
 
+    public static IProxyContextBuilder DetectDerivedPropertyChanges(this IProxyContextBuilder builder)
+    {
+        return builder
+            .UsePropertyChangedHandlers()
+            .TryAddSingleHandler(new DetectDerivedPropertyChangesHandler());
+    }
+
     /// <summary>
     /// Adds support for <see cref="IProxyChangedHandler"/> handlers.
     /// </summary>
