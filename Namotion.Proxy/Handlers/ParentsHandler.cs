@@ -2,21 +2,21 @@
 
 namespace Namotion.Proxy.Handlers;
 
-internal class AutomaticContextAssignmentHandler : IProxyPropertyRegistryHandler
+internal class ParentsHandler : IProxyPropertyRegistryHandler
 {
     public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
     {
-        if (context.ReferenceCount == 1)
+        if (context.ParentProxy is not null)
         {
-            proxy.Context = context.Context;
+            proxy.AddParent(context.ParentProxy);
         }
     }
 
     public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
     {
-        if (context.ReferenceCount == 0)
+        if (context.ParentProxy is not null)
         {
-            proxy.Context = null;
+            proxy.RemoveParent(context.ParentProxy);
         }
     }
 }

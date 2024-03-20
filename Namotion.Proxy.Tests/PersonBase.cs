@@ -12,5 +12,7 @@
         public virtual Person? Father { get; set; }
 
         public virtual Person? Mother { get; set; }
+
+        public virtual Person[] Children { get; set; } = Array.Empty<Person>();
     }
 }

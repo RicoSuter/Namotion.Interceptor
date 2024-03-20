@@ -2,28 +2,30 @@
 
 namespace Namotion.Proxy.Tests.Handlers
 {
-    public class DetectDerivedPropertyChangesHandlerTests : ProxyChangedHandlerTestsBase
+    public class DetectDerivedPropertyChangesHandlerTests
     {
         [Fact]
-        public void Test1()
+        public void WhenChangingPropertyWhichIsUsedInDerivedProperty_ThenDerivedPropertyIsChanged()
         {
             // Arrange
             var changes = new List<ProxyChangedHandlerContext>();
-            var changeHandler = CreateMockProxyChangedHandler(changes);
-
             var context = ProxyContext
                 .CreateBuilder()
                 .WithDerivedPropertyChangeDetection(initiallyReadAllProperties: true)
-                .AddHandler(changeHandler)
+                .WithPropertyChangedCallback(changes.Add)
                 .Build();
 
             // Act
-            var person = new Person();
-            person.SetContext(context);
+            var person = new Person(context);
             person.FirstName = "Rico";
             person.LastName = "Suter";
 
             // Assert
+            Assert.Contains(changes, c =>
+                c.PropertyName == nameof(Person.FullName) &&
+                c.OldValue?.ToString() == " " &&
+                c.NewValue?.ToString() == "Rico ");
+
             Assert.Contains(changes, c => 
                 c.PropertyName == nameof(Person.FullName) &&
                 c.OldValue?.ToString() == "Rico " && 

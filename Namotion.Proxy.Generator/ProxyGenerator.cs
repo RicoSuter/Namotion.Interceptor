@@ -30,6 +30,7 @@ public class ProxyGenerator : IIncrementalGenerator
                             {
                                 Property = p,
                                 Type = model.GetTypeInfo(p.Type, ct),
+                                IsRequired = p.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword)),
                                 IsDerived = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) != true
                             })
                             .ToArray()
@@ -105,7 +106,7 @@ $@"
 
                     generatedCode +=
 $@"
-        public override {fullyQualifiedName} {property.Property.Identifier.Value}
+        public override {(property.IsRequired ? "required" : "")} {fullyQualifiedName} {property.Property.Identifier.Value}
         {{
 ";
                     if (property.Property.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||

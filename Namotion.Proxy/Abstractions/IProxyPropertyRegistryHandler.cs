@@ -1,4 +1,6 @@
-﻿namespace Namotion.Proxy.Abstractions;
+﻿using Namotion.Proxy.Handlers;
+
+namespace Namotion.Proxy.Abstractions;
 
 public interface IProxyPropertyRegistryHandler : IProxyHandler
 {
@@ -9,6 +11,7 @@ public interface IProxyPropertyRegistryHandler : IProxyHandler
 
 public record struct ProxyPropertyRegistryHandlerContext(
     IProxyContext Context,
-    IProxy Proxy)
+    IProxy? ParentProxy,
+    int ReferenceCount)
 {
 }

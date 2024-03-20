@@ -2,29 +2,28 @@
 
 namespace Namotion.Proxy.Tests.Handlers
 {
-    public class UsePropertyChangedHandlersHandlerTests : ProxyChangedHandlerTestsBase
+    public class PropertyChangedHandlersHandlerTests
     {
         [Fact]
-        public void Test1()
+        public void WhenPropertyIsChanged_ThenChangeHandlerIsTriggered()
         {
             // Arrange
             var changes = new List<ProxyChangedHandlerContext>();
-            var changeHandler = CreateMockProxyChangedHandler(changes);
-
             var context = ProxyContext
                 .CreateBuilder()
                 .WithPropertyChangedHandlers()
-                .AddHandler(changeHandler)
+                .WithPropertyChangedCallback(changes.Add)
                 .Build();
 
             // Act
-            var person = new Person();
-            person.SetContext(context);
-
+            var person = new Person(context);
             person.FirstName = "Rico";
 
             // Assert
-            Assert.Contains(changes, c => c.PropertyName == "FirstName" && c.NewValue?.ToString() == "Rico");
+            Assert.Contains(changes, c => 
+                c.PropertyName == "FirstName" &&
+                c.OldValue is null &&
+                c.NewValue?.ToString() == "Rico");
         }
     }
 }

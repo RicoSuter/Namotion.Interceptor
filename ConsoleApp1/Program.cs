@@ -32,7 +32,7 @@ namespace ConsoleApp1
     [GenerateProxy]
     public abstract class PersonBase
     {
-        public virtual string FirstName { get; set; }
+        public virtual required string FirstName { get; set; }
 
         public virtual string? LastName { get; set; }
 

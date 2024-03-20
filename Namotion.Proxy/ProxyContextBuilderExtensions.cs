@@ -10,6 +10,7 @@ public static class ProxyContextBuilderExtensions
         return builder
             .WithPropertyValueEqualityCheck()
             .WithAutomaticContextAssignment()
+            .WithParents()
             .WithDerivedPropertyChangeDetection(initiallyReadAllProperties: true);
     }
 
@@ -23,6 +24,13 @@ public static class ProxyContextBuilderExtensions
     {
         return builder
             .TryAddSingleHandler(new AutomaticContextAssignmentHandler())
+            .WithPropertyRegistryHandlers();
+    }
+
+    public static IProxyContextBuilder WithParents(this IProxyContextBuilder builder)
+    {
+        return builder
+            .TryAddSingleHandler(new ParentsHandler())
             .WithPropertyRegistryHandlers();
     }
 
