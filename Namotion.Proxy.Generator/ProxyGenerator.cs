@@ -91,7 +91,10 @@ $@"
 
         public {newClassName}(IProxyContext? context = null)
         {{
-            _context = context;
+            if (context is not null)
+            {{
+                this.SetContext(context);
+            }}
         }}
 ";
                 foreach (var property in cls.Properties)

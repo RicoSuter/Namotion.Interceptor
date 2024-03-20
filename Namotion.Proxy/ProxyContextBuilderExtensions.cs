@@ -22,15 +22,15 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithAutomaticContextAssignment(this IProxyContextBuilder builder)
     {
         return builder
-            .WithPropertyRegistryHandlers()
-            .TryAddSingleHandler(new AutomaticContextAssignmentHandler());
+            .TryAddSingleHandler(new AutomaticContextAssignmentHandler())
+            .WithPropertyRegistryHandlers();
     }
 
     public static IProxyContextBuilder WithDerivedPropertyChangeDetection(this IProxyContextBuilder builder, bool initiallyReadAllProperties)
     {
         return builder
-            .WithPropertyChangedHandlers()
-            .TryAddSingleHandler(new DerivedPropertyChangeDetectionHandler(initiallyReadAllProperties));
+            .TryAddSingleHandler(new DerivedPropertyChangeDetectionHandler(initiallyReadAllProperties))
+            .WithPropertyChangedHandlers();
     }
 
     public static IProxyContextBuilder WithPropertyChangedCallback(this IProxyContextBuilder builder, Action<ProxyChangedHandlerContext> callback)

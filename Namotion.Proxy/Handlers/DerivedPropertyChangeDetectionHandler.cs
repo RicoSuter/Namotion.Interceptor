@@ -52,7 +52,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
     {
         next.Invoke(context);
 
-        var usedByProperties = context.Proxy.GetUsedByProperties();
+        var usedByProperties = context.Proxy.GetUsedByProperties(context.PropertyName);
         if (usedByProperties.Any())
         {
             lock (usedByProperties)
@@ -84,22 +84,22 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
     {
         var newProperties = _currentTouchedProperties!.Pop();
 
-        var previouslyRequiredProperties = context.Proxy.GetRequiredProperties();
+        var previouslyRequiredProperties = context.Proxy.GetRequiredProperties(context.PropertyName);
         foreach (var previouslyRequiredProperty in previouslyRequiredProperties)
         {
             if (!newProperties.Contains(previouslyRequiredProperty))
             {
-                var usedByProperties = previouslyRequiredProperty.Proxy.GetUsedByProperties();
+                var usedByProperties = previouslyRequiredProperty.Proxy.GetUsedByProperties(previouslyRequiredProperty.PropertyName);
                 lock (usedByProperties)
                     usedByProperties.Remove(previouslyRequiredProperty);
             }
         }
 
-        context.Proxy.SetRequiredProperties(newProperties);
+        context.Proxy.SetRequiredProperties(context.PropertyName, newProperties);
 
         foreach (var newlyRequiredProperty in newProperties)
         {
-            var usedByProperties = newlyRequiredProperty.Proxy.GetUsedByProperties();
+            var usedByProperties = newlyRequiredProperty.Proxy.GetUsedByProperties(newlyRequiredProperty.PropertyName);
             lock (usedByProperties)
                 usedByProperties.Add(new TrackedProperty(context.Proxy, context.PropertyName));
         }
