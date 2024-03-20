@@ -5,24 +5,32 @@ namespace Namotion.Proxy;
 
 public static class ProxyContextBuilderExtensions
 {
-    public static IProxyContextBuilder CheckPropertyEqualityBeforeAssignment(this IProxyContextBuilder builder)
+    public static IProxyContextBuilder WithFullPropertyTracking(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new CheckPropertyEqualityBeforeAssignmentHandler());
+            .WithPropertyValueEqualityCheck()
+            .WithAutomaticContextAssignment()
+            .WithDerivedPropertyChangeDetection(initiallyReadAllProperties: true);
     }
 
-    public static IProxyContextBuilder AutomaticallyAssignContextToPropertyValues(this IProxyContextBuilder builder)
+    public static IProxyContextBuilder WithPropertyValueEqualityCheck(this IProxyContextBuilder builder)
     {
         return builder
-            .UsePropertyRegistryHandlers()
-            .TryAddSingleHandler(new AutomaticallyAssignContextToPropertyValuesHandler());
+            .TryAddSingleHandler(new PropertyValueEqualityCheckHandler());
     }
 
-    public static IProxyContextBuilder DetectDerivedPropertyChanges(this IProxyContextBuilder builder, bool initiallyReadAllProperties)
+    public static IProxyContextBuilder WithAutomaticContextAssignment(this IProxyContextBuilder builder)
     {
         return builder
-            .UsePropertyChangedHandlers()
-            .TryAddSingleHandler(new DetectDerivedPropertyChangesHandler(initiallyReadAllProperties));
+            .WithPropertyRegistryHandlers()
+            .TryAddSingleHandler(new AutomaticContextAssignmentHandler());
+    }
+
+    public static IProxyContextBuilder WithDerivedPropertyChangeDetection(this IProxyContextBuilder builder, bool initiallyReadAllProperties)
+    {
+        return builder
+            .WithPropertyChangedHandlers()
+            .TryAddSingleHandler(new DerivedPropertyChangeDetectionHandler(initiallyReadAllProperties));
     }
 
     /// <summary>
@@ -30,10 +38,10 @@ public static class ProxyContextBuilderExtensions
     /// </summary>
     /// <param name="builder"></param>
     /// <returns></returns>
-    public static IProxyContextBuilder UsePropertyChangedHandlers(this IProxyContextBuilder builder)
+    public static IProxyContextBuilder WithPropertyChangedHandlers(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new UsePropertyChangedHandlersHandler());
+            .TryAddSingleHandler(new PropertyChangedHandlersHandler());
     }
 
     /// <summary>
@@ -41,9 +49,9 @@ public static class ProxyContextBuilderExtensions
     /// </summary>
     /// <param name="builder"></param>
     /// <returns></returns>
-    public static IProxyContextBuilder UsePropertyRegistryHandlers(this IProxyContextBuilder builder)
+    public static IProxyContextBuilder WithPropertyRegistryHandlers(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new UsePropertyRegistryHandlersHandler());
+            .TryAddSingleHandler(new PropertyRegistryHandlersHandler());
     }
 }

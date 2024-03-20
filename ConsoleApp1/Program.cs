@@ -11,8 +11,8 @@ namespace ConsoleApp1
                 .CreateBuilder()
                 .AddHandler(new LogPropertyChangesHandler("1"))
 
-                .CheckPropertyEqualityBeforeAssignment()
-                .AutomaticallyAssignContextToPropertyValues()
+                .WithPropertyValueEqualityCheck()
+                .WithAutomaticContextAssignment()
 
                 .AddHandler(new LogPropertyChangesHandler("2"))
                 .Build();

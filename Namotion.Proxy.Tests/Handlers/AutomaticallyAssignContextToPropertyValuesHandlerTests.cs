@@ -8,7 +8,7 @@ namespace Namotion.Proxy.Tests.Handlers
             // Arrange
             var context = ProxyContext
                 .CreateBuilder()
-                .AutomaticallyAssignContextToPropertyValues()
+                .WithAutomaticContextAssignment()
                 .Build();
 
             // Act

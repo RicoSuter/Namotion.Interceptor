@@ -2,7 +2,7 @@
 
 namespace Namotion.Proxy.Handlers;
 
-internal class UsePropertyRegistryHandlersHandler : IProxyWriteHandler
+internal class PropertyRegistryHandlersHandler : IProxyWriteHandler
 {
     private const string ReferenceCountKey = "Namotion.Proxy.Handlers.ReferenceCount";
 

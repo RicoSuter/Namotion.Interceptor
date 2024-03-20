@@ -2,7 +2,7 @@
 
 namespace Namotion.Proxy.Handlers;
 
-public class CheckPropertyEqualityBeforeAssignmentHandler : IProxyWriteHandler
+public class PropertyValueEqualityCheckHandler : IProxyWriteHandler
 {
     public void SetProperty(ProxyWriteHandlerContext context, Action<ProxyWriteHandlerContext> next)
     {

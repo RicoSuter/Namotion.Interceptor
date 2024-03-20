@@ -13,7 +13,7 @@ namespace Namotion.Proxy.Tests.Handlers
 
             var context = ProxyContext
                 .CreateBuilder()
-                .DetectDerivedPropertyChanges(initiallyReadAllProperties: true)
+                .WithDerivedPropertyChangeDetection(initiallyReadAllProperties: true)
                 .AddHandler(changeHandler)
                 .Build();
 

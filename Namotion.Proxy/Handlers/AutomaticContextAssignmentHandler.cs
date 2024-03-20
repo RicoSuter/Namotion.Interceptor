@@ -2,7 +2,7 @@
 
 namespace Namotion.Proxy.Handlers;
 
-internal class AutomaticallyAssignContextToPropertyValuesHandler : IProxyPropertyRegistryHandler
+internal class AutomaticContextAssignmentHandler : IProxyPropertyRegistryHandler
 {
     public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
     {

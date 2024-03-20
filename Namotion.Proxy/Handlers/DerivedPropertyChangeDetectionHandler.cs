@@ -4,13 +4,13 @@ namespace Namotion.Proxy.Handlers;
 
 public record struct TrackedProperty(IProxy Proxy, string PropertyName);
 
-public class DetectDerivedPropertyChangesHandler : IProxyReadHandler, IProxyWriteHandler, IProxyPropertyRegistryHandler
+internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxyWriteHandler, IProxyPropertyRegistryHandler
 {
     [ThreadStatic]
     private static Stack<HashSet<TrackedProperty>>? _currentTouchedProperties;
     private readonly bool _initiallyReadAllProperties;
 
-    public DetectDerivedPropertyChangesHandler(bool initiallyReadAllProperties)
+    public DerivedPropertyChangeDetectionHandler(bool initiallyReadAllProperties)
     {
         _initiallyReadAllProperties = initiallyReadAllProperties;
     }
