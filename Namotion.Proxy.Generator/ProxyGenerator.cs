@@ -14,7 +14,7 @@ public class ProxyGenerator : IIncrementalGenerator
     {
         var classWithAttributeProvider = context.SyntaxProvider
             .CreateSyntaxProvider(
-                predicate: (node, _) => node is ClassDeclarationSyntax cds && cds.AttributeLists.Count > 0,
+                predicate: (node, _) => node is ClassDeclarationSyntax cds && cds.AttributeLists.Count > 0 && cds.Identifier.Value?.ToString().EndsWith("Base") == true,
                 transform: (ctx, ct) =>
                 {
                     var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
@@ -50,18 +50,26 @@ public class ProxyGenerator : IIncrementalGenerator
 
                 var generatedCode = $@"
 using Namotion.Proxy;
+using System.Collections.Concurrent;
 
 namespace {namespaceName} 
 {{
-    public class {newClassName} : {baseClassName}, IProxyContextProvider
+    public class {newClassName} : {baseClassName}, IProxy
     {{
-        private IProxyContext _context;
+        private IProxyContext? _context;
+        private ConcurrentDictionary<string, object?> _data = new ConcurrentDictionary<string, object?>();
 
-        IProxyContext IProxyContextProvider.Context => _context;
-
-        public {newClassName}(IProxyContextProvider proxyContextProvider)
+        IProxyContext? IProxy.Context
         {{
-            _context = proxyContextProvider.Context;
+            get => _context;
+            set => _context = value;
+        }}
+
+        ConcurrentDictionary<string, object?> IProxy.Data => _data;
+
+        public {newClassName}(IProxy? proxy = null)
+        {{
+            _context = proxy?.Context;
         }}
 ";
                 foreach (var property in cls.Properties)
@@ -86,12 +94,19 @@ typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTyp
 
         private T GetProperty<T>(string propertyName, Func<object?> readValue)
         {{
-            return (T?)_context.GetProperty(this, propertyName, readValue)!;
+            return _context is not null ? (T?)_context.GetProperty(this, propertyName, readValue)! : (T?)readValue()!;
         }}
 
         private void SetProperty<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)
         {{
-            _context.SetProperty(this, propertyName, newValue, readValue, setValue);
+            if (_context is null)
+            {{
+                setValue(newValue);
+            }}
+            else
+            {{
+                _context.SetProperty(this, propertyName, newValue, readValue, setValue);
+            }}
         }}
     }}
 }}

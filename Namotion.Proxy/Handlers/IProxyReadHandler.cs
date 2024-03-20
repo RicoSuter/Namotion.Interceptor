@@ -7,7 +7,7 @@ public interface IProxyReadHandler : IProxyHandler
 
 public record struct ProxyReadHandlerContext(
     IProxyContext Context,
-    object Proxy,
+    IProxy Proxy,
     string PropertyName)
 {
 }

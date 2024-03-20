@@ -1,10 +1,13 @@
-﻿namespace Namotion.Proxy;
+﻿using Namotion.Proxy.Handlers;
 
-public interface IProxyContext : IProxyContextProvider
+namespace Namotion.Proxy;
+
+public interface IProxyContext
 {
-    IProxyContext IProxyContextProvider.Context => this;
+    IEnumerable<THandler> GetHandlers<THandler>()
+        where THandler : IProxyHandler;
 
-    object? GetProperty(object proxy, string propertyName, Func<object?> readValue);
+    object? GetProperty(IProxy proxy, string propertyName, Func<object?> readValue);
 
-    void SetProperty(object proxy, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue);
+    void SetProperty(IProxy proxy, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue);
 }

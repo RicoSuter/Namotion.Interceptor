@@ -1,5 +1,6 @@
 ﻿using Namotion.Proxy;
 using Namotion.Proxy.Handlers;
+using System.Collections.Concurrent;
 
 namespace ConsoleApp1
 {
@@ -8,12 +9,16 @@ namespace ConsoleApp1
         static void Main(string[] args)
         {
             var context = new ProxyContext([
-                new LogPropertyChangesHandler("1"), 
+                new LogPropertyChangesHandler("1"),
+                new ProxyPropertyValueHandler(),
+                new AutoProxyContextHandler(),
                 new LogPropertyChangesHandler("2")]);
 
-            var person = new Person(context);
+            var person = new Person();
+            context.RegisterProxy(person); // TODO: better api
             person.FirstName = "Rico";
             person.LastName = "Suter";
+            person.Mother = new Person { FirstName = "Susi" };
 
             Console.WriteLine(person.FirstName);
         }
@@ -26,7 +31,7 @@ namespace ConsoleApp1
 
         public virtual string? LastName { get; set; }
 
-        public virtual Person? Parent { get; set; }
+        public virtual Person? Father { get; set; }
 
         public virtual Person? Mother { get; set; }
     }
@@ -51,7 +56,7 @@ namespace ConsoleApp1
         public void SetProperty(ProxyWriteHandlerContext context, Action<ProxyWriteHandlerContext> next)
         {
             Console.WriteLine($"{_prefix}: Setting {context.PropertyName} to {context.NewValue}");
-            next.Invoke(context);
+            next.Invoke(context with { NewValue = context.NewValue });
             Console.WriteLine($"{_prefix}: Set {context.PropertyName} to {context.NewValue}");
         }
     }

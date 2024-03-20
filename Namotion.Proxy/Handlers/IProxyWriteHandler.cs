@@ -7,7 +7,7 @@ public interface IProxyWriteHandler : IProxyHandler
 
 public record struct ProxyWriteHandlerContext(
     IProxyContext Context,
-    object Proxy,
+    IProxy Proxy,
     string PropertyName,
     object? NewValue,
     Func<object?> ReadValue)
