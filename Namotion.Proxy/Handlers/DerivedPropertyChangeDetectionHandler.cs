@@ -59,7 +59,8 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
             {
                 foreach (var usedByProperty in usedByProperties)
                 {
-                    var changedContext = new ProxyChangedHandlerContext(context.Context, usedByProperty.Proxy, usedByProperty.PropertyName, null, null); // TODO: how to provide current and new value?
+                    // TODO: how to provide current and new value?
+                    var changedContext = new ProxyChangedHandlerContext(context.Context, usedByProperty.Proxy, usedByProperty.PropertyName, null, null);
                     foreach (var handler in context.Context.GetHandlers<IProxyChangedHandler>())
                     {
                         handler.RaisePropertyChanged(changedContext);

@@ -9,7 +9,7 @@ public record struct ProxyChangedHandlerContext(
     IProxyContext Context,
     IProxy Proxy,
     string PropertyName,
-    object? PreviousValue,
+    object? OldValue,
     object? NewValue)
 {
 }

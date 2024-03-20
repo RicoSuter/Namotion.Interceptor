@@ -10,11 +10,9 @@ namespace ConsoleApp1
             var context = ProxyContext
                 .CreateBuilder()
                 .AddHandler(new LogPropertyChangesHandler("1"))
-
-                .WithPropertyValueEqualityCheck()
-                .WithAutomaticContextAssignment()
-
+                .WithFullPropertyTracking()
                 .AddHandler(new LogPropertyChangesHandler("2"))
+                .WithPropertyChangedCallback((ctx) => Console.WriteLine($"Property {ctx.PropertyName} changed from {ctx.OldValue} to {ctx.NewValue}."))
                 .Build();
 
             var person = new Person(context)
