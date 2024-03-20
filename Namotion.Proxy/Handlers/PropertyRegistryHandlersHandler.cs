@@ -15,12 +15,44 @@ internal class PropertyRegistryHandlersHandler : IProxyWriteHandler
 
         if (!Equals(currentValue, newValue))
         {
-            TryDetachProxy(context.Context, context.Proxy, context.PropertyName, currentValue, null);
-            TryAttachProxy(context.Context, context.Proxy, context.PropertyName, newValue, null);
+            // TODO: Write unit tests for this!
+            var oldProxies = FindProxies(context.Proxy, context.PropertyName, currentValue, null).ToDictionary(p => p.Item3, p => p);
+            var newProxies = FindProxies(context.Proxy, context.PropertyName, newValue, null).ToDictionary(p => p.Item3, p => p);
+
+            foreach (var d in oldProxies.Where(u => !newProxies.ContainsKey(u.Key)))
+            {
+                DetachProxy(context.Context, d.Value.Item1, d.Value.Item2, d.Value.Item3, d.Value.Item4);
+            }
+
+            foreach (var d in newProxies.Where(u => !oldProxies.ContainsKey(u.Key)))
+            {
+                AttachProxy(context.Context, d.Value.Item1, d.Value.Item2, d.Value.Item3, d.Value.Item4);
+            }
         }
     }
 
-    private static void TryAttachProxy(IProxyContext context, IProxy parentProxy, string propertyName, object? value, object? index)
+    private static void AttachProxy(IProxyContext context, IProxy parentProxy, string propertyName, IProxy proxy, object? index)
+    {
+        var count = proxy.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
+        var registryContext = new ProxyPropertyRegistryHandlerContext(context, parentProxy, propertyName, index, proxy, count ?? 1);
+
+        foreach (var handler in context.GetHandlers<IProxyPropertyRegistryHandler>())
+        {
+            handler.AttachProxy(registryContext, proxy);
+        }
+    }
+
+    private static void DetachProxy(IProxyContext context, IProxy parentProxy, string propertyName, IProxy proxy, object? index)
+    {
+        var count = proxy.Data.AddOrUpdate(ReferenceCountKey, -1, (_, count) => (int)count! - 1) as int?;
+        var registryContext = new ProxyPropertyRegistryHandlerContext(context, parentProxy, propertyName, index, proxy, count ?? 1);
+        foreach (var handler in context.GetHandlers<IProxyPropertyRegistryHandler>())
+        {
+            handler.DetachProxy(registryContext, proxy);
+        }
+    }
+
+    private static IEnumerable<(IProxy, string, IProxy, object?)> FindProxies(IProxy parentProxy, string propertyName, object? value, object? index)
     {
         if (value is IDictionary dictionary)
         {
@@ -29,7 +61,10 @@ internal class PropertyRegistryHandlersHandler : IProxyWriteHandler
                 var dictionaryValue = dictionary[key];
                 if (dictionaryValue is IProxy proxy)
                 {
-                    TryAttachProxy(context, parentProxy, propertyName, proxy, key);
+                    foreach (var child in FindProxies(parentProxy, propertyName, proxy, key))
+                    {
+                        yield return child;
+                    }
                 }
             }
         }
@@ -38,48 +73,10 @@ internal class PropertyRegistryHandlersHandler : IProxyWriteHandler
             var i = 0;
             foreach (var proxy in collection.OfType<IProxy>())
             {
-                TryAttachProxy(context, parentProxy, propertyName, proxy, i);
-                i++;
-            }
-        }
-        else if (value is IProxy proxy)
-        {
-            var count = proxy.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
-            var registryContext = new ProxyPropertyRegistryHandlerContext(context, parentProxy, propertyName, index, proxy, count ?? 1);
-
-            foreach (var handler in context.GetHandlers<IProxyPropertyRegistryHandler>())
-            {
-                handler.AttachProxy(registryContext, proxy);
-            }
-
-            // TODO: Avoid infinite recursion when circular references are present
-            foreach (var property in proxy.Properties)
-            {
-                var childValue = property.Value.ReadValue(proxy);
-                TryAttachProxy(context, proxy, property.Key, childValue, null);
-            }
-        }
-    }
-
-    private static void TryDetachProxy(IProxyContext context, IProxy parentProxy, string propertyName, object? value, object? index)
-    {
-        if (value is IDictionary dictionary)
-        {
-            foreach (var key in dictionary.Keys)
-            {
-                var dictionaryValue = dictionary[key];
-                if (dictionaryValue is IProxy proxy)
+                foreach (var child in FindProxies(parentProxy, propertyName, proxy, i))
                 {
-                    TryDetachProxy(context, parentProxy, propertyName, proxy, key);
+                    yield return child;
                 }
-            }
-        }
-        else if (value is ICollection collection)
-        {
-            var i = 0;
-            foreach (var proxy in collection.OfType<IProxy>())
-            {
-                TryDetachProxy(context, parentProxy, propertyName, proxy, i);
                 i++;
             }
         }
@@ -89,15 +86,13 @@ internal class PropertyRegistryHandlersHandler : IProxyWriteHandler
             foreach (var property in proxy.Properties)
             {
                 var childValue = property.Value.ReadValue(proxy);
-                TryDetachProxy(context, proxy, property.Key, childValue, null);
+                foreach (var child in FindProxies(proxy, property.Key, childValue, null))
+                {
+                    yield return child;
+                }
             }
 
-            var count = proxy.Data.AddOrUpdate(ReferenceCountKey, -1, (_, count) => (int)count! - 1) as int?;
-            var registryContext = new ProxyPropertyRegistryHandlerContext(context, parentProxy, propertyName, index, proxy, count ?? 1);
-            foreach (var handler in context.GetHandlers<IProxyPropertyRegistryHandler>())
-            {
-                handler.DetachProxy(registryContext, proxy);
-            }
+            yield return (parentProxy, propertyName, proxy, index);
         }
     }
 }

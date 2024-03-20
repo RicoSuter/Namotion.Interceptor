@@ -9,11 +9,14 @@ namespace ConsoleApp1
         {
             var context = ProxyContext
                 .CreateBuilder()
-                //.AddHandler(new LogPropertyChangesHandler("1"))
+                .AddHandler(new LogPropertyChangesHandler())
                 .WithFullPropertyTracking()
-                //.AddHandler(new LogPropertyChangesHandler("2"))
                 .WithPropertyChangedCallback((ctx) => Console.WriteLine($"Property {ctx.PropertyName} changed from {ctx.OldValue} to {ctx.NewValue}."))
                 .Build();
+
+            var child1 = new Person { FirstName = "Child1" };
+            var child2 = new Person { FirstName = "Child2" };
+            var child3 = new Person { FirstName = "Child3" };
 
             var person = new Person(context)
             {
@@ -22,8 +25,20 @@ namespace ConsoleApp1
                 Mother = new Person
                 {
                     FirstName = "Susi"
-                }
+                },
+                Children = [
+                    child1,
+                    child2
+                ]
             };
+
+            person.Children = [
+                child1,
+                child2,
+                child3
+            ];
+
+            person.Children = Array.Empty<Person>();
 
             Console.WriteLine(person.FirstName);
         }
@@ -41,30 +56,25 @@ namespace ConsoleApp1
         public virtual Person? Father { get; set; }
 
         public virtual Person? Mother { get; set; }
+
+        public virtual Person[] Children { get; set; } = Array.Empty<Person>();
+
+        public override string ToString()
+        {
+            return "Person: " + FullName;
+        }
     }
 
-    public class LogPropertyChangesHandler : IProxyWriteHandler, IProxyReadHandler
+    public class LogPropertyChangesHandler : IProxyPropertyRegistryHandler
     {
-        private readonly string _prefix;
-
-        public LogPropertyChangesHandler(string prefix)
+        public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
         {
-            _prefix = prefix;
+            Console.WriteLine($"AttachProxy: {proxy}");
         }
 
-        public object? GetProperty(ProxyReadHandlerContext context, Func<ProxyReadHandlerContext, object?> next)
+        public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
         {
-            Console.WriteLine($"{_prefix}: Reading {context.PropertyName}...");
-            var result = next.Invoke(context);
-            Console.WriteLine($"{_prefix}: Read {context.PropertyName} to {result}");
-            return result;
-        }
-
-        public void SetProperty(ProxyWriteHandlerContext context, Action<ProxyWriteHandlerContext> next)
-        {
-            Console.WriteLine($"{_prefix}: Setting {context.PropertyName} to {context.NewValue}");
-            next.Invoke(context with { NewValue = context.NewValue });
-            Console.WriteLine($"{_prefix}: Set {context.PropertyName} to {context.NewValue}");
+            Console.WriteLine($"DetachProxy: {proxy}");
         }
     }
 }
