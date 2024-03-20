@@ -29,20 +29,90 @@
                 .Build();
 
             // Act
-            var grandmother = new Person { FirstName = "Grandmother" };
+            var grandmother = new Person
+            {
+                FirstName = "Grandmother"
+            };
+
+            var mother = new Person
+            {
+                FirstName = "Susi",
+                Mother = grandmother
+            };
 
             var person = new Person(context)
             {
-                Mother = new Person
-                {
-                    FirstName = "Susi",
-                    Mother = grandmother
-                }
+                FirstName = "Child",
+                Mother = mother
             };
 
             // Assert
-            Assert.Equal(context, ((IProxy)person.Mother).Context);
+            Assert.Equal(context, ((IProxy)person).Context);
+            Assert.Equal(context, ((IProxy)mother).Context);
             Assert.Equal(context, ((IProxy)grandmother).Context);
+        }
+
+        [Fact]
+        public void WhenPropertyWithDeepProxiesIsRemoved_ThenAllContextsAreNull()
+        {
+            // Arrange
+            var context = ProxyContext
+                .CreateBuilder()
+                .WithAutomaticContextAssignment()
+                .Build();
+
+            // Act
+            var grandmother = new Person
+            {
+                FirstName = "Grandmother"
+            };
+
+            var mother = new Person
+            {
+                FirstName = "Susi",
+                Mother = grandmother
+            };
+
+            var person = new Person(context)
+            {
+                FirstName = "Child",
+                Mother = mother
+            };
+
+            person.Mother = null;
+
+            // Assert
+            Assert.Equal(context, ((IProxy)person).Context);
+            Assert.Null(((IProxy)mother).Context);
+            Assert.Null(((IProxy)grandmother).Context);
+        }
+
+        [Fact]
+        public void WhenArrayIsAssigned_ThenAllChildrenAreAttached()
+        {
+            // Arrange
+            var context = ProxyContext
+                .CreateBuilder()
+                .WithAutomaticContextAssignment()
+                .Build();
+
+            // Act
+            var child1 = new Person { FirstName = "Child1" };
+            var child2 = new Person { FirstName = "Child2" };
+
+            var person = new Person(context)
+            {
+                FirstName = "Mother",
+                Children = [
+                    child1,
+                    child2
+                ]
+            };
+
+            // Assert
+            Assert.Equal(context, ((IProxy)person).Context);
+            Assert.Equal(context, ((IProxy)child1).Context);
+            Assert.Equal(context, ((IProxy)child2).Context);
         }
     }
 }

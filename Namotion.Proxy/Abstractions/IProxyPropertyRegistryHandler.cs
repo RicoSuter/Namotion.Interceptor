@@ -12,6 +12,9 @@ public interface IProxyPropertyRegistryHandler : IProxyHandler
 public record struct ProxyPropertyRegistryHandlerContext(
     IProxyContext Context,
     IProxy? ParentProxy,
+    string PropertyName,
+    object? Index,
+    IProxy? Proxy,
     int ReferenceCount)
 {
 }
