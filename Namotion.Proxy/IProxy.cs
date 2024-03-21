@@ -13,6 +13,7 @@ public interface IProxy
 
 public record struct PropertyInfo(
     string PropertyName,
+    System.Reflection.PropertyInfo Info,
     bool IsDerived,
     Func<object?, object?> ReadValue)
 {

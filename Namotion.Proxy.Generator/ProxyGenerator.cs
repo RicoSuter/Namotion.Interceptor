@@ -81,12 +81,13 @@ namespace {namespaceName}
                 {
                     var symbolDisplayFormat = new SymbolDisplayFormat(typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
                     var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
+                    var propertyName = property.Property.Identifier.Value;
 
                     generatedCode +=
 $@"
             {{
-                ""{property.Property.Identifier.Value}"",       
-                new PropertyInfo(nameof({property.Property.Identifier.Value}), {(property.IsDerived ? "true" : "false")}, (o) => (({newClassName})o).{property.Property.Identifier.Value})
+                ""{propertyName}"",       
+                new PropertyInfo(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName}))!, {(property.IsDerived ? "true" : "false")}, (o) => (({newClassName})o).{propertyName})
             }},
 ";
                 }
@@ -107,10 +108,11 @@ $@"
                 {
                     var symbolDisplayFormat = new SymbolDisplayFormat(typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
                     var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
+                    var propertyName = property.Property.Identifier.Value;
 
                     generatedCode +=
 $@"
-        public override {(property.IsRequired ? "required" : "")} {fullyQualifiedName} {property.Property.Identifier.Value}
+        public override {(property.IsRequired ? "required" : "")} {fullyQualifiedName} {propertyName}
         {{
 ";
                     if (property.Property.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
@@ -118,7 +120,7 @@ $@"
                     {
                         generatedCode +=
 $@"
-            get => GetProperty<{fullyQualifiedName}>(nameof({property.Property.Identifier.Value}), () => base.{property.Property.Identifier.Value});
+            get => GetProperty<{fullyQualifiedName}>(nameof({propertyName}), () => base.{propertyName});
 ";
 
                     }
@@ -127,7 +129,7 @@ $@"
                     {
                         generatedCode +=
 $@"
-            set => SetProperty(nameof({property.Property.Identifier.Value}), value, () => base.{property.Property.Identifier.Value}, v => base.{property.Property.Identifier.Value} = ({fullyQualifiedName})v!);
+            set => SetProperty(nameof({propertyName}), value, () => base.{propertyName}, v => base.{propertyName} = ({fullyQualifiedName})v!);
 "; 
                     }
 
