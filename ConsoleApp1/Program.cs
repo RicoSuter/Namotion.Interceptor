@@ -66,7 +66,7 @@ namespace ConsoleApp1
         }
     }
 
-    public class LogPropertyChangesHandler : IProxyPropertyRegistryHandler
+    public class LogPropertyChangesHandler : IProxyLifecycleHandler
     {
         public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
         {

@@ -2,7 +2,7 @@
 
 namespace Namotion.Proxy.Abstractions;
 
-public interface IProxyPropertyRegistryHandler : IProxyHandler
+public interface IProxyLifecycleHandler : IProxyHandler
 {
     public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy);
 

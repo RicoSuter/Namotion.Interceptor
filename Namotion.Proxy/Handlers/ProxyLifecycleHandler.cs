@@ -3,7 +3,7 @@ using System.Collections;
 
 namespace Namotion.Proxy.Handlers;
 
-internal class AttachAndDetachHandler : IProxyWriteHandler
+internal class ProxyLifecycleHandler : IProxyWriteHandler
 {
     private const string ReferenceCountKey = "Namotion.Proxy.Handlers.ReferenceCount";
 
@@ -41,7 +41,7 @@ internal class AttachAndDetachHandler : IProxyWriteHandler
         var count = proxy.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
         var registryContext = new ProxyPropertyRegistryHandlerContext(context, parentProxy, propertyName, index, proxy, count ?? 1);
 
-        foreach (var handler in context.GetHandlers<IProxyPropertyRegistryHandler>())
+        foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
         {
             if (handler != this)
             {
@@ -54,7 +54,7 @@ internal class AttachAndDetachHandler : IProxyWriteHandler
     {
         var count = proxy.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
         var registryContext = new ProxyPropertyRegistryHandlerContext(context, parentProxy, propertyName, index, proxy, count ?? 1);
-        foreach (var handler in context.GetHandlers<IProxyPropertyRegistryHandler>())
+        foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
         {
             if (handler != this)
             {

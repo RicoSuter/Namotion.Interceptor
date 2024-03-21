@@ -2,7 +2,7 @@
 
 namespace Namotion.Proxy.Handlers;
 
-internal class ParentsHandler : IProxyPropertyRegistryHandler
+internal class ParentsHandler : IProxyLifecycleHandler
 {
     public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
     {

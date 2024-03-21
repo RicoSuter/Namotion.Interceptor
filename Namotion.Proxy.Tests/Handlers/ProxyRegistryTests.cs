@@ -4,7 +4,7 @@ namespace Namotion.Proxy.Tests.Handlers
 {
     public class ProxyRegistryTests
     {
-        public class MyProxyPropertyRegistryHandler : IProxyPropertyRegistryHandler
+        public class MyProxyPropertyRegistryHandler : IProxyLifecycleHandler
         {
             private readonly List<ProxyPropertyRegistryHandlerContext> _attaches;
             private readonly List<ProxyPropertyRegistryHandlerContext> _detaches;

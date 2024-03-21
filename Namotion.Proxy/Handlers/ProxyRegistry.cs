@@ -2,7 +2,7 @@
 
 namespace Namotion.Proxy.Handlers;
 
-internal class ProxyRegistry : IProxyRegistry, IProxyPropertyRegistryHandler
+internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
 {
     private HashSet<IProxy> _knownProxies = new HashSet<IProxy>();
 
