@@ -52,7 +52,11 @@ public class ProxyGenerator : IIncrementalGenerator
 
                 var generatedCode = $@"
 using Namotion.Proxy;
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+
+#pragma warning disable CS8669
 
 namespace {namespaceName} 
 {{
