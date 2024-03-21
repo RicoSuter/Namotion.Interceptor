@@ -6,17 +6,17 @@ public static class DerivedPropertyChangeDetectionHandlerExtensions
     private const string RequiredPropertiesKey = "Namotion.Proxy.RequiredProperties.";
     private const string LastKnownValueKey = "Namotion.Proxy.LastKnownValue.";
 
-    public static HashSet<TrackedProperty> GetUsedByProperties(this IProxy proxy, string propertyName)
+    public static HashSet<ProxyPropertyReference> GetUsedByProperties(this IProxy proxy, string propertyName)
     {
-        return (HashSet<TrackedProperty>)proxy.Data.GetOrAdd(UsedByPropertiesKey + propertyName, (_) => new HashSet<TrackedProperty>())!;
+        return (HashSet<ProxyPropertyReference>)proxy.Data.GetOrAdd(UsedByPropertiesKey + propertyName, (_) => new HashSet<ProxyPropertyReference>())!;
     }
 
-    public static HashSet<TrackedProperty> GetRequiredProperties(this IProxy proxy, string propertyName)
+    public static HashSet<ProxyPropertyReference> GetRequiredProperties(this IProxy proxy, string propertyName)
     {
-        return (HashSet<TrackedProperty>)proxy.Data.GetOrAdd(RequiredPropertiesKey + propertyName, (_) => new HashSet<TrackedProperty>())!;
+        return (HashSet<ProxyPropertyReference>)proxy.Data.GetOrAdd(RequiredPropertiesKey + propertyName, (_) => new HashSet<ProxyPropertyReference>())!;
     }
 
-    public static void SetRequiredProperties(this IProxy proxy, string propertyName, HashSet<TrackedProperty> requiredProperties)
+    public static void SetRequiredProperties(this IProxy proxy, string propertyName, HashSet<ProxyPropertyReference> requiredProperties)
     {
         proxy.Data[RequiredPropertiesKey + propertyName] = requiredProperties;
     }

@@ -31,6 +31,7 @@ public class Benchmark
             _context = ProxyContext
                 .CreateBuilder()
                 .WithFullPropertyTracking()
+                .WithRegistry()
                 .Build();
 
             _object = new Car(_context);

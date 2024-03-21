@@ -30,6 +30,12 @@ public static class ProxyContextBuilderExtensions
             .WithPropertyChangedHandlers();
     }
 
+    public static IProxyContextBuilder WithPropertyChangeRecorder(this IProxyContextBuilder builder)
+    {
+        return builder
+            .TryAddSingleHandler(new PropertyChangeRecorder());
+    }
+
     public static IProxyContextBuilder WithPropertyChangedCallback(this IProxyContextBuilder builder, Action<ProxyChangedHandlerContext> callback)
     {
         return builder

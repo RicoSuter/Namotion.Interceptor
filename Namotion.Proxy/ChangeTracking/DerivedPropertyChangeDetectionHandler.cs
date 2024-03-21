@@ -2,15 +2,13 @@
 
 namespace Namotion.Proxy.ChangeTracking;
 
-public record struct TrackedProperty(IProxy Proxy, string PropertyName);
-
 /// <summary>
 /// Should be used with <see cref="InitiallyLoadDerivedPropertiesHandler"/> so that dependencies are initially set up.
 /// </summary>
 internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxyWriteHandler
 {
     [ThreadStatic]
-    private static Stack<HashSet<TrackedProperty>>? _currentTouchedProperties;
+    private static Stack<HashSet<ProxyPropertyReference>>? _currentTouchedProperties;
 
     public object? GetProperty(ProxyReadHandlerContext context, Func<ProxyReadHandlerContext, object?> next)
     {
@@ -64,10 +62,10 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
     {
         if (_currentTouchedProperties == null)
         {
-            _currentTouchedProperties = new Stack<HashSet<TrackedProperty>>();
+            _currentTouchedProperties = new Stack<HashSet<ProxyPropertyReference>>();
         }
 
-        _currentTouchedProperties.Push(new HashSet<TrackedProperty>());
+        _currentTouchedProperties.Push(new HashSet<ProxyPropertyReference>());
     }
 
     private void StoreRecordedTouchedProperties(ProxyReadHandlerContext context)
@@ -91,7 +89,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
         {
             var usedByProperties = newlyRequiredProperty.Proxy.GetUsedByProperties(newlyRequiredProperty.PropertyName);
             lock (usedByProperties)
-                usedByProperties.Add(new TrackedProperty(context.Proxy, context.PropertyName));
+                usedByProperties.Add(new ProxyPropertyReference(context.Proxy, context.PropertyName));
         }
     }
 
@@ -99,7 +97,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
     {
         if (_currentTouchedProperties?.TryPeek(out var touchedProperties) == true)
         {
-            touchedProperties.Add(new TrackedProperty(context.Proxy, context.PropertyName));
+            touchedProperties.Add(new ProxyPropertyReference(context.Proxy, context.PropertyName));
         }
         else
         {
