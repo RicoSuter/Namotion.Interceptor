@@ -11,7 +11,8 @@ namespace ConsoleApp1
                 .CreateBuilder()
                 .AddHandler(new LogPropertyChangesHandler())
                 .WithFullPropertyTracking()
-                .WithPropertyChangedCallback((ctx) => Console.WriteLine($"Property {ctx.PropertyName} changed from {ctx.OldValue} to {ctx.NewValue}."))
+                .WithPropertyChangedCallback((ctx) => 
+                    Console.WriteLine($"Property {ctx.PropertyName} changed from {ctx.OldValue} to {ctx.NewValue}."))
                 .Build();
 
             var child1 = new Person { FirstName = "Child1" };

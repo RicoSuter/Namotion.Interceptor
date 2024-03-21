@@ -4,31 +4,13 @@ namespace Namotion.Proxy.Handlers;
 
 public record struct TrackedProperty(IProxy Proxy, string PropertyName);
 
-internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxyWriteHandler, IProxyPropertyRegistryHandler
+/// <summary>
+/// Should be used with <see cref="InitiallyLoadDerivedPropertiesHandler"/> so that dependencies are initially set up.
+/// </summary>
+internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxyWriteHandler
 {
     [ThreadStatic]
     private static Stack<HashSet<TrackedProperty>>? _currentTouchedProperties;
-    private readonly bool _initiallyReadAllProperties;
-
-    public DerivedPropertyChangeDetectionHandler(bool initiallyReadAllProperties)
-    {
-        _initiallyReadAllProperties = initiallyReadAllProperties;
-    }
-
-    public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
-    {
-        if (_initiallyReadAllProperties)
-        {
-            foreach (var property in proxy.Properties.Where(p => p.Value.IsDerived))
-            {
-                property.Value.ReadValue(proxy);
-            }
-        }
-    }
-
-    public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
-    {
-    }
 
     public object? GetProperty(ProxyReadHandlerContext context, Func<ProxyReadHandlerContext, object?> next)
     {

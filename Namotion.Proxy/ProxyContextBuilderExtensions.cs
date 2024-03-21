@@ -8,22 +8,23 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithFullPropertyTracking(this IProxyContextBuilder builder)
     {
         return builder
-            .WithPropertyValueEqualityCheck()
+            .WithEqualityCheck()
             .WithRegistry()
             .WithParents()
-            .WithDerivedPropertyChangeDetection(initiallyReadAllProperties: true);
+            .WithDerivedPropertyChangeDetection();
     }
 
-    public static IProxyContextBuilder WithPropertyValueEqualityCheck(this IProxyContextBuilder builder)
+    public static IProxyContextBuilder WithEqualityCheck(this IProxyContextBuilder builder)
     {
         return builder
             .TryAddSingleHandler(new PropertyValueEqualityCheckHandler());
     }
 
-    public static IProxyContextBuilder WithDerivedPropertyChangeDetection(this IProxyContextBuilder builder, bool initiallyReadAllProperties)
+    public static IProxyContextBuilder WithDerivedPropertyChangeDetection(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new DerivedPropertyChangeDetectionHandler(initiallyReadAllProperties))
+            .TryAddSingleHandler(new InitiallyLoadDerivedPropertiesHandler())
+            .TryAddSingleHandler(new DerivedPropertyChangeDetectionHandler())
             .WithPropertyChangedHandlers();
     }
 
@@ -41,7 +42,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithPropertyChangedHandlers(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new PropertyChangedHandlersHandler());
+            .TryAddSingleHandler(new PropertyChangedHandler());
     }
 
     /// <summary>
@@ -53,6 +54,7 @@ public static class ProxyContextBuilderExtensions
     {
         return builder
             .TryAddSingleHandler(new AutomaticContextAssignmentHandler())
+            .TryAddSingleHandler(new AttachAndDetachHandler())
             .TryAddSingleHandler(new ProxyRegistry());
     }
 

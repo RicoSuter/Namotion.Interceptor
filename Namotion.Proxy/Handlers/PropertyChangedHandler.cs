@@ -2,7 +2,7 @@
 
 namespace Namotion.Proxy.Handlers;
 
-internal class PropertyChangedHandlersHandler : IProxyWriteHandler
+internal class PropertyChangedHandler : IProxyWriteHandler
 {
     public void SetProperty(ProxyWriteHandlerContext context, Action<ProxyWriteHandlerContext> next)
     {

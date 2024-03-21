@@ -1,0 +1,18 @@
+﻿using Namotion.Proxy.Abstractions;
+
+namespace Namotion.Proxy.Handlers;
+
+internal class InitiallyLoadDerivedPropertiesHandler : IProxyPropertyRegistryHandler
+{
+    public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+    {
+        foreach (var property in proxy.Properties.Where(p => p.Value.IsDerived))
+        {
+            property.Value.ReadValue(proxy);
+        }
+    }
+
+    public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+    {
+    }
+}
