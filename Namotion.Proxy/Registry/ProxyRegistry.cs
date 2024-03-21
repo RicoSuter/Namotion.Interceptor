@@ -1,6 +1,6 @@
 ﻿using Namotion.Proxy.Abstractions;
 
-namespace Namotion.Proxy.Handlers;
+namespace Namotion.Proxy.Registry;
 
 internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
 {

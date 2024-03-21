@@ -1,4 +1,4 @@
-﻿namespace Namotion.Proxy.Handlers;
+﻿namespace Namotion.Proxy.ChangeTracking;
 
 public static class DerivedPropertyChangeDetectionHandlerExtensions
 {

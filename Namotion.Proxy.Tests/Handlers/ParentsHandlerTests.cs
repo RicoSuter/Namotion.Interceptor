@@ -1,90 +1,89 @@
-﻿using Namotion.Proxy.Handlers;
+﻿using Namotion.Proxy.Lifecycle;
 
-namespace Namotion.Proxy.Tests.Handlers
+namespace Namotion.Proxy.Tests.Handlers;
+
+public class ParentsHandlerTests
 {
-    public class ParentsHandlerTests
+    [Fact]
+    public void WhenProxyIsReferencedByTwoPropertiesOfTheSameProxy_ThenOnlyOneParentIsSet()
     {
-        [Fact]
-        public void WhenProxyIsReferencedByTwoPropertiesOfTheSameProxy_ThenOnlyOneParentIsSet()
+        // Arrange
+        var context = ProxyContext
+            .CreateBuilder()
+            .WithParents()
+            .Build();
+
+        // Act
+        var parent = new Person(context)
         {
-            // Arrange
-            var context = ProxyContext
-                .CreateBuilder()
-                .WithParents()
-                .Build();
+            FirstName = "Parent"
+        };
 
-            // Act
-            var parent = new Person(context)
-            {
-                FirstName = "Parent"
-            };
+        var person = new Person(context);
+        person.FirstName = "Child";
+        person.Mother = parent;
+        person.Father = parent;
 
-            var person = new Person(context);
-            person.FirstName = "Child";
-            person.Mother = parent;
-            person.Father = parent;
+        // Assert
+        var parents = parent.GetParents();
+        Assert.Single(parents);
+    }
 
-            // Assert
-            var parents = parent.GetParents();
-            Assert.Single(parents);
-        }
+    [Fact]
+    public void WhenReferencesAreSetToNull_ThenParentIsEmpty()
+    {
+        // Arrange
+        var context = ProxyContext
+            .CreateBuilder()
+            .WithParents()
+            .Build();
 
-        [Fact]
-        public void WhenReferencesAreSetToNull_ThenParentIsEmpty()
+        // Act
+        var parent = new Person(context)
         {
-            // Arrange
-            var context = ProxyContext
-                .CreateBuilder()
-                .WithParents()
-                .Build();
+            FirstName = "Parent"
+        };
 
-            // Act
-            var parent = new Person(context)
-            {
-                FirstName = "Parent"
-            };
+        var person = new Person(context);
+        person.FirstName = "Child";
+        person.Mother = parent;
+        person.Father = parent;
 
-            var person = new Person(context);
-            person.FirstName = "Child";
-            person.Mother = parent;
-            person.Father = parent;
+        person.Mother = null;
+        person.Father = null;
 
-            person.Mother = null;
-            person.Father = null;
+        // Assert
+        var parents = parent.GetParents();
+        Assert.Empty(parents);
+    }
 
-            // Assert
-            var parents = parent.GetParents();
-            Assert.Empty(parents);
-        }
+    [Fact]
+    public void WhenProxyIsReferencedByTwoOtherProxies_ThenItHasTwoParents()
+    {
+        // Arrange
+        var context = ProxyContext
+            .CreateBuilder()
+            .WithParents()
+            .Build();
 
-        [Fact]
-        public void WhenProxyIsReferencedByTwoOtherProxies_ThenItHasTwoParents()
+        // Act
+        var mother = new Person(context);
+        mother.FirstName = "Mother";
+
+        var child1 = new Person(context)
         {
-            // Arrange
-            var context = ProxyContext
-                .CreateBuilder()
-                .WithParents()
-                .Build();
+            FirstName = "Child1",
+            Mother = mother
+        };
 
-            // Act
-            var mother = new Person(context);
-            mother.FirstName = "Mother";
+        var child2 = new Person(context)
+        {
+            FirstName = "Child2",
+            Mother = mother
+        };
 
-            var child1 = new Person(context)
-            {
-                FirstName = "Child1",
-                Mother = mother
-            };
-
-            var child2 = new Person(context)
-            {
-                FirstName = "Child2",
-                Mother = mother
-            };
-
-            // Assert
-            var parents = mother.GetParents();
-            Assert.Equal(2, parents.Count);
-        }
+        // Assert
+        var parents = mother.GetParents();
+        Assert.Equal(2, parents.Count);
     }
 }

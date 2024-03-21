@@ -1,4 +1,4 @@
-﻿namespace Namotion.Proxy.Handlers;
+﻿namespace Namotion.Proxy.Registry;
 
 public static class ProxyRegistryExtensions
 {

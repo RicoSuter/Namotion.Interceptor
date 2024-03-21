@@ -1,6 +1,6 @@
 ﻿using Namotion.Proxy.Abstractions;
 
-namespace Namotion.Proxy.Handlers;
+namespace Namotion.Proxy.ChangeTracking;
 
 internal class PropertyChangedHandler : IProxyWriteHandler
 {

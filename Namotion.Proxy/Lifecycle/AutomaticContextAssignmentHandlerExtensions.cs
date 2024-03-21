@@ -1,4 +1,4 @@
-﻿namespace Namotion.Proxy.Handlers;
+﻿namespace Namotion.Proxy.Lifecycle;
 
 public static class AutomaticContextAssignmentHandlerExtensions
 {

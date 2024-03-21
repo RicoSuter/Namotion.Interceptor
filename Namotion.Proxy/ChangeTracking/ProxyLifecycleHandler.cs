@@ -1,7 +1,7 @@
 ﻿using Namotion.Proxy.Abstractions;
 using System.Collections;
 
-namespace Namotion.Proxy.Handlers;
+namespace Namotion.Proxy.ChangeTracking;
 
 internal class ProxyLifecycleHandler : IProxyWriteHandler
 {
@@ -63,7 +63,7 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler
         }
     }
 
-    private IEnumerable<(IProxy, string, IProxy, object?)> FindProxies(IProxy parentProxy, string propertyName, 
+    private IEnumerable<(IProxy, string, IProxy, object?)> FindProxies(IProxy parentProxy, string propertyName,
         object? value, object? index, HashSet<IProxy> seen)
     {
         if (value is IDictionary dictionary)

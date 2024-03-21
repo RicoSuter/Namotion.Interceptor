@@ -1,6 +1,6 @@
 ﻿using Namotion.Proxy.Abstractions;
 
-namespace Namotion.Proxy.Handlers;
+namespace Namotion.Proxy.ChangeTracking;
 
 public record struct TrackedProperty(IProxy Proxy, string PropertyName);
 

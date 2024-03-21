@@ -1,5 +1,7 @@
 ﻿using Namotion.Proxy.Abstractions;
-using Namotion.Proxy.Handlers;
+using Namotion.Proxy.ChangeTracking;
+using Namotion.Proxy.Lifecycle;
+using Namotion.Proxy.Registry;
 
 namespace Namotion.Proxy;
 
