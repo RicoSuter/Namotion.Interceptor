@@ -16,8 +16,8 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler
         if (!Equals(currentValue, newValue))
         {
             // TODO: Write unit tests for this!
-            var oldProxies = FindProxies(context.Proxy, context.PropertyName, currentValue, null).ToDictionary(p => p.Item3, p => p);
-            var newProxies = FindProxies(context.Proxy, context.PropertyName, newValue, null).ToDictionary(p => p.Item3, p => p);
+            var oldProxies = FindProxies(context.Proxy, context.PropertyName, currentValue, null, new HashSet<IProxy>()).ToDictionary(p => p.Item3, p => p);
+            var newProxies = FindProxies(context.Proxy, context.PropertyName, newValue, null, new HashSet<IProxy>()).ToDictionary(p => p.Item3, p => p);
 
             if (oldProxies.Count != 0 || newProxies.Count != 0)
             {
@@ -63,7 +63,8 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler
         }
     }
 
-    private IEnumerable<(IProxy, string, IProxy, object?)> FindProxies(IProxy parentProxy, string propertyName, object? value, object? index)
+    private IEnumerable<(IProxy, string, IProxy, object?)> FindProxies(IProxy parentProxy, string propertyName, 
+        object? value, object? index, HashSet<IProxy> seen)
     {
         if (value is IDictionary dictionary)
         {
@@ -72,7 +73,7 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler
                 var dictionaryValue = dictionary[key];
                 if (dictionaryValue is IProxy proxy)
                 {
-                    foreach (var child in FindProxies(parentProxy, propertyName, proxy, key))
+                    foreach (var child in FindProxies(parentProxy, propertyName, proxy, key, seen))
                     {
                         yield return child;
                     }
@@ -84,7 +85,7 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler
             var i = 0;
             foreach (var proxy in collection.OfType<IProxy>())
             {
-                foreach (var child in FindProxies(parentProxy, propertyName, proxy, i))
+                foreach (var child in FindProxies(parentProxy, propertyName, proxy, i, seen))
                 {
                     yield return child;
                 }
@@ -93,17 +94,20 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler
         }
         else if (value is IProxy proxy)
         {
-            // TODO: Avoid infinite recursion when circular references are present
-            foreach (var property in proxy.Properties)
+            if (!seen.Contains(proxy))
             {
-                var childValue = property.Value.ReadValue(proxy);
-                foreach (var child in FindProxies(proxy, property.Key, childValue, null))
+                seen.Add(proxy);
+                foreach (var property in proxy.Properties)
                 {
-                    yield return child;
+                    var childValue = property.Value.ReadValue(proxy);
+                    foreach (var child in FindProxies(proxy, property.Key, childValue, null, seen))
+                    {
+                        yield return child;
+                    }
                 }
-            }
 
-            yield return (parentProxy, propertyName, proxy, index);
+                yield return (parentProxy, propertyName, proxy, index);
+            }
         }
     }
 }

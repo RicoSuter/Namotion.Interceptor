@@ -114,5 +114,29 @@
             Assert.Equal(context, ((IProxy)child1).Context);
             Assert.Equal(context, ((IProxy)child2).Context);
         }
+
+        [Fact]
+        public void WhenUsingCircularDependencies_ThenProxiesAreAttached()
+        {
+            // Arrange
+            var context = ProxyContext
+                .CreateBuilder()
+                .WithRegistry()
+                .Build();
+
+            // Act
+            var child1 = new Person(context) { FirstName = "Child1" };
+            var child2 = new Person { FirstName = "Child2" };
+            var child3 = new Person { FirstName = "Child2" };
+
+            child1.Mother = child2;
+            child2.Mother = child3;
+            child3.Mother = child1;
+
+            // Assert
+            Assert.Equal(context, ((IProxy)child1).Context);
+            Assert.Equal(context, ((IProxy)child2).Context);
+            Assert.Equal(context, ((IProxy)child3).Context);
+        }
     }
 }
