@@ -138,5 +138,83 @@ namespace Namotion.Proxy.Tests.Handlers
             var registry = context.GetHandlers<IProxyRegistry>().Single();
             Assert.Single(registry.KnownProxies);
         }
+
+        [Fact]
+        public void WhenAddingTransitiveProxies_ThenAllAreAvailable()
+        {
+            // Arrange
+            var context = ProxyContext
+                .CreateBuilder()
+                .WithRegistry()
+                .Build();
+
+            var registry = context
+                .GetHandlers<IProxyRegistry>()
+                .Single();
+
+            // Act
+            var grandmother = new Person
+            {
+                FirstName = "Grandmother"
+            };
+
+            var mother = new Person
+            {
+                FirstName = "Mother",
+                Mother = grandmother
+            };
+
+            var person = new Person(context)
+            {
+                FirstName = "Child",
+                Mother = mother
+            };
+
+            // Assert
+            Assert.Equal(3, registry.KnownProxies.Count());
+            Assert.Contains(person, registry.KnownProxies.Keys);
+            Assert.Contains(mother, registry.KnownProxies.Keys);
+            Assert.Contains(grandmother, registry.KnownProxies.Keys);
+        }
+
+        [Fact]
+        public void WhenRemovingMiddleElement_ThenChildrensAreAlsoRemoved()
+        {
+            // Arrange
+            var context = ProxyContext
+                .CreateBuilder()
+                .WithRegistry()
+                .Build();
+
+            var registry = context
+                .GetHandlers<IProxyRegistry>()
+                .Single();
+
+            // Act
+            var grandmother = new Person
+            {
+                FirstName = "Grandmother"
+            };
+
+            var mother = new Person
+            {
+                FirstName = "Mother",
+                Mother = grandmother
+            };
+
+            var person = new Person(context)
+            {
+                FirstName = "Child",
+                Mother = mother
+            };
+
+            mother.Mother = null;
+
+            // Assert
+            Assert.Equal(2, registry.KnownProxies.Count());
+            Assert.Contains(person, registry.KnownProxies.Keys);
+            Assert.Contains(mother, registry.KnownProxies.Keys);
+            Assert.DoesNotContain(grandmother, registry.KnownProxies.Keys);
+        }
     }
 }

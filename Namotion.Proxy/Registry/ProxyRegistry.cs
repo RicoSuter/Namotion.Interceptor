@@ -78,17 +78,20 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                         parents.Remove(new ProxyPropertyReference(context.ParentProxy, context.PropertyName));
                     }
 
-                    var children = _knownProxies[context.ParentProxy]
-                       .Properties[context.PropertyName]
-                       .Children as HashSet<ProxyPropertyChild>;
-
-                    if (children is not null)
+                    if (_knownProxies.TryGetValue(context.ParentProxy, out var parentMetadata))
                     {
-                        children.Remove(new ProxyPropertyChild
+                        var children = parentMetadata
+                            .Properties[context.PropertyName]
+                            .Children as HashSet<ProxyPropertyChild>;
+
+                        if (children is not null)
                         {
-                            Proxy = context.Proxy,
-                            Index = context.Index
-                        });
+                            children.Remove(new ProxyPropertyChild
+                            {
+                                Proxy = context.Proxy,
+                                Index = context.Index
+                            });
+                        }
                     }
                 }
 
