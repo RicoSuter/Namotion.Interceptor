@@ -97,16 +97,17 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler
             if (!seen.Contains(proxy))
             {
                 seen.Add(proxy);
+
+                yield return (parentProxy, propertyName, proxy, index);
+
                 foreach (var property in proxy.Properties)
                 {
-                    var childValue = property.Value.ReadValue(proxy);
+                    var childValue = property.Value.GetValue(proxy);
                     foreach (var child in FindProxies(proxy, property.Key, childValue, null, seen))
                     {
                         yield return child;
                     }
                 }
-
-                yield return (parentProxy, propertyName, proxy, index);
             }
         }
     }

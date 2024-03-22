@@ -12,9 +12,9 @@ public interface IProxy
 }
 
 public record struct PropertyInfo(
-    string PropertyName,
+    string PropertyName, // TODO: Remove as already defined as key in the dictionary
     System.Reflection.PropertyInfo Info,
     bool IsDerived,
-    Func<object?, object?> ReadValue)
+    Func<object?, object?> GetValue)
 {
 }

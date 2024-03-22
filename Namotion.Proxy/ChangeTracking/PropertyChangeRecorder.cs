@@ -3,6 +3,7 @@
 namespace Namotion.Proxy.ChangeTracking;
 
 // experimental
+// TODO: Add lots of tests!
 
 public static class PropertyChangeRecorderExtensions
 {
