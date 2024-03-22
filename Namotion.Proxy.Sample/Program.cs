@@ -60,7 +60,7 @@ namespace ConsoleApp1
 
         public virtual Person? Mother { get; set; }
 
-        public virtual Person[] Children { get; set; } = Array.Empty<Person>();
+        public virtual Person[] Children { get; set; } = [];
 
         public override string ToString()
         {
