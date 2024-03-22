@@ -4,9 +4,9 @@ namespace Namotion.Proxy.ChangeTracking;
 
 public static class PropertyChangeRecorderExtensions
 {
-    public static IDisposable BeginPropertyChangedRecording(this IProxyContext context)
+    public static PropertyChangeRecorderScope BeginPropertyChangedRecording(this IProxyContext context)
     {
-        PropertyChangeRecorder._scopes = 
+        PropertyChangeRecorder._scopes =
             PropertyChangeRecorder._scopes ??
             new Dictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>();
 
@@ -29,9 +29,31 @@ public class PropertyChangeRecorderScope : IDisposable
         _properties = properties;
     }
 
+    public ProxyPropertyReference[] GetAndReset()
+    {
+        lock (typeof(PropertyChangeRecorder))
+        {
+            var properties = _properties.ToArray();
+            _properties.Clear();
+            return properties;
+        }
+    }
+
+    public ProxyPropertyReference[] Properties
+    {
+        get
+        {
+            lock (typeof(PropertyChangeRecorder))
+            {
+                return _properties.ToArray();
+            }
+        }
+    }
+
     public void Dispose()
     {
-        PropertyChangeRecorder._scopes?[_context]?.Remove(_properties);
+        lock (typeof(PropertyChangeRecorder))
+            PropertyChangeRecorder._scopes?[_context]?.Remove(_properties);
     }
 }
 
@@ -44,9 +66,10 @@ internal class PropertyChangeRecorder : IProxyReadHandler
     {
         if (_scopes is not null)
         {
-            lock (this)
+            lock (typeof(PropertyChangeRecorder))
             {
-                if (_scopes is not null && _scopes.TryGetValue(context.Context, out var scopes))
+                if (_scopes is not null && 
+                    _scopes.TryGetValue(context.Context, out var scopes))
                 {
                     foreach (var scope in scopes)
                     {

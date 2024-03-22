@@ -1,8 +1,12 @@
 {
   "profiles": {
-    "ConsoleApp1": {
+    "Sample": {
       "commandName": "DebugRoslynComponent",
-      "targetProject": "..\\ConsoleApp1\\ConsoleApp1.csproj"
+      "targetProject": "..\\Namotion.Proxy.Sample\\Namotion.Proxy.Sample.csproj"
+    },
+    "SampleBlazor": {
+      "commandName": "DebugRoslynComponent",
+      "targetProject": "..\\Namotion.Proxy.SampleBlazor\\Namotion.Proxy.SampleBlazor.csproj"
     }
   }
 }

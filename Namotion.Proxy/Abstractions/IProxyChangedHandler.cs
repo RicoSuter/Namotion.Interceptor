@@ -2,10 +2,10 @@
 
 public interface IProxyChangedHandler : IProxyHandler
 {
-    void RaisePropertyChanged(ProxyChangedHandlerContext context);
+    void RaisePropertyChanged(ProxyChanged context);
 }
 
-public record struct ProxyChangedHandlerContext(
+public record struct ProxyChanged(
     IProxyContext Context,
     IProxy Proxy,
     string PropertyName,

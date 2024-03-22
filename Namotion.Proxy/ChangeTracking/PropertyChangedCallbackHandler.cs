@@ -4,14 +4,14 @@ namespace Namotion.Proxy.ChangeTracking;
 
 internal class PropertyChangedCallbackHandler : IProxyChangedHandler
 {
-    private readonly Action<ProxyChangedHandlerContext> _callback;
+    private readonly Action<ProxyChanged> _callback;
 
-    public PropertyChangedCallbackHandler(Action<ProxyChangedHandlerContext> callback)
+    public PropertyChangedCallbackHandler(Action<ProxyChanged> callback)
     {
         _callback = callback;
     }
 
-    public void RaisePropertyChanged(ProxyChangedHandlerContext context)
+    public void RaisePropertyChanged(ProxyChanged context)
     {
         _callback.Invoke(context);
     }

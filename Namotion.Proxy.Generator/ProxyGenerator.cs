@@ -42,6 +42,8 @@ public class ProxyGenerator : IIncrementalGenerator
 
         context.RegisterSourceOutput(compilationAndClasses, (spc, source) =>
         {
+            var symbolDisplayFormat = new SymbolDisplayFormat(typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
+
             var (compilation, classes) = source;
             foreach (var cls in classes)
             {
@@ -79,7 +81,6 @@ namespace {namespaceName}
 ";
                 foreach (var property in cls.Properties)
                 {
-                    var symbolDisplayFormat = new SymbolDisplayFormat(typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
                     var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
                     var propertyName = property.Property.Identifier.Value;
 
@@ -92,10 +93,20 @@ $@"
 ";
                 }
 
-                    generatedCode +=
+                generatedCode +=
 $@"
         }};
+";
 
+                var firstConstructor = cls.ClassNode.Members
+                    .FirstOrDefault(m => m.IsKind(SyntaxKind.ConstructorDeclaration))
+                    as ConstructorDeclarationSyntax;
+            
+                if (firstConstructor == null ||
+                    firstConstructor.ParameterList.Parameters.Count == 0)
+                {
+                    generatedCode +=
+$@"
         public {newClassName}(IProxyContext? context = null)
         {{
             if (context is not null)
@@ -104,9 +115,20 @@ $@"
             }}
         }}
 ";
+                }
+                else
+                {
+                    generatedCode +=
+$@"
+        public {newClassName}({string.Join(", ", firstConstructor.ParameterList.Parameters.Select(p => $"{p.Type.TryGetInferredMemberName()} {p.Identifier.Value}"))})
+            : base({string.Join(", ", firstConstructor.ParameterList.Parameters.Select(p => p.Identifier.Value))})
+        {{
+        }}
+";
+                }
+
                 foreach (var property in cls.Properties)
                 {
-                    var symbolDisplayFormat = new SymbolDisplayFormat(typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
                     var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
                     var propertyName = property.Property.Identifier.Value;
 
@@ -118,18 +140,26 @@ $@"
                     if (property.Property.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
                         property.Property.ExpressionBody.IsKind(SyntaxKind.ArrowExpressionClause))
                     {
+                        var modifiers = string.Join(" ", property.Property.AccessorList?
+                            .Accessors.First(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)).Modifiers.Select(m => m.Value) ??
+                            System.Array.Empty<string>());
+
                         generatedCode +=
 $@"
-            get => GetProperty<{fullyQualifiedName}>(nameof({propertyName}), () => base.{propertyName});
+            {modifiers} get => GetProperty<{fullyQualifiedName}>(nameof({propertyName}), () => base.{propertyName});
 ";
 
                     }
 
                     if (property.IsDerived == false)
                     {
+                        var modifiers = string.Join(" ", property.Property.AccessorList?
+                            .Accessors.First(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)).Modifiers.Select(m => m.Value) ??
+                            System.Array.Empty<string>());
+
                         generatedCode +=
 $@"
-            set => SetProperty(nameof({propertyName}), value, () => base.{propertyName}, v => base.{propertyName} = ({fullyQualifiedName})v!);
+            {modifiers} set => SetProperty(nameof({propertyName}), value, () => base.{propertyName}, v => base.{propertyName} = ({fullyQualifiedName})v!);
 "; 
                     }
 

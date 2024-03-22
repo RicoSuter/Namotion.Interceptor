@@ -11,7 +11,7 @@ internal class PropertyChangedHandler : IProxyWriteHandler
 
         next(context);
 
-        var changedContext = new ProxyChangedHandlerContext(context.Context, context.Proxy, context.PropertyName, currentValue, newValue);
+        var changedContext = new ProxyChanged(context.Context, context.Proxy, context.PropertyName, currentValue, newValue);
         foreach (var handler in context.Context.GetHandlers<IProxyChangedHandler>())
         {
             handler.RaisePropertyChanged(changedContext);
