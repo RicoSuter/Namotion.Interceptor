@@ -10,7 +10,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
     [ThreadStatic]
     private static Stack<HashSet<ProxyPropertyReference>>? _currentTouchedProperties;
 
-    public object? GetProperty(ProxyReadHandlerContext context, Func<ProxyReadHandlerContext, object?> next)
+    public object? GetProperty(ReadProxyPropertyContext context, Func<ReadProxyPropertyContext, object?> next)
     {
         if (context.Proxy.Properties[context.PropertyName].IsDerived)
         {
@@ -32,7 +32,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
         }
     }
 
-    public void SetProperty(ProxyWriteHandlerContext context, Action<ProxyWriteHandlerContext> next)
+    public void SetProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
     {
         next.Invoke(context);
 
@@ -48,7 +48,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
                         .Properties[usedByProperty.PropertyName]
                         .ReadValue(usedByProperty.Proxy);
 
-                    var changedContext = new ProxyChanged(context.Context, usedByProperty.Proxy, usedByProperty.PropertyName, oldValue, newValue);
+                    var changedContext = new ProxyChangedContext(context.Context, usedByProperty.Proxy, usedByProperty.PropertyName, oldValue, newValue);
                     foreach (var handler in context.Context.GetHandlers<IProxyChangedHandler>())
                     {
                         handler.RaisePropertyChanged(changedContext);
@@ -68,7 +68,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
         _currentTouchedProperties.Push(new HashSet<ProxyPropertyReference>());
     }
 
-    private void StoreRecordedTouchedProperties(ProxyReadHandlerContext context)
+    private void StoreRecordedTouchedProperties(ReadProxyPropertyContext context)
     {
         var newProperties = _currentTouchedProperties!.Pop();
 
@@ -93,7 +93,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
         }
     }
 
-    private void TouchProperty(ProxyReadHandlerContext context)
+    private void TouchProperty(ReadProxyPropertyContext context)
     {
         if (_currentTouchedProperties?.TryPeek(out var touchedProperties) == true)
         {

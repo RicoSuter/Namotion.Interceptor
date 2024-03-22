@@ -62,7 +62,7 @@ internal class PropertyChangeRecorder : IProxyReadHandler
     [ThreadStatic]
     internal static IDictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>? _scopes;
 
-    public object? GetProperty(ProxyReadHandlerContext context, Func<ProxyReadHandlerContext, object?> next)
+    public object? GetProperty(ReadProxyPropertyContext context, Func<ReadProxyPropertyContext, object?> next)
     {
         if (_scopes is not null)
         {

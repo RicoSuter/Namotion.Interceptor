@@ -2,10 +2,10 @@
 
 public interface IProxyReadHandler : IProxyHandler
 {
-    object? GetProperty(ProxyReadHandlerContext context, Func<ProxyReadHandlerContext, object?> next);
+    object? GetProperty(ReadProxyPropertyContext context, Func<ReadProxyPropertyContext, object?> next);
 }
 
-public record struct ProxyReadHandlerContext(
+public record struct ReadProxyPropertyContext(
     IProxyContext Context,
     IProxy Proxy,
     string PropertyName)

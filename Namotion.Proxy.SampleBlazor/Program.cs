@@ -47,7 +47,7 @@ namespace Namotion.Proxy.SampleBlazor
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var subject = new Subject<ProxyChanged>();
+            var subject = new Subject<ProxyChangedContext>();
             var context = ProxyContext
                 .CreateBuilder()
                 .WithFullPropertyTracking()
@@ -60,7 +60,7 @@ namespace Namotion.Proxy.SampleBlazor
                 .AddRazorComponents()
                 .AddInteractiveServerComponents();
 
-            builder.Services.AddSingleton<IObservable<ProxyChanged>>(subject);
+            builder.Services.AddSingleton<IObservable<ProxyChangedContext>>(subject);
             builder.Services.AddSingleton<IProxyContext>(context);
             builder.Services.AddSingleton(new Game(context));
             builder.Services.AddScoped<Player>();

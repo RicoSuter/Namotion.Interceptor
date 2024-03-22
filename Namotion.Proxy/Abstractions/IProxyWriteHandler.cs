@@ -2,10 +2,10 @@
 
 public interface IProxyWriteHandler : IProxyHandler
 {
-    void SetProperty(ProxyWriteHandlerContext context, Action<ProxyWriteHandlerContext> next);
+    void SetProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next);
 }
 
-public record struct ProxyWriteHandlerContext(
+public record struct WriteProxyPropertyContext(
     IProxyContext Context,
     IProxy Proxy,
     string PropertyName,

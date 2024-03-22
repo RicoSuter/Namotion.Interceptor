@@ -4,7 +4,7 @@ namespace Namotion.Proxy.Lifecycle;
 
 public class PropertyValueEqualityCheckHandler : IProxyWriteHandler
 {
-    public void SetProperty(ProxyWriteHandlerContext context, Action<ProxyWriteHandlerContext> next)
+    public void SetProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
     {
         var currentValue = context.GetValueBeforeWrite();
         var newValue = context.NewValue;

@@ -8,7 +8,7 @@ namespace Namotion.Proxy.Tests.Handlers
         public void WhenChangingPropertyWhichIsUsedInDerivedProperty_ThenDerivedPropertyIsChanged()
         {
             // Arrange
-            var changes = new List<ProxyChanged>();
+            var changes = new List<ProxyChangedContext>();
             var context = ProxyContext
                 .CreateBuilder()
                 .WithDerivedPropertyChangeDetection()
