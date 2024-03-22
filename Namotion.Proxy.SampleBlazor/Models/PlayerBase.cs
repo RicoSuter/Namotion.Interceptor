@@ -10,12 +10,12 @@
         public PlayerBase(Game game)
         {
             _game = game;
-            _game.AddPlayer((Player)this);
+            _game.AddPlayer(this);
         }
 
         public void Dispose()
         {
-            _game.RemovePlayer((Player)this);
+            _game.RemovePlayer(this);
         }
     }
 }

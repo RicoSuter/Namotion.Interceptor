@@ -3,15 +3,15 @@
     [GenerateProxy]
     public abstract class GameBase
     {
-        public virtual Player[] Players { get; protected set; } = [];
+        public virtual PlayerBase[] Players { get; protected set; } = [];
 
-        public void AddPlayer(Player player)
+        public void AddPlayer(PlayerBase player)
         {
             lock (this)
                 Players = [.. Players, player];
         }
 
-        public void RemovePlayer(Player player)
+        public void RemovePlayer(PlayerBase player)
         {
             lock (this)
                 Players = Players.Where(p => p != player).ToArray();
