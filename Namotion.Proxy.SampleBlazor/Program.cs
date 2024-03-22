@@ -1,46 +1,11 @@
 using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.SampleBlazor.Components;
+using Namotion.Proxy.SampleBlazor.Models;
+
 using System.Reactive.Subjects;
 
 namespace Namotion.Proxy.SampleBlazor
 {
-    [GenerateProxy]
-    public abstract class GameBase
-    {
-        public virtual Player[] Players { get; protected set; } = [];
-
-        public void AddPlayer(Player player)
-        {
-            lock (this)
-                Players = [..Players, player];
-        }
-
-        public void RemovePlayer(Player player)
-        {
-            lock (this)
-                Players = Players.Where(p => p != player).ToArray();
-        }
-    }
-
-    [GenerateProxy]
-    public class PlayerBase : IDisposable
-    {
-        private readonly Game _game;
-
-        public virtual string Name { get; set; } = Guid.NewGuid().ToString();
-
-        public PlayerBase(Game game)
-        {
-            _game = game;
-            _game.AddPlayer((Player)this);
-        }
-
-        public void Dispose()
-        {
-            _game.RemovePlayer((Player)this);
-        }
-    }
-
     public class Program
     {
         public static void Main(string[] args)

@@ -9,7 +9,7 @@ namespace Namotion.Proxy.Blazor
     {
         private IDisposable? _subscription;
         private PropertyChangeRecorderScope? _recorder;
-        private ProxyPropertyReference[]? _properties;
+        public ProxyPropertyReference[]? _properties;
 
         [Inject]
         public IObservable<ProxyChangedContext>? ProxyPropertyChanges { get; set; }
@@ -19,23 +19,32 @@ namespace Namotion.Proxy.Blazor
 
         protected override void OnInitialized()
         {
-            _recorder = ProxyContext!.BeginPropertyChangedRecording();
             _subscription = ProxyPropertyChanges!
                 .Subscribe(change =>
                 {
-                    // TODO: Find a way to make this work
-                    //if (_properties?.Any(p =>
-                    //    p.Proxy == change.Proxy &&
-                    //    p.PropertyName == change.PropertyName) != false)
+                    if (_properties?.Any(p =>
+                        p.Proxy == change.Proxy &&
+                        p.PropertyName == change.PropertyName) != false)
                     {
                         InvokeAsync(StateHasChanged);
                     }
                 });
         }
 
+        protected override bool ShouldRender()
+        {
+            var result = base.ShouldRender();
+            if (result)
+            {
+                _recorder = ProxyContext?.BeginPropertyChangedRecording();
+            }
+
+            return result;
+        }
+
         protected override void OnAfterRender(bool firstRender)
         {
-            _properties = _recorder?.GetAndReset();
+            _properties = _recorder?.GetPropertiesAndDispose();
         }
 
         public virtual void Dispose()
