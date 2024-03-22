@@ -4,19 +4,19 @@ namespace Namotion.Proxy.Lifecycle;
 
 internal class AutomaticContextAssignmentHandler : IProxyLifecycleHandler
 {
-    public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+    public void OnProxyAttached(ProxyLifecycleContext context)
     {
         if (context.ReferenceCount == 1)
         {
-            proxy.Context = context.Context;
+            context.Proxy.Context = context.Context;
         }
     }
 
-    public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+    public void OnProxyDetached(ProxyLifecycleContext context)
     {
         if (context.ReferenceCount == 0)
         {
-            proxy.Context = null;
+            context.Proxy.Context = null;
         }
     }
 }

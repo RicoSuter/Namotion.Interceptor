@@ -11,10 +11,10 @@ public static class ProxyExtensions
         {
             if (currentContext is not null)
             {
-                var registryContext = new ProxyPropertyRegistryHandlerContext(currentContext, null, string.Empty, null, proxy, 1);
+                var registryContext = new ProxyLifecycleContext(currentContext, null, string.Empty, null, proxy, 1);
                 foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
                 {
-                    handler.DetachProxy(registryContext, proxy);
+                    handler.OnProxyDetached(registryContext);
                 }
             }
 
@@ -22,10 +22,10 @@ public static class ProxyExtensions
 
             if (context is not null)
             {
-                var registryContext = new ProxyPropertyRegistryHandlerContext(context, null, string.Empty, null, proxy, 0);
+                var registryContext = new ProxyLifecycleContext(context, null, string.Empty, null, proxy, 0);
                 foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
                 {
-                    handler.AttachProxy(registryContext, proxy);
+                    handler.OnProxyAttached(registryContext);
                 }
             }
         }

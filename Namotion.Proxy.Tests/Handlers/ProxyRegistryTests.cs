@@ -6,23 +6,23 @@ namespace Namotion.Proxy.Tests.Handlers
     {
         public class MyProxyPropertyRegistryHandler : IProxyLifecycleHandler
         {
-            private readonly List<ProxyPropertyRegistryHandlerContext> _attaches;
-            private readonly List<ProxyPropertyRegistryHandlerContext> _detaches;
+            private readonly List<ProxyLifecycleContext> _attaches;
+            private readonly List<ProxyLifecycleContext> _detaches;
 
             public MyProxyPropertyRegistryHandler(
-                List<ProxyPropertyRegistryHandlerContext> attaches,
-                List<ProxyPropertyRegistryHandlerContext> detaches)
+                List<ProxyLifecycleContext> attaches,
+                List<ProxyLifecycleContext> detaches)
             {
                 _attaches = attaches;
                 _detaches = detaches;
             }
 
-            public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+            public void OnProxyAttached(ProxyLifecycleContext context)
             {
                 _attaches.Add(context);
             }
 
-            public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+            public void OnProxyDetached(ProxyLifecycleContext context)
             {
                 _detaches.Add(context);
             }
@@ -32,8 +32,8 @@ namespace Namotion.Proxy.Tests.Handlers
         public void WhenTwoChildrenAreAttachedSequentially_ThenWeHaveThreeAttaches()
         {
             // Arrange
-            var attaches = new List<ProxyPropertyRegistryHandlerContext>();
-            var detaches = new List<ProxyPropertyRegistryHandlerContext>();
+            var attaches = new List<ProxyLifecycleContext>();
+            var detaches = new List<ProxyLifecycleContext>();
 
             var handler = new MyProxyPropertyRegistryHandler(attaches, detaches);
             var context = ProxyContext
@@ -68,8 +68,8 @@ namespace Namotion.Proxy.Tests.Handlers
         public void WhenTwoChildrenAreAttachedInOneBranch_ThenWeHaveThreeAttaches()
         {
             // Arrange
-            var attaches = new List<ProxyPropertyRegistryHandlerContext>();
-            var detaches = new List<ProxyPropertyRegistryHandlerContext>();
+            var attaches = new List<ProxyLifecycleContext>();
+            var detaches = new List<ProxyLifecycleContext>();
 
             var handler = new MyProxyPropertyRegistryHandler(attaches, detaches);
             var context = ProxyContext
@@ -105,8 +105,8 @@ namespace Namotion.Proxy.Tests.Handlers
         public void WhenProxyWithChildProxyIsRemoved_ThenWeHaveTwoDetaches()
         {
             // Arrange
-            var attaches = new List<ProxyPropertyRegistryHandlerContext>();
-            var detaches = new List<ProxyPropertyRegistryHandlerContext>();
+            var attaches = new List<ProxyLifecycleContext>();
+            var detaches = new List<ProxyLifecycleContext>();
 
             var handler = new MyProxyPropertyRegistryHandler(attaches, detaches);
             var context = ProxyContext

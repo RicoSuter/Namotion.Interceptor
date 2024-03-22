@@ -4,15 +4,15 @@ namespace Namotion.Proxy.ChangeTracking;
 
 internal class InitiallyLoadDerivedPropertiesHandler : IProxyLifecycleHandler
 {
-    public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+    public void OnProxyAttached(ProxyLifecycleContext context)
     {
-        foreach (var property in proxy.Properties.Where(p => p.Value.IsDerived))
+        foreach (var property in context.Proxy.Properties.Where(p => p.Value.IsDerived))
         {
-            property.Value.ReadValue(proxy);
+            property.Value.ReadValue(context.Proxy);
         }
     }
 
-    public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+    public void OnProxyDetached(ProxyLifecycleContext context)
     {
     }
 }

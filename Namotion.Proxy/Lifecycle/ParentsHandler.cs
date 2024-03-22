@@ -4,19 +4,19 @@ namespace Namotion.Proxy.Lifecycle;
 
 internal class ParentsHandler : IProxyLifecycleHandler
 {
-    public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+    public void OnProxyAttached(ProxyLifecycleContext context)
     {
         if (context.ParentProxy is not null)
         {
-            proxy.AddParent(context.ParentProxy);
+            context.Proxy.AddParent(context.ParentProxy);
         }
     }
 
-    public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+    public void OnProxyDetached(ProxyLifecycleContext context)
     {
         if (context.ParentProxy is not null)
         {
-            proxy.RemoveParent(context.ParentProxy);
+            context.Proxy.RemoveParent(context.ParentProxy);
         }
     }
 }

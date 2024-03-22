@@ -4,17 +4,17 @@ namespace Namotion.Proxy.Abstractions;
 
 public interface IProxyLifecycleHandler : IProxyHandler
 {
-    public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy);
+    public void OnProxyAttached(ProxyLifecycleContext context);
 
-    public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy);
+    public void OnProxyDetached(ProxyLifecycleContext context);
 }
 
-public record struct ProxyPropertyRegistryHandlerContext(
+public record struct ProxyLifecycleContext(
     IProxyContext Context,
     IProxy? ParentProxy,
     string PropertyName,
     object? Index,
-    IProxy? Proxy,
+    IProxy Proxy,
     int ReferenceCount)
 {
 }

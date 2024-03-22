@@ -39,13 +39,13 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler
     private void AttachProxy(IProxyContext context, IProxy parentProxy, string propertyName, IProxy proxy, object? index)
     {
         var count = proxy.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
-        var registryContext = new ProxyPropertyRegistryHandlerContext(context, parentProxy, propertyName, index, proxy, count ?? 1);
+        var registryContext = new ProxyLifecycleContext(context, parentProxy, propertyName, index, proxy, count ?? 1);
 
         foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
         {
             if (handler != this)
             {
-                handler.AttachProxy(registryContext, proxy);
+                handler.OnProxyAttached(registryContext);
             }
         }
     }
@@ -53,12 +53,12 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler
     private void DetachProxy(IProxyContext context, IProxy parentProxy, string propertyName, IProxy proxy, object? index)
     {
         var count = proxy.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
-        var registryContext = new ProxyPropertyRegistryHandlerContext(context, parentProxy, propertyName, index, proxy, count ?? 1);
+        var registryContext = new ProxyLifecycleContext(context, parentProxy, propertyName, index, proxy, count ?? 1);
         foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
         {
             if (handler != this)
             {
-                handler.DetachProxy(registryContext, proxy);
+                handler.OnProxyDetached(registryContext);
             }
         }
     }

@@ -27,13 +27,15 @@ namespace ConsoleApp1
                 {
                     FirstName = "Susi"
                 },
-                Children = [
+                Children = 
+                [
                     child1,
                     child2
                 ]
             };
 
-            person.Children = [
+            person.Children = 
+            [
                 child1,
                 child2,
                 child3
@@ -68,14 +70,14 @@ namespace ConsoleApp1
 
     public class LogPropertyChangesHandler : IProxyLifecycleHandler
     {
-        public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+        public void OnProxyAttached(ProxyLifecycleContext context)
         {
-            Console.WriteLine($"AttachProxy: {proxy}");
+            Console.WriteLine($"Attach Proxy: {context.Proxy}");
         }
 
-        public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+        public void OnProxyDetached(ProxyLifecycleContext context)
         {
-            Console.WriteLine($"DetachProxy: {proxy}");
+            Console.WriteLine($"Detach Proxy: {context.Proxy}");
         }
     }
 }

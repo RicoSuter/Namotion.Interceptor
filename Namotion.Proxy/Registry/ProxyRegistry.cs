@@ -15,15 +15,15 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
         }
     }
 
-    public void AttachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+    public void OnProxyAttached(ProxyLifecycleContext context)
     {
         lock (_knownProxies)
-            _knownProxies.Add(proxy);
+            _knownProxies.Add(context.Proxy);
     }
 
-    public void DetachProxy(ProxyPropertyRegistryHandlerContext context, IProxy proxy)
+    public void OnProxyDetached(ProxyLifecycleContext context)
     {
         lock (_knownProxies)
-            _knownProxies.Remove(proxy);
+            _knownProxies.Remove(context.Proxy);
     }
 }
