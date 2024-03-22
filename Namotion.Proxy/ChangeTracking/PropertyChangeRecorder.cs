@@ -2,17 +2,20 @@
 
 namespace Namotion.Proxy.ChangeTracking;
 
+// experimental
+// TODO: Add lots of tests!
+
 public static class PropertyChangeRecorderExtensions
 {
     public static PropertyChangeRecorderScope BeginPropertyChangedRecording(this IProxyContext context)
     {
-        PropertyChangeRecorder._scopes =
-            PropertyChangeRecorder._scopes ??
+        PropertyChangeRecorder._scopes.Value =
+            PropertyChangeRecorder._scopes.Value ??
             new Dictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>();
 
         var scope = new HashSet<ProxyPropertyReference>();
-        PropertyChangeRecorder._scopes.TryAdd(context, new List<HashSet<ProxyPropertyReference>>());
-        PropertyChangeRecorder._scopes[context].Add(scope);
+        PropertyChangeRecorder._scopes.Value.TryAdd(context, new List<HashSet<ProxyPropertyReference>>());
+        PropertyChangeRecorder._scopes.Value[context].Add(scope);
 
         return new PropertyChangeRecorderScope(context, scope);
     }
@@ -29,16 +32,6 @@ public class PropertyChangeRecorderScope : IDisposable
         _properties = properties;
     }
 
-    public ProxyPropertyReference[] GetAndReset()
-    {
-        lock (typeof(PropertyChangeRecorder))
-        {
-            var properties = _properties.ToArray();
-            _properties.Clear();
-            return properties;
-        }
-    }
-
     public ProxyPropertyReference[] Properties
     {
         get
@@ -50,26 +43,46 @@ public class PropertyChangeRecorderScope : IDisposable
         }
     }
 
+    public ProxyPropertyReference[] GetPropertiesAndReset()
+    {
+        lock (typeof(PropertyChangeRecorder))
+        {
+            var properties = _properties.ToArray();
+            _properties.Clear();
+            return properties;
+        }
+    }
+
+    public ProxyPropertyReference[] GetPropertiesAndDispose()
+    {
+        lock (typeof(PropertyChangeRecorder))
+        {
+            var properties = _properties.ToArray();
+            Dispose();
+            return properties;
+        }
+    }
+
     public void Dispose()
     {
         lock (typeof(PropertyChangeRecorder))
-            PropertyChangeRecorder._scopes?[_context]?.Remove(_properties);
+            PropertyChangeRecorder._scopes.Value?[_context]?.Remove(_properties);
     }
 }
 
 internal class PropertyChangeRecorder : IProxyReadHandler
 {
-    [ThreadStatic]
-    internal static IDictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>? _scopes;
+    internal static AsyncLocal<IDictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>> _scopes = 
+        new AsyncLocal<IDictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>>();
 
     public object? GetProperty(ReadProxyPropertyContext context, Func<ReadProxyPropertyContext, object?> next)
     {
-        if (_scopes is not null)
+        if (_scopes.Value is not null)
         {
             lock (typeof(PropertyChangeRecorder))
             {
-                if (_scopes is not null && 
-                    _scopes.TryGetValue(context.Context, out var scopes))
+                if (_scopes.Value is not null &&
+                    _scopes.Value.TryGetValue(context.Context, out var scopes))
                 {
                     foreach (var scope in scopes)
                     {
