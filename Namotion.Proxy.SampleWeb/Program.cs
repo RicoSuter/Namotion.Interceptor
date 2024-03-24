@@ -1,17 +1,66 @@
 using Microsoft.AspNetCore.Mvc;
+using Namotion.Proxy;
 using Namotion.Proxy.Sources.Attributes;
 using NSwag.Annotations;
 
 namespace Namotion.Trackable.SampleWeb
 {
+    [GenerateProxy]
+    public abstract class CarBase
+    {
+        public CarBase()
+        {
+            Tires = new Tire[]
+            {
+                new Tire(),
+                new Tire(),
+                new Tire(),
+                new Tire()
+            };
+        }
+
+        [TrackableSource("mqtt", "name")]
+        public virtual string Name { get; set; } = "My Car";
+
+        [TrackableSourcePath("mqtt", "tires")]
+        public virtual Tire[] Tires { get; set; }
+
+        [TrackableSource("mqtt", "averagePressure")]
+        public virtual decimal AveragePressure => Tires.Average(t => t.Pressure);
+    }
+
+    [GenerateProxy]
+    public abstract class TireBase
+    {
+        [TrackableSource("mqtt", "pressure")]
+        //[Unit("bar")]
+        public virtual decimal Pressure { get; set; }
+
+        //[Unit("bar")]
+        //[AttributeOfTrackable(nameof(Pressure), "Minimum")]
+        public virtual decimal Pressure_Minimum { get; set; } = 0.0m;
+
+        //[AttributeOfTrackable(nameof(Pressure), "Maximum")]
+        public virtual decimal Pressure_Maximum => 4 * Pressure;
+    }
+
     public class Program
     {
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
 
+            var context = ProxyContext
+                .CreateBuilder()
+                .WithFullPropertyTracking()
+                .WithRegistry()
+                .Build();
+
+            var car = new Car(context);
+
             //// trackable
-            //builder.Services.AddTrackable<Car>();
+            builder.Services.AddSingleton<IProxyContext>(context);
+            builder.Services.AddSingleton(car);
 
             //// trackable api controllers
             //builder.Services.AddTrackableControllers<Car, TrackablesController<Car>>();
@@ -19,8 +68,8 @@ namespace Namotion.Trackable.SampleWeb
             //// trackable UPC UA
             //builder.Services.AddOpcUaServerTrackableSource<Car>("mqtt");
 
-            //// trackable mqtt
-            //builder.Services.AddMqttServerTrackableSource<Car>("mqtt");
+            // trackable mqtt
+            builder.Services.AddMqttServerTrackableSource<Car>("mqtt");
 
             //// trackable graphql
             //builder.Services
@@ -38,50 +87,13 @@ namespace Namotion.Trackable.SampleWeb
             app.UseHttpsRedirection();
             app.UseAuthorization();
 
-            app.MapGraphQL();
+            //app.MapGraphQL();
 
-            app.UseOpenApi();
-            app.UseSwaggerUi();
+            //app.UseOpenApi();
+            //app.UseSwaggerUi();
 
-            app.MapControllers();
+            //app.MapControllers();
             app.Run();
-        }
-
-        public class Car
-        {
-            public Car()
-            {
-                Tires = new Tire[]
-                {
-                    new Tire(),
-                    new Tire(),
-                    new Tire(),
-                    new Tire()
-                };
-            }
-
-            [TrackableSource("mqtt", "name")]
-            public virtual string Name { get; set; } = "My Car";
-
-            [TrackableSourcePath("mqtt", "tires")]
-            public virtual Tire[] Tires { get; set; }
-
-            [TrackableSource("mqtt", "averagePressure")]
-            public virtual decimal AveragePressure => Tires.Average(t => t.Pressure);
-        }
-
-        public class Tire
-        {
-            [TrackableSource("mqtt", "pressure")]
-            //[Unit("bar")]
-            public virtual decimal Pressure { get; set; }
-
-            //[Unit("bar")]
-            //[AttributeOfTrackable(nameof(Pressure), "Minimum")]
-            public virtual decimal Pressure_Minimum { get; set; } = 0.0m;
-
-            //[AttributeOfTrackable(nameof(Pressure), "Maximum")]
-            public virtual decimal Pressure_Maximum => 4 * Pressure;
         }
 
         //public class UnitAttribute : Attribute, ITrackablePropertyInitializer

@@ -5,6 +5,7 @@ namespace Namotion.Proxy.Sources;
 public class AttributeBasedSourcePathProvider : ISourcePathProvider
 {
     private string _sourceName;
+
     private readonly IProxyContext _context;
     private readonly string? _pathPrefix;
 
@@ -15,9 +16,9 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
         _pathPrefix = pathPrefix ?? string.Empty;
     }
 
-    public string? TryGetSourceProperty(ProxyPropertyReference property)
+    public string? TryGetSourcePropertyName(ProxyPropertyReference property)
     {
-        var propertyName = property.TryGetAttributeBasedSourceProperty(_sourceName);
+        var propertyName = property.TryGetAttributeBasedSourcePropertyName(_sourceName);
         return propertyName is not null ? propertyName : null;
     }
 

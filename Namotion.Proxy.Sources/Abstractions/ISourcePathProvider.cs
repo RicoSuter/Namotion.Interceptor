@@ -2,7 +2,7 @@
 
 public interface ISourcePathProvider
 {
-    string? TryGetSourceProperty(ProxyPropertyReference property);
+    string? TryGetSourcePropertyName(ProxyPropertyReference property);
 
     string? TryGetSourcePath(ProxyPropertyReference property);
 }

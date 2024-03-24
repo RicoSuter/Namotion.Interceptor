@@ -1,6 +1,8 @@
 ﻿using Namotion.Proxy.Abstractions;
+using Namotion.Proxy.Sources.Abstractions;
 using System.Collections.Immutable;
 using System.Reactive.Subjects;
+using System.Reflection;
 
 namespace Namotion.Proxy.Registry;
 
@@ -30,13 +32,27 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                 metadata.Properties = context.Proxy
                     .Properties
                     .ToDictionary(p => p.Key,
-                        p => new ProxyProperty(new ProxyPropertyReference(context.Proxy, p.Key))
+                        p =>
                         {
-                            Parent = metadata,
-                            GetValue = p.Value.GetValue is not null ? () => p.Value.GetValue.Invoke(context.Proxy) : null
+                            var u = new ProxyProperty(new ProxyPropertyReference(context.Proxy, p.Key))
+                            {
+                                Parent = metadata,
+                                Info = p.Value.Info,
+                                GetValue = p.Value.GetValue is not null ? () => p.Value.GetValue.Invoke(context.Proxy) : null
+                            };
+
+                            return u;
                         });
 
                 _knownProxies[context.Proxy] = metadata;
+
+                foreach (var y in metadata.Properties)
+                {
+                    foreach (var x in y.Value.Info.GetCustomAttributes().OfType<ITrackablePropertyInitializer>())
+                    {
+                        x.InitializeProperty(y.Value, null, context.Context); // TODO: provide index
+                    }
+                }
             }
 
             if (context.ParentProxy is not null)

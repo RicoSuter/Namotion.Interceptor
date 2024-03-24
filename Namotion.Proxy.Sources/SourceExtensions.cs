@@ -11,7 +11,7 @@ public static class SourceExtensions
 
     private const string IsChangingFromSourceKey = "IsChangingFromSource";
 
-    public static string? TryGetAttributeBasedSourceProperty(this ProxyPropertyReference property, string sourceName)
+    public static string? TryGetAttributeBasedSourcePropertyName(this ProxyPropertyReference property, string sourceName)
     {
         return property.Proxy.Data.TryGetValue($"{SourcePropertyNameKey}{property.PropertyName}.{sourceName}", out var value) ?
             value as string : null;

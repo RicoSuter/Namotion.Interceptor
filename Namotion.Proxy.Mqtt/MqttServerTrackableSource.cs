@@ -5,30 +5,30 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using Namotion.Trackable;
 using System.Reactive.Linq;
-using Namotion.Trackable.Model;
 using System.Linq;
 using System.Text.Json;
 using System.Text;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
-using Namotion.Trackable.Sources;
+using Namotion.Proxy.Sources.Abstractions;
+using Namotion.Proxy;
+using Namotion.Proxy.Abstractions;
 
-namespace HomeBlaze.Mqtt
+namespace Namotion.Trackable.Mqtt
 {
     public class MqttServerTrackableSource<TTrackable> : BackgroundService, ITrackableSource
         where TTrackable : class
     {
-        private readonly TrackableContext<TTrackable> _trackableContext;
+        private readonly IProxyContext _context;
         private readonly ISourcePathProvider _sourcePathProvider;
         private readonly ILogger _logger;
 
         private int _numberOfClients = 0;
         private MqttServer? _mqttServer;
 
-        private Action<PropertyInfo>? _propertyUpdateAction;
-        private ConcurrentDictionary<TrackedProperty, object?> _state = new();
+        private Action<ProxyPropertyPathReference>? _propertyUpdateAction;
+        private ConcurrentDictionary<ProxyPropertyReference, object?> _state = new();
 
         public int Port { get; set; } = 1883;
 
@@ -37,11 +37,11 @@ namespace HomeBlaze.Mqtt
         public int? NumberOfClients => _numberOfClients;
 
         public MqttServerTrackableSource(
-            TrackableContext<TTrackable> trackableContext,
+            IProxyContext context,
             ISourcePathProvider sourcePathProvider,
             ILogger<MqttServerTrackableSource<TTrackable>> logger)
         {
-            _trackableContext = trackableContext;
+            _context = context;
             _sourcePathProvider = sourcePathProvider;
             _logger = logger;
         }
@@ -84,25 +84,25 @@ namespace HomeBlaze.Mqtt
             }
         }
 
-        public Task<IDisposable?> InitializeAsync(IEnumerable<PropertyInfo> properties, Action<PropertyInfo> propertyUpdateAction, CancellationToken cancellationToken)
+        public Task<IDisposable?> InitializeAsync(IEnumerable<ProxyPropertyPathReference> properties, Action<ProxyPropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
         {
             _propertyUpdateAction = propertyUpdateAction;
             return Task.FromResult<IDisposable?>(null);
         }
 
-        public Task<IEnumerable<PropertyInfo>> ReadAsync(IEnumerable<PropertyInfo> properties, CancellationToken cancellationToken)
+        public Task<IEnumerable<ProxyPropertyPathReference>> ReadAsync(IEnumerable<ProxyPropertyPathReference> properties, CancellationToken cancellationToken)
         {
             var propertyPaths = properties
                 .Select(p => p.Path)
                 .ToList();
 
-            return Task.FromResult<IEnumerable<PropertyInfo>>(_state
+            return Task.FromResult<IEnumerable<ProxyPropertyPathReference>>(_state
                 .Where(s => propertyPaths.Contains(_sourcePathProvider.TryGetSourcePath(s.Key)!.Replace(".", "/")))
-                .Select(s => new PropertyInfo(s.Key, null!, s.Value))
+                .Select(s => new ProxyPropertyPathReference(s.Key, null!, s.Value))
                 .ToList());
         }
 
-        public async Task WriteAsync(IEnumerable<PropertyInfo> propertyChanges, CancellationToken cancellationToken)
+        public async Task WriteAsync(IEnumerable<ProxyPropertyPathReference> propertyChanges, CancellationToken cancellationToken)
         {
             foreach (var property in propertyChanges)
             {
@@ -118,7 +118,7 @@ namespace HomeBlaze.Mqtt
             }
         }
 
-        public string? TryGetSourcePath(TrackedProperty property)
+        public string? TryGetSourcePath(ProxyPropertyReference property)
         {
             return _sourcePathProvider.TryGetSourcePath(property);
         }
@@ -130,16 +130,18 @@ namespace HomeBlaze.Mqtt
             Task.Run(async () =>
             {
                 await Task.Delay(1000);
-                foreach (var property in _trackableContext.AllProperties)
+                foreach (var property in _context.GetHandlers<IProxyRegistry>().Single()
+                    .GetProperties()
+                    .Where(p => p.GetValue is not null))
                 {
-                    await PublishPropertyValueAsync(property.GetValue(), property);
+                    await PublishPropertyValueAsync(property.GetValue?.Invoke(), property.Property);
                 }
             });
 
             return Task.CompletedTask;
         }
 
-        private async Task PublishPropertyValueAsync(object? value, TrackedProperty property)
+        private async Task PublishPropertyValueAsync(object? value, ProxyPropertyReference property)
         {
             var sourcePath = _sourcePathProvider.TryGetSourcePath(property);
             if (sourcePath != null)
@@ -159,18 +161,18 @@ namespace HomeBlaze.Mqtt
             try
             {
                 var sourcePath = args.ApplicationMessage.Topic.Replace('/', '.');
-                var property = _trackableContext
-                    .AllProperties
-                    .SingleOrDefault(p => _sourcePathProvider.TryGetSourcePath(p) == sourcePath);
+                var property = _context.GetHandlers<IProxyRegistry>().Single()
+                    .GetProperties()
+                    .SingleOrDefault(p => _sourcePathProvider.TryGetSourcePath(p.Property) == sourcePath);
 
-                if (property != null)
+                if (property != default)
                 {
                     var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
                     var document = JsonDocument.Parse(payload);
-                    var value = document.Deserialize(property.PropertyType);
+                    var value = document.Deserialize(property.Info.PropertyType);
 
-                    _state[property] = value;
-                    _propertyUpdateAction?.Invoke(new PropertyInfo(property, sourcePath, value));
+                    _state[property.Property] = value;
+                    _propertyUpdateAction?.Invoke(new ProxyPropertyPathReference(property.Property, sourcePath, value));
                 }
             }
             catch (Exception ex)
