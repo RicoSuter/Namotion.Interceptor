@@ -11,8 +11,7 @@ public static class ProxyContextBuilderExtensions
     {
         return builder
             .WithEqualityCheck()
-            .WithRegistry()
-            .WithParents()
+            .WithAutomaticContextAssignment()
             .WithDerivedPropertyChangeDetection();
     }
 

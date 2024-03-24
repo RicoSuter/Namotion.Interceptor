@@ -12,10 +12,10 @@ namespace Namotion.Trackable.SampleWeb
         {
             Tires = new Tire[]
             {
-                new Tire(),
-                new Tire(),
-                new Tire(),
-                new Tire()
+                new(),
+                new(),
+                new(),
+                new()
             };
         }
 
@@ -54,6 +54,7 @@ namespace Namotion.Trackable.SampleWeb
                 .CreateBuilder()
                 .WithFullPropertyTracking()
                 .WithRegistry()
+                .WithProxyLifecycle()
                 .Build();
 
             var car = new Car(context);

@@ -1,5 +1,7 @@
 ﻿namespace Namotion.Proxy.Lifecycle;
 
+// TODO: Is this needed? Remove?
+
 public static class AutomaticContextAssignmentHandlerExtensions
 {
     private const string ParentsKey = "Namotion.Proxy.Parents";

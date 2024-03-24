@@ -1,6 +1,4 @@
-﻿using Namotion.Proxy.ChangeTracking;
-
-namespace Namotion.Proxy.Abstractions;
+﻿namespace Namotion.Proxy.Abstractions;
 
 public interface IProxyLifecycleHandler : IProxyHandler
 {

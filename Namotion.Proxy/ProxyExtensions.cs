@@ -1,4 +1,4 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using Namotion.Proxy.ChangeTracking;
 
 namespace Namotion.Proxy;
 
@@ -11,22 +11,16 @@ public static class ProxyExtensions
         {
             if (currentContext is not null)
             {
-                var registryContext = new ProxyLifecycleContext(currentContext, null, string.Empty, null, proxy, 1);
-                foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
-                {
-                    handler.OnProxyDetached(registryContext);
-                }
+                currentContext.GetHandlers<IProxyLifecycleHandler2>().Single()
+                    .DetachProxyGraph(currentContext, proxy);
             }
 
             proxy.Context = context;
 
             if (context is not null)
             {
-                var registryContext = new ProxyLifecycleContext(context, null, string.Empty, null, proxy, 0);
-                foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
-                {
-                    handler.OnProxyAttached(registryContext);
-                }
+                context.GetHandlers<IProxyLifecycleHandler2>().Single()
+                    .AttachProxyGraph(context, proxy);
             }
         }
     }

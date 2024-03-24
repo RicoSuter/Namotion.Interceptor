@@ -31,28 +31,16 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                 metadata = new ProxyMetadata();
                 metadata.Properties = context.Proxy
                     .Properties
-                    .ToDictionary(p => p.Key,
-                        p =>
+                    .ToDictionary(
+                        p => p.Key,
+                        p => new ProxyProperty(new ProxyPropertyReference(context.Proxy, p.Key))
                         {
-                            var u = new ProxyProperty(new ProxyPropertyReference(context.Proxy, p.Key))
-                            {
-                                Parent = metadata,
-                                Info = p.Value.Info,
-                                GetValue = p.Value.GetValue is not null ? () => p.Value.GetValue.Invoke(context.Proxy) : null
-                            };
-
-                            return u;
+                            Parent = metadata,
+                            Info = p.Value.Info,
+                            GetValue = p.Value.GetValue is not null ? () => p.Value.GetValue.Invoke(context.Proxy) : null
                         });
 
                 _knownProxies[context.Proxy] = metadata;
-
-                foreach (var y in metadata.Properties)
-                {
-                    foreach (var x in y.Value.Info.GetCustomAttributes().OfType<ITrackablePropertyInitializer>())
-                    {
-                        x.InitializeProperty(y.Value, null, context.Context); // TODO: provide index
-                    }
-                }
             }
 
             if (context.ParentProxy is not null)
@@ -74,6 +62,14 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                         Proxy = context.Proxy,
                         Index = context.Index
                     });
+                }
+            }
+
+            foreach (var y in metadata.Properties)
+            {
+                foreach (var x in y.Value.Info.GetCustomAttributes().OfType<ITrackablePropertyInitializer>())
+                {
+                    x.InitializeProperty(y.Value, context.Index, context.Context); // TODO: provide index
                 }
             }
         }
