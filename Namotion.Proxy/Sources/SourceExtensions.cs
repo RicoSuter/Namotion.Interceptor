@@ -1,4 +1,5 @@
-﻿using System.Collections.Immutable;
+﻿using Namotion.Proxy.Abstractions;
+using System.Collections.Immutable;
 
 namespace Namotion.Proxy.Sources;
 
@@ -75,7 +76,7 @@ public static class SourceExtensions
         //}
     }
 
-    public static bool IsChangingFromSource(this ProxyPropertyReference change, ITrackableSource source)
+    public static bool IsChangingFromSource(this ProxyPropertyChanged change, ITrackableSource source)
     {
         //return change.PropertyDataSnapshot.TryGetValue(IsChangingFromSourceKey, out var isChangingFromSource) &&
         //    isChangingFromSource is ITrackableSource[] sources &&

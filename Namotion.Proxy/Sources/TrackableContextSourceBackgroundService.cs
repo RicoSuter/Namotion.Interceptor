@@ -3,6 +3,8 @@ using Namotion.Proxy.Sources;
 using Namotion.Proxy;
 using Namotion.Proxy.Abstractions;
 using Microsoft.Extensions.Hosting;
+using Namotion.Proxy.ChangeTracking;
+using System.Reactive.Linq;
 
 namespace Namotion.Trackable.Sources;
 
@@ -72,20 +74,25 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
                     _initializedProperties = null;
                 }
 
-                //await _context
-                //    .GetHandlers<IProxyRegistry>().Single().KnownProxies
-                //    .Where(change => !change.IsChangingFromSource(_source) &&
-                //                     _source.TryGetSourcePath(change.Property) != null)
-                //    .BufferChanges(_bufferTime)
-                //    .Where(changes => changes.Any())
-                //    .ForEachAsync(async changes =>
-                //    {
-                //        var values = changes
-                //            .Select(c => new PropertyInfo(c.Property, _source.TryGetSourcePath(c.Property)!, c.Value))
-                //            .ToList();
+                await _context
+                    .GetHandlers<IProxyPropertyChangedHandler>().Single()
+                    .Where(change => !change.IsChangingFromSource(_source) &&
+                                     _source.TryGetSourcePath(new ProxyPropertyReference(change.Proxy, change.PropertyName)) != null)
+                    .BufferChanges(_bufferTime)
+                    .Where(changes => changes.Any())
+                    .ForEachAsync(async changes =>
+                    {
+                        var values = changes
+                            .Select(c =>
+                            {
+                                var reference = new ProxyPropertyReference(c.Proxy, c.PropertyName);
+                                return new ProxyPropertyPathReference(reference,
+                                    _source.TryGetSourcePath(reference)!, c.NewValue);
+                            })
+                            .ToList();
 
-                //        await _source.WriteAsync(values, stoppingToken);
-                //    }, stoppingToken);
+                        await _source.WriteAsync(values, stoppingToken);
+                    }, stoppingToken);
             }
             catch (Exception ex)
             {
@@ -113,5 +120,16 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
                 }
             }
         }
+    }
+}
+
+public static class TrackableObservableExtensions
+{
+    public static IObservable<IEnumerable<ProxyPropertyChanged>> BufferChanges(this IObservable<ProxyPropertyChanged> observable, TimeSpan bufferTime)
+    {
+        return observable
+            .Buffer(bufferTime)
+            .Where(propertyChanges => propertyChanges.Any())
+            .Select(propertyChanges => propertyChanges.Reverse().DistinctBy(c => (c.Proxy, c.PropertyName)));
     }
 }
