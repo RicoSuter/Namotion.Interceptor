@@ -12,7 +12,7 @@ namespace Namotion.Proxy.Blazor
         public ProxyPropertyReference[]? _properties;
 
         [Inject]
-        public IObservable<ProxyChangedContext>? ProxyPropertyChanges { get; set; }
+        public IObservable<ProxyPropertyChanged>? ProxyPropertyChanges { get; set; }
 
         [Inject]
         public IProxyContext? ProxyContext { get; set; }

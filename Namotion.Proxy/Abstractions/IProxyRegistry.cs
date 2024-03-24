@@ -1,6 +1,6 @@
 ﻿namespace Namotion.Proxy.Abstractions;
 
-public interface IProxyRegistry : IProxyHandler
+public interface IProxyRegistry : IProxyHandler, IObservable<ProxyPropertyChanged>
 {
     IReadOnlyDictionary<IProxy, ProxyMetadata> KnownProxies { get; }
 }

@@ -1,11 +1,6 @@
 ﻿namespace Namotion.Proxy.Abstractions;
 
-public interface IProxyChangedHandler : IProxyHandler
-{
-    void RaisePropertyChanged(ProxyChangedContext context);
-}
-
-public record struct ProxyChangedContext(
+public record struct ProxyPropertyChanged(
     IProxyContext Context,
     IProxy Proxy,
     string PropertyName,

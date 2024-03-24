@@ -1,4 +1,5 @@
 ﻿using Namotion.Proxy.Abstractions;
+using Namotion.Proxy.ChangeTracking;
 
 namespace Namotion.Proxy.Tests.Handlers
 {
@@ -8,12 +9,13 @@ namespace Namotion.Proxy.Tests.Handlers
         public void WhenChangingPropertyWhichIsUsedInDerivedProperty_ThenDerivedPropertyIsChanged()
         {
             // Arrange
-            var changes = new List<ProxyChangedContext>();
+            var changes = new List<ProxyPropertyChanged>();
             var context = ProxyContext
                 .CreateBuilder()
                 .WithDerivedPropertyChangeDetection()
-                .WithPropertyChangedCallback(changes.Add)
                 .Build();
+
+            context.GetHandlers<IProxyPropertyChangedHandler>().Single().Subscribe(changes.Add);
 
             // Act
             var person = new Person(context);

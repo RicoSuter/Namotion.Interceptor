@@ -1,5 +1,6 @@
 ﻿using Namotion.Proxy.Abstractions;
 using System.Collections.Immutable;
+using System.Reactive.Subjects;
 
 namespace Namotion.Proxy.Registry;
 
@@ -7,6 +8,7 @@ namespace Namotion.Proxy.Registry;
 
 internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
 {
+    private Subject<ProxyPropertyChanged> _subject = new();
     private Dictionary<IProxy, ProxyMetadata> _knownProxies = new();
 
     public IReadOnlyDictionary<IProxy, ProxyMetadata> KnownProxies
@@ -98,5 +100,10 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                 _knownProxies.Remove(context.Proxy);
             }
         }
+    }
+
+    public IDisposable Subscribe(IObserver<ProxyPropertyChanged> observer)
+    {
+        return _subject.Subscribe(observer);
     }
 }

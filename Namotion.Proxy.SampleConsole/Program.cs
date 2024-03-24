@@ -1,5 +1,6 @@
 ﻿using Namotion.Proxy;
 using Namotion.Proxy.Abstractions;
+using Namotion.Proxy.ChangeTracking;
 
 namespace ConsoleApp1
 {
@@ -11,9 +12,10 @@ namespace ConsoleApp1
                 .CreateBuilder()
                 .AddHandler(new LogPropertyChangesHandler())
                 .WithFullPropertyTracking()
-                .WithPropertyChangedCallback((ctx) => 
-                    Console.WriteLine($"Property {ctx.PropertyName} changed from {ctx.OldValue} to {ctx.NewValue}."))
                 .Build();
+
+            context.GetHandlers<IProxyPropertyChangedHandler>().Single().Subscribe((ctx) =>
+                Console.WriteLine($"Property {ctx.PropertyName} changed from {ctx.OldValue} to {ctx.NewValue}."));
 
             var child1 = new Person { FirstName = "Child1" };
             var child2 = new Person { FirstName = "Child2" };

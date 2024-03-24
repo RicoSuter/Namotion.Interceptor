@@ -1,8 +1,7 @@
 using Namotion.Proxy.Abstractions;
+using Namotion.Proxy.ChangeTracking;
 using Namotion.Proxy.SampleBlazor.Components;
 using Namotion.Proxy.SampleBlazor.Models;
-
-using System.Reactive.Subjects;
 
 namespace Namotion.Proxy.SampleBlazor
 {
@@ -12,12 +11,10 @@ namespace Namotion.Proxy.SampleBlazor
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var subject = new Subject<ProxyChangedContext>();
             var context = ProxyContext
                 .CreateBuilder()
                 .WithFullPropertyTracking()
                 .WithPropertyChangeRecorder()
-                .WithPropertyChangedCallback(subject.OnNext)
                 .Build();
 
             // Add services to the container.
@@ -25,7 +22,7 @@ namespace Namotion.Proxy.SampleBlazor
                 .AddRazorComponents()
                 .AddInteractiveServerComponents();
 
-            builder.Services.AddSingleton<IObservable<ProxyChangedContext>>(subject);
+            builder.Services.AddSingleton<IObservable<ProxyPropertyChanged>>(context.GetHandlers<IProxyPropertyChangedHandler>().Single());
             builder.Services.AddSingleton<IProxyContext>(context);
             builder.Services.AddSingleton(new Game(context));
             builder.Services.AddScoped<Player>();
