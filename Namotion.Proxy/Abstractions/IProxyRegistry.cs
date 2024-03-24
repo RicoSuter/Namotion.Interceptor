@@ -13,16 +13,14 @@ public record struct ProxyMetadata
 
     public IReadOnlyCollection<ProxyPropertyReference> Parents { get; } = new HashSet<ProxyPropertyReference>();
 
-    public required IReadOnlyDictionary<string, ProxyProperty> Properties { get; init; }
+    public IReadOnlyDictionary<string, ProxyProperty> Properties { get; internal set; }
 }
 
-public record struct ProxyProperty
+public record struct ProxyProperty(ProxyPropertyReference Property)
 {
-    public ProxyProperty()
-    {
-    }
+    public required ProxyMetadata Parent { get; init; }
 
-    public required Func<object?> GetValue { get; init; }
+    public required Func<object?>? GetValue { get; init; }
 
     public IReadOnlyCollection<ProxyPropertyChild> Children { get; } = new HashSet<ProxyPropertyChild>();
 }

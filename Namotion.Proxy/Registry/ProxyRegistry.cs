@@ -26,16 +26,15 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
         {
             if (!_knownProxies.TryGetValue(context.Proxy, out var metadata))
             {
-                metadata = new ProxyMetadata
-                {
-                    Properties = context.Proxy
-                        .Properties
-                        .ToDictionary(p => p.Key,
-                            p => new ProxyProperty
-                            {
-                                GetValue = () => p.Value.GetValue(context.Proxy)
-                            })
-                };
+                metadata = new ProxyMetadata();
+                metadata.Properties = context.Proxy
+                    .Properties
+                    .ToDictionary(p => p.Key,
+                        p => new ProxyProperty(new ProxyPropertyReference(context.Proxy, p.Key))
+                        {
+                            Parent = metadata,
+                            GetValue = p.Value.GetValue is not null ? () => p.Value.GetValue.Invoke(context.Proxy) : null
+                        });
 
                 _knownProxies[context.Proxy] = metadata;
             }
@@ -54,8 +53,8 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
 
                 if (children is not null)
                 {
-                    children.Add(new ProxyPropertyChild 
-                    { 
+                    children.Add(new ProxyPropertyChild
+                    {
                         Proxy = context.Proxy,
                         Index = context.Index
                     });
@@ -73,7 +72,7 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                 if (context.ParentProxy is not null)
                 {
                     var metadata = _knownProxies[context.Proxy];
-                    
+
                     var parents = metadata.Parents as HashSet<ProxyPropertyReference>;
                     if (parents is not null)
                     {

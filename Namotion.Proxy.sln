@@ -19,6 +19,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.Blazor", "Na
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.SampleConsole", "Namotion.Proxy.SampleConsole\Namotion.Proxy.SampleConsole.csproj", "{499EBD8C-9968-47C9-88AB-219C5424AA0F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Proxy.Sources", "Namotion.Proxy.Sources\Namotion.Proxy.Sources.csproj", "{B0BD7C00-43AC-41A4-B33E-3D4404C13397}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -53,6 +55,10 @@ Global
 		{499EBD8C-9968-47C9-88AB-219C5424AA0F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{499EBD8C-9968-47C9-88AB-219C5424AA0F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{499EBD8C-9968-47C9-88AB-219C5424AA0F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B0BD7C00-43AC-41A4-B33E-3D4404C13397}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B0BD7C00-43AC-41A4-B33E-3D4404C13397}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B0BD7C00-43AC-41A4-B33E-3D4404C13397}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B0BD7C00-43AC-41A4-B33E-3D4404C13397}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

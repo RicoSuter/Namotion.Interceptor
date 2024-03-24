@@ -1,5 +1,4 @@
 ﻿using Namotion.Proxy.Abstractions;
-using System.Collections.Immutable;
 
 namespace Namotion.Proxy.Sources;
 
@@ -46,41 +45,37 @@ public static class SourceExtensions
 
     public static void SetValueFromSource(this ProxyPropertyReference property, ITrackableSource source, object? valueFromSource)
     {
-        //lock (property.Data)
-        //{
-        //    property.Data = property.Data.SetItem(IsChangingFromSourceKey,
-        //        property.Data.TryGetValue(IsChangingFromSourceKey, out var sources)
-        //        ? ((ITrackableSource[])sources!).Append(source).ToArray()
-        //        : (object)(new[] { source }));
-        //}
+        var contexts = (HashSet<ITrackableSource>)property.Proxy.Data.GetOrAdd($"{IsChangingFromSourceKey}{property.PropertyName}", _ => new HashSet<ITrackableSource>())!;
+        lock (contexts)
+        {
+            contexts.Add(source);
+        }
 
-        //try
-        //{
-        //    var newValue = valueFromSource;
+        try
+        {
+            var newValue = valueFromSource;
 
-        //    var currentValue = property.Proxy.Properties[property.PropertyName].GetValue(property.Proxy);
-        //    if (!Equals(currentValue, newValue))
-        //    {
-        //        property.SetValue(newValue);
-        //    }
-        //}
-        //finally
-        //{
-        //    lock (property.Data)
-        //    {
-        //        property.Data = property.Data.SetItem(IsChangingFromSourceKey,
-        //            ((ITrackableSource[])property.Data[IsChangingFromSourceKey]!)
-        //            .Except(new[] { source })
-        //            .ToArray());
-        //    }
-        //}
+            var currentValue = property.Proxy.Properties[property.PropertyName].GetValue?.Invoke(property.Proxy);
+            if (!Equals(currentValue, newValue))
+            {
+                property.Proxy.Properties[property.PropertyName].SetValue?.Invoke(property.Proxy, newValue);
+            }
+        }
+        finally
+        {
+            lock (contexts)
+            {
+                contexts.Remove(source);
+            }
+        }
     }
 
     public static bool IsChangingFromSource(this ProxyPropertyChanged change, ITrackableSource source)
     {
-        //return change.PropertyDataSnapshot.TryGetValue(IsChangingFromSourceKey, out var isChangingFromSource) &&
-        //    isChangingFromSource is ITrackableSource[] sources &&
-        //    sources.Contains(source);
-        return false;
+        var contexts = (HashSet<ITrackableSource>)change.Proxy.Data.GetOrAdd($"{IsChangingFromSourceKey}{change.PropertyName}", _ => new HashSet<ITrackableSource>())!;
+        lock (contexts)
+        {
+            return contexts.Contains(source);
+        }
     }
 }
