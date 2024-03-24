@@ -31,7 +31,9 @@ public class ProxyGenerator : IIncrementalGenerator
                                 Property = p,
                                 Type = model.GetTypeInfo(p.Type, ct),
                                 IsRequired = p.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword)),
-                                IsDerived = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) != true
+                                HasGetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
+                                            p.ExpressionBody.IsKind(SyntaxKind.ArrowExpressionClause),
+                                HasSetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true
                             })
                             .ToArray()
                     };
@@ -74,9 +76,9 @@ namespace {namespaceName}
         }}
 
         ConcurrentDictionary<string, object?> IProxy.Data => _data;
-        IReadOnlyDictionary<string, PropertyInfo> IProxy.Properties => _properties;
+        IReadOnlyDictionary<string, PropertyMetadata> IProxy.Properties => _properties;
 
-        private static IReadOnlyDictionary<string, PropertyInfo> _properties = new Dictionary<string, PropertyInfo>
+        private static IReadOnlyDictionary<string, PropertyMetadata> _properties = new Dictionary<string, PropertyMetadata>
         {{
 ";
                 foreach (var property in cls.Properties)
@@ -88,7 +90,7 @@ namespace {namespaceName}
 $@"
             {{
                 ""{propertyName}"",       
-                new PropertyInfo(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName}))!, {(property.IsDerived ? "true" : "false")}, (o) => (({newClassName})o).{propertyName})
+                new PropertyMetadata(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName}))!, {(property.HasGetter ? ($"(o) => (({newClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({newClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")})
             }},
 ";
                 }
@@ -120,7 +122,7 @@ $@"
                 {
                     generatedCode +=
 $@"
-        public {newClassName}({string.Join(", ", firstConstructor.ParameterList.Parameters.Select(p => $"{p.Type.TryGetInferredMemberName()} {p.Identifier.Value}"))})
+        public {newClassName}({string.Join(", ", firstConstructor.ParameterList.Parameters.Select(p => $"{p.Type?.TryGetInferredMemberName()} {p.Identifier.Value}"))})
             : base({string.Join(", ", firstConstructor.ParameterList.Parameters.Select(p => p.Identifier.Value))})
         {{
         }}
@@ -137,8 +139,7 @@ $@"
         public override {(property.IsRequired ? "required" : "")} {fullyQualifiedName} {propertyName}
         {{
 ";
-                    if (property.Property.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
-                        property.Property.ExpressionBody.IsKind(SyntaxKind.ArrowExpressionClause))
+                    if (property.HasGetter)
                     {
                         var modifiers = string.Join(" ", property.Property.AccessorList?
                             .Accessors.First(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)).Modifiers.Select(m => m.Value) ??
@@ -151,7 +152,7 @@ $@"
 
                     }
 
-                    if (property.IsDerived == false)
+                    if (property.HasSetter)
                     {
                         var modifiers = string.Join(" ", property.Property.AccessorList?
                             .Accessors.First(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)).Modifiers.Select(m => m.Value) ??

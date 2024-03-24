@@ -8,7 +8,7 @@ internal class InitiallyLoadDerivedPropertiesHandler : IProxyLifecycleHandler
     {
         foreach (var property in context.Proxy.Properties.Where(p => p.Value.IsDerived))
         {
-            property.Value.GetValue(context.Proxy);
+            property.Value.GetValue?.Invoke(context.Proxy);
         }
     }
 
