@@ -15,7 +15,9 @@ namespace Namotion.Proxy.Tests.Handlers
                 .WithDerivedPropertyChangeDetection()
                 .Build();
 
-            context.GetHandlers<IProxyPropertyChangedHandler>().Single().Subscribe(changes.Add);
+            context
+                .GetHandler<IProxyPropertyChangedHandler>()
+                .Subscribe(changes.Add);
 
             // Act
             var person = new Person(context);

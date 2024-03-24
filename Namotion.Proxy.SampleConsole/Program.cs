@@ -14,8 +14,10 @@ namespace ConsoleApp1
                 .WithFullPropertyTracking()
                 .Build();
 
-            context.GetHandlers<IProxyPropertyChangedHandler>().Single().Subscribe((ctx) =>
-                Console.WriteLine($"Property {ctx.PropertyName} changed from {ctx.OldValue} to {ctx.NewValue}."));
+            context
+                .GetHandler<IProxyPropertyChangedHandler>()
+                .Subscribe((ctx) => 
+                    Console.WriteLine($"Property {ctx.PropertyName} changed from {ctx.OldValue} to {ctx.NewValue}."));
 
             var child1 = new Person { FirstName = "Child1" };
             var child2 = new Person { FirstName = "Child2" };

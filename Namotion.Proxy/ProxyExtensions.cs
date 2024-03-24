@@ -11,16 +11,20 @@ public static class ProxyExtensions
         {
             if (currentContext is not null)
             {
-                currentContext.GetHandlers<IProxyLifecycleHandler2>().Single()
-                    .DetachProxyGraph(currentContext, proxy);
+                foreach (var handler in currentContext.GetHandlers<IProxyLifecycleHandler2>())
+                {
+                    handler.DetachProxyGraph(currentContext, proxy);
+                }
             }
 
             proxy.Context = context;
 
             if (context is not null)
             {
-                context.GetHandlers<IProxyLifecycleHandler2>().Single()
-                    .AttachProxyGraph(context, proxy);
+                foreach (var handler in context.GetHandlers<IProxyLifecycleHandler2>())
+                {
+                    handler.AttachProxyGraph(context, proxy);
+                }
             }
         }
     }

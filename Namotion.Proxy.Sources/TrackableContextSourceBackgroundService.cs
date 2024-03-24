@@ -43,7 +43,8 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
                 // TODO: Currently newly added properties/trackable are not automatically tracked/subscribed to
 
                 var properties = _context
-                    .GetHandlers<IProxyRegistry>().Single().KnownProxies
+                    .GetHandler<IProxyRegistry>()
+                    .KnownProxies
                     .SelectMany(v => v.Value.Properties.Select(p => {
                         var reference = new ProxyPropertyReference(v.Key, p.Key);
                         return new ProxyPropertyPathReference(reference, 
@@ -76,7 +77,7 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
                 }
 
                 await _context
-                    .GetHandlers<IProxyPropertyChangedHandler>().Single()
+                    .GetHandler<IProxyPropertyChangedHandler>()
                     .Where(change => !change.IsChangingFromSource(_source) &&
                                      _source.TryGetSourcePath(new ProxyPropertyReference(change.Proxy, change.PropertyName)) != null)
                     .BufferChanges(_bufferTime)

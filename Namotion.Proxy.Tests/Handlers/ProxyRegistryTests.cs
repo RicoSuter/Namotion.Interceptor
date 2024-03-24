@@ -60,7 +60,7 @@ namespace Namotion.Proxy.Tests.Handlers
             Assert.Equal(3, attaches.Count);
             Assert.Empty(detaches);
 
-            var registry = context.GetHandlers<IProxyRegistry>().Single();
+            var registry = context.GetHandler<IProxyRegistry>();
             Assert.Equal(3, registry.KnownProxies.Count());
         }
 
@@ -97,7 +97,7 @@ namespace Namotion.Proxy.Tests.Handlers
             Assert.Equal(3, attaches.Count);
             Assert.Empty(detaches);
 
-            var registry = context.GetHandlers<IProxyRegistry>().Single();
+            var registry = context.GetHandler<IProxyRegistry>();
             Assert.Equal(3, registry.KnownProxies.Count());
         }
 
@@ -135,7 +135,7 @@ namespace Namotion.Proxy.Tests.Handlers
             Assert.Equal(3, attaches.Count);
             Assert.Equal(2, detaches.Count);
 
-            var registry = context.GetHandlers<IProxyRegistry>().Single();
+            var registry = context.GetHandler<IProxyRegistry>();
             Assert.Single(registry.KnownProxies);
         }
 
@@ -148,9 +148,7 @@ namespace Namotion.Proxy.Tests.Handlers
                 .WithRegistry()
                 .Build();
 
-            var registry = context
-                .GetHandlers<IProxyRegistry>()
-                .Single();
+            var registry = context.GetHandler<IProxyRegistry>();
 
             // Act
             var grandmother = new Person
@@ -186,9 +184,7 @@ namespace Namotion.Proxy.Tests.Handlers
                 .WithRegistry()
                 .Build();
 
-            var registry = context
-                .GetHandlers<IProxyRegistry>()
-                .Single();
+            var registry = context.GetHandler<IProxyRegistry>();
 
             // Act
             var grandmother = new Person

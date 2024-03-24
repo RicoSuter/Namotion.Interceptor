@@ -130,7 +130,7 @@ namespace Namotion.Trackable.Mqtt
             Task.Run(async () =>
             {
                 await Task.Delay(1000);
-                foreach (var property in _context.GetHandlers<IProxyRegistry>().Single()
+                foreach (var property in _context.GetHandler<IProxyRegistry>()
                     .GetProperties()
                     .Where(p => p.GetValue is not null))
                 {
@@ -161,7 +161,8 @@ namespace Namotion.Trackable.Mqtt
             try
             {
                 var sourcePath = args.ApplicationMessage.Topic.Replace('/', '.');
-                var property = _context.GetHandlers<IProxyRegistry>().Single()
+                var property = _context
+                    .GetHandler<IProxyRegistry>()
                     .GetProperties()
                     .SingleOrDefault(p => _sourcePathProvider.TryGetSourcePath(p.Property) == sourcePath);
 

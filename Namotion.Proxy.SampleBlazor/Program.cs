@@ -22,7 +22,8 @@ namespace Namotion.Proxy.SampleBlazor
                 .AddRazorComponents()
                 .AddInteractiveServerComponents();
 
-            builder.Services.AddSingleton<IObservable<ProxyPropertyChanged>>(context.GetHandlers<IProxyPropertyChangedHandler>().Single());
+            builder.Services.AddSingleton<IObservable<ProxyPropertyChanged>>(
+                context.GetHandler<IProxyPropertyChangedHandler>());
             builder.Services.AddSingleton<IProxyContext>(context);
             builder.Services.AddSingleton(new Game(context));
             builder.Services.AddScoped<Player>();
