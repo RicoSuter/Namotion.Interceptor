@@ -17,6 +17,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
             TryStartRecordTouchedProperties();
 
             var result = next(context);
+
             context.Proxy.SetLastKnownValue(context.PropertyName, result);
 
             StoreRecordedTouchedProperties(context);
