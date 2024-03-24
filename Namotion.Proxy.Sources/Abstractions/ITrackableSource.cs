@@ -1,4 +1,4 @@
-﻿namespace Namotion.Proxy.Sources;
+﻿namespace Namotion.Proxy.Sources.Abstractions;
 
 public interface ITrackableSource
 {

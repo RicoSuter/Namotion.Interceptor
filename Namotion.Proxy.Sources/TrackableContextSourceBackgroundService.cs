@@ -5,6 +5,7 @@ using Namotion.Proxy.Abstractions;
 using Microsoft.Extensions.Hosting;
 using Namotion.Proxy.ChangeTracking;
 using System.Reactive.Linq;
+using Namotion.Proxy.Sources.Abstractions;
 
 namespace Namotion.Trackable.Sources;
 
@@ -47,7 +48,7 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
                         var reference = new ProxyPropertyReference(v.Key, p.Key);
                         return new ProxyPropertyPathReference(reference, 
                             _source.TryGetSourcePath(reference) ?? string.Empty, 
-                            p.Value.GetValue());
+                            p.Value.GetValue?.Invoke());
                     }))
                     .Where(p => p.Path != string.Empty)
                     .ToList();
@@ -120,16 +121,5 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
                 }
             }
         }
-    }
-}
-
-public static class TrackableObservableExtensions
-{
-    public static IObservable<IEnumerable<ProxyPropertyChanged>> BufferChanges(this IObservable<ProxyPropertyChanged> observable, TimeSpan bufferTime)
-    {
-        return observable
-            .Buffer(bufferTime)
-            .Where(propertyChanges => propertyChanges.Any())
-            .Select(propertyChanges => propertyChanges.Reverse().DistinctBy(c => (c.Proxy, c.PropertyName)));
     }
 }

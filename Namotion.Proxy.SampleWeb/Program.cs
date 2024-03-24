@@ -1,10 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-
-using Namotion.Trackable.AspNetCore.Controllers;
-using Namotion.Trackable.Attributes;
-using Namotion.Trackable.GraphQL;
-using Namotion.Trackable.Model;
-using Namotion.Trackable.Sources;
+using Namotion.Proxy.Sources.Attributes;
 using NSwag.Annotations;
 
 namespace Namotion.Trackable.SampleWeb
@@ -15,23 +10,23 @@ namespace Namotion.Trackable.SampleWeb
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // trackable
-            builder.Services.AddTrackable<Car>();
+            //// trackable
+            //builder.Services.AddTrackable<Car>();
 
-            // trackable api controllers
-            builder.Services.AddTrackableControllers<Car, TrackablesController<Car>>();
+            //// trackable api controllers
+            //builder.Services.AddTrackableControllers<Car, TrackablesController<Car>>();
 
-            // trackable UPC UA
-            builder.Services.AddOpcUaServerTrackableSource<Car>("mqtt");
+            //// trackable UPC UA
+            //builder.Services.AddOpcUaServerTrackableSource<Car>("mqtt");
 
-            // trackable mqtt
-            builder.Services.AddMqttServerTrackableSource<Car>("mqtt");
+            //// trackable mqtt
+            //builder.Services.AddMqttServerTrackableSource<Car>("mqtt");
 
-            // trackable graphql
-            builder.Services
-                .AddGraphQLServer()
-                .AddInMemorySubscriptions()
-                .AddTrackedGraphQL<Car>();
+            //// trackable graphql
+            //builder.Services
+            //    .AddGraphQLServer()
+            //    .AddInMemorySubscriptions()
+            //    .AddTrackedGraphQL<Car>();
 
             // other asp services
             builder.Services.AddHostedService<Simulator>();
@@ -54,71 +49,67 @@ namespace Namotion.Trackable.SampleWeb
 
         public class Car
         {
-            public Car(ITrackableFactory factory)
+            public Car()
             {
                 Tires = new Tire[]
                 {
-                    factory.CreateProxy<Tire>(),
-                    factory.CreateProxy<Tire>(),
-                    factory.CreateProxy<Tire>(),
-                    factory.CreateProxy<Tire>()
+                    new Tire(),
+                    new Tire(),
+                    new Tire(),
+                    new Tire()
                 };
             }
 
-            [Trackable]
             [TrackableSource("mqtt", "name")]
             public virtual string Name { get; set; } = "My Car";
 
-            [Trackable]
             [TrackableSourcePath("mqtt", "tires")]
             public virtual Tire[] Tires { get; set; }
 
-            [Trackable]
             [TrackableSource("mqtt", "averagePressure")]
             public virtual decimal AveragePressure => Tires.Average(t => t.Pressure);
         }
 
         public class Tire
         {
-            [Trackable]
             [TrackableSource("mqtt", "pressure")]
-            [Unit("bar")]
+            //[Unit("bar")]
             public virtual decimal Pressure { get; set; }
 
-            [Unit("bar")]
-            [AttributeOfTrackable(nameof(Pressure), "Minimum")]
+            //[Unit("bar")]
+            //[AttributeOfTrackable(nameof(Pressure), "Minimum")]
             public virtual decimal Pressure_Minimum { get; set; } = 0.0m;
 
-            [AttributeOfTrackable(nameof(Pressure), "Maximum")]
+            //[AttributeOfTrackable(nameof(Pressure), "Maximum")]
             public virtual decimal Pressure_Maximum => 4 * Pressure;
         }
 
-        public class UnitAttribute : Attribute, ITrackablePropertyInitializer
-        {
-            private readonly string _unit;
+        //public class UnitAttribute : Attribute, ITrackablePropertyInitializer
+        //{
+        //    private readonly string _unit;
 
-            public UnitAttribute(string unit)
-            {
-                _unit = unit;
-            }
+        //    public UnitAttribute(string unit)
+        //    {
+        //        _unit = unit;
+        //    }
 
-            public void InitializeProperty(TrackedProperty property, object? parentCollectionKey, ITrackableContext context)
-            {
-                property.Parent.AddProperty(
-                    TrackedProperty<string>.CreateAttribute(property, "Unit", _unit, context));
-            }
-        }
+        //    public void InitializeProperty(TrackedProperty property, object? parentCollectionKey, ITrackableContext context)
+        //    {
+        //        property.Parent.AddProperty(
+        //            TrackedProperty<string>.CreateAttribute(property, "Unit", _unit, context));
+        //    }
+        //}
 
-        [OpenApiTag("Car")]
-        [Route("/api/car")]
-        public class TrackablesController<TTrackable> : TrackablesControllerBase<TTrackable>
-            where TTrackable : class
-        {
-            public TrackablesController(TrackableContext<TTrackable> trackableContext)
-                : base(trackableContext)
-            {
-            }
-        }
+        //[OpenApiTag("Car")]
+        //[Route("/api/car")]
+        //public class TrackablesController<TTrackable> : TrackablesControllerBase<TTrackable>
+        //    where TTrackable : class
+        //{
+        //    public TrackablesController(TrackableContext<TTrackable> trackableContext)
+        //        : base(trackableContext)
+        //    {
+        //    }
+        //}
 
         public class Simulator : BackgroundService
         {

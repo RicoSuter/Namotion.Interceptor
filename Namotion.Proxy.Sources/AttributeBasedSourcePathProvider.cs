@@ -1,4 +1,6 @@
-﻿namespace Namotion.Proxy.Sources;
+﻿using Namotion.Proxy.Sources.Abstractions;
+
+namespace Namotion.Proxy.Sources;
 
 public class AttributeBasedSourcePathProvider : ISourcePathProvider
 {
