@@ -17,10 +17,12 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
 
     public void OnProxyDetached(ProxyLifecycleContext context)
     {
-        foreach (var child in FindProxiesInProperties(context.Proxy, new HashSet<IProxy>()))
-        {
-            DetachProxy(context.Context, child.Item1, child.Item2, child.Item3);
-        }
+        //foreach (var child in FindProxiesInProperties(context.Proxy, new HashSet<IProxy>()))
+        //{
+        //    DetachProxy(context.Context, child.Item1, child.Item2, child.Item3);
+        //}
+
+        //DetachProxy(context.Context, context.Property, context., child.Item3);
     }
 
     public void SetProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
@@ -31,7 +33,6 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
 
         if (!Equals(currentValue, newValue))
         {
-            // TODO: Write unit tests for this!
             var oldProxies = FindProxies(context.Property, currentValue, null, new HashSet<IProxy>()).ToDictionary(p => p.Item2, p => p);
             var newProxies = FindProxies(context.Property, newValue, null, new HashSet<IProxy>()).ToDictionary(p => p.Item2, p => p);
 

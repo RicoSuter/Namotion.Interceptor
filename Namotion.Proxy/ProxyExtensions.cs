@@ -4,7 +4,13 @@ namespace Namotion.Proxy;
 
 public static class ProxyExtensions
 {
-    public static void SetContext(this IProxy proxy, IProxyContext context)
+    /// <summary>
+    /// Will attach the proxy and its children to the context and 
+    /// detach only the proxy itself from the previous context.
+    /// </summary>
+    /// <param name="proxy">The proxy.</param>
+    /// <param name="context">The context.</param>
+    public static void SetContext(this IProxy proxy, IProxyContext? context)
     {
         var currentContext = proxy.Context;
         if (currentContext != context)
