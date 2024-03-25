@@ -30,4 +30,14 @@ public static class ProxyExtensions
             }
         }
     }
+
+    public static void SetData(this IProxy proxy, string key, object? value)
+    {
+        proxy.Data[key] = value;
+    }
+
+    public static bool TryGetData(this IProxy proxy, string key, out object? value)
+    {
+        return proxy.Data.TryGetValue(key, out value);
+    }
 }

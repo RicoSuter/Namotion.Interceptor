@@ -2,32 +2,32 @@
 
 public static class DerivedPropertyChangeDetectionHandlerExtensions
 {
-    private const string UsedByPropertiesKey = "Namotion.Proxy.UsedByProperties.";
-    private const string RequiredPropertiesKey = "Namotion.Proxy.RequiredProperties.";
-    private const string LastKnownValueKey = "Namotion.Proxy.LastKnownValue.";
+    private const string UsedByPropertiesKey = "Namotion.Proxy.UsedByProperties";
+    private const string RequiredPropertiesKey = "Namotion.Proxy.RequiredProperties";
+    private const string LastKnownValueKey = "Namotion.Proxy.LastKnownValue";
 
-    public static HashSet<ProxyPropertyReference> GetUsedByProperties(this IProxy proxy, string propertyName)
+    public static HashSet<ProxyPropertyReference> GetUsedByProperties(this ProxyPropertyReference property)
     {
-        return (HashSet<ProxyPropertyReference>)proxy.Data.GetOrAdd(UsedByPropertiesKey + propertyName, (_) => new HashSet<ProxyPropertyReference>())!;
+        return property.GetOrAddPropertyData(UsedByPropertiesKey, () => new HashSet<ProxyPropertyReference>());
     }
 
-    public static HashSet<ProxyPropertyReference> GetRequiredProperties(this IProxy proxy, string propertyName)
+    public static HashSet<ProxyPropertyReference> GetRequiredProperties(this ProxyPropertyReference property)
     {
-        return (HashSet<ProxyPropertyReference>)proxy.Data.GetOrAdd(RequiredPropertiesKey + propertyName, (_) => new HashSet<ProxyPropertyReference>())!;
+        return property.GetOrAddPropertyData(RequiredPropertiesKey, () => new HashSet<ProxyPropertyReference>());
     }
 
-    public static void SetRequiredProperties(this IProxy proxy, string propertyName, HashSet<ProxyPropertyReference> requiredProperties)
+    public static void SetRequiredProperties(this ProxyPropertyReference property, HashSet<ProxyPropertyReference> requiredProperties)
     {
-        proxy.Data[RequiredPropertiesKey + propertyName] = requiredProperties;
+        property.SetPropertyData(RequiredPropertiesKey, requiredProperties);
     }
 
-    internal static object? GetLastKnownValue(this IProxy proxy, string propertyName)
+    internal static object? GetLastKnownValue(this ProxyPropertyReference property)
     {
-        return proxy.Data.GetOrAdd(LastKnownValueKey + propertyName, (_) => null)!;
+        return property.GetOrAddPropertyData(LastKnownValueKey, () => (object?)null);
     }
 
-    internal static void SetLastKnownValue(this IProxy proxy, string propertyName, object? value)
+    internal static void SetLastKnownValue(this ProxyPropertyReference property, object? value)
     {
-        proxy.Data[LastKnownValueKey + propertyName] = value;
+        property.SetPropertyData(LastKnownValueKey, value);
     }
 }
