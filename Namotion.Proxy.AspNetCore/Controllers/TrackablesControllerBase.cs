@@ -126,9 +126,9 @@ public abstract class TrackablesControllerBase<TProxy> : ControllerBase
     //[HttpGet("properties")]
     //public ActionResult GetProperties()
     //{
-    //    var allTrackers = _context.AllTrackers;
-    //    return Ok(_context
-    //        .AllProperties
+    //    var registry = _context.GetHandler<IProxyRegistry>();
+    //    return Ok(registry
+    //        .KnownProxies
     //        .Where(p => !p.IsAttribute && allTrackers.Any(t => t.ParentProperty == p) == false));
     //}
 
@@ -165,7 +165,7 @@ public abstract class TrackablesControllerBase<TProxy> : ControllerBase
         }
     }
 
-    private static string GetPropertyName(ProxyMetadata metadata, string name, ProxyProperty property)
+    private static string GetPropertyName(ProxyMetadata metadata, string name, ProxyPropertyMetadata property)
     {
         var attribute = property.Attributes
             .OfType<PropertyAttributeAttribute>()

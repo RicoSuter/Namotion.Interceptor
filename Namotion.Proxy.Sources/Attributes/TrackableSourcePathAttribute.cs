@@ -17,7 +17,7 @@ public class TrackableSourcePathAttribute : Attribute, IProxyPropertyInitializer
         Path = path;
     }
 
-    public void InitializeProperty(ProxyProperty property, object? parentCollectionKey, IProxyContext context)
+    public void InitializeProperty(ProxyPropertyMetadata property, object? parentCollectionKey, IProxyContext context)
     {
         var prefix = property.Parent.Parents.Any() ?
             property.Parent.Parents.FirstOrDefault().TryGetAttributeBasedSourcePathPrefix(SourceName) :

@@ -1,15 +1,18 @@
-﻿namespace Namotion.Proxy.Registry.Abstractions;
+﻿using System.Text.Json.Serialization;
+
+namespace Namotion.Proxy.Registry.Abstractions;
 
 public record ProxyMetadata
 {
     private readonly HashSet<ProxyPropertyReference> _parents = new();
-    private readonly Dictionary<string, ProxyProperty> _properties = new();
+    private readonly Dictionary<string, ProxyPropertyMetadata> _properties = new();
 
+    [JsonIgnore]
     public required IProxy Proxy { get; init; }
 
     public IReadOnlyCollection<ProxyPropertyReference> Parents => _parents;
 
-    public IReadOnlyDictionary<string, ProxyProperty> Properties => _properties;
+    public IReadOnlyDictionary<string, ProxyPropertyMetadata> Properties => _properties;
 
     public void AddParent(ProxyPropertyReference parent)
     {
@@ -31,7 +34,7 @@ public record ProxyMetadata
     {
         lock (_properties)
         {
-            _properties.Add(name, new ProxyProperty(new ProxyPropertyReference(Proxy, name))
+            _properties.Add(name, new ProxyPropertyMetadata(new ProxyPropertyReference(Proxy, name))
             {
                 Parent = this,
                 Type = type,

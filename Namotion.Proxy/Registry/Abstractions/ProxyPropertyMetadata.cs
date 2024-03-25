@@ -2,7 +2,7 @@
 
 namespace Namotion.Proxy.Registry.Abstractions;
 
-public record ProxyProperty(ProxyPropertyReference Property)
+public record ProxyPropertyMetadata(ProxyPropertyReference Property)
 {
     private readonly HashSet<ProxyPropertyChild> _children = new();
 

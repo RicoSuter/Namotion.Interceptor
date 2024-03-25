@@ -4,7 +4,7 @@ namespace Namotion.Proxy.Registry;
 
 public static class ProxyRegistryExtensions
 {
-    public static IEnumerable<ProxyProperty> GetProperties(this IProxyRegistry registry)
+    public static IEnumerable<ProxyPropertyMetadata> GetProperties(this IProxyRegistry registry)
     {
         foreach (var pair in registry.KnownProxies)
         {
@@ -15,7 +15,7 @@ public static class ProxyRegistryExtensions
         }
     }
 
-    public static ProxyProperty? TryGetProperty(this IReadOnlyDictionary<IProxy, ProxyMetadata> properties, ProxyPropertyReference property)
+    public static ProxyPropertyMetadata? TryGetProperty(this IReadOnlyDictionary<IProxy, ProxyMetadata> properties, ProxyPropertyReference property)
     {
         if (properties.TryGetValue(property.Proxy, out var metadata))
         {

@@ -56,7 +56,7 @@ namespace Namotion.Trackable.SampleWeb
             _unit = unit;
         }
 
-        public void InitializeProperty(ProxyProperty property, object? parentCollectionKey, IProxyContext context)
+        public void InitializeProperty(ProxyPropertyMetadata property, object? parentCollectionKey, IProxyContext context)
         {
             property.AddAttribute("Unit", typeof(string), () => _unit, null);
         }
