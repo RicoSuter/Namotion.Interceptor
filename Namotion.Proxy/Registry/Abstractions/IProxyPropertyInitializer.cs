@@ -1,6 +1,4 @@
-﻿using Namotion.Proxy.Abstractions;
-
-namespace Namotion.Proxy.Sources.Abstractions;
+﻿namespace Namotion.Proxy.Registry.Abstractions;
 
 public interface IProxyPropertyInitializer
 {

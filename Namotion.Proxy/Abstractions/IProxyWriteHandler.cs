@@ -6,9 +6,9 @@ public interface IProxyWriteHandler : IProxyHandler
 }
 
 public record struct WriteProxyPropertyContext(
-    IProxyContext Context,
     ProxyPropertyReference Property,
     object? NewValue,
-    Func<object?> GetValueBeforeWrite)
+    Func<object?> GetValueBeforeWrite,
+    IProxyContext Context)
 {
 }

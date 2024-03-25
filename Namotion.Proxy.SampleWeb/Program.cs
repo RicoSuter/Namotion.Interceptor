@@ -1,9 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Namotion.Proxy;
-using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.AspNetCore.Controllers;
-using Namotion.Proxy.Attributes;
-using Namotion.Proxy.Sources.Abstractions;
+using Namotion.Proxy.Registry.Attributes;
+using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Sources.Attributes;
 using NSwag.Annotations;
 

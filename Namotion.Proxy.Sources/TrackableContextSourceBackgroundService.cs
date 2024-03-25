@@ -1,11 +1,11 @@
 ﻿using Microsoft.Extensions.Logging;
 using Namotion.Proxy.Sources;
 using Namotion.Proxy;
-using Namotion.Proxy.Abstractions;
 using Microsoft.Extensions.Hosting;
 using Namotion.Proxy.ChangeTracking;
 using System.Reactive.Linq;
 using Namotion.Proxy.Sources.Abstractions;
+using Namotion.Proxy.Registry.Abstractions;
 
 namespace Namotion.Trackable.Sources;
 

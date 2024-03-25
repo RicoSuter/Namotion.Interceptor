@@ -3,9 +3,8 @@ using System.Linq;
 using System.Text.Json.Nodes;
 
 using Microsoft.AspNetCore.Mvc;
-
-using Namotion.Proxy.Abstractions;
-using Namotion.Proxy.Attributes;
+using Namotion.Proxy.Registry.Abstractions;
+using Namotion.Proxy.Registry.Attributes;
 
 namespace Namotion.Proxy.AspNetCore.Controllers;
 

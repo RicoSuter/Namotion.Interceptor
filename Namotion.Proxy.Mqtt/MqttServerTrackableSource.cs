@@ -13,7 +13,8 @@ using System.Collections.Generic;
 using System.Collections.Concurrent;
 using Namotion.Proxy.Sources.Abstractions;
 using Namotion.Proxy;
-using Namotion.Proxy.Abstractions;
+using Namotion.Proxy.Registry.Abstractions;
+using Namotion.Proxy.Registry;
 
 namespace Namotion.Trackable.Mqtt
 {

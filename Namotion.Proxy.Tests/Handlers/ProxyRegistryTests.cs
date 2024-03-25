@@ -1,4 +1,5 @@
 ﻿using Namotion.Proxy.Abstractions;
+using Namotion.Proxy.Registry.Abstractions;
 
 namespace Namotion.Proxy.Tests.Handlers
 {

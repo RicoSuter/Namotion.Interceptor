@@ -1,5 +1,5 @@
 ﻿using Namotion.Proxy.Abstractions;
-using Namotion.Proxy.Sources.Abstractions;
+using Namotion.Proxy.Registry.Abstractions;
 using System.Collections.Immutable;
 using System.Reactive.Subjects;
 using System.Reflection;
