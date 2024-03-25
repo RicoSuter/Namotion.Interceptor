@@ -7,6 +7,8 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
 {
     private const string ReferenceCountKey = "Namotion.Proxy.Handlers.ReferenceCount";
 
+    // TODO: does this make sense?
+
     public void OnProxyAttached(ProxyLifecycleContext context)
     {
         foreach (var child in FindProxiesInProperties(context.Proxy, new HashSet<IProxy>()))
