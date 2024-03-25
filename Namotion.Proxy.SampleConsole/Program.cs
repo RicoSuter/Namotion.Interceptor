@@ -17,7 +17,7 @@ namespace ConsoleApp1
             context
                 .GetHandler<IProxyPropertyChangedHandler>()
                 .Subscribe((ctx) => 
-                    Console.WriteLine($"Property {ctx.Property.PropertyName} changed from {ctx.OldValue} to {ctx.NewValue}."));
+                    Console.WriteLine($"Property {ctx.Property.Name} changed from {ctx.OldValue} to {ctx.NewValue}."));
 
             var child1 = new Person { FirstName = "Child1" };
             var child2 = new Person { FirstName = "Child2" };

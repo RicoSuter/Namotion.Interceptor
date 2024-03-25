@@ -49,8 +49,8 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
             {
                 metadata.AddParent(context.Property);
 
-                _knownProxies[context.Property.Proxy]
-                    .Properties[context.Property.PropertyName]
+                _knownProxies
+                    .TryGetProperty(context.Property)?
                     .AddChild(new ProxyPropertyChild
                     {
                         Proxy = context.Proxy,
@@ -79,16 +79,13 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                     var metadata = _knownProxies[context.Proxy];
                     metadata.RemoveParent(context.Property);
 
-                    if (_knownProxies.TryGetValue(context.Property.Proxy, out var parentMetadata))
-                    {
-                        _knownProxies[context.Property.Proxy]
-                            .Properties[context.Property.PropertyName]
-                            .RemoveChild(new ProxyPropertyChild
-                            {
-                                Proxy = context.Proxy,
-                                Index = context.Index
-                            });
-                    }
+                    _knownProxies
+                        .TryGetProperty(context.Property)?
+                        .RemoveChild(new ProxyPropertyChild
+                        {
+                            Proxy = context.Proxy,
+                            Index = context.Index
+                        });
                 }
 
                 _knownProxies.Remove(context.Proxy);

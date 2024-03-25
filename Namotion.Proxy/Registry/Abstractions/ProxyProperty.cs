@@ -37,8 +37,8 @@ public record ProxyProperty(ProxyPropertyReference Property)
     public void AddAttribute(string name, Type type, Func<object?>? getValue, Action<object?>? setValue)
     {
         Parent.AddProperty(
-            $"{Property.PropertyName}_{name}",
+            $"{Property.Name}_{name}",
             type, getValue, setValue,
-            new PropertyAttributeAttribute(Property.PropertyName, name));
+            new PropertyAttributeAttribute(Property.Name, name));
     }
 }

@@ -26,12 +26,12 @@ namespace Namotion.Proxy.Tests.Handlers
 
             // Assert
             Assert.Contains(changes, c =>
-                c.Property.PropertyName == nameof(Person.FullName) &&
+                c.Property.Name == nameof(Person.FullName) &&
                 c.OldValue?.ToString() == " " &&
                 c.NewValue?.ToString() == "Rico ");
 
             Assert.Contains(changes, c => 
-                c.Property.PropertyName == nameof(Person.FullName) &&
+                c.Property.Name == nameof(Person.FullName) &&
                 c.OldValue?.ToString() == "Rico " && 
                 c.NewValue?.ToString() == "Rico Suter");
         }

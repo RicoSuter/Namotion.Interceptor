@@ -1,3 +1,3 @@
 ﻿namespace Namotion.Proxy;
 
-public record struct ProxyPropertyReference(IProxy Proxy, string PropertyName);
+public record struct ProxyPropertyReference(IProxy Proxy, string Name);

@@ -27,7 +27,7 @@ public class TrackableSourceAttribute : Attribute, IProxyPropertyInitializer
 
         var sourcePath = GetSourcePath(parentPath, property.Property);
         property.Property.SetAttributeBasedSourcePath(SourceName, sourcePath);
-        property.Property.SetAttributeBasedSourceProperty(SourceName, Path ?? property.Property.PropertyName);
+        property.Property.SetAttributeBasedSourceProperty(SourceName, Path ?? property.Property.Name);
     }
 
     private string GetSourcePath(string? basePath, ProxyPropertyReference property)
@@ -41,6 +41,6 @@ public class TrackableSourceAttribute : Attribute, IProxyPropertyInitializer
             return (!string.IsNullOrEmpty(basePath) ? basePath + "." : "") + Path;
         }
 
-        return (!string.IsNullOrEmpty(basePath) ? basePath + "." : "") + property.PropertyName;
+        return (!string.IsNullOrEmpty(basePath) ? basePath + "." : "") + property.Name;
     }
 }

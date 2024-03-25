@@ -25,7 +25,7 @@ namespace Namotion.Proxy.Tests.Handlers
 
             // Assert
             Assert.Contains(changes, c => 
-                c.Property.PropertyName == "FirstName" &&
+                c.Property.Name == "FirstName" &&
                 c.OldValue is null &&
                 c.NewValue?.ToString() == "Rico");
         }

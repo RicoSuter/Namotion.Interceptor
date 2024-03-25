@@ -14,4 +14,17 @@ public static class ProxyRegistryExtensions
             }
         }
     }
+
+    public static ProxyProperty? TryGetProperty(this IReadOnlyDictionary<IProxy, ProxyMetadata> properties, ProxyPropertyReference property)
+    {
+        if (properties.TryGetValue(property.Proxy, out var metadata))
+        {
+            if (metadata.Properties.TryGetValue(property.Name, out var result))
+            {
+                return result;
+            }
+        }
+
+        return null;
+    }
 }
