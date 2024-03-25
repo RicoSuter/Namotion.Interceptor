@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Nodes;
 
@@ -146,10 +147,10 @@ public abstract class TrackablesControllerBase<TProxy> : ControllerBase
                     Populate(childProxy, register, child);
                     obj[name] = child;
                 }
-                else if (value is IEnumerable<IProxy> collection)
+                else if (value is ICollection collection && collection.OfType<IProxy>().Any())
                 {
                     var children = new JsonArray();
-                    foreach (var arrayProxyItem in collection)
+                    foreach (var arrayProxyItem in collection.OfType<IProxy>())
                     {
                         var child = new JsonObject();
                         Populate(arrayProxyItem, register, child);

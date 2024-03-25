@@ -79,8 +79,10 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
         }
     }
 
-    private IEnumerable<(ProxyPropertyReference, IProxy, object?)> FindProxies(ProxyPropertyReference property,
-        object? value, object? index, HashSet<IProxy> seen)
+    private IEnumerable<(ProxyPropertyReference, IProxy, object?)> FindProxies(
+        ProxyPropertyReference property,
+        object? value, object? index, 
+        HashSet<IProxy> seen)
     {
         if (value is IDictionary dictionary)
         {
@@ -96,10 +98,10 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
                 }
             }
         }
-        else if (value is IEnumerable<IProxy> collection)
+        else if (value is ICollection collection)
         {
             var i = 0;
-            foreach (var proxy in collection)
+            foreach (var proxy in collection.OfType<IProxy>())
             {
                 foreach (var child in FindProxies(property, proxy, i, seen))
                 {

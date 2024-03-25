@@ -3,16 +3,16 @@ using Namotion.Proxy.ChangeTracking;
 
 namespace Namotion.Proxy.Tests.Handlers
 {
-    public class PropertyChangedHandlersHandlerTests
+    public class DerivedPropertyChangeDetectionHandlerTests
     {
         [Fact]
-        public void WhenPropertyIsChanged_ThenChangeHandlerIsTriggered()
+        public void WhenChangingPropertyWhichIsUsedInDerivedProperty_ThenDerivedPropertyIsChanged()
         {
             // Arrange
             var changes = new List<ProxyPropertyChanged>();
             var context = ProxyContext
                 .CreateBuilder()
-                .WithPropertyChangedHandlers()
+                .WithDerivedPropertyChangeDetection()
                 .Build();
 
             context
@@ -22,12 +22,18 @@ namespace Namotion.Proxy.Tests.Handlers
             // Act
             var person = new Person(context);
             person.FirstName = "Rico";
+            person.LastName = "Suter";
 
             // Assert
+            Assert.Contains(changes, c =>
+                c.Property.Name == nameof(Person.FullName) &&
+                c.OldValue?.ToString() == " " &&
+                c.NewValue?.ToString() == "Rico ");
+
             Assert.Contains(changes, c => 
-                c.Property.Name == "FirstName" &&
-                c.OldValue is null &&
-                c.NewValue?.ToString() == "Rico");
+                c.Property.Name == nameof(Person.FullName) &&
+                c.OldValue?.ToString() == "Rico " && 
+                c.NewValue?.ToString() == "Rico Suter");
         }
     }
 }
