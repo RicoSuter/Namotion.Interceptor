@@ -3,28 +3,28 @@ using System.Collections;
 
 namespace Namotion.Proxy.ChangeTracking;
 
-internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandler2
+internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandler
 {
     private const string ReferenceCountKey = "Namotion.Proxy.Handlers.ReferenceCount";
 
-    public void AttachProxyGraph(IProxyContext context, IProxy proxy)
+    public void OnProxyAttached(ProxyLifecycleContext context)
     {
-        AttachProxy(context, null, string.Empty, proxy, null);
+        //AttachProxy(context.Context, context.ParentProxy, context.PropertyName, context.Proxy, context.Index);
 
-        foreach (var child in FindProxiesInProperties(proxy, new HashSet<IProxy>()))
+        foreach (var child in FindProxiesInProperties(context.Proxy, new HashSet<IProxy>()))
         {
-            AttachProxy(context, child.Item1, child.Item2, child.Item3, child.Item4);
+            AttachProxy(context.Context, child.Item1, child.Item2, child.Item3, child.Item4);
         }
     }
 
-    public void DetachProxyGraph(IProxyContext context, IProxy proxy)
+    public void OnProxyDetached(ProxyLifecycleContext context)
     {
-        foreach (var child in FindProxiesInProperties(proxy, new HashSet<IProxy>()))
+        foreach (var child in FindProxiesInProperties(context.Proxy, new HashSet<IProxy>()))
         {
-            DetachProxy(context, child.Item1, child.Item2, child.Item3, child.Item4);
+            DetachProxy(context.Context, child.Item1, child.Item2, child.Item3, child.Item4);
         }
 
-        DetachProxy(context, null, string.Empty, proxy, null);
+        //DetachProxy(context.Context, context.ParentProxy, context.PropertyName, context.Proxy, context.Index);
     }
 
     public void SetProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
