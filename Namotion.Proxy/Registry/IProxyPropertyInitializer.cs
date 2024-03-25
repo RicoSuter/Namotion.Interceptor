@@ -2,7 +2,7 @@
 
 namespace Namotion.Proxy.Sources.Abstractions;
 
-public interface ITrackablePropertyInitializer
+public interface IProxyPropertyInitializer
 {
     void InitializeProperty(ProxyProperty property, object? parentCollectionKey, IProxyContext context);
 }

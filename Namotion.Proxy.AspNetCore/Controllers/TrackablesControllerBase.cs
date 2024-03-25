@@ -1,28 +1,31 @@
 ﻿using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.VisualBasic;
+using Namotion.Proxy.Abstractions;
+using Namotion.Proxy.Attributes;
 
-using Namotion.Trackable.Attributes;
-using Namotion.Trackable.Validation;
+namespace Namotion.Proxy.AspNetCore.Controllers;
 
-namespace Namotion.Trackable.AspNetCore.Controllers;
-
-public abstract class TrackablesControllerBase<TTrackable> : ControllerBase
-    where TTrackable : class
+public abstract class TrackablesControllerBase<TProxy> : ControllerBase
+    where TProxy : class, IProxy
 {
     private readonly static JsonSerializerOptions _options;
 
-    private readonly TrackableContext<TTrackable> _trackableContext;
+    private readonly IProxyContext _context;
+    private readonly TProxy _proxy;
 
-    protected TrackablesControllerBase(TrackableContext<TTrackable> trackableContext)
+    // TODO: Inject IProxyContext<TProxy> so that multiple contexts are supported.
+    protected TrackablesControllerBase(IProxyContext context, TProxy proxy)
     {
-        _trackableContext = trackableContext;
+        _context = context;
+        _proxy = proxy;
     }
 
     static TrackablesControllerBase()
@@ -41,7 +44,7 @@ public abstract class TrackablesControllerBase<TTrackable> : ControllerBase
             {
                 var variableAttribute = propertyInfo.AttributeProvider?
                     .GetCustomAttributes(true)
-                    .OfType<AttributeOfTrackableAttribute>()
+                    .OfType<PropertyAttributeAttribute>()
                     .FirstOrDefault();
 
                 if (variableAttribute != null)
@@ -63,108 +66,155 @@ public abstract class TrackablesControllerBase<TTrackable> : ControllerBase
     }
 
     [HttpGet]
-    public ActionResult<TTrackable> GetVariables()
+    public ActionResult<TProxy> GetVariables()
     {
-        var json = JsonSerializer.SerializeToElement(_trackableContext.Object, _options);
-        return Ok(json);
+        var jsonObject = new JsonObject();
+        Populate(_proxy, _context.GetHandler<IProxyRegistry>(), jsonObject);
+
+        //var json = JsonSerializer.SerializeToElement(_proxy, _options);
+        return Ok(jsonObject);
     }
 
-    [HttpPost]
-    public ActionResult UpdateVariables(
-        [FromBody] Dictionary<string, JsonElement> updates,
-        [FromServices] IEnumerable<ITrackablePropertyValidator> propertyValidators)
+    public static void Populate(IProxy proxy, IProxyRegistry register, JsonObject obj)
     {
-        try
+        if (register.KnownProxies.TryGetValue(proxy, out var metadata))
         {
-            var resolvedUpdates = updates
-                .Select(t =>
-                {
-                    var variable = _trackableContext
-                        .AllProperties
-                        .SingleOrDefault(v => v.Path.ToLowerInvariant() == t.Key.ToLowerInvariant());
+            foreach (var property in metadata.Properties.Where(p => p.Value.GetValue is not null))
+            {
+                var key = property.Key;
+               
+                var attribute = property.Value.Attributes
+                    .OfType<PropertyAttributeAttribute>()
+                    .FirstOrDefault();
 
-                    return new
+                if (attribute is not null)
+                {
+                    key = attribute.PropertyName + "@" + attribute.AttributeName;
+                }
+
+                var value = property.Value.GetValue?.Invoke();
+                if (value is IProxy childProxy)
+                {
+                    var child = new JsonObject();
+                    Populate(childProxy, register, child);
+                    obj[key] = child;
+                }
+                else if (value is IEnumerable<IProxy> childProxies)
+                {
+                    var children = new JsonArray();
+                    foreach (var childProxy2 in childProxies)
                     {
-                        t.Key,
-                        Variable = variable,
-                        Value = variable != null ?
-                            t.Value.Deserialize(variable.PropertyType) :
-                            null
-                    };
-                })
-                .ToArray();
-
-            // check only known variables
-            if (resolvedUpdates.Any(u => u.Variable == null))
-            {
-                return BadRequest(new ProblemDetails
+                        var child = new JsonObject();
+                        Populate(childProxy2, register, child);
+                        children.Add(child);
+                    }
+                    obj[key] = children;
+                }
+                else
                 {
-                    Detail = "Unknown variable paths."
-                });
-            }
-
-            // check not read-only
-            if (resolvedUpdates.Any(u => !u.Variable!.IsWriteable))
-            {
-                return BadRequest(new ProblemDetails
-                {
-                    Detail = "Attempted to change read only variable."
-                });
-            }
-
-            // run validators
-            var errors = new Dictionary<string, ValidationResult[]>();
-            foreach (var update in resolvedUpdates)
-            {
-                var updateErrors = propertyValidators
-                    .SelectMany(v => v.Validate(update.Variable!, update.Value, _trackableContext))
-                    .ToArray();
-
-                if (updateErrors.Any())
-                {
-                    errors.Add(update.Key, updateErrors);
+                    obj[key] = JsonValue.Create(value);
                 }
             }
-
-            if (errors.Any())
-            {
-                return BadRequest(new ProblemDetails
-                {
-                    Detail = "Variable updates not valid.",
-                    Extensions =
-                    {
-                        { "errors", errors.ToDictionary(e => e.Key, e => e.Value.Select(v => v.ErrorMessage)) }
-                    }
-                });
-            }
-
-            // write updates
-            foreach (var update in resolvedUpdates)
-            {
-                update.Variable!.SetValue(update.Value);
-            }
-
-            return Ok();
-        }
-        catch (JsonException)
-        {
-            return BadRequest(new ProblemDetails
-            {
-                Detail = "Invalid variable value."
-            });
         }
     }
 
-    /// <summary>
-    /// Gets all leaf properties.
-    /// </summary>
-    /// <returns></returns>
-    [HttpGet("properties")]
-    public ActionResult GetProperties()
-    {
-        var allTrackers = _trackableContext.AllTrackers;
-        return Ok(_trackableContext
-            .AllProperties
-            .Where(p => !p.IsAttribute && allTrackers.Any(t => t.ParentProperty == p) == false));
-    }
+    //[HttpPost]
+    //public ActionResult UpdateVariables(
+    //    [FromBody] Dictionary<string, JsonElement> updates/*,
+    //    [FromServices] IEnumerable<ITrackablePropertyValidator> propertyValidators*/)
+    //{
+    //    try
+    //    {
+    //        var resolvedUpdates = updates
+    //            .Select(t =>
+    //            {
+    //                var variable = _context
+    //                    .GetHandler<IProxyRegistry>()
+    //                    .GetProperties()
+    //                    .SingleOrDefault(v => v.Path.ToLowerInvariant() == t.Key.ToLowerInvariant());
+
+    //                return new
+    //                {
+    //                    t.Key,
+    //                    Variable = variable,
+    //                    Value = variable != null ?
+    //                        t.Value.Deserialize(variable.PropertyType) :
+    //                        null
+    //                };
+    //            })
+    //            .ToArray();
+
+    //        // check only known variables
+    //        if (resolvedUpdates.Any(u => u.Variable == null))
+    //        {
+    //            return BadRequest(new ProblemDetails
+    //            {
+    //                Detail = "Unknown variable paths."
+    //            });
+    //        }
+
+    //        // check not read-only
+    //        if (resolvedUpdates.Any(u => !u.Variable!.IsWriteable))
+    //        {
+    //            return BadRequest(new ProblemDetails
+    //            {
+    //                Detail = "Attempted to change read only variable."
+    //            });
+    //        }
+
+    //        // run validators
+    //        //var errors = new Dictionary<string, ValidationResult[]>();
+    //        //foreach (var update in resolvedUpdates)
+    //        //{
+    //        //    var updateErrors = propertyValidators
+    //        //        .SelectMany(v => v.Validate(update.Variable!, update.Value, _context))
+    //        //        .ToArray();
+
+    //        //    if (updateErrors.Any())
+    //        //    {
+    //        //        errors.Add(update.Key, updateErrors);
+    //        //    }
+    //        //}
+
+    //        //if (errors.Any())
+    //        //{
+    //        //    return BadRequest(new ProblemDetails
+    //        //    {
+    //        //        Detail = "Variable updates not valid.",
+    //        //        Extensions =
+    //        //        {
+    //        //            { "errors", errors.ToDictionary(e => e.Key, e => e.Value.Select(v => v.ErrorMessage)) }
+    //        //        }
+    //        //    });
+    //        //}
+
+    //        // write updates
+    //        foreach (var update in resolvedUpdates)
+    //        {
+    //            update.Variable!.SetValue(update.Value);
+    //        }
+
+    //        return Ok();
+    //    }
+    //    catch (JsonException)
+    //    {
+    //        return BadRequest(new ProblemDetails
+    //        {
+    //            Detail = "Invalid variable value."
+    //        });
+    //    }
+    //}
+
+    ///// <summary>
+    ///// Gets all leaf properties.
+    ///// </summary>
+    ///// <returns></returns>
+    //[HttpGet("properties")]
+    //public ActionResult GetProperties()
+    //{
+    //    var allTrackers = _context.AllTrackers;
+    //    return Ok(_context
+    //        .AllProperties
+    //        .Where(p => !p.IsAttribute && allTrackers.Any(t => t.ParentProperty == p) == false));
+    //}
 }

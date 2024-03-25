@@ -1,5 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Namotion.Proxy;
+using Namotion.Proxy.Abstractions;
+using Namotion.Proxy.AspNetCore.Controllers;
+using Namotion.Proxy.Attributes;
+using Namotion.Proxy.Sources.Abstractions;
 using Namotion.Proxy.Sources.Attributes;
 using NSwag.Annotations;
 
@@ -33,15 +37,30 @@ namespace Namotion.Trackable.SampleWeb
     public abstract class TireBase
     {
         [TrackableSource("mqtt", "pressure")]
-        //[Unit("bar")]
+        [Unit("bar")]
         public virtual decimal Pressure { get; set; }
 
-        //[Unit("bar")]
-        //[AttributeOfTrackable(nameof(Pressure), "Minimum")]
+        [Unit("bar")]
+        [PropertyAttribute(nameof(Pressure), "Minimum")]
         public virtual decimal Pressure_Minimum { get; set; } = 0.0m;
 
-        //[AttributeOfTrackable(nameof(Pressure), "Maximum")]
+        [PropertyAttribute(nameof(Pressure), "Maximum")]
         public virtual decimal Pressure_Maximum => 4 * Pressure;
+    }
+
+    public class UnitAttribute : Attribute, IProxyPropertyInitializer
+    {
+        private readonly string _unit;
+
+        public UnitAttribute(string unit)
+        {
+            _unit = unit;
+        }
+
+        public void InitializeProperty(ProxyProperty property, object? parentCollectionKey, IProxyContext context)
+        {
+            property.Parent.AddProperty(property.Property.PropertyName + "_Unit", typeof(string), () => _unit, null, new PropertyAttributeAttribute(property.Property.PropertyName, "Unit"));
+        }
     }
 
     public class Program
@@ -64,7 +83,7 @@ namespace Namotion.Trackable.SampleWeb
             builder.Services.AddSingleton<IProxyContext>(context);
 
             // trackable api controllers
-            //builder.Services.AddTrackableControllers<Car, TrackablesController<Car>>();
+            builder.Services.AddTrackableControllers<Car, TrackablesController<Car>>();
 
             // trackable UPC UA
             //builder.Services.AddOpcUaServerTrackableSource<Car>("mqtt");
@@ -90,39 +109,23 @@ namespace Namotion.Trackable.SampleWeb
 
             app.MapGraphQL();
 
-            //app.UseOpenApi();
-            //app.UseSwaggerUi();
+            app.UseOpenApi();
+            app.UseSwaggerUi();
 
-            //app.MapControllers();
+            app.MapControllers();
             app.Run();
         }
 
-        //public class UnitAttribute : Attribute, ITrackablePropertyInitializer
-        //{
-        //    private readonly string _unit;
-
-        //    public UnitAttribute(string unit)
-        //    {
-        //        _unit = unit;
-        //    }
-
-        //    public void InitializeProperty(TrackedProperty property, object? parentCollectionKey, ITrackableContext context)
-        //    {
-        //        property.Parent.AddProperty(
-        //            TrackedProperty<string>.CreateAttribute(property, "Unit", _unit, context));
-        //    }
-        //}
-
-        //[OpenApiTag("Car")]
-        //[Route("/api/car")]
-        //public class TrackablesController<TTrackable> : TrackablesControllerBase<TTrackable>
-        //    where TTrackable : class
-        //{
-        //    public TrackablesController(TrackableContext<TTrackable> trackableContext)
-        //        : base(trackableContext)
-        //    {
-        //    }
-        //}
+        [OpenApiTag("Car")]
+        [Route("/api/car")]
+        public class TrackablesController<TProxy> : TrackablesControllerBase<TProxy>
+            where TProxy : class, IProxy
+        {
+            public TrackablesController(IProxyContext context, TProxy proxy)
+                : base(context, proxy)
+            {
+            }
+        }
 
         public class Simulator : BackgroundService
         {

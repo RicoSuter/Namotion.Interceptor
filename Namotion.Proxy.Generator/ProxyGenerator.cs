@@ -59,6 +59,7 @@ using Namotion.Proxy;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 #pragma warning disable CS8669
 
@@ -69,13 +70,17 @@ namespace {namespaceName}
         private IProxyContext? _context;
         private ConcurrentDictionary<string, object?> _data = new ConcurrentDictionary<string, object?>();
 
+        [JsonIgnore]
         IProxyContext? IProxy.Context
         {{
             get => _context;
             set => _context = value;
         }}
 
+        [JsonIgnore]
         ConcurrentDictionary<string, object?> IProxy.Data => _data;
+
+        [JsonIgnore]
         IReadOnlyDictionary<string, PropertyMetadata> IProxy.Properties => _properties;
 
         private static IReadOnlyDictionary<string, PropertyMetadata> _properties = new Dictionary<string, PropertyMetadata>

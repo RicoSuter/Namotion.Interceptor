@@ -8,7 +8,7 @@
   </PropertyGroup>
   
   <ItemGroup>
-    <ProjectReference Include="..\Namotion.Trackable\Namotion.Trackable.csproj" />
+    <ProjectReference Include="..\Namotion.Proxy\Namotion.Proxy.csproj" />
   </ItemGroup>
 
 </Project>

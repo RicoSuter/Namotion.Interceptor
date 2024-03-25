@@ -36,6 +36,7 @@ namespace Namotion.Trackable.Mqtt
 
         public int? NumberOfClients => _numberOfClients;
 
+        // TODO: Inject IProxyContext<TProxy> so that multiple contexts are supported.
         public MqttServerTrackableSource(
             IProxyContext context,
             ISourcePathProvider sourcePathProvider,
@@ -170,7 +171,7 @@ namespace Namotion.Trackable.Mqtt
                 {
                     var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
                     var document = JsonDocument.Parse(payload);
-                    var value = document.Deserialize(property.Info.PropertyType);
+                    var value = document.Deserialize(property.Type);
 
                     _state[property.Property] = value;
                     _propertyUpdateAction?.Invoke(new ProxyPropertyPathReference(property.Property, sourcePath, value));

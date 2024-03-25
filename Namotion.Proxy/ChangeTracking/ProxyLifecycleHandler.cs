@@ -96,10 +96,10 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
                 }
             }
         }
-        else if (value is ICollection collection)
+        else if (value is IEnumerable<IProxy> collection)
         {
             var i = 0;
-            foreach (var proxy in collection.OfType<IProxy>())
+            foreach (var proxy in collection)
             {
                 foreach (var child in FindProxies(parentProxy, propertyName, proxy, i, seen))
                 {

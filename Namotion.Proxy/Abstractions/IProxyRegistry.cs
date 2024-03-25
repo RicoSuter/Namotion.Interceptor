@@ -23,24 +23,78 @@ public static class ProxyRegistryExtensions
 
 public record ProxyMetadata
 {
-    public ProxyMetadata()
+    private readonly HashSet<ProxyPropertyReference> _parents = new();
+    private readonly Dictionary<string, ProxyProperty> _properties = new();
+
+    public required IProxy Proxy { get; init; }
+
+    public IReadOnlyCollection<ProxyPropertyReference> Parents => _parents;
+
+    public IReadOnlyDictionary<string, ProxyProperty> Properties => _properties;
+
+    public void AddParent(ProxyPropertyReference parent)
     {
+        lock (_parents)
+        {
+            _parents.Add(parent);
+        }
     }
 
-    public IReadOnlyCollection<ProxyPropertyReference> Parents { get; } = new HashSet<ProxyPropertyReference>();
+    public void RemoveParent(ProxyPropertyReference parent)
+    {
+        lock (_parents)
+        {
+            _parents.Remove(parent);
+        }
+    }
 
-    public IReadOnlyDictionary<string, ProxyProperty> Properties { get; internal set; }
+    public void AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params object[] attributes)
+    {
+        lock (_properties)
+        {
+            _properties.Add(name, new ProxyProperty(new ProxyPropertyReference(Proxy, name))
+            {
+                Parent = this,
+                Type = type,
+                Attributes = attributes,
+                GetValue = getValue,
+                SetValue = setValue
+            });
+        }
+    }
 }
 
 public record ProxyProperty(ProxyPropertyReference Property)
 {
-    public required PropertyInfo Info { get; init; }
+    private readonly HashSet<ProxyPropertyChild> _children = new();
+
+    public required Type Type { get; init; }
+
+    public required object[] Attributes { get; init; }
 
     public required ProxyMetadata Parent { get; init; }
 
     public required Func<object?>? GetValue { get; init; }
 
-    public IReadOnlyCollection<ProxyPropertyChild> Children { get; } = new HashSet<ProxyPropertyChild>();
+    public required Action<object?>? SetValue { get; init; }
+
+    public IReadOnlyCollection<ProxyPropertyChild> Children => _children;
+
+    public void AddChild(ProxyPropertyChild parent)
+    {
+        lock (_children)
+        {
+            _children.Add(parent);
+        }
+    }
+
+    public void RemoveChild(ProxyPropertyChild parent)
+    {
+        lock (_children)
+        {
+            _children.Remove(parent);
+        }
+    }
 }
 
 public readonly record struct ProxyPropertyChild

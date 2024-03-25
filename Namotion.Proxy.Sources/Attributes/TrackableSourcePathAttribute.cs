@@ -4,7 +4,7 @@ using Namotion.Proxy.Sources.Abstractions;
 namespace Namotion.Proxy.Sources.Attributes;
 
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
-public class TrackableSourcePathAttribute : Attribute, ITrackablePropertyInitializer
+public class TrackableSourcePathAttribute : Attribute, IProxyPropertyInitializer
 {
     public string SourceName { get; }
 

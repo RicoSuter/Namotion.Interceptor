@@ -28,48 +28,41 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
         {
             if (!_knownProxies.TryGetValue(context.Proxy, out var metadata))
             {
-                metadata = new ProxyMetadata();
-                metadata.Properties = context.Proxy
-                    .Properties
-                    .ToDictionary(
-                        p => p.Key,
-                        p => new ProxyProperty(new ProxyPropertyReference(context.Proxy, p.Key))
-                        {
-                            Parent = metadata,
-                            Info = p.Value.Info,
-                            GetValue = p.Value.GetValue is not null ? () => p.Value.GetValue.Invoke(context.Proxy) : null
-                        });
+                metadata = new ProxyMetadata
+                {
+                    Proxy = context.Proxy
+                };
+
+                foreach (var p in context.Proxy.Properties)
+                {
+                    metadata.AddProperty(p.Key,
+                        p.Value.Info.PropertyType,
+                        p.Value.GetValue is not null ? () => p.Value.GetValue.Invoke(context.Proxy) : null,
+                        p.Value.SetValue is not null ? (value) => p.Value.SetValue.Invoke(context.Proxy, value) : null,
+                        p.Value.Info.GetCustomAttributes().ToArray());
+                }
 
                 _knownProxies[context.Proxy] = metadata;
             }
 
             if (context.ParentProxy is not null)
             {
-                var parents = metadata.Parents as HashSet<ProxyPropertyReference>;
-                if (parents is not null)
-                {
-                    parents.Add(new ProxyPropertyReference(context.ParentProxy, context.PropertyName));
-                }
+                metadata.AddParent(new ProxyPropertyReference(context.ParentProxy, context.PropertyName));
 
-                var children = _knownProxies[context.ParentProxy]
+                _knownProxies[context.ParentProxy]
                     .Properties[context.PropertyName]
-                    .Children as HashSet<ProxyPropertyChild>;
-
-                if (children is not null)
-                {
-                    children.Add(new ProxyPropertyChild
+                    .AddChild(new ProxyPropertyChild
                     {
                         Proxy = context.Proxy,
                         Index = context.Index
                     });
-                }
             }
 
-            foreach (var y in metadata.Properties)
+            foreach (var property in metadata.Properties.ToArray())
             {
-                foreach (var x in y.Value.Info.GetCustomAttributes().OfType<ITrackablePropertyInitializer>())
+                foreach (var attribute in property.Value.Attributes.OfType<IProxyPropertyInitializer>())
                 {
-                    x.InitializeProperty(y.Value, context.Index, context.Context); // TODO: provide index
+                    attribute.InitializeProperty(property.Value, context.Index, context.Context);
                 }
             }
         }
@@ -84,27 +77,17 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                 if (context.ParentProxy is not null)
                 {
                     var metadata = _knownProxies[context.Proxy];
-
-                    var parents = metadata.Parents as HashSet<ProxyPropertyReference>;
-                    if (parents is not null)
-                    {
-                        parents.Remove(new ProxyPropertyReference(context.ParentProxy, context.PropertyName));
-                    }
+                    metadata.RemoveParent(new ProxyPropertyReference(context.ParentProxy, context.PropertyName));
 
                     if (_knownProxies.TryGetValue(context.ParentProxy, out var parentMetadata))
                     {
-                        var children = parentMetadata
+                        _knownProxies[context.ParentProxy]
                             .Properties[context.PropertyName]
-                            .Children as HashSet<ProxyPropertyChild>;
-
-                        if (children is not null)
-                        {
-                            children.Remove(new ProxyPropertyChild
+                            .RemoveChild(new ProxyPropertyChild
                             {
                                 Proxy = context.Proxy,
                                 Index = context.Index
                             });
-                        }
                     }
                 }
 
