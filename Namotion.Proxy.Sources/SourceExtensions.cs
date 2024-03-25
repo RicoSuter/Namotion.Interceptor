@@ -73,7 +73,7 @@ public static class SourceExtensions
 
     public static bool IsChangingFromSource(this ProxyPropertyChanged change, ITrackableSource source)
     {
-        var contexts = (HashSet<ITrackableSource>)change.Proxy.Data.GetOrAdd($"{IsChangingFromSourceKey}{change.PropertyName}", _ => new HashSet<ITrackableSource>())!;
+        var contexts = (HashSet<ITrackableSource>)change.Property.Proxy.Data.GetOrAdd($"{IsChangingFromSourceKey}{change.Property.PropertyName}", _ => new HashSet<ITrackableSource>())!;
         lock (contexts)
         {
             return contexts.Contains(source);

@@ -24,7 +24,7 @@ public class ProxyContext : IProxyContext
 
     public object? GetProperty(IProxy proxy, string propertyName, Func<object?> readValue)
     {
-        var context = new ReadProxyPropertyContext(this, proxy, propertyName);
+        var context = new ReadProxyPropertyContext(new ProxyPropertyReference(proxy, propertyName), this);
 
         foreach (var handler in GetHandlers<IProxyReadHandler>().Reverse())
         {
@@ -40,7 +40,7 @@ public class ProxyContext : IProxyContext
 
     public void SetProperty(IProxy proxy, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
     {
-        var context = new WriteProxyPropertyContext(this, proxy, propertyName, null, GetReadValueFunctionWithCache(readValue));
+        var context = new WriteProxyPropertyContext(this, new ProxyPropertyReference(proxy, propertyName), null, GetReadValueFunctionWithCache(readValue));
 
         foreach (var handler in GetHandlers<IProxyWriteHandler>().Reverse())
         {

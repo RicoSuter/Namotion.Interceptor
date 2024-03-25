@@ -8,11 +8,10 @@ public interface IProxyLifecycleHandler : IProxyHandler
 }
 
 public record struct ProxyLifecycleContext(
-    IProxyContext Context,
-    IProxy? ParentProxy,
-    string PropertyName,
+    ProxyPropertyReference Property,
     object? Index,
     IProxy Proxy,
-    int ReferenceCount)
+    int ReferenceCount,
+    IProxyContext Context)
 {
 }

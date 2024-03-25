@@ -6,8 +6,7 @@ public interface IProxyReadHandler : IProxyHandler
 }
 
 public record struct ReadProxyPropertyContext(
-    IProxyContext Context,
-    IProxy Proxy,
-    string PropertyName)
+    ProxyPropertyReference Property,
+    IProxyContext Context)
 {
 }

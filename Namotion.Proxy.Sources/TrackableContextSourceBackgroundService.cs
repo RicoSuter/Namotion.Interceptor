@@ -79,18 +79,13 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
                 await _context
                     .GetHandler<IProxyPropertyChangedHandler>()
                     .Where(change => !change.IsChangingFromSource(_source) &&
-                                     _source.TryGetSourcePath(new ProxyPropertyReference(change.Proxy, change.PropertyName)) != null)
+                                     _source.TryGetSourcePath(change.Property) != null)
                     .BufferChanges(_bufferTime)
                     .Where(changes => changes.Any())
                     .ForEachAsync(async changes =>
                     {
                         var values = changes
-                            .Select(c =>
-                            {
-                                var reference = new ProxyPropertyReference(c.Proxy, c.PropertyName);
-                                return new ProxyPropertyPathReference(reference,
-                                    _source.TryGetSourcePath(reference)!, c.NewValue);
-                            })
+                            .Select(c => new ProxyPropertyPathReference(c.Property, _source.TryGetSourcePath(c.Property)!, c.NewValue))
                             .ToList();
 
                         await _source.WriteAsync(values, stoppingToken);

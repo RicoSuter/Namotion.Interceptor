@@ -10,6 +10,6 @@ public static class TrackableObservableExtensions
         return observable
             .Buffer(bufferTime)
             .Where(propertyChanges => propertyChanges.Any())
-            .Select(propertyChanges => propertyChanges.Reverse().DistinctBy(c => (c.Proxy, c.PropertyName)));
+            .Select(propertyChanges => propertyChanges.Reverse().DistinctBy(c => c.Property));
     }
 }

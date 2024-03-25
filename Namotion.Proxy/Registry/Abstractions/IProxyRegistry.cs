@@ -1,5 +1,4 @@
 ﻿using Namotion.Proxy.Attributes;
-using System.Reflection;
 
 namespace Namotion.Proxy.Abstractions;
 

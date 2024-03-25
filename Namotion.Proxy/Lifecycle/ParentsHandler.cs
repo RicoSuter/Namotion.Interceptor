@@ -6,17 +6,17 @@ internal class ParentsHandler : IProxyLifecycleHandler
 {
     public void OnProxyAttached(ProxyLifecycleContext context)
     {
-        if (context.ParentProxy is not null)
+        if (context.Property != default)
         {
-            context.Proxy.AddParent(context.ParentProxy);
+            context.Proxy.AddParent(context.Property.Proxy);
         }
     }
 
     public void OnProxyDetached(ProxyLifecycleContext context)
     {
-        if (context.ParentProxy is not null)
+        if (context.Property != default)
         {
-            context.Proxy.RemoveParent(context.ParentProxy);
+            context.Proxy.RemoveParent(context.Property.Proxy);
         }
     }
 }

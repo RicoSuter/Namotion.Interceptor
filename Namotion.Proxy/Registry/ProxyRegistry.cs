@@ -45,12 +45,12 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                 _knownProxies[context.Proxy] = metadata;
             }
 
-            if (context.ParentProxy is not null)
+            if (context.Property != default)
             {
-                metadata.AddParent(new ProxyPropertyReference(context.ParentProxy, context.PropertyName));
+                metadata.AddParent(context.Property);
 
-                _knownProxies[context.ParentProxy]
-                    .Properties[context.PropertyName]
+                _knownProxies[context.Property.Proxy]
+                    .Properties[context.Property.PropertyName]
                     .AddChild(new ProxyPropertyChild
                     {
                         Proxy = context.Proxy,
@@ -74,15 +74,15 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
         {
             if (context.ReferenceCount == 0)
             {
-                if (context.ParentProxy is not null)
+                if (context.Property != default)
                 {
                     var metadata = _knownProxies[context.Proxy];
-                    metadata.RemoveParent(new ProxyPropertyReference(context.ParentProxy, context.PropertyName));
+                    metadata.RemoveParent(context.Property);
 
-                    if (_knownProxies.TryGetValue(context.ParentProxy, out var parentMetadata))
+                    if (_knownProxies.TryGetValue(context.Property.Proxy, out var parentMetadata))
                     {
-                        _knownProxies[context.ParentProxy]
-                            .Properties[context.PropertyName]
+                        _knownProxies[context.Property.Proxy]
+                            .Properties[context.Property.PropertyName]
                             .RemoveChild(new ProxyPropertyChild
                             {
                                 Proxy = context.Proxy,

@@ -86,7 +86,7 @@ internal class PropertyChangeRecorder : IProxyReadHandler
                 {
                     foreach (var scope in scopes)
                     {
-                        scope.Add(new ProxyPropertyReference(context.Proxy, context.PropertyName));
+                        scope.Add(context.Property);
                     }
                 }
             }

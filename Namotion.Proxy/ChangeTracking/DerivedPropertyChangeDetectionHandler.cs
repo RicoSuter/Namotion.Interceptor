@@ -12,13 +12,13 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
 
     public object? GetProperty(ReadProxyPropertyContext context, Func<ReadProxyPropertyContext, object?> next)
     {
-        if (context.Proxy.Properties[context.PropertyName].IsDerived)
+        if (context.Property.Proxy.Properties[context.Property.PropertyName].IsDerived)
         {
             TryStartRecordTouchedProperties();
 
             var result = next(context);
 
-            context.Proxy.SetLastKnownValue(context.PropertyName, result);
+            context.Property.Proxy.SetLastKnownValue(context.Property.PropertyName, result);
 
             StoreRecordedTouchedProperties(context);
             TouchProperty(context);
@@ -37,7 +37,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
     {
         next.Invoke(context);
 
-        var usedByProperties = context.Proxy.GetUsedByProperties(context.PropertyName);
+        var usedByProperties = context.Property.Proxy.GetUsedByProperties(context.Property.PropertyName);
         if (usedByProperties.Any())
         {
             lock (usedByProperties)
@@ -50,7 +50,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
                         .GetValue?
                         .Invoke(usedByProperty.Proxy);
 
-                    var changedContext = new ProxyPropertyChanged(context.Context, usedByProperty.Proxy, usedByProperty.PropertyName, oldValue, newValue);
+                    var changedContext = new ProxyPropertyChanged(usedByProperty, oldValue, newValue, context.Context);
                     foreach (var handler in context.Context.GetHandlers<IProxyPropertyChangedHandler>())
                     {
                         handler.RaisePropertyChanged(changedContext);
@@ -74,7 +74,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
     {
         var newProperties = _currentTouchedProperties!.Pop();
 
-        var previouslyRequiredProperties = context.Proxy.GetRequiredProperties(context.PropertyName);
+        var previouslyRequiredProperties = context.Property.Proxy.GetRequiredProperties(context.Property.PropertyName);
         foreach (var previouslyRequiredProperty in previouslyRequiredProperties)
         {
             if (!newProperties.Contains(previouslyRequiredProperty))
@@ -85,13 +85,13 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
             }
         }
 
-        context.Proxy.SetRequiredProperties(context.PropertyName, newProperties);
+        context.Property.Proxy.SetRequiredProperties(context.Property.PropertyName, newProperties);
 
         foreach (var newlyRequiredProperty in newProperties)
         {
             var usedByProperties = newlyRequiredProperty.Proxy.GetUsedByProperties(newlyRequiredProperty.PropertyName);
             lock (usedByProperties)
-                usedByProperties.Add(new ProxyPropertyReference(context.Proxy, context.PropertyName));
+                usedByProperties.Add(new ProxyPropertyReference(context.Property.Proxy, context.Property.PropertyName));
         }
     }
 
@@ -99,7 +99,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
     {
         if (_currentTouchedProperties?.TryPeek(out var touchedProperties) == true)
         {
-            touchedProperties.Add(new ProxyPropertyReference(context.Proxy, context.PropertyName));
+            touchedProperties.Add(new ProxyPropertyReference(context.Property.Proxy, context.Property.PropertyName));
         }
         else
         {

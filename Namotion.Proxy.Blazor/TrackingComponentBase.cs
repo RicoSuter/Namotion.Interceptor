@@ -22,9 +22,7 @@ namespace Namotion.Proxy.Blazor
             _subscription = ProxyPropertyChanges!
                 .Subscribe(change =>
                 {
-                    if (_properties?.Any(p =>
-                        p.Proxy == change.Proxy &&
-                        p.PropertyName == change.PropertyName) != false)
+                    if (_properties?.Any(p => p == change.Property) != false)
                     {
                         InvokeAsync(StateHasChanged);
                     }
