@@ -52,27 +52,27 @@ namespace Namotion.Trackable.SampleWeb
 
             var context = ProxyContext
                 .CreateBuilder()
-                .WithFullPropertyTracking()
                 .WithRegistry()
+                .WithFullPropertyTracking()
                 .WithProxyLifecycle()
                 .Build();
 
             var car = new Car(context);
 
-            //// trackable
-            builder.Services.AddSingleton<IProxyContext>(context);
+            // trackable
             builder.Services.AddSingleton(car);
+            builder.Services.AddSingleton<IProxyContext>(context);
 
-            //// trackable api controllers
+            // trackable api controllers
             //builder.Services.AddTrackableControllers<Car, TrackablesController<Car>>();
 
-            //// trackable UPC UA
+            // trackable UPC UA
             //builder.Services.AddOpcUaServerTrackableSource<Car>("mqtt");
 
             // trackable mqtt
             builder.Services.AddMqttServerTrackableSource<Car>("mqtt");
 
-            //// trackable graphql
+            // trackable graphql
             //builder.Services
             //    .AddGraphQLServer()
             //    .AddInMemorySubscriptions()

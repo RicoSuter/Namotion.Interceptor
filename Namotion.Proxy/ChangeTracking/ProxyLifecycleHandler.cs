@@ -9,8 +9,6 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
 
     public void OnProxyAttached(ProxyLifecycleContext context)
     {
-        //AttachProxy(context.Context, context.ParentProxy, context.PropertyName, context.Proxy, context.Index);
-
         foreach (var child in FindProxiesInProperties(context.Proxy, new HashSet<IProxy>()))
         {
             AttachProxy(context.Context, child.Item1, child.Item2, child.Item3, child.Item4);
@@ -23,8 +21,6 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
         {
             DetachProxy(context.Context, child.Item1, child.Item2, child.Item3, child.Item4);
         }
-
-        //DetachProxy(context.Context, context.ParentProxy, context.PropertyName, context.Proxy, context.Index);
     }
 
     public void SetProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
@@ -128,7 +124,7 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
         }
     }
 
-    public IEnumerable<(IProxy, string, IProxy, object?)> FindProxiesInProperties(IProxy proxy, HashSet<IProxy> seen)
+    private IEnumerable<(IProxy, string, IProxy, object?)> FindProxiesInProperties(IProxy proxy, HashSet<IProxy> seen)
     {
         foreach (var property in proxy.Properties)
         {
