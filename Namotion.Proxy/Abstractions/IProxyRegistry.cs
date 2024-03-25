@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using Namotion.Proxy.Attributes;
+using System.Reflection;
 
 namespace Namotion.Proxy.Abstractions;
 
@@ -94,6 +95,14 @@ public record ProxyProperty(ProxyPropertyReference Property)
         {
             _children.Remove(parent);
         }
+    }
+
+    public void AddAttribute(string name, Type type, Func<object?>? getValue, Action<object?>? setValue)
+    {
+        Parent.AddProperty(
+            $"{Property.PropertyName}_{name}",
+            type, getValue, setValue,
+            new PropertyAttributeAttribute(Property.PropertyName, name));
     }
 }
 
