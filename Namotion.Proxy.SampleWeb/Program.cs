@@ -73,10 +73,10 @@ namespace Namotion.Trackable.SampleWeb
             builder.Services.AddMqttServerTrackableSource<Car>("mqtt");
 
             // trackable graphql
-            //builder.Services
-            //    .AddGraphQLServer()
-            //    .AddInMemorySubscriptions()
-            //    .AddTrackedGraphQL<Car>();
+            builder.Services
+                .AddGraphQLServer()
+                .AddInMemorySubscriptions()
+                .AddTrackedGraphQL<Car>();
 
             // other asp services
             builder.Services.AddHostedService<Simulator>();
@@ -88,7 +88,7 @@ namespace Namotion.Trackable.SampleWeb
             app.UseHttpsRedirection();
             app.UseAuthorization();
 
-            //app.MapGraphQL();
+            app.MapGraphQL();
 
             //app.UseOpenApi();
             //app.UseSwaggerUi();

@@ -112,9 +112,4 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
             }
         }
     }
-
-    public IDisposable Subscribe(IObserver<ProxyPropertyChanged> observer)
-    {
-        return _subject.Subscribe(observer);
-    }
 }

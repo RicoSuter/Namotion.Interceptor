@@ -1,8 +1,8 @@
-﻿namespace Namotion.Trackable.GraphQL
+﻿namespace Namotion.Proxy.GraphQL
 {
-    public class Subscription<TTrackable>
+    public class Subscription<TProxy>
     {
         [Subscribe]
-        public TTrackable Root([EventMessage] TTrackable trackable) => trackable;
+        public TProxy Root([EventMessage] TProxy proxy) => proxy;
     }
 }

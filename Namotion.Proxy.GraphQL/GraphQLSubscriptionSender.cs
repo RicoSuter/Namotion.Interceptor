@@ -1,27 +1,33 @@
 ﻿using HotChocolate.Subscriptions;
 using Microsoft.Extensions.Hosting;
+using Namotion.Proxy.ChangeTracking;
 using System.Reactive.Linq;
 
-namespace Namotion.Trackable.GraphQL
+namespace Namotion.Proxy.GraphQL
 {
-    public class GraphQLSubscriptionSender<TTrackable> : BackgroundService
-        where TTrackable : class
+    public class GraphQLSubscriptionSender<TProxy> : BackgroundService
+        where TProxy : class
     {
-        private readonly TrackableContext<TTrackable> _trackableContext;
+        private readonly IProxyContext _context;
+        private readonly TProxy _proxy;
         private readonly ITopicEventSender _sender;
 
-        public GraphQLSubscriptionSender(TrackableContext<TTrackable> trackableContext, ITopicEventSender sender)
+        // TODO: Inject IProxyContext<TProxy> so that multiple contexts are supported.
+        public GraphQLSubscriptionSender(IProxyContext context, TProxy proxy, ITopicEventSender sender)
         {
-            _trackableContext = trackableContext;
+            _context = context;
+            _proxy = proxy;
             _sender = sender;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await _trackableContext.ForEachAsync(async (change) =>
-            {
-                await _sender.SendAsync(nameof(Subscription<TTrackable>.Root), _trackableContext.Object, stoppingToken);
-            }, stoppingToken);
+            await _context
+                .GetHandler<IProxyPropertyChangedHandler>()
+                .ForEachAsync(async (change) =>
+                {
+                    await _sender.SendAsync(nameof(Subscription<TProxy>.Root), _proxy, stoppingToken);
+                }, stoppingToken);
         }
     }
 }

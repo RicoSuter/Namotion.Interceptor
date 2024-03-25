@@ -1,14 +1,14 @@
-﻿namespace Namotion.Trackable.GraphQL
+﻿namespace Namotion.Proxy.GraphQL
 {
-    public class Query<TTrackable>
+    public class Query<TProxy>
     {
-        private readonly TTrackable _trackable;
+        private readonly TProxy _proxy;
 
-        public Query(TTrackable trackable)
+        public Query(TProxy proxy)
         {
-            _trackable = trackable;
+            _proxy = proxy;
         }
 
-        public TTrackable GetRoot() => _trackable;
+        public TProxy GetRoot() => _proxy;
     }
 }
