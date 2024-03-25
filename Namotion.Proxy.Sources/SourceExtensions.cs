@@ -13,40 +13,37 @@ public static class SourceExtensions
 
     public static string? TryGetAttributeBasedSourcePropertyName(this ProxyPropertyReference property, string sourceName)
     {
-        return property.Proxy.Data.TryGetValue($"{SourcePropertyNameKey}{property.Name}.{sourceName}", out var value) ?
-            value as string : null;
+        return property.TryGetPropertyData($"{SourcePropertyNameKey}{sourceName}", out var value) ? value as string : null;
     }
 
     public static string? TryGetAttributeBasedSourcePath(this ProxyPropertyReference property, string sourceName, IProxyContext context)
     {
-        return property.Proxy.Data.TryGetValue($"{SourcePathKey}{property.Name}.{sourceName}", out var value) ?
-            value as string : null;
+        return property.TryGetPropertyData($"{SourcePathKey}{sourceName}", out var value) ? value as string : null;
     }
 
     public static string? TryGetAttributeBasedSourcePathPrefix(this ProxyPropertyReference property, string sourceName)
     {
-        return property.Proxy.Data.TryGetValue($"{SourcePathPrefixKey}{property.Name}.{sourceName}", out var value) ?
-            value as string : null;
+        return property.TryGetPropertyData($"{SourcePathPrefixKey}{sourceName}", out var value) ? value as string : null;
     }
 
     public static void SetAttributeBasedSourceProperty(this ProxyPropertyReference property, string sourceName, string sourceProperty)
     {
-        property.Proxy.Data[$"{SourcePropertyNameKey}{property.Name}.{sourceName}"] = sourceProperty;
+        property.SetPropertyData($"{SourcePropertyNameKey}{sourceName}", sourceProperty);
     }
 
     public static void SetAttributeBasedSourcePathPrefix(this ProxyPropertyReference property, string sourceName, string sourcePath)
     {
-        property.Proxy.Data[$"{SourcePathPrefixKey}{property.Name}.{sourceName}"] = sourcePath;
+        property.SetPropertyData($"{SourcePathPrefixKey}{sourceName}", sourcePath);
     }
 
     public static void SetAttributeBasedSourcePath(this ProxyPropertyReference property, string sourceName, string sourcePath)
     {
-        property.Proxy.Data[$"{SourcePathKey}{property.Name}.{sourceName}"] = sourcePath;
+        property.SetPropertyData($"{SourcePathKey}{sourceName}", sourcePath);
     }
 
     public static void SetValueFromSource(this ProxyPropertyReference property, ITrackableSource source, object? valueFromSource)
     {
-        var contexts = (HashSet<ITrackableSource>)property.Proxy.Data.GetOrAdd($"{IsChangingFromSourceKey}{property.Name}", _ => new HashSet<ITrackableSource>())!;
+        var contexts = property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ITrackableSource>())!;
         lock (contexts)
         {
             contexts.Add(source);
@@ -56,10 +53,10 @@ public static class SourceExtensions
         {
             var newValue = valueFromSource;
 
-            var currentValue = property.Proxy.Properties[property.Name].GetValue?.Invoke(property.Proxy);
+            var currentValue = property.Metadata.GetValue?.Invoke(property.Proxy);
             if (!Equals(currentValue, newValue))
             {
-                property.Proxy.Properties[property.Name].SetValue?.Invoke(property.Proxy, newValue);
+                property.Metadata.SetValue?.Invoke(property.Proxy, newValue);
             }
         }
         finally
@@ -73,7 +70,7 @@ public static class SourceExtensions
 
     public static bool IsChangingFromSource(this ProxyPropertyChanged change, ITrackableSource source)
     {
-        var contexts = (HashSet<ITrackableSource>)change.Property.Proxy.Data.GetOrAdd($"{IsChangingFromSourceKey}{change.Property.Name}", _ => new HashSet<ITrackableSource>())!;
+        var contexts = change.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ITrackableSource>())!;
         lock (contexts)
         {
             return contexts.Contains(source);

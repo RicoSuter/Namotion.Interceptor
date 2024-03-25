@@ -16,7 +16,7 @@ public static class DerivedPropertyChangeDetectionHandlerExtensions
         return property.GetOrAddPropertyData(RequiredPropertiesKey, () => new HashSet<ProxyPropertyReference>());
     }
 
-    public static void SetRequiredProperties(this ProxyPropertyReference property, HashSet<ProxyPropertyReference> requiredProperties)
+    internal static void SetRequiredProperties(this ProxyPropertyReference property, HashSet<ProxyPropertyReference> requiredProperties)
     {
         property.SetPropertyData(RequiredPropertiesKey, requiredProperties);
     }
