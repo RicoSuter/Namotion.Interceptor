@@ -13,7 +13,7 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
     {
         var proxies = new HashSet<IProxy>();
         var proxyProperties = new HashSet<(IProxy, ProxyPropertyReference, object?)>();
-        FindProxiesInProperties(context.Proxy, , proxyProperties);
+        FindProxiesInProperties(context.Proxy, proxies, proxyProperties);
         
         foreach (var child in proxyProperties)
         {
