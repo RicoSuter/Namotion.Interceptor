@@ -7,8 +7,15 @@ namespace Namotion.Proxy.ChangeTracking;
 /// </summary>
 internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxyWriteHandler
 {
+    private readonly Lazy<IProxyPropertyChangedHandler[]> _handlers;
+
     [ThreadStatic]
     private static Stack<HashSet<ProxyPropertyReference>>? _currentTouchedProperties;
+
+    public DerivedPropertyChangeDetectionHandler(Lazy<IProxyPropertyChangedHandler[]> handlers)
+    {
+        _handlers = handlers;
+    }
 
     public object? GetProperty(ReadProxyPropertyContext context, Func<ReadProxyPropertyContext, object?> next)
     {
@@ -51,9 +58,9 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
                         .Invoke(usedByProperty.Proxy);
 
                     var changedContext = new ProxyPropertyChanged(usedByProperty, oldValue, newValue, context.Context);
-                    foreach (var handler in context.Context.GetHandlers<IProxyPropertyChangedHandler>())
+                    for (int i = 0; i < _handlers.Value.Length; i++)
                     {
-                        handler.RaisePropertyChanged(changedContext);
+                        _handlers.Value[i].RaisePropertyChanged(changedContext);
                     }
                 }
             }

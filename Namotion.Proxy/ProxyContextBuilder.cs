@@ -27,4 +27,10 @@ public class ProxyContextBuilder : IProxyContextBuilder
     {
         return new ProxyContext(_handlers);
     }
+
+    public Lazy<THandler[]> GetLazyHandlers<THandler>()
+        where THandler : IProxyHandler
+    {
+        return new Lazy<THandler[]>(() => _handlers.OfType<THandler>().ToArray());
+    }
 }

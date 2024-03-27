@@ -6,6 +6,9 @@ public class ProxyContext : IProxyContext
 {
     private readonly IEnumerable<IProxyHandler> _handlers;
 
+    private readonly IProxyReadHandler[] _readHandlers;
+    private readonly IProxyWriteHandler[] _writeHandlers;
+
     public static ProxyContextBuilder CreateBuilder()
     {
         return new ProxyContextBuilder();
@@ -13,7 +16,9 @@ public class ProxyContext : IProxyContext
 
     public ProxyContext(IEnumerable<IProxyHandler> handlers)
     {
-        _handlers = handlers;
+        _handlers = handlers.ToArray();
+        _readHandlers = handlers.OfType<IProxyReadHandler>().Reverse().ToArray();
+        _writeHandlers = handlers.OfType<IProxyWriteHandler>().Reverse().ToArray();
     }
 
     public IEnumerable<THandler> GetHandlers<THandler>()
@@ -26,8 +31,9 @@ public class ProxyContext : IProxyContext
     {
         var context = new ReadProxyPropertyContext(new ProxyPropertyReference(proxy, propertyName), this);
 
-        foreach (var handler in GetHandlers<IProxyReadHandler>().Reverse())
+        for (int i = 0; i < _readHandlers.Length; i++)
         {
+            var handler = _readHandlers[i];
             var previousReadValue = readValue;
             readValue = () =>
             {
@@ -42,8 +48,9 @@ public class ProxyContext : IProxyContext
     {
         var context = new WriteProxyPropertyContext(new ProxyPropertyReference(proxy, propertyName), null, GetReadValueFunctionWithCache(readValue), this);
 
-        foreach (var handler in GetHandlers<IProxyWriteHandler>().Reverse())
+        for (int i = 0; i < _writeHandlers.Length; i++)
         {
+            var handler = _writeHandlers[i];
             var previousWriteValue = writeValue;
             writeValue = (value) =>
             {

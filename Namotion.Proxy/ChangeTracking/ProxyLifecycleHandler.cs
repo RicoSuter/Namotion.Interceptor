@@ -1,4 +1,5 @@
 ﻿using Namotion.Proxy.Abstractions;
+
 using System.Collections;
 
 namespace Namotion.Proxy.ChangeTracking;
@@ -6,6 +7,13 @@ namespace Namotion.Proxy.ChangeTracking;
 internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandler
 {
     private const string ReferenceCountKey = "Namotion.Proxy.Handlers.ReferenceCount";
+ 
+    private readonly Lazy<IProxyLifecycleHandler[]> _handlers;
+
+    public ProxyLifecycleHandler(Lazy<IProxyLifecycleHandler[]> handlers)
+    {
+        _handlers = handlers;
+    }
 
     // TODO: does it make sense that the two methods are not "the same"?
 
@@ -69,8 +77,9 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
         var count = proxy.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
         var registryContext = new ProxyLifecycleContext(property, index, proxy, count ?? 1, context);
 
-        foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
+        for (int i = 0; i < _handlers.Value.Length; i++)
         {
+            var handler = _handlers.Value[i];
             if (handler != this)
             {
                 handler.OnProxyAttached(registryContext);
@@ -82,8 +91,10 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
     {
         var count = proxy.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
         var registryContext = new ProxyLifecycleContext(property, index, proxy, count ?? 1, context);
-        foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
+       
+        for (int i = 0; i < _handlers.Value.Length; i++)
         {
+            var handler = _handlers.Value[i];
             if (handler != this)
             {
                 handler.OnProxyDetached(registryContext);

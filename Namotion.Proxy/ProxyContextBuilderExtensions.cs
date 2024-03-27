@@ -25,7 +25,7 @@ public static class ProxyContextBuilderExtensions
     {
         return builder
             .TryAddSingleHandler(new InitiallyLoadDerivedPropertiesHandler())
-            .TryAddSingleHandler(new DerivedPropertyChangeDetectionHandler())
+            .TryAddSingleHandler(new DerivedPropertyChangeDetectionHandler(builder.GetLazyHandlers<IProxyPropertyChangedHandler>()))
             .WithPropertyChangedHandlers();
     }
 
@@ -79,7 +79,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithProxyLifecycle(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new ProxyLifecycleHandler());
+            .TryAddSingleHandler(new ProxyLifecycleHandler(builder.GetLazyHandlers<IProxyLifecycleHandler>()));
     }
 
 
