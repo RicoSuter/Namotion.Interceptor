@@ -1,7 +1,6 @@
 ﻿using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
 using System.Collections.Immutable;
-using System.Reactive.Subjects;
 using System.Reflection;
 
 namespace Namotion.Proxy.Registry;
@@ -10,7 +9,6 @@ namespace Namotion.Proxy.Registry;
 
 internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
 {
-    private Subject<ProxyPropertyChanged> _subject = new();
     private Dictionary<IProxy, ProxyMetadata> _knownProxies = new();
 
     public IReadOnlyDictionary<IProxy, ProxyMetadata> KnownProxies
@@ -28,19 +26,17 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
         {
             if (!_knownProxies.TryGetValue(context.Proxy, out var metadata))
             {
-                metadata = new ProxyMetadata
-                {
-                    Proxy = context.Proxy
-                };
-
-                foreach (var p in context.Proxy.Properties)
-                {
-                    metadata.AddProperty(p.Key,
-                        p.Value.Info.PropertyType,
-                        p.Value.GetValue is not null ? () => p.Value.GetValue.Invoke(context.Proxy) : null,
-                        p.Value.SetValue is not null ? (value) => p.Value.SetValue.Invoke(context.Proxy, value) : null,
-                        p.Value.Info.GetCustomAttributes().ToArray());
-                }
+                metadata = new ProxyMetadata(context.Proxy);
+                metadata.AddProperties(context
+                    .Proxy
+                    .Properties
+                    .Select(p => new ProxyPropertyMetadata(new ProxyPropertyReference(context.Proxy, p.Key))
+                    {
+                        Type = p.Value.Info.PropertyType,
+                        GetValue = p.Value.GetValue is not null ? () => p.Value.GetValue.Invoke(context.Proxy) : null,
+                        SetValue = p.Value.SetValue is not null ? (value) => p.Value.SetValue.Invoke(context.Proxy, value) : null,
+                        Attributes = p.Value.Info.GetCustomAttributes().ToArray()
+                    }));
 
                 _knownProxies[context.Proxy] = metadata;
             }

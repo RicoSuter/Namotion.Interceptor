@@ -5,29 +5,50 @@ namespace Namotion.Proxy.Registry.Abstractions;
 
 public record ProxyMetadata
 {
-    private readonly ConcurrentDictionary<ProxyPropertyReference, byte> _parents = new();
-    private readonly ConcurrentDictionary<string, ProxyPropertyMetadata> _properties = new();
+    private readonly HashSet<ProxyPropertyReference> _parents = new();
+    private readonly Dictionary<string, ProxyPropertyMetadata> _properties = new Dictionary<string, ProxyPropertyMetadata>();
 
     [JsonIgnore]
-    public required IProxy Proxy { get; init; }
+    public IProxy Proxy { get; }
 
-    public ICollection<ProxyPropertyReference> Parents => _parents.Keys;
+    public ProxyMetadata(IProxy proxy)
+    {
+        Proxy = proxy;
+    }
 
-    public IReadOnlyDictionary<string, ProxyPropertyMetadata> Properties => _properties;
+    public ICollection<ProxyPropertyReference> Parents
+    {
+        get
+        {
+            lock (this)
+                return _parents.ToArray();
+        }
+    }
+
+    public IReadOnlyDictionary<string, ProxyPropertyMetadata> Properties
+    {
+        get
+        {
+            lock (this)
+                return _properties.ToDictionary(p => p.Key, p => p.Value);
+        }
+    }
 
     public void AddParent(ProxyPropertyReference parent)
     {
-        _parents.TryAdd(parent, 0);
+        lock (this)
+            _parents.Add(parent);
     }
 
     public void RemoveParent(ProxyPropertyReference parent)
     {
-        _parents.Remove(parent, out var _);
+        lock (this)
+            _parents.Remove(parent);
     }
 
     public void AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params object[] attributes)
     {
-        _properties.TryAdd(name, new ProxyPropertyMetadata(new ProxyPropertyReference(Proxy, name))
+        AddProperty(new ProxyPropertyMetadata(new ProxyPropertyReference(Proxy, name))
         {
             Parent = this,
             Type = type,
@@ -35,5 +56,23 @@ public record ProxyMetadata
             GetValue = getValue,
             SetValue = setValue
         });
+    }
+
+    internal void AddProperty(ProxyPropertyMetadata property)
+    {
+        lock (this)
+        {
+            _properties.Add(property.Property.Name, property);
+        }
+    }
+
+    internal void AddProperties(IEnumerable<ProxyPropertyMetadata> properties)
+    {
+        {
+            foreach (var property in properties)
+            {
+                _properties.Add(property.Property.Name, property);
+            }
+        }
     }
 }
