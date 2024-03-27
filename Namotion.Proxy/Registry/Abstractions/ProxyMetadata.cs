@@ -5,16 +5,11 @@ namespace Namotion.Proxy.Registry.Abstractions;
 
 public record ProxyMetadata
 {
+    private readonly Dictionary<string, ProxyPropertyMetadata> _properties;
     private readonly HashSet<ProxyPropertyReference> _parents = new();
-    private readonly Dictionary<string, ProxyPropertyMetadata> _properties = new Dictionary<string, ProxyPropertyMetadata>();
 
     [JsonIgnore]
     public IProxy Proxy { get; }
-
-    public ProxyMetadata(IProxy proxy)
-    {
-        Proxy = proxy;
-    }
 
     public ICollection<ProxyPropertyReference> Parents
     {
@@ -30,8 +25,21 @@ public record ProxyMetadata
         get
         {
             lock (this)
-                return _properties.ToDictionary(p => p.Key, p => p.Value);
+                return _properties!.ToDictionary(p => p.Key, p => p.Value);
         }
+    }
+
+    internal ProxyMetadata(IProxy proxy, IEnumerable<ProxyPropertyMetadata> properties)
+    {
+        Proxy = proxy;
+        _properties = properties
+            .ToDictionary(
+                p => p.Property.Name, 
+                p =>
+                {
+                    p.Parent = this;
+                    return p;
+                });
     }
 
     public void AddParent(ProxyPropertyReference parent)
@@ -48,31 +56,16 @@ public record ProxyMetadata
 
     public void AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params object[] attributes)
     {
-        AddProperty(new ProxyPropertyMetadata(new ProxyPropertyReference(Proxy, name))
-        {
-            Parent = this,
-            Type = type,
-            Attributes = attributes,
-            GetValue = getValue,
-            SetValue = setValue
-        });
-    }
-
-    internal void AddProperty(ProxyPropertyMetadata property)
-    {
         lock (this)
         {
-            _properties.Add(property.Property.Name, property);
-        }
-    }
-
-    internal void AddProperties(IEnumerable<ProxyPropertyMetadata> properties)
-    {
-        {
-            foreach (var property in properties)
+            _properties!.Add(name, new ProxyPropertyMetadata(new ProxyPropertyReference(Proxy, name))
             {
-                _properties.Add(property.Property.Name, property);
-            }
+                Parent = this,
+                Type = type,
+                Attributes = attributes,
+                GetValue = getValue,
+                SetValue = setValue
+            });
         }
     }
 }

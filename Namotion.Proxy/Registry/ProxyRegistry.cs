@@ -26,10 +26,7 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
         {
             if (!_knownProxies.TryGetValue(context.Proxy, out var metadata))
             {
-                metadata = new ProxyMetadata(context.Proxy);
-                metadata.AddProperties(context
-                    .Proxy
-                    .Properties
+                metadata = new ProxyMetadata(context.Proxy, context.Proxy.Properties
                     .Select(p => new ProxyPropertyMetadata(new ProxyPropertyReference(context.Proxy, p.Key))
                     {
                         Type = p.Value.Info.PropertyType,
