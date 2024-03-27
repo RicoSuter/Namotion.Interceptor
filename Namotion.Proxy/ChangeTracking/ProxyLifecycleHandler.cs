@@ -145,7 +145,10 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
         foreach (var property in proxy.Properties)
         {
             var childValue = property.Value.GetValue?.Invoke(proxy);
-            FindProxies(new ProxyPropertyReference(proxy, property.Key), childValue, null, touchedProxies, result);
+            if (childValue is not null)
+            {
+                FindProxies(new ProxyPropertyReference(proxy, property.Key), childValue, null, touchedProxies, result);
+            }
         }
     }
 }

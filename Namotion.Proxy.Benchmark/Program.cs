@@ -37,7 +37,7 @@ public static class Program
             watch.Restart();
             for (int j = 0; j < inner; ++j)
             {
-                benchmark.AddLotsOfPreviousCars();
+                benchmark.ChangeAllTires();
             }
             Console.WriteLine($"{i * inner}/{total} ({watch.ElapsedMilliseconds / inner} ms)");
         }
