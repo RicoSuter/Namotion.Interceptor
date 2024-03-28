@@ -73,6 +73,7 @@ namespace Namotion.Trackable.SampleWeb
                 .WithRegistry()
                 .WithFullPropertyTracking()
                 .WithProxyLifecycle()
+                .WithDataAnnotationValidation()
                 .Build();
 
             var car = new Car(context);

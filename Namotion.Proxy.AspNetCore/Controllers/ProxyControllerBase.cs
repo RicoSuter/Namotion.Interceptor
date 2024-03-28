@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text.Json;
-using System.Text.Json.Nodes;
+
 using Microsoft.AspNetCore.Mvc;
+
+using Namotion.Proxy.Registry;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Registry.Attributes;
 using Namotion.Proxy.Validation;
@@ -29,7 +31,10 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     public ActionResult<TProxy> GetVariables()
     {
         // TODO: correctly generate OpenAPI schema
-        return Ok(CreateJsonObject(_proxy, _context.GetHandler<IProxyRegistry>()));
+
+        return Ok(_context
+            .GetHandler<IProxyRegistry>()
+            .SerializeProxyToJson(_proxy));
     }
 
     [HttpPost]
@@ -42,8 +47,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
             var resolvedUpdates = updates
                 .Select(t =>
                 {
-                    (var proxy, var property) = GetPropertyMetadata(_proxy, t.Key.Split('.'));
-
+                    (var proxy, var property) = _proxy.FindPropertyFromJsonPath(t.Key);
                     return new
                     {
                         t.Key,
@@ -115,33 +119,6 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
         }
     }
 
-    private (IProxy?, PropertyMetadata) GetPropertyMetadata(IProxy proxy, string[] segments)
-    {
-        var next = segments[0];
-        if (segments.Length > 1)
-        {
-            if (next.Contains('['))
-            {
-                var segs = next.Split('[', ']');
-                next = segs[0];
-                var index = int.Parse(segs[1]);
-
-                var collection = proxy.Properties[next].GetValue?.Invoke(proxy) as ICollection;
-                var child = collection?.OfType<IProxy>().ElementAt(index);
-                return child is not null ? GetPropertyMetadata(child, segments.Skip(1).ToArray()) : (null, default);
-            }
-            else
-            {
-                var child = proxy.Properties[next].GetValue?.Invoke(proxy) as IProxy;
-                return child is not null ? GetPropertyMetadata(child, segments.Skip(1).ToArray()) : (null, default);
-            }
-        }
-        else
-        {
-            return (proxy, proxy.Properties[next]);
-        }
-    }
-
     /// <summary>
     /// Gets all leaf properties.
     /// </summary>
@@ -150,55 +127,6 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     public ActionResult<ProxyDescription> GetProperties()
     {
         return Ok(CreateProxyDescription(_proxy, _context.GetHandler<IProxyRegistry>()));
-    }
-
-    private static JsonObject CreateJsonObject(IProxy proxy, IProxyRegistry register)
-    {
-        // TODO: apply JSON naming policy
-        var obj = new JsonObject();
-        if (register.KnownProxies.TryGetValue(proxy, out var metadata))
-        {
-            foreach (var property in metadata.Properties
-                .Where(p => p.Value.GetValue is not null))
-            {
-                var name = GetPropertyName(metadata, property.Key, property.Value);
-                var value = property.Value.GetValue?.Invoke();
-                if (value is IProxy childProxy)
-                {
-                    obj[name] = CreateJsonObject(childProxy, register);
-                }
-                else if (value is ICollection collection && collection.OfType<IProxy>().Any())
-                {
-                    var children = new JsonArray();
-                    foreach (var arrayProxyItem in collection.OfType<IProxy>())
-                    {
-                        children.Add(CreateJsonObject(arrayProxyItem, register));
-                    }
-                    obj[name] = children;
-                }
-                else
-                {
-                    obj[name] = JsonValue.Create(value);
-                }
-            }
-        }
-        return obj;
-    }
-
-    private static string GetPropertyName(ProxyMetadata metadata, string name, ProxyPropertyMetadata property)
-    {
-        var attribute = property.Attributes
-            .OfType<PropertyAttributeAttribute>()
-            .FirstOrDefault();
-
-        if (attribute is not null)
-        {
-            return GetPropertyName(metadata,
-                attribute.PropertyName,
-                metadata.Properties[attribute.PropertyName]) + "@" + attribute.AttributeName;
-        }
-
-        return name; // TODO: apply JSON naming policy
     }
 
     public class ProxyDescription
@@ -227,7 +155,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
                 .Where(p => p.Value.GetValue is not null &&
                             p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any() == false))
             {
-                var name = GetPropertyName(metadata, property.Key, property.Value);
+                var name = metadata.GetJsonPropertyName(property.Key, property.Value);
                 var value = property.Value.GetValue?.Invoke();
 
                 description.Properties[name] = CreateDescription(register, metadata, property.Key, value);
