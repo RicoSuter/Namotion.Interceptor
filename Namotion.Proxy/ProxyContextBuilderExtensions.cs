@@ -2,6 +2,7 @@
 using Namotion.Proxy.ChangeTracking;
 using Namotion.Proxy.Lifecycle;
 using Namotion.Proxy.Registry;
+using Namotion.Proxy.Validation;
 
 namespace Namotion.Proxy;
 
@@ -33,6 +34,19 @@ public static class ProxyContextBuilderExtensions
     {
         return builder
             .TryAddSingleHandler(new PropertyChangeRecorder());
+    }
+
+    public static IProxyContextBuilder WithPropertyValidation(this IProxyContextBuilder builder)
+    {
+        return builder
+            .TryAddSingleHandler(new ProxyValidationHandler(builder.GetLazyHandlers<ITrackablePropertyValidator>()));
+    }
+
+    public static IProxyContextBuilder WithDataAnnotationValidation(this IProxyContextBuilder builder)
+    {
+        return builder
+            .TryAddSingleHandler(new DataAnnotationsValidator())
+            .WithPropertyValidation();
     }
 
     /// <summary>

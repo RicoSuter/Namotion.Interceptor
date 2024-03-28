@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc.Controllers;
 
 namespace Namotion.Trackable.AspNetCore.Controllers;
 
-internal class TrackablesControllerFeatureProvider<TController> : IApplicationFeatureProvider<ControllerFeature>
+internal class ProxyControllerFeatureProvider<TController> : IApplicationFeatureProvider<ControllerFeature>
 {
     public void PopulateFeature(IEnumerable<ApplicationPart> parts, ControllerFeature feature)
     {

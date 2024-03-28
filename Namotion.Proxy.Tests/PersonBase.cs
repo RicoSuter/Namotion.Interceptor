@@ -1,8 +1,11 @@
-﻿namespace Namotion.Proxy.Tests
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace Namotion.Proxy.Tests
 {
     [GenerateProxy]
     public abstract class PersonBase
     {
+        [MaxLength(4)]
         public virtual string? FirstName { get; set; }
 
         public virtual string? LastName { get; set; }

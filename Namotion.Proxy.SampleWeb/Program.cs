@@ -82,7 +82,7 @@ namespace Namotion.Trackable.SampleWeb
             builder.Services.AddSingleton<IProxyContext>(context);
 
             // trackable api controllers
-            builder.Services.AddTrackableControllers<Car, TrackablesController<Car>>();
+            builder.Services.AddProxyControllers<Car, TrackablesController<Car>>();
 
             // trackable UPC UA
             //builder.Services.AddOpcUaServerTrackableSource<Car>("mqtt");
@@ -117,7 +117,7 @@ namespace Namotion.Trackable.SampleWeb
 
         [OpenApiTag("Car")]
         [Route("/api/car")]
-        public class TrackablesController<TProxy> : TrackablesControllerBase<TProxy>
+        public class TrackablesController<TProxy> : ProxyControllerBase<TProxy>
             where TProxy : class, IProxy
         {
             public TrackablesController(IProxyContext context, TProxy proxy)
@@ -142,7 +142,6 @@ namespace Namotion.Trackable.SampleWeb
                     _car.Tires[0].Pressure = Random.Shared.Next(0, 40) / 10m;
                     _car.Tires[1].Pressure = Random.Shared.Next(0, 40) / 10m;
                     _car.Tires[2].Pressure = Random.Shared.Next(0, 40) / 10m;
-                    _car.Tires[3].Pressure = Random.Shared.Next(0, 40) / 10m;
 
                     await Task.Delay(1000, stoppingToken);
                 }

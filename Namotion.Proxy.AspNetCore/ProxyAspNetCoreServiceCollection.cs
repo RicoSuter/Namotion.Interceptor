@@ -5,24 +5,24 @@ using Namotion.Trackable.AspNetCore.Controllers;
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class TrackableAspNetCoreServiceCollection
+public static class ProxyAspNetCoreServiceCollection
 {
     /// <summary>
-    /// Registers a generic controller with the signature 'VariablesController{TVariables} : TrackablesControllerBase{TVariables} where TVariables : class'.
+    /// Registers a generic controller with the signature 'ProxyController{TProxy} : ProxyControllerBase{TProxy} where TProxy : class'.
     /// </summary>
     /// <typeparam name="TController">The controller type.</typeparam>
-    /// <typeparam name="TProxy">The trackable type.</typeparam>
+    /// <typeparam name="TProxy">The proxy type.</typeparam>
     /// <param name="services">The service collection.</param>
     /// <returns>The service collection.</returns>
-    public static IServiceCollection AddTrackableControllers<TProxy, TController>(this IServiceCollection services)
-        where TController : TrackablesControllerBase<TProxy>
+    public static IServiceCollection AddProxyControllers<TProxy, TController>(this IServiceCollection services)
+        where TController : ProxyControllerBase<TProxy>
         where TProxy : class, IProxy
     {
         services
             .AddControllers()
             .ConfigureApplicationPartManager(setup =>
             {
-                setup.FeatureProviders.Add(new TrackablesControllerFeatureProvider<TController>());
+                setup.FeatureProviders.Add(new ProxyControllerFeatureProvider<TController>());
             });
 
         return services;
