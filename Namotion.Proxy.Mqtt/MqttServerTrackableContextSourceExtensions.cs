@@ -9,9 +9,9 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class MqttServerTrackableContextSourceExtensions
 {
-    public static IServiceCollection AddMqttServerTrackableSource<TTrackable>(
+    public static IServiceCollection AddMqttServerProxySource<TProxy>(
         this IServiceCollection serviceCollection, string sourceName, string? pathPrefix = null)
-        where TTrackable : class
+        where TProxy : IProxy
     {
         return serviceCollection
             .AddSingleton(sp =>
@@ -19,18 +19,18 @@ public static class MqttServerTrackableContextSourceExtensions
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(
                     sourceName, sp.GetRequiredService<IProxyContext>(), pathPrefix);
 
-                return new MqttServerTrackableSource<TTrackable>(
+                return new MqttServerTrackableSource<TProxy>(
                     sp.GetRequiredService<IProxyContext>(),
                     sourcePathProvider,
-                    sp.GetRequiredService<ILogger<MqttServerTrackableSource<TTrackable>>>());
+                    sp.GetRequiredService<ILogger<MqttServerTrackableSource<TProxy>>>());
             })
-            .AddHostedService(sp => sp.GetRequiredService<MqttServerTrackableSource<TTrackable>>())
+            .AddHostedService(sp => sp.GetRequiredService<MqttServerTrackableSource<TProxy>>())
             .AddHostedService(sp =>
             {
-                return new TrackableContextSourceBackgroundService<TTrackable>(
-                    sp.GetRequiredService<MqttServerTrackableSource<TTrackable>>(),
+                return new TrackableContextSourceBackgroundService<TProxy>(
+                    sp.GetRequiredService<MqttServerTrackableSource<TProxy>>(),
                     sp.GetRequiredService<IProxyContext>(),
-                    sp.GetRequiredService<ILogger<TrackableContextSourceBackgroundService<TTrackable>>>());
+                    sp.GetRequiredService<ILogger<TrackableContextSourceBackgroundService<TProxy>>>());
             });
     }
 }

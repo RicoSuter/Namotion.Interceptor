@@ -14,6 +14,11 @@ public record struct ProxyPropertyReference(IProxy Proxy, string Name)
         return Proxy.Data.TryGetValue($"{key}:{Name}", out value);
     }
 
+    public readonly object? GetPropertyData(string key)
+    {
+        return Proxy.Data[$"{key}:{Name}"];
+    }
+
     public readonly T GetOrAddPropertyData<T>(string key, Func<T> valueFactory)
     {
         return (T)Proxy.Data.GetOrAdd($"{key}:{Name}", _ => valueFactory())!;

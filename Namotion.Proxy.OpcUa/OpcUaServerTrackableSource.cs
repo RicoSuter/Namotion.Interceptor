@@ -1,40 +1,41 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Namotion.Trackable;
-using System.Reactive.Linq;
-using Namotion.Trackable.Model;
-using System.Collections.Concurrent;
-using Namotion.Trackable.Sources;
+
 using Opc.UaFx;
 using Opc.UaFx.Server;
+
+using System.Reactive.Linq;
 using System.Collections.ObjectModel;
-using Newtonsoft.Json.Linq;
-using System.Xml.Linq;
+
+using Namotion.Proxy;
+using Namotion.Proxy.Sources.Abstractions;
+using Namotion.Proxy.Registry.Abstractions;
 
 namespace Namotion.Trackable.OpcUa
 {
-    public class OpcUaServerTrackableSource<TTrackable> : BackgroundService, ITrackableSource, IDisposable
-        where TTrackable : class
+    public class OpcUaServerTrackableSource<TProxy> : BackgroundService, ITrackableSource, IDisposable
+        where TProxy : IProxy
     {
         internal const string OpcVariableKey = "OpcVariable";
 
-        private readonly TrackableContext<TTrackable> _trackableContext;
+        private readonly IProxyContext _context;
         internal readonly ISourcePathProvider _sourcePathProvider;
         private readonly ILogger _logger;
 
-        private readonly OpcProviderBasedNodeManager<TTrackable> _nodeManager;
+        private readonly OpcProviderBasedNodeManager<TProxy> _nodeManager;
         private readonly OpcNodeSet[] _nodeSets = Array.Empty<OpcNodeSet>();
 
         private OpcServer? _opcServer;
 
         public OpcUaServerTrackableSource(
-            TrackableContext<TTrackable> trackableContext,
+            IProxyContext context,
+            TProxy proxy,
             ISourcePathProvider sourcePathProvider,
-            ILogger<OpcUaServerTrackableSource<TTrackable>> logger)
+            ILogger<OpcUaServerTrackableSource<TProxy>> logger)
         {
-            _trackableContext = trackableContext;
+            _context = context;
             _sourcePathProvider = sourcePathProvider;
-            _nodeManager = new OpcProviderBasedNodeManager<TTrackable>(_trackableContext, this);
+            _nodeManager = new OpcProviderBasedNodeManager<TProxy>(_context, proxy, this);
             _logger = logger;
         }
 
@@ -72,25 +73,26 @@ namespace Namotion.Trackable.OpcUa
             base.Dispose();
         }
 
-        public Task<IDisposable?> InitializeAsync(IEnumerable<PropertyInfo> properties, Action<PropertyInfo> propertyUpdateAction, CancellationToken cancellationToken)
+        public Task<IDisposable?> InitializeAsync(IEnumerable<ProxyPropertyPathReference> properties, Action<ProxyPropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
         {
             return Task.FromResult<IDisposable?>(null);
         }
 
-        public Task<IEnumerable<PropertyInfo>> ReadAsync(IEnumerable<PropertyInfo> properties, CancellationToken cancellationToken)
+        public Task<IEnumerable<ProxyPropertyPathReference>> ReadAsync(IEnumerable<ProxyPropertyPathReference> properties, CancellationToken cancellationToken)
         {
-            return Task.FromResult<IEnumerable<PropertyInfo>>(properties
-                .Where(p => p.Property.Data.ContainsKey(OpcUaServerTrackableSource<TTrackable>.OpcVariableKey))
-                .Select(property => (property, node: property.Property.Data[OpcUaServerTrackableSource<TTrackable>.OpcVariableKey] as OpcDataVariableNode))
+            return Task.FromResult<IEnumerable<ProxyPropertyPathReference>>(properties
+                .Where(p => p.Property.TryGetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, out var _))
+                .Select(property => (property, node: property.Property.GetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey) as OpcDataVariableNode))
                 .Where(p => p.node is not null)
-                .Select(p => new PropertyInfo(p.property.Property, p.property.Path, p.node!.Value))
+                .Select(p => new ProxyPropertyPathReference(p.property.Property, p.property.Path,
+                    p.property.Property.Metadata.Info.PropertyType == typeof(decimal) ? Convert.ToDecimal(p.node!.Value) : p.node!.Value))
                 .ToList());
         }
 
-        public async Task WriteAsync(IEnumerable<PropertyInfo> propertyChanges, CancellationToken cancellationToken)
+        public Task WriteAsync(IEnumerable<ProxyPropertyPathReference> propertyChanges, CancellationToken cancellationToken)
         {
             foreach (var property in propertyChanges
-                .Where(p => p.Property.Data.ContainsKey(OpcUaServerTrackableSource<TTrackable>.OpcVariableKey)))
+                .Where(p => p.Property.TryGetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, out var _)))
             {
                 var actualValue = property.Value;
                 if (actualValue is decimal)
@@ -98,39 +100,43 @@ namespace Namotion.Trackable.OpcUa
                     actualValue = Convert.ToDouble(actualValue);
                 }
 
-                var node = property.Property.Data[OpcUaServerTrackableSource<TTrackable>.OpcVariableKey] as OpcDataVariableNode;
+                var node = property.Property.GetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey) as OpcDataVariableNode;
                 node!.Value = actualValue;
                 node.UpdateChanges(_opcServer!.SystemContext, OpcNodeChanges.Value);
             }
+
+            return Task.CompletedTask;
         }
 
-        public string? TryGetSourcePath(TrackedProperty property)
+        public string? TryGetSourcePath(ProxyPropertyReference property)
         {
             return _sourcePathProvider.TryGetSourcePath(property);
         }
     }
 
-    public class OpcProviderBasedNodeManager<TTrackable> : OpcNodeManager
-        where TTrackable : class
+    public class OpcProviderBasedNodeManager<TProxy> : OpcNodeManager
+        where TProxy : IProxy
     {
-        private readonly TrackableContext<TTrackable> _trackableContext;
-
+        private readonly IProxyContext _context;
+        private readonly IProxyRegistry _registry;
+        private readonly TProxy _proxy;
         private readonly IEnumerable<IOpcUaNodeProvider> _nodeProviders = Enumerable.Empty<IOpcUaNodeProvider>();
 
-        private TrackableContext<TTrackable> trackableContext;
-        private OpcUaServerTrackableSource<TTrackable> _source;
+        private OpcUaServerTrackableSource<TProxy> _source;
 
-        public OpcProviderBasedNodeManager(TrackableContext<TTrackable> trackableContext, OpcUaServerTrackableSource<TTrackable> source)
+        public OpcProviderBasedNodeManager(IProxyContext context, TProxy proxy, OpcUaServerTrackableSource<TProxy> source)
             : base("https://foobar/")
         {
-            _trackableContext = trackableContext;
+            _context = context;
+            _registry = context.GetHandler<IProxyRegistry>();
+            _proxy = proxy;
             _source = source;
         }
 
         public OpcServer CreateServer()
         {
             var companionSpecsManager = OpcNodeSetManager.Create(
-                NodeSetFactory.LoadNodeSetFromEmbeddedResource<OpcProviderBasedNodeManager<TTrackable>>("NodeSets.Opc.Ua.Di.NodeSet2.xml"),
+                NodeSetFactory.LoadNodeSetFromEmbeddedResource<OpcProviderBasedNodeManager<TProxy>>("NodeSets.Opc.Ua.Di.NodeSet2.xml"),
                 _nodeProviders
                     .SelectMany(p => p.CreateNodeSets())
                     .DistinctBy(n => n.Name)
@@ -159,11 +165,11 @@ namespace Namotion.Trackable.OpcUa
                 References = references
             };
 
-            var root = _trackableContext.TryGetTracker(_trackableContext.Object);
-            if (root is not null)
+            var metadata = _registry.KnownProxies[_proxy];
+            if (metadata is not null)
             {
                 var node = new OpcFolderNode(new OpcName("Root", DefaultNamespaceIndex));
-                CreateObjectNode(context, root, node);
+                CreateObjectNode(context, metadata, node, string.Empty);
                 context.Nodes.Add(node);
                 context.References.Add(node, OpcObjectTypes.ObjectsFolder);
             }
@@ -179,18 +185,20 @@ namespace Namotion.Trackable.OpcUa
             }
         }
 
-        private void CreateObjectNode(OpcUaNodeProviderContext context, ProxyTracker parent, OpcInstanceNode parentNode)
+        private void CreateObjectNode(OpcUaNodeProviderContext context, ProxyMetadata metadata, OpcInstanceNode parentNode, string prefix)
         {
-            foreach (var property in parent.Properties)
+            foreach (var property in metadata.Properties)
             {
-                var propertyName = _source._sourcePathProvider.TryGetSourceProperty(property.Value);
+                var propertyName = _source._sourcePathProvider.TryGetSourcePropertyName(property.Value.Property);
                 if (property.Value.Children.Any())
                 {
                     var propertyNode = new OpcFolderNode(new OpcName(propertyName, DefaultNamespaceIndex));
                     foreach (var child in property.Value.Children)
                     {
-                        var objectNode = new OpcObjectNode(child.Path);
-                        CreateObjectNode(context, child, objectNode);
+                        // TODO: Improve this
+                        var path = (prefix + "." + propertyName + (child.Index is not null ? $"[{child.Index}]" : string.Empty)).Trim('.');
+                        var objectNode = new OpcObjectNode(path);
+                        CreateObjectNode(context, _registry.KnownProxies[child.Proxy], objectNode, path);
 
                         propertyNode.AddChild(context.Context, objectNode);
                     }
@@ -198,11 +206,11 @@ namespace Namotion.Trackable.OpcUa
                 }
                 else
                 {
-                    var sourcePath = _source.TryGetSourcePath(property.Value);
+                    var sourcePath = _source.TryGetSourcePath(property.Value.Property);
                     if (sourcePath is not null)
                     {
-                        var value = property.Value.GetValue();
-                        var type = property.Value.PropertyType;
+                        var value = property.Value.GetValue?.Invoke();
+                        var type = property.Value.Type;
 
                         if (type == typeof(decimal))
                         {
@@ -215,7 +223,7 @@ namespace Namotion.Trackable.OpcUa
                         var variable = (OpcDataVariableNode)Activator.CreateInstance(opcType, opcName)!;
 
                         variable.Value = value;
-                        property.Value.Data = property.Value.Data.SetItem(OpcUaServerTrackableSource<TTrackable>.OpcVariableKey, variable);
+                        property.Value.Property.SetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, variable);
 
                         parentNode.AddChild(context.Context, variable);
                     }

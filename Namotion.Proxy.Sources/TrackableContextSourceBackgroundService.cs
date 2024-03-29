@@ -10,7 +10,7 @@ using Namotion.Proxy.Registry.Abstractions;
 namespace Namotion.Trackable.Sources;
 
 public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundService
-    where TTrackable : class
+    where TTrackable : IProxy
 {
     private readonly IProxyContext _context;
     private readonly ITrackableSource _source;

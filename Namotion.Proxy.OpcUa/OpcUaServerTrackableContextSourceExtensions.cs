@@ -1,36 +1,37 @@
 ﻿using Microsoft.Extensions.Logging;
-using Namotion.Trackable;
 using Namotion.Trackable.Sources;
 using Namotion.Trackable.OpcUa;
-using Microsoft.Extensions.Hosting;
+using Namotion.Proxy.Sources;
+using Namotion.Proxy;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
 public static class OpcUaServerTrackableContextSourceExtensions
 {
-    public static IServiceCollection AddOpcUaServerTrackableSource<TTrackable>(
+    public static IServiceCollection AddOpcUaServerProxySource<TProxy>(
         this IServiceCollection serviceCollection, string sourceName, string? pathPrefix = null)
-        where TTrackable : class
+        where TProxy : IProxy
     {
         return serviceCollection
             .AddSingleton(sp =>
             {
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(
-                    sourceName, sp.GetRequiredService<TrackableContext<TTrackable>>(), pathPrefix);
+                    sourceName, sp.GetRequiredService<IProxyContext>(), pathPrefix);
 
-                return new OpcUaServerTrackableSource<TTrackable>(
-                    sp.GetRequiredService<TrackableContext<TTrackable>>(),
+                return new OpcUaServerTrackableSource<TProxy>(
+                    sp.GetRequiredService<IProxyContext>(),
+                    sp.GetRequiredService<TProxy>(),
                     sourcePathProvider,
-                    sp.GetRequiredService<ILogger<OpcUaServerTrackableSource<TTrackable>>>());
+                    sp.GetRequiredService<ILogger<OpcUaServerTrackableSource<TProxy>>>());
             })
-            .AddHostedService(sp => sp.GetRequiredService<OpcUaServerTrackableSource<TTrackable>>())
+            .AddHostedService(sp => sp.GetRequiredService<OpcUaServerTrackableSource<TProxy>>())
             .AddHostedService(sp =>
             {
-                return new TrackableContextSourceBackgroundService<TTrackable>(
-                    sp.GetRequiredService<OpcUaServerTrackableSource<TTrackable>>(),
-                    sp.GetRequiredService<TrackableContext<TTrackable>>(),
-                    sp.GetRequiredService<ILogger<TrackableContextSourceBackgroundService<TTrackable>>>());
+                return new TrackableContextSourceBackgroundService<TProxy>(
+                    sp.GetRequiredService<OpcUaServerTrackableSource<TProxy>>(),
+                    sp.GetRequiredService<IProxyContext>(),
+                    sp.GetRequiredService<ILogger<TrackableContextSourceBackgroundService<TProxy>>>());
             });
     }
 }

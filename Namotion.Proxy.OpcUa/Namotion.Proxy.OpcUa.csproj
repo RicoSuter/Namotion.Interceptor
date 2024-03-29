@@ -22,7 +22,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Namotion.Trackable\Namotion.Trackable.csproj" />
+    <ProjectReference Include="..\Namotion.Proxy.Sources\Namotion.Proxy.Sources.csproj" />
+    <ProjectReference Include="..\Namotion.Proxy\Namotion.Proxy.csproj" />
   </ItemGroup>
 
 </Project>
