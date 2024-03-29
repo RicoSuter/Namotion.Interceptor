@@ -5,11 +5,11 @@ namespace Namotion.Proxy.Sources;
 
 public static class SourceExtensions
 {
-    private const string SourcePropertyNameKey = "SourcePropertyName:";
-    private const string SourcePathKey = "SourcePath:";
-    private const string SourcePathPrefixKey = "SourcePathPrefix:";
+    private const string SourcePropertyNameKey = "Namotion.SourcePropertyName:";
+    private const string SourcePathKey = "Namotion.SourcePath:";
+    private const string SourcePathPrefixKey = "Namotion.SourcePathPrefix:";
 
-    private const string IsChangingFromSourceKey = "IsChangingFromSource";
+    private const string IsChangingFromSourceKey = "Namotion.IsChangingFromSource";
 
     public static string? TryGetAttributeBasedSourcePropertyName(this ProxyPropertyReference property, string sourceName)
     {
