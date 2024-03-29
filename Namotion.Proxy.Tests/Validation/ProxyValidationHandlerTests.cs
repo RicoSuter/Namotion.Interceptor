@@ -15,8 +15,10 @@ public class ProxyValidationHandlerTests
             .Build();
 
         // Act
-        var person = new Person(context);
-        person.FirstName = "Rico"; // allowed
+        var person = new Person(context)
+        {
+            FirstName = "Rico" // allowed
+        };
 
         // Assert
         Assert.Throws<ValidationException>(() =>
