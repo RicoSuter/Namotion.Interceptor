@@ -6,9 +6,9 @@ namespace Namotion.Proxy.Validation;
 
 public class ProxyValidationHandler : IProxyWriteHandler
 {
-    private readonly Lazy<ITrackablePropertyValidator[]> _propertyValidators;
+    private readonly Lazy<IProxyPropertyValidator[]> _propertyValidators;
 
-    public ProxyValidationHandler(Lazy<ITrackablePropertyValidator[]> propertyValidators)
+    public ProxyValidationHandler(Lazy<IProxyPropertyValidator[]> propertyValidators)
     {
         _propertyValidators = propertyValidators;
     }

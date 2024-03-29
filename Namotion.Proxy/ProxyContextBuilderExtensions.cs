@@ -36,12 +36,22 @@ public static class ProxyContextBuilderExtensions
             .TryAddSingleHandler(new PropertyChangeRecorder());
     }
 
+    /// <summary>
+    /// Registers support for <see cref="IProxyPropertyValidator"/> handlers.
+    /// </summary>
+    /// <param name="builder">The builder.</param>
+    /// <returns>The builder.</returns>
     public static IProxyContextBuilder WithPropertyValidation(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new ProxyValidationHandler(builder.GetLazyHandlers<ITrackablePropertyValidator>()));
+            .TryAddSingleHandler(new ProxyValidationHandler(builder.GetLazyHandlers<IProxyPropertyValidator>()));
     }
 
+    /// <summary>
+    /// Adds support for data annotations on the proxy properties and <see cref="WithPropertyValidation"/>.
+    /// </summary>
+    /// <param name="builder">The builder.</param>
+    /// <returns>The builder.</returns>
     public static IProxyContextBuilder WithDataAnnotationValidation(this IProxyContextBuilder builder)
     {
         return builder
@@ -52,8 +62,8 @@ public static class ProxyContextBuilderExtensions
     /// <summary>
     /// Adds support for <see cref="IProxyChangedHandler"/> handlers.
     /// </summary>
-    /// <param name="builder"></param>
-    /// <returns></returns>
+    /// <param name="builder">The builder.</param>
+    /// <returns>The builder.</returns>
     public static IProxyContextBuilder WithPropertyChangedHandlers(this IProxyContextBuilder builder)
     {
         return builder
@@ -61,11 +71,10 @@ public static class ProxyContextBuilderExtensions
     }
 
     /// <summary>
-    /// 
     /// Adds support for <see cref="IProxyLifecycleHandler"/> handlers.
     /// </summary>
-    /// <param name="builder"></param>
-    /// <returns></returns>
+    /// <param name="builder">The builder.</param>
+    /// <returns>The builder.</returns>
     public static IProxyContextBuilder WithRegistry(this IProxyContextBuilder builder)
     {
         return builder
@@ -74,10 +83,10 @@ public static class ProxyContextBuilderExtensions
     }
 
     /// <summary>
-    /// Adds  automatic context assignment and <see cref="WithProxyLifecycle"/>.
+    /// Adds automatic context assignment and <see cref="WithProxyLifecycle"/>.
     /// </summary>
-    /// <param name="builder"></param>
-    /// <returns></returns>
+    /// <param name="builder">The builder.</param>
+    /// <returns>The builder.</returns>
     public static IProxyContextBuilder WithAutomaticContextAssignment(this IProxyContextBuilder builder)
     {
         return builder
@@ -88,14 +97,13 @@ public static class ProxyContextBuilderExtensions
     /// <summary>
     /// Adds support for <see cref="IProxyLifecycleHandler"/> handlers.
     /// </summary>
-    /// <param name="builder"></param>
-    /// <returns></returns>
+    /// <param name="builder">The builder.</param>
+    /// <returns>The builder.</returns>
     public static IProxyContextBuilder WithProxyLifecycle(this IProxyContextBuilder builder)
     {
         return builder
             .TryAddSingleHandler(new ProxyLifecycleHandler(builder.GetLazyHandlers<IProxyLifecycleHandler>()));
     }
-
 
     public static IProxyContextBuilder WithParents(this IProxyContextBuilder builder)
     {
