@@ -1,6 +1,6 @@
 ﻿using Namotion.Proxy.Lifecycle;
 
-namespace Namotion.Proxy.Tests.Handlers;
+namespace Namotion.Proxy.Tests.Lifecycle;
 
 public class ParentsHandlerTests
 {
