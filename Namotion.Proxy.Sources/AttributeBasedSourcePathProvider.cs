@@ -4,7 +4,7 @@ namespace Namotion.Proxy.Sources;
 
 public class AttributeBasedSourcePathProvider : ISourcePathProvider
 {
-    private string _sourceName;
+    private readonly string _sourceName;
 
     private readonly IProxyContext _context;
     private readonly string? _pathPrefix;
