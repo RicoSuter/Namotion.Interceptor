@@ -54,32 +54,39 @@ public static class ProxyExtensions
         return proxy.FindPropertyFromJsonPath(path.Split('.'));
     }
 
-    private static (IProxy?, PropertyMetadata) FindPropertyFromJsonPath(this IProxy proxy, string[] segments)
+    private static (IProxy?, PropertyMetadata) FindPropertyFromJsonPath(this IProxy proxy, IEnumerable<string> segments)
     {
         // TODO: Improve this code, correcly apply JSON naming policy from serializer options
 
-        var next = segments[0][0].ToString().ToUpperInvariant() + segments[0][1..];
-        if (segments.Length > 1)
+        var nextSegment = ToUpperStart(segments.First());
+        segments = segments.Skip(1);
+    
+        if (segments.Any())
         {
-            if (next.Contains('['))
+            if (nextSegment.Contains('['))
             {
-                var segs = next.Split('[', ']');
-                next = segs[0];
-                var index = int.Parse(segs[1]);
+                var arraySegments = nextSegment.Split('[', ']');
+                var index = int.Parse(arraySegments[1]);
+                nextSegment = arraySegments[0];
 
-                var collection = proxy.Properties[next].GetValue?.Invoke(proxy) as ICollection;
+                var collection = proxy.Properties[nextSegment].GetValue?.Invoke(proxy) as ICollection;
                 var child = collection?.OfType<IProxy>().ElementAt(index);
-                return child is not null ? FindPropertyFromJsonPath(child, segments.Skip(1).ToArray()) : (null, default);
+                return child is not null ? FindPropertyFromJsonPath(child, segments) : (null, default);
             }
             else
             {
-                var child = proxy.Properties[next].GetValue?.Invoke(proxy) as IProxy;
-                return child is not null ? FindPropertyFromJsonPath(child, segments.Skip(1).ToArray()) : (null, default);
+                var child = proxy.Properties[nextSegment].GetValue?.Invoke(proxy) as IProxy;
+                return child is not null ? FindPropertyFromJsonPath(child, segments) : (null, default);
             }
         }
         else
         {
-            return (proxy, proxy.Properties[next]);
+            return (proxy, proxy.Properties[nextSegment]);
         }
+    }
+
+    private static string ToUpperStart(string value)
+    {
+        return value[0].ToString().ToUpperInvariant() + value[1..];
     }
 }

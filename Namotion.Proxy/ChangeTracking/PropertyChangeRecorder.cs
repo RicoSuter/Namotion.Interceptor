@@ -7,17 +7,16 @@ namespace Namotion.Proxy.ChangeTracking;
 
 internal class PropertyChangeRecorder : IProxyReadHandler
 {
-    internal static AsyncLocal<IDictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>> _scopes = 
-        new AsyncLocal<IDictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>>();
+    internal static AsyncLocal<IDictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>> Scopes { get; } = new();
 
     public object? GetProperty(ReadProxyPropertyContext context, Func<ReadProxyPropertyContext, object?> next)
     {
-        if (_scopes.Value is not null)
+        if (Scopes.Value is not null)
         {
             lock (typeof(PropertyChangeRecorder))
             {
-                if (_scopes.Value is not null &&
-                    _scopes.Value.TryGetValue(context.Context, out var scopes))
+                if (Scopes.Value is not null &&
+                    Scopes.Value.TryGetValue(context.Context, out var scopes))
                 {
                     foreach (var scope in scopes)
                     {

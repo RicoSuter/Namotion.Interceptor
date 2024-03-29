@@ -6,7 +6,7 @@ namespace Namotion.Proxy.ChangeTracking;
 
 internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandler
 {
-    private const string ReferenceCountKey = "Namotion.Proxy.Handlers.ReferenceCount";
+    private const string ReferenceCountKey = "Namotion.ReferenceCount";
  
     private readonly Lazy<IProxyLifecycleHandler[]> _handlers;
 

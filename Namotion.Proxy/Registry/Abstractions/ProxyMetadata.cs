@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace Namotion.Proxy.Registry.Abstractions;
 

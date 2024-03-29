@@ -1,4 +1,5 @@
 ﻿using Namotion.Proxy.Abstractions;
+
 using System.ComponentModel.DataAnnotations;
 using System.Reactive.Linq;
 

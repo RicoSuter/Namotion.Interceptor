@@ -45,6 +45,8 @@ public class PropertyChangeRecorderScope : IDisposable
     public void Dispose()
     {
         lock (typeof(PropertyChangeRecorder))
-            PropertyChangeRecorder._scopes.Value?[_context]?.Remove(_properties);
+        {
+            PropertyChangeRecorder.Scopes.Value?[_context]?.Remove(_properties);
+        }
     }
 }

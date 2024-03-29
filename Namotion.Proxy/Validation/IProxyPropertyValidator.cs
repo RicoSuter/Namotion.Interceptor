@@ -1,5 +1,5 @@
-﻿using Namotion.Proxy;
-using Namotion.Proxy.Abstractions;
+﻿using Namotion.Proxy.Abstractions;
+
 using System.ComponentModel.DataAnnotations;
 
 namespace Namotion.Proxy.Validation;

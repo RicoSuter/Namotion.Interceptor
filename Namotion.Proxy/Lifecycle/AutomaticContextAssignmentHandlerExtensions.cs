@@ -4,7 +4,7 @@
 
 public static class AutomaticContextAssignmentHandlerExtensions
 {
-    private const string ParentsKey = "Namotion.Proxy.Parents";
+    private const string ParentsKey = "Namotion.Parents";
 
     public static void AddParent(this IProxy proxy, IProxy parent)
     {
