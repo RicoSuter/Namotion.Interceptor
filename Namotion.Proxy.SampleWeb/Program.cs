@@ -22,20 +22,20 @@ namespace Namotion.Trackable.SampleWeb
             };
         }
 
-        [TrackableSource("mqtt", "name")]
+        [ProxySource("mqtt", "name")]
         public virtual string Name { get; set; } = "My Car";
 
-        [TrackableSourcePath("mqtt", "tires")]
+        [ProxySourcePath("mqtt", "tires")]
         public virtual Tire[] Tires { get; set; }
 
-        [TrackableSource("mqtt", "averagePressure")]
+        [ProxySource("mqtt", "averagePressure")]
         public virtual decimal AveragePressure => Tires.Average(t => t.Pressure);
     }
 
     [GenerateProxy]
     public abstract class TireBase
     {
-        [TrackableSource("mqtt", "pressure")]
+        [ProxySource("mqtt", "pressure")]
         [Unit("bar")]
         public virtual decimal Pressure { get; set; }
 

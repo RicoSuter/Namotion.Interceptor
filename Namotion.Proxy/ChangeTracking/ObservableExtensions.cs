@@ -1,10 +1,9 @@
 ﻿using Namotion.Proxy.Abstractions;
-
 using System.Reactive.Linq;
 
-namespace Namotion.Trackable.Sources;
+namespace Namotion.Proxy.ChangeTracking;
 
-public static class TrackableObservableExtensions
+public static class ObservableExtensions
 {
     public static IObservable<IEnumerable<ProxyPropertyChanged>> BufferChanges(this IObservable<ProxyPropertyChanged> observable, TimeSpan bufferTime)
     {

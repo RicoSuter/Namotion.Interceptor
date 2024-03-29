@@ -3,7 +3,7 @@
 namespace Namotion.Proxy.Sources.Attributes;
 
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
-public class TrackableSourcePathAttribute : Attribute, IProxyPropertyInitializer
+public class ProxySourcePathAttribute : Attribute, IProxyPropertyInitializer
 {
     public string SourceName { get; }
 
@@ -11,7 +11,7 @@ public class TrackableSourcePathAttribute : Attribute, IProxyPropertyInitializer
 
     public string? AbsolutePath { get; set; }
 
-    public TrackableSourcePathAttribute(string sourceName, string? path = null)
+    public ProxySourcePathAttribute(string sourceName, string? path = null)
     {
         SourceName = sourceName;
         Path = path;

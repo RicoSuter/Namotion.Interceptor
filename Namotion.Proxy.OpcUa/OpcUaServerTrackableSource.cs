@@ -13,7 +13,7 @@ using Namotion.Proxy.Registry.Abstractions;
 
 namespace Namotion.Trackable.OpcUa
 {
-    public class OpcUaServerTrackableSource<TProxy> : BackgroundService, ITrackableSource, IDisposable
+    public class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
         where TProxy : IProxy
     {
         internal const string OpcVariableKey = "OpcVariable";

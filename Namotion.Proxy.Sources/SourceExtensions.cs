@@ -1,5 +1,6 @@
 ﻿using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Sources.Abstractions;
+using System.Text.Json;
 
 namespace Namotion.Proxy.Sources;
 
@@ -41,9 +42,9 @@ public static class SourceExtensions
         property.SetPropertyData($"{SourcePathKey}{sourceName}", sourcePath);
     }
 
-    public static void SetValueFromSource(this ProxyPropertyReference property, ITrackableSource source, object? valueFromSource)
+    public static void SetValueFromSource(this ProxyPropertyReference property, IProxySource source, object? valueFromSource)
     {
-        var contexts = property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ITrackableSource>())!;
+        var contexts = property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<IProxySource>())!;
         lock (contexts)
         {
             contexts.Add(source);
@@ -68,12 +69,31 @@ public static class SourceExtensions
         }
     }
 
-    public static bool IsChangingFromSource(this ProxyPropertyChanged change, ITrackableSource source)
+    public static bool IsChangingFromSource(this ProxyPropertyChanged change, IProxySource source)
     {
-        var contexts = change.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ITrackableSource>())!;
+        var contexts = change.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<IProxySource>())!;
         lock (contexts)
         {
             return contexts.Contains(source);
+        }
+    }
+
+    public static string GetJsonPath(this ProxyPropertyReference property, ISourcePathProvider pathProvider)
+    {
+        //if (property.IsAttribute)
+        //{
+        //    return
+        //        string
+        //            .Join('.', property.AttributedProperty.Path.Split('.')
+        //            .Select(s => JsonNamingPolicy.CamelCase.ConvertName(s)))
+        //        + "@" + JsonNamingPolicy.CamelCase.ConvertName(property.AttributeName);
+        //}
+        //else
+        {
+            var path = pathProvider.TryGetSourcePath(property);
+            return string
+                .Join('.', path!.Split('.')
+                .Select(s => JsonNamingPolicy.CamelCase.ConvertName(s)));
         }
     }
 }

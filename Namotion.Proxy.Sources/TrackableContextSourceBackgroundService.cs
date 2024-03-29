@@ -15,7 +15,7 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
     where TTrackable : IProxy
 {
     private readonly IProxyContext _context;
-    private readonly ITrackableSource _source;
+    private readonly IProxySource _source;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
@@ -23,7 +23,7 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
     private HashSet<string>? _initializedProperties;
 
     public TrackableContextSourceBackgroundService(
-        ITrackableSource source,
+        IProxySource source,
         IProxyContext context,
         ILogger logger,
         TimeSpan? bufferTime = null,
