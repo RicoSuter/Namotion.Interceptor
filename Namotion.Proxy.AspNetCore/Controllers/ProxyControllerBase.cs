@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -14,17 +15,17 @@ using Namotion.Proxy.Validation;
 namespace Namotion.Proxy.AspNetCore.Controllers;
 
 public abstract class ProxyControllerBase<TProxy> : ControllerBase
-    where TProxy : class, IProxy
+    where TProxy : IProxy
 {
     private readonly IProxyContext _context;
     private readonly TProxy _proxy;
 
     // TODO: Inject IProxyContext<TProxy> so that multiple contexts are supported.
 
-    protected ProxyControllerBase(IProxyContext context, TProxy proxy)
+    protected ProxyControllerBase(TProxy proxy)
     {
-        _context = context;
         _proxy = proxy;
+        _context = proxy.Context ?? throw new ArgumentNullException(nameof(proxy.Context));
     }
 
     [HttpGet]

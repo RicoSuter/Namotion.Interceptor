@@ -80,7 +80,6 @@ namespace Namotion.Trackable.SampleWeb
 
             // trackable
             builder.Services.AddSingleton(car);
-            builder.Services.AddSingleton<IProxyContext>(context);
 
             // trackable api controllers
             builder.Services.AddProxyControllers<Car, TrackablesController<Car>>();
@@ -118,11 +117,9 @@ namespace Namotion.Trackable.SampleWeb
 
         [OpenApiTag("Car")]
         [Route("/api/car")]
-        public class TrackablesController<TProxy> : ProxyControllerBase<TProxy>
-            where TProxy : class, IProxy
+        public class TrackablesController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IProxy
         {
-            public TrackablesController(IProxyContext context, TProxy proxy)
-                : base(context, proxy)
+            public TrackablesController(TProxy proxy) : base(proxy)
             {
             }
         }

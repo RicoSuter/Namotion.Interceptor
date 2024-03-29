@@ -6,16 +6,17 @@ using System.Reactive.Linq;
 namespace Namotion.Proxy.GraphQL
 {
     public class GraphQLSubscriptionSender<TProxy> : BackgroundService
-        where TProxy : class
+        where TProxy : IProxy
     {
-        private readonly IProxyContext _context;
         private readonly TProxy _proxy;
+        private readonly IProxyContext _context;
         private readonly ITopicEventSender _sender;
 
-        // TODO: Inject IProxyContext<TProxy> so that multiple contexts are supported.
-        public GraphQLSubscriptionSender(IProxyContext context, TProxy proxy, ITopicEventSender sender)
+        public GraphQLSubscriptionSender(TProxy proxy, ITopicEventSender sender)
         {
-            _context = context;
+            _context = proxy.Context  ??
+                throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
+
             _proxy = proxy;
             _sender = sender;
         }

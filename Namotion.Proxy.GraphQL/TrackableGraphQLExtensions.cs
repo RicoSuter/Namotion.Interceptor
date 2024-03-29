@@ -1,4 +1,5 @@
 ﻿using HotChocolate.Execution.Configuration;
+using Namotion.Proxy;
 using Namotion.Proxy.GraphQL;
 
 // ReSharper disable once CheckNamespace
@@ -6,15 +7,15 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class TrackableGraphQLExtensions
 {
-    public static void AddTrackedGraphQL<TTrackable>(this IRequestExecutorBuilder builder)
-        where TTrackable : class
+    public static void AddTrackedGraphQL<TProxy>(this IRequestExecutorBuilder builder)
+        where TProxy : IProxy
     {
         builder
             .Services
-            .AddHostedService<GraphQLSubscriptionSender<TTrackable>>();
+            .AddHostedService<GraphQLSubscriptionSender<TProxy>>();
 
         builder
-            .AddQueryType<Query<TTrackable>>()
-            .AddSubscriptionType<Subscription<TTrackable>>();
+            .AddQueryType<Query<TProxy>>()
+            .AddSubscriptionType<Subscription<TProxy>>();
     }
 }

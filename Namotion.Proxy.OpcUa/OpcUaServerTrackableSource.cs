@@ -28,14 +28,15 @@ namespace Namotion.Trackable.OpcUa
         private OpcServer? _opcServer;
 
         public OpcUaServerTrackableSource(
-            IProxyContext context,
             TProxy proxy,
             ISourcePathProvider sourcePathProvider,
             ILogger<OpcUaServerTrackableSource<TProxy>> logger)
         {
-            _context = context;
+            _context = proxy.Context  ??
+                throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
+            
+            _nodeManager = new OpcProviderBasedNodeManager<TProxy>(_context.GetHandler<IProxyRegistry>(), proxy, this);
             _sourcePathProvider = sourcePathProvider;
-            _nodeManager = new OpcProviderBasedNodeManager<TProxy>(_context, proxy, this);
             _logger = logger;
         }
 
@@ -117,19 +118,17 @@ namespace Namotion.Trackable.OpcUa
     public class OpcProviderBasedNodeManager<TProxy> : OpcNodeManager
         where TProxy : IProxy
     {
-        private readonly IProxyContext _context;
-        private readonly IProxyRegistry _registry;
         private readonly TProxy _proxy;
+        private readonly IProxyRegistry _registry;
         private readonly IEnumerable<IOpcUaNodeProvider> _nodeProviders = Enumerable.Empty<IOpcUaNodeProvider>();
 
         private OpcUaServerTrackableSource<TProxy> _source;
 
-        public OpcProviderBasedNodeManager(IProxyContext context, TProxy proxy, OpcUaServerTrackableSource<TProxy> source)
+        public OpcProviderBasedNodeManager(IProxyRegistry registry, TProxy proxy, OpcUaServerTrackableSource<TProxy> source)
             : base("https://foobar/")
         {
-            _context = context;
-            _registry = context.GetHandler<IProxyRegistry>();
             _proxy = proxy;
+            _registry = registry;
             _source = source;
         }
 

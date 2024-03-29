@@ -5,7 +5,8 @@ using Namotion.Proxy.ChangeTracking;
 
 namespace Namotion.Proxy.Blazor
 {
-    public class TrackingComponentBase : ComponentBase, IDisposable
+    public class ProxyComponentBase<TProxy> : ComponentBase, IDisposable
+        where TProxy : IProxy
     {
         private IDisposable? _subscription;
         private PropertyChangeRecorderScope? _recorder;
@@ -15,7 +16,7 @@ namespace Namotion.Proxy.Blazor
         public IObservable<ProxyPropertyChanged>? ProxyPropertyChanges { get; set; }
 
         [Inject]
-        public IProxyContext? ProxyContext { get; set; }
+        public TProxy? Proxy { get; set; }
 
         protected override void OnInitialized()
         {
@@ -34,7 +35,7 @@ namespace Namotion.Proxy.Blazor
             var result = base.ShouldRender();
             if (result)
             {
-                _recorder = ProxyContext?.BeginPropertyChangedRecording();
+                _recorder = Proxy?.Context?.BeginPropertyChangedRecording();
             }
 
             return result;
