@@ -11,7 +11,7 @@ using System.Reactive.Linq;
 
 namespace Namotion.Trackable.Sources;
 
-public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundService
+public class ProxySourceBackgroundService<TTrackable> : BackgroundService
     where TTrackable : IProxy
 {
     private readonly IProxyContext _context;
@@ -22,7 +22,7 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
 
     private HashSet<string>? _initializedProperties;
 
-    public TrackableContextSourceBackgroundService(
+    public ProxySourceBackgroundService(
         IProxySource source,
         IProxyContext context,
         ILogger logger,
@@ -66,7 +66,7 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
 
                 // read all properties (subscription during read will later be ignored)
                 var initialValues = await _source.ReadAsync(properties!, stoppingToken);
-                //lock (this) // TODO: Implement correct locking here (avoid deadlock)
+                lock (this)
                 {
                     // ignore properties which have been updated via subscription
                     foreach (var value in initialValues
@@ -87,8 +87,8 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
                     .ForEachAsync(async changes =>
                     {
                         var values = changes
-                            .Select(c => new ProxyPropertyPathReference(c.Property, _source.TryGetSourcePath(c.Property)!, c.NewValue))
-                            .ToList();
+                            .Select(c => new ProxyPropertyPathReference(
+                                c.Property, _source.TryGetSourcePath(c.Property)!, c.NewValue));
 
                         await _source.WriteAsync(values, stoppingToken);
                     }, stoppingToken);
