@@ -77,23 +77,4 @@ public static class SourceExtensions
             return contexts.Contains(source);
         }
     }
-
-    public static string GetJsonPath(this ProxyPropertyReference property, ISourcePathProvider pathProvider)
-    {
-        //if (property.IsAttribute)
-        //{
-        //    return
-        //        string
-        //            .Join('.', property.AttributedProperty.Path.Split('.')
-        //            .Select(s => JsonNamingPolicy.CamelCase.ConvertName(s)))
-        //        + "@" + JsonNamingPolicy.CamelCase.ConvertName(property.AttributeName);
-        //}
-        //else
-        {
-            var path = pathProvider.TryGetSourcePath(property);
-            return string
-                .Join('.', path!.Split('.')
-                .Select(s => JsonNamingPolicy.CamelCase.ConvertName(s)));
-        }
-    }
 }

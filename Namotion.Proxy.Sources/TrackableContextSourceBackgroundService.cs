@@ -66,7 +66,7 @@ public class TrackableContextSourceBackgroundService<TTrackable> : BackgroundSer
 
                 // read all properties (subscription during read will later be ignored)
                 var initialValues = await _source.ReadAsync(properties!, stoppingToken);
-                lock (this)
+                //lock (this) // TODO: Implement correct locking here (avoid deadlock)
                 {
                     // ignore properties which have been updated via subscription
                     foreach (var value in initialValues

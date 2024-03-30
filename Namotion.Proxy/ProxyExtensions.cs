@@ -1,6 +1,7 @@
 ﻿using Namotion.Proxy.Abstractions;
-
+using Namotion.Proxy.Lifecycle;
 using System.Collections;
+using System.Text.Json;
 
 namespace Namotion.Proxy;
 
@@ -49,6 +50,19 @@ public static class ProxyExtensions
         return proxy.Data.TryGetValue(key, out value);
     }
 
+    public static string GetJsonPath(this ProxyPropertyReference property)
+    {
+        // TODO: avoid endless recursion
+        var path = string.Empty;
+        do
+        {
+            path = JsonNamingPolicy.CamelCase.ConvertName(property.Name) + "." + path;
+            property = property.Proxy.GetParents().FirstOrDefault();
+        }
+        while (property.Proxy is not null);
+        return path.Trim('.');
+    }
+
     public static (IProxy?, PropertyMetadata) FindPropertyFromJsonPath(this IProxy proxy, string path)
     {
         return proxy.FindPropertyFromJsonPath(path.Split('.'));
@@ -56,11 +70,9 @@ public static class ProxyExtensions
 
     private static (IProxy?, PropertyMetadata) FindPropertyFromJsonPath(this IProxy proxy, IEnumerable<string> segments)
     {
-        // TODO: Improve this code, correcly apply JSON naming policy from serializer options
-
-        var nextSegment = ToUpperStart(segments.First());
+        var nextSegment = JsonNamingPolicy.CamelCase.ConvertName(segments.First());
         segments = segments.Skip(1);
-    
+
         if (segments.Any())
         {
             if (nextSegment.Contains('['))
@@ -83,10 +95,5 @@ public static class ProxyExtensions
         {
             return (proxy, proxy.Properties[nextSegment]);
         }
-    }
-
-    private static string ToUpperStart(string value)
-    {
-        return value[0].ToString().ToUpperInvariant() + value[1..];
     }
 }
