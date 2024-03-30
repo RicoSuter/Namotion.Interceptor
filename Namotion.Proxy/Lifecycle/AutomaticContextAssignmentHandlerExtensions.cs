@@ -6,20 +6,26 @@ public static class AutomaticContextAssignmentHandlerExtensions
 {
     private const string ParentsKey = "Namotion.Parents";
 
-    public static void AddParent(this IProxy proxy, ProxyPropertyReference parent)
+    public static void AddParent(this IProxy proxy, ProxyPropertyReference parent, object? index)
     {
         var parents = proxy.GetParents();
-        parents.Add(parent);
+        parents.Add(new ProxyParent(parent, index));
     }
 
-    public static void RemoveParent(this IProxy proxy, ProxyPropertyReference parent)
+    public static void RemoveParent(this IProxy proxy, ProxyPropertyReference parent, object? index)
     {
         var parents = proxy.GetParents();
-        parents.Remove(parent);
+        parents.Remove(new ProxyParent(parent, index));
     }
 
-    public static HashSet<ProxyPropertyReference> GetParents(this IProxy proxy)
+    public static HashSet<ProxyParent> GetParents(this IProxy proxy)
     {
-        return (HashSet<ProxyPropertyReference>)proxy.Data.GetOrAdd(ParentsKey, (_) => new HashSet<ProxyPropertyReference>())!;
+        return (HashSet<ProxyParent>)proxy.Data.GetOrAdd(ParentsKey, (_) => new HashSet<ProxyParent>())!;
     }
+}
+
+public record struct ProxyParent(
+    ProxyPropertyReference Property,
+    object? Index)
+{
 }

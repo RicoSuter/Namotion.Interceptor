@@ -26,7 +26,7 @@ public class ParentsHandlerTests
 
         // Assert
         var parents = parent.GetParents();
-        Assert.Single(parents);
+        Assert.Equal(2, parents.Count);
     }
 
     [Fact]

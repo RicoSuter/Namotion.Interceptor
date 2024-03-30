@@ -53,13 +53,17 @@ public static class ProxyExtensions
     public static string GetJsonPath(this ProxyPropertyReference property)
     {
         // TODO: avoid endless recursion
-        var path = string.Empty;
+        string? path = null;
+        var parent = new ProxyParent(property, null);
         do
         {
-            path = JsonNamingPolicy.CamelCase.ConvertName(property.Name) + "." + path;
-            property = property.Proxy.GetParents().FirstOrDefault();
+            path = JsonNamingPolicy.CamelCase.ConvertName(parent.Property.Name) + 
+                (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) + 
+                (path is not null ? "." + path : string.Empty);
+           
+            parent = parent.Property.Proxy.GetParents().FirstOrDefault();
         }
-        while (property.Proxy is not null);
+        while (parent.Property.Proxy is not null);
         return path.Trim('.');
     }
 

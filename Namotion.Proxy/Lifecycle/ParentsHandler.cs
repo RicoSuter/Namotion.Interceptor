@@ -8,7 +8,7 @@ internal class ParentsHandler : IProxyLifecycleHandler
     {
         if (context.Property != default)
         {
-            context.Proxy.AddParent(context.Property);
+            context.Proxy.AddParent(context.Property, context.Index);
         }
     }
 
@@ -16,7 +16,7 @@ internal class ParentsHandler : IProxyLifecycleHandler
     {
         if (context.Property != default)
         {
-            context.Proxy.RemoveParent(context.Property);
+            context.Proxy.RemoveParent(context.Property, context.Index);
         }
     }
 }
