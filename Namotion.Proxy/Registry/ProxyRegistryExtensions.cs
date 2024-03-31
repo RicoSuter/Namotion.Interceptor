@@ -1,4 +1,5 @@
-﻿using Namotion.Proxy.Registry.Abstractions;
+﻿using Namotion.Proxy.Lifecycle;
+using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Registry.Attributes;
 
 using System.Collections;
@@ -33,17 +34,64 @@ public static class ProxyRegistryExtensions
         return null;
     }
 
-    public static ProxyPropertyMetadata? TryGetAttribute(this IProxy proxy, string propertyName, string attributeName)
+    public static ProxyPropertyMetadata? TryGetPropertyAttribute(this ProxyPropertyReference property, string attributeName)
     {
-        var registry = proxy.Context?.GetHandler<IProxyRegistry>() 
+        var registry = property.Proxy.Context?.GetHandler<IProxyRegistry>() 
             ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
         
-        var attribute = registry?.KnownProxies[proxy].Properties
+        var attribute = registry.KnownProxies[property.Proxy].Properties
             .SingleOrDefault(p => p.Value.Attributes
                 .OfType<PropertyAttributeAttribute>()
-                .Any(a => a.PropertyName == propertyName && a.AttributeName == attributeName));
+                .Any(a => a.PropertyName == property.Name && a.AttributeName == attributeName));
 
-        return attribute?.Value;
+        return attribute.Value;
+    }
+
+    public static IEnumerable<KeyValuePair<string, ProxyPropertyMetadata>> GetPropertyAttributes(this ProxyPropertyReference property)
+    {
+        var registry = property.Proxy.Context?.GetHandler<IProxyRegistry>()
+            ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
+
+        return registry.KnownProxies[property.Proxy].Properties
+            .Where(p => p.Value.Attributes
+                .OfType<PropertyAttributeAttribute>()
+                .Any(a => a.PropertyName == property.Name));
+    }
+
+    public static string GetJsonPath(this ProxyPropertyReference property)
+    {
+        var registry = property.Proxy.Context?.GetHandler<IProxyRegistry>()
+           ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
+
+        // TODO: avoid endless recursion
+        string? path = null;
+        var parent = new ProxyParent(property, null);
+        do
+        {
+            var attribute = registry
+                .KnownProxies[parent.Property.Proxy]
+                .Properties[parent.Property.Name]
+                .Attributes
+                .OfType<PropertyAttributeAttribute>()
+                .FirstOrDefault();
+
+            if (attribute is not null)
+            {
+                return GetJsonPath(new ProxyPropertyReference(
+                    parent.Property.Proxy,
+                    attribute.PropertyName)) + 
+                    "@" + attribute.AttributeName;
+            }
+
+            path = JsonNamingPolicy.CamelCase.ConvertName(parent.Property.Name) +
+                (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
+                (path is not null ? "." + path : string.Empty);
+
+            parent = parent.Property.Proxy.GetParents().FirstOrDefault();
+        }
+        while (parent.Property.Proxy is not null);
+       
+        return path.Trim('.');
     }
 
     public static JsonObject ToJsonObject(this IProxy proxy)

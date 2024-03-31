@@ -79,7 +79,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
             foreach (var update in resolvedUpdates)
             {
                 var updateErrors = propertyValidators
-                    .SelectMany(v => v.Validate(update.Proxy!, update.Property.PropertyName, update.Value, _context))
+                    .SelectMany(v => v.Validate(new ProxyPropertyReference(update.Proxy!, update.Property.PropertyName), update.Value, _context))
                     .ToArray();
 
                 if (updateErrors.Any())

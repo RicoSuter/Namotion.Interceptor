@@ -4,15 +4,15 @@ namespace Namotion.Proxy.Validation;
 
 public class DataAnnotationsValidator : IProxyPropertyValidator
 {
-    public IEnumerable<ValidationResult> Validate(IProxy proxy, string propertyName, object? value, IProxyContext context)
+    public IEnumerable<ValidationResult> Validate(ProxyPropertyReference property, object? value, IProxyContext context)
     {
         var results = new List<ValidationResult>();
 
         if (value is not null)
         {
-            var validationContext = new ValidationContext(proxy)
+            var validationContext = new ValidationContext(property.Proxy)
             {
-                MemberName = propertyName
+                MemberName = property.Name
             };
 
             Validator.TryValidateProperty(value, validationContext, results);

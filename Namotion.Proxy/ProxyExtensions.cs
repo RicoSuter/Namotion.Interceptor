@@ -52,29 +52,6 @@ public static class ProxyExtensions
         return proxy.Data.TryGetValue(key, out value);
     }
 
-    public static string GetJsonPath(this ProxyPropertyReference property)
-    {
-        // TODO: avoid endless recursion
-        string? path = null;
-        var parent = new ProxyParent(property, null);
-        do
-        {
-            // TODO: Should we instead use IProxyRegistry here (instead of reflection)?
-            if (property.Metadata.Info.GetCustomAttribute<PropertyAttributeAttribute>() is { } attribute)
-            {
-                return GetJsonPath(new ProxyPropertyReference(property.Proxy, attribute.PropertyName)) + "@" + attribute.AttributeName;
-            }
-
-            path = JsonNamingPolicy.CamelCase.ConvertName(parent.Property.Name) + 
-                (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) + 
-                (path is not null ? "." + path : string.Empty);
-           
-            parent = parent.Property.Proxy.GetParents().FirstOrDefault();
-        }
-        while (parent.Property.Proxy is not null);
-        return path.Trim('.');
-    }
-
     public static (IProxy?, PropertyMetadata) FindPropertyFromJsonPath(this IProxy proxy, string path)
     {
         return proxy.FindPropertyFromJsonPath(path.Split('.'));
