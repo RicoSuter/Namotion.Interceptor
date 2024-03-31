@@ -1,6 +1,8 @@
 ﻿using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Lifecycle;
+using Namotion.Proxy.Registry.Attributes;
 using System.Collections;
+using System.Reflection;
 using System.Text.Json;
 
 namespace Namotion.Proxy;
@@ -57,6 +59,12 @@ public static class ProxyExtensions
         var parent = new ProxyParent(property, null);
         do
         {
+            // TODO: Should we instead use IProxyRegistry here (instead of reflection)?
+            if (property.Metadata.Info.GetCustomAttribute<PropertyAttributeAttribute>() is { } attribute)
+            {
+                return GetJsonPath(new ProxyPropertyReference(property.Proxy, attribute.PropertyName)) + "@" + attribute.AttributeName;
+            }
+
             path = JsonNamingPolicy.CamelCase.ConvertName(parent.Property.Name) + 
                 (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) + 
                 (path is not null ? "." + path : string.Empty);

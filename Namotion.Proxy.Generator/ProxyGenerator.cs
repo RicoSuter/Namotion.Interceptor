@@ -47,12 +47,12 @@ public class ProxyGenerator : IIncrementalGenerator
             var symbolDisplayFormat = new SymbolDisplayFormat(typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
 
             var (compilation, classes) = source;
-            foreach (var cls in classes)
+            foreach (var cls in classes.GroupBy(c => c.ClassNode.Identifier.ValueText))
             {
-                var baseClassName = cls.ClassNode.Identifier.ValueText;
+                var baseClassName = cls.First().ClassNode.Identifier.ValueText;
                 var newClassName = baseClassName.Replace("Base", string.Empty);
          
-                var namespaceName = (cls.ClassNode.Parent as NamespaceDeclarationSyntax)?.Name.ToString() ?? "YourDefaultNamespace";
+                var namespaceName = (cls.First().ClassNode.Parent as NamespaceDeclarationSyntax)?.Name.ToString() ?? "YourDefaultNamespace";
 
                 var generatedCode = $@"
 using Namotion.Proxy;
@@ -86,7 +86,7 @@ namespace {namespaceName}
         private static IReadOnlyDictionary<string, PropertyMetadata> _properties = new Dictionary<string, PropertyMetadata>
         {{
 ";
-                foreach (var property in cls.Properties)
+                foreach (var property in cls.SelectMany(c => c.Properties))
                 {
                     var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
                     var propertyName = property.Property.Identifier.Value;
@@ -105,7 +105,7 @@ $@"
         }};
 ";
 
-                var firstConstructor = cls.ClassNode.Members
+                var firstConstructor = cls.SelectMany(c => c.ClassNode.Members)
                     .FirstOrDefault(m => m.IsKind(SyntaxKind.ConstructorDeclaration))
                     as ConstructorDeclarationSyntax;
             
@@ -134,7 +134,7 @@ $@"
 ";
                 }
 
-                foreach (var property in cls.Properties)
+                foreach (var property in cls.SelectMany(c => c.Properties))
                 {
                     var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
                     var propertyName = property.Property.Identifier.Value;
@@ -197,7 +197,7 @@ $@"
     }}
 }}
 ";
-                spc.AddSource($"{cls.ClassNode.Identifier.Value}.g.cs", SourceText.From(generatedCode, Encoding.UTF8));
+                spc.AddSource($"{cls.First().ClassNode.Identifier.Value}.g.cs", SourceText.From(generatedCode, Encoding.UTF8));
             }
         });
     }

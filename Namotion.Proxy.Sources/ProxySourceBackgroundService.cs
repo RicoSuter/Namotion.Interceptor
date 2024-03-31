@@ -103,8 +103,16 @@ public class ProxySourceBackgroundService<TTrackable> : BackgroundService
 
     protected void UpdatePropertyValueFromSource(ProxyPropertyPathReference property)
     {
-        MarkPropertyAsInitialized(property.Path);
-        property.Property.SetValueFromSource(_source, property.Value);
+        try
+        {
+            MarkPropertyAsInitialized(property.Path);
+            property.Property.SetValueFromSource(_source, property.Value);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to set value of property {PropertyName} of type {Type}.", 
+                property.Property.Proxy.GetType().FullName, property.Property.Name);
+        }
     }
 
     private void MarkPropertyAsInitialized(string sourcePath)
