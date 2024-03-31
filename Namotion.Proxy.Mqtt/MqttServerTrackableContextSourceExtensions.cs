@@ -36,10 +36,10 @@ public static class MqttServerTrackableContextSourceExtensions
                 var context = sp.GetRequiredService<TProxy>().Context ??
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
-                return new TrackableContextSourceBackgroundService<TProxy>(
+                return new ProxySourceBackgroundService<TProxy>(
                     sp.GetRequiredService<MqttServerTrackableSource<TProxy>>(),
                     context,
-                    sp.GetRequiredService<ILogger<TrackableContextSourceBackgroundService<TProxy>>>());
+                    sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TProxy>>>());
             });
     }
 }

@@ -74,7 +74,9 @@ public static class ProxyExtensions
 
     private static (IProxy?, PropertyMetadata) FindPropertyFromJsonPath(this IProxy proxy, IEnumerable<string> segments)
     {
-        var nextSegment = JsonNamingPolicy.CamelCase.ConvertName(segments.First());
+        var nextSegment = segments.First(); // TODO: Improve convert to upper camel case
+        nextSegment = nextSegment[0].ToString().ToUpperInvariant() + nextSegment.Substring(1);
+
         segments = segments.Skip(1);
 
         if (segments.Any())

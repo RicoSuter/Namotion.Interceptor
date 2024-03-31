@@ -32,10 +32,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     public ActionResult<TProxy> GetVariables()
     {
         // TODO: correctly generate OpenAPI schema
-
-        return Ok(_context
-            .GetHandler<IProxyRegistry>()
-            .SerializeProxyToJson(_proxy));
+        return Ok(_proxy.ToJsonObject());
     }
 
     [HttpPost]
@@ -156,10 +153,10 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
                 .Where(p => p.Value.GetValue is not null &&
                             p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any() == false))
             {
-                var name = metadata.GetJsonPropertyName(property.Key, property.Value);
+                var propertyName = property.GetJsonPropertyName();
                 var value = property.Value.GetValue?.Invoke();
 
-                description.Properties[name] = CreateDescription(register, metadata, property.Key, value);
+                description.Properties[propertyName] = CreateDescription(register, metadata, property.Key, value);
             }
         }
 
