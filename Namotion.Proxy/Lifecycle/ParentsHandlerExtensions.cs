@@ -2,7 +2,7 @@
 
 // TODO: Is this needed? Remove?
 
-public static class AutomaticContextAssignmentHandlerExtensions
+public static class ParentsHandlerExtensions
 {
     private const string ParentsKey = "Namotion.Parents";
 

@@ -59,11 +59,6 @@ public static class ProxyContextBuilderExtensions
             .WithPropertyValidation();
     }
 
-    /// <summary>
-    /// Adds support for <see cref="IProxyChangedHandler"/> handlers.
-    /// </summary>
-    /// <param name="builder">The builder.</param>
-    /// <returns>The builder.</returns>
     public static IProxyContextBuilder WithPropertyChangedHandlers(this IProxyContextBuilder builder)
     {
         return builder

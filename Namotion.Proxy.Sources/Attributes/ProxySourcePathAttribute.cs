@@ -17,13 +17,13 @@ public class ProxySourcePathAttribute : Attribute, IProxyPropertyInitializer
         Path = path;
     }
 
-    public void InitializeProperty(ProxyPropertyMetadata property, object? parentCollectionKey, IProxyContext context)
+    public void InitializeProperty(ProxyPropertyMetadata property, object? index, IProxyContext context)
     {
         var prefix = property.Parent.Parents.Any() ?
             property.Parent.Parents.FirstOrDefault().TryGetAttributeBasedSourcePathPrefix(SourceName) :
             string.Empty;
 
-        var parentPath = prefix + (parentCollectionKey != null ? $"[{parentCollectionKey}]" : string.Empty);
+        var parentPath = prefix + (index != null ? $"[{index}]" : string.Empty);
 
         var sourcePath = GetSourcePath(parentPath, property.Property);
         property.Property.SetAttributeBasedSourcePathPrefix(SourceName, sourcePath);

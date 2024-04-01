@@ -1,4 +1,5 @@
 ﻿using Namotion.Proxy.Abstractions;
+
 using System.Reactive.Subjects;
 
 namespace Namotion.Proxy.ChangeTracking;

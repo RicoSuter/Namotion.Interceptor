@@ -47,10 +47,11 @@ public class ProxySourceBackgroundService<TTrackable> : BackgroundService
                 var properties = _context
                     .GetHandler<IProxyRegistry>()
                     .KnownProxies
-                    .SelectMany(v => v.Value.Properties.Select(p => {
+                    .SelectMany(v => v.Value.Properties.Select(p =>
+                    {
                         var reference = new ProxyPropertyReference(v.Key, p.Key);
-                        return new ProxyPropertyPathReference(reference, 
-                            _source.TryGetSourcePath(reference) ?? string.Empty, 
+                        return new ProxyPropertyPathReference(reference,
+                            _source.TryGetSourcePath(reference) ?? string.Empty,
                             p.Value.GetValue?.Invoke());
                     }))
                     .Where(p => p.Path != string.Empty)
@@ -80,8 +81,9 @@ public class ProxySourceBackgroundService<TTrackable> : BackgroundService
 
                 await _context
                     .GetHandler<IProxyPropertyChangedHandler>()
-                    .Where(change => !change.IsChangingFromSource(_source) &&
-                                     _source.TryGetSourcePath(change.Property) != null)
+                    .Where(change => 
+                        !change.IsChangingFromSource(_source) &&
+                        _source.TryGetSourcePath(change.Property) != null)
                     .BufferChanges(_bufferTime)
                     .Where(changes => changes.Any())
                     .ForEachAsync(async changes =>
@@ -110,7 +112,7 @@ public class ProxySourceBackgroundService<TTrackable> : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to set value of property {PropertyName} of type {Type}.", 
+            _logger.LogError(ex, "Failed to set value of property {PropertyName} of type {Type}.",
                 property.Property.Proxy.GetType().FullName, property.Property.Name);
         }
     }
