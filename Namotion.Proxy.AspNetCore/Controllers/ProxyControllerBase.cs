@@ -4,10 +4,11 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 using Microsoft.AspNetCore.Mvc;
+
 using Namotion.Proxy.Attributes;
-using Namotion.Proxy.Registry;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Validation;
 
@@ -16,15 +17,13 @@ namespace Namotion.Proxy.AspNetCore.Controllers;
 public abstract class ProxyControllerBase<TProxy> : ControllerBase
     where TProxy : IProxy
 {
-    private readonly IProxyContext _context;
     private readonly TProxy _proxy;
-
-    // TODO: Inject IProxyContext<TProxy> so that multiple contexts are supported.
+    private readonly IProxyContext _context;
 
     protected ProxyControllerBase(TProxy proxy)
     {
         _proxy = proxy;
-        _context = proxy.Context ?? throw new ArgumentNullException(nameof(proxy.Context));
+        _context = proxy.Context ?? throw new ArgumentException($"The proxy context is null.");
     }
 
     [HttpGet]
@@ -78,7 +77,8 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
             foreach (var update in resolvedUpdates)
             {
                 var updateErrors = propertyValidators
-                    .SelectMany(v => v.Validate(new ProxyPropertyReference(update.Proxy!, update.Property.Name), update.Value, _context))
+                    .SelectMany(v => v.Validate(
+                        new ProxyPropertyReference(update.Proxy!, update.Property.Name), update.Value, _context))
                     .ToArray();
 
                 if (updateErrors.Any())
@@ -126,25 +126,12 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
         return Ok(CreateProxyDescription(_proxy, _context.GetHandler<IProxyRegistry>()));
     }
 
-    public class ProxyDescription
-    {
-        public Dictionary<string, ProxyPropertyDescription> Properties { get; } = new Dictionary<string, ProxyPropertyDescription>();
-    }
-
-    public class ProxyPropertyDescription
-    {
-        public IReadOnlyDictionary<string, ProxyPropertyDescription>? Attributes { get; init; }
-
-        public object? Value { get; internal set; }
-
-        public ProxyDescription? Proxy { get; set; }
-
-        public List<ProxyDescription>? Proxies { get; set; }
-    }
-
     private static ProxyDescription CreateProxyDescription(IProxy proxy, IProxyRegistry register)
     {
-        var description = new ProxyDescription();
+        var description = new ProxyDescription
+        {
+            Type = proxy.GetType().Name
+        };
 
         if (register.KnownProxies.TryGetValue(proxy, out var metadata))
         {
@@ -155,35 +142,62 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
                 var propertyName = property.GetJsonPropertyName();
                 var value = property.Value.GetValue?.Invoke();
 
-                description.Properties[propertyName] = CreateDescription(register, metadata, property.Key, value);
+                description.Properties[propertyName] = CreateDescription(register, metadata, property.Key, property.Value, value);
             }
         }
 
         return description;
     }
 
-    private static ProxyPropertyDescription CreateDescription(IProxyRegistry register, ProxyMetadata metadata, string propertyKey, object? value)
+    public class ProxyDescription
     {
+        public required string Type { get; init; }
+
+        public Dictionary<string, ProxyPropertyDescription> Properties { get; } = new Dictionary<string, ProxyPropertyDescription>();
+    }
+
+    public class ProxyPropertyDescription
+    {
+        public required string Type { get; init; }
+
+        public object? Value { get; internal set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public IReadOnlyDictionary<string, ProxyPropertyDescription>? Attributes { get; init; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public ProxyDescription? Proxy { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public List<ProxyDescription>? Proxies { get; set; }
+    }
+
+    private static ProxyPropertyDescription CreateDescription(IProxyRegistry registry, ProxyMetadata parent, 
+        string propertyName, ProxyPropertyMetadata property, object? value)
+    {
+        var attributes = parent.Properties
+            .Where(p => p.Value.GetValue is not null &&
+                        p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any(a => a.PropertyName == propertyName))
+            .ToDictionary(
+                p => p.Value.Attributes.OfType<PropertyAttributeAttribute>().Single().AttributeName,
+                p => CreateDescription(registry, parent, p.Key, p.Value, p.Value.GetValue?.Invoke()));
+
         var description = new ProxyPropertyDescription
         {
-            Attributes = metadata.Properties
-                .Where(p => p.Value.GetValue is not null &&
-                            p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any(a => a.PropertyName == propertyKey))
-                .ToDictionary(
-                    p => p.Value.Attributes.OfType<PropertyAttributeAttribute>().Single().AttributeName,
-                    p => CreateDescription(register, metadata, p.Key, p.Value.GetValue?.Invoke()))
+            Type = property.Type.Name,
+            Attributes = attributes.Any() ? attributes : null
         };
 
         if (value is IProxy childProxy)
         {
-            description.Proxy = CreateProxyDescription(childProxy, register);
+            description.Proxy = CreateProxyDescription(childProxy, registry);
         }
         else if (value is ICollection collection && collection.OfType<IProxy>().Any())
         {
             var children = new List<ProxyDescription>();
             foreach (var arrayProxyItem in collection.OfType<IProxy>())
             {
-                children.Add(CreateProxyDescription(arrayProxyItem, register));
+                children.Add(CreateProxyDescription(arrayProxyItem, registry));
             }
             description.Proxies = children;
         }
