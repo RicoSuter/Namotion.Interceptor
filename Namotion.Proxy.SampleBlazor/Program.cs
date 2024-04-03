@@ -14,7 +14,7 @@ namespace Namotion.Proxy.SampleBlazor
             var context = ProxyContext
                 .CreateBuilder()
                 .WithFullPropertyTracking()
-                .WithPropertyChangeRecorder()
+                .WithReadPropertyRecorder()
                 .Build();
 
             // Add services to the container.

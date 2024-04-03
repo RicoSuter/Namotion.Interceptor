@@ -5,7 +5,7 @@ namespace Namotion.Proxy.ChangeTracking;
 // experimental
 // TODO: Add lots of tests!
 
-internal class PropertyChangeRecorder : IProxyReadHandler
+internal class ReadPropertyRecorder : IProxyReadHandler
 {
     internal static AsyncLocal<IDictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>> Scopes { get; } = new();
 
@@ -13,7 +13,7 @@ internal class PropertyChangeRecorder : IProxyReadHandler
     {
         if (Scopes.Value is not null)
         {
-            lock (typeof(PropertyChangeRecorder))
+            lock (typeof(ReadPropertyRecorder))
             {
                 if (Scopes.Value is not null &&
                     Scopes.Value.TryGetValue(context.Context, out var scopes))

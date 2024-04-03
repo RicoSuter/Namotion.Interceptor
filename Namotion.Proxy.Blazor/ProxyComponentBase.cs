@@ -35,7 +35,7 @@ namespace Namotion.Proxy.Blazor
             var result = base.ShouldRender();
             if (result)
             {
-                _recorder = Proxy?.Context?.BeginPropertyChangedRecording();
+                _recorder = Proxy?.Context?.BeginReadPropertyRecording();
             }
 
             return result;

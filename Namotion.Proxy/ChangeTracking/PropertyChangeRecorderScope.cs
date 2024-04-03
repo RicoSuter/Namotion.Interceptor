@@ -15,7 +15,7 @@ public class PropertyChangeRecorderScope : IDisposable
     {
         get
         {
-            lock (typeof(PropertyChangeRecorder))
+            lock (typeof(ReadPropertyRecorder))
             {
                 return _properties.ToArray();
             }
@@ -24,7 +24,7 @@ public class PropertyChangeRecorderScope : IDisposable
 
     public ProxyPropertyReference[] GetPropertiesAndReset()
     {
-        lock (typeof(PropertyChangeRecorder))
+        lock (typeof(ReadPropertyRecorder))
         {
             var properties = _properties.ToArray();
             _properties.Clear();
@@ -34,7 +34,7 @@ public class PropertyChangeRecorderScope : IDisposable
 
     public ProxyPropertyReference[] GetPropertiesAndDispose()
     {
-        lock (typeof(PropertyChangeRecorder))
+        lock (typeof(ReadPropertyRecorder))
         {
             var properties = _properties.ToArray();
             Dispose();
@@ -44,9 +44,9 @@ public class PropertyChangeRecorderScope : IDisposable
 
     public void Dispose()
     {
-        lock (typeof(PropertyChangeRecorder))
+        lock (typeof(ReadPropertyRecorder))
         {
-            PropertyChangeRecorder.Scopes.Value?[_context]?.Remove(_properties);
+            ReadPropertyRecorder.Scopes.Value?[_context]?.Remove(_properties);
         }
     }
 }
