@@ -33,6 +33,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.AspNetCore",
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.OpcUa", "Namotion.Proxy.OpcUa\Namotion.Proxy.OpcUa.csproj", "{250077E2-9FC0-4385-8594-5BD0938C0B63}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Proxy.Registry", "Namotion.Proxy.Registry\Namotion.Proxy.Registry.csproj", "{1663A18B-9663-46E2-A0E1-FB9B4FDE8448}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -91,6 +93,10 @@ Global
 		{250077E2-9FC0-4385-8594-5BD0938C0B63}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{250077E2-9FC0-4385-8594-5BD0938C0B63}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{250077E2-9FC0-4385-8594-5BD0938C0B63}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1663A18B-9663-46E2-A0E1-FB9B4FDE8448}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1663A18B-9663-46E2-A0E1-FB9B4FDE8448}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1663A18B-9663-46E2-A0E1-FB9B4FDE8448}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1663A18B-9663-46E2-A0E1-FB9B4FDE8448}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
