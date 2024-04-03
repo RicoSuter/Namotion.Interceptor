@@ -59,6 +59,8 @@ using Namotion.Proxy;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Reflection;
+using System.Linq;
 using System.Text.Json.Serialization;
 
 #pragma warning disable CS8669
@@ -81,9 +83,9 @@ namespace {namespaceName}
         ConcurrentDictionary<string, object?> IProxy.Data => _data;
 
         [JsonIgnore]
-        IReadOnlyDictionary<string, PropertyMetadata> IProxy.Properties => _properties;
+        IReadOnlyDictionary<string, ProxyPropertyInfo> IProxy.Properties => _properties;
 
-        private static IReadOnlyDictionary<string, PropertyMetadata> _properties = new Dictionary<string, PropertyMetadata>
+        private static IReadOnlyDictionary<string, ProxyPropertyInfo> _properties = new Dictionary<string, ProxyPropertyInfo>
         {{
 ";
                 foreach (var property in cls.SelectMany(c => c.Properties))
@@ -95,7 +97,7 @@ namespace {namespaceName}
 $@"
             {{
                 ""{propertyName}"",       
-                new PropertyMetadata(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName}))!, {(property.HasGetter ? ($"(o) => (({newClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({newClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")})
+                new ProxyPropertyInfo(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, {(property.HasGetter ? ($"(o) => (({newClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({newClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")})
             }},
 ";
                 }

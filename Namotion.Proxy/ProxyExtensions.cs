@@ -63,8 +63,8 @@ public static class ProxyExtensions
         {
             var attribute = parent.Property.Proxy
                 .Properties[parent.Property.Name]
-                .Info
-                .GetCustomAttributes<PropertyAttributeAttribute>()
+                .Attributes
+                .OfType<PropertyAttributeAttribute>()
                 .FirstOrDefault();
 
             if (attribute is not null)
@@ -121,11 +121,11 @@ public static class ProxyExtensions
         return GetJsonPropertyName(propertyName, proxy.Properties[propertyName], proxy);
     }
 
-    private static string GetJsonPropertyName(string key, PropertyMetadata property, IProxy parent)
+    private static string GetJsonPropertyName(string key, ProxyPropertyInfo property, IProxy parent)
     {
         var attribute = property
-            .Info
-            .GetCustomAttributes<PropertyAttributeAttribute>()
+            .Attributes
+            .OfType<PropertyAttributeAttribute>()
             .FirstOrDefault();
 
         if (attribute is not null)
@@ -136,12 +136,12 @@ public static class ProxyExtensions
         return JsonNamingPolicy.CamelCase.ConvertName(key);
     }
 
-    public static (IProxy?, PropertyMetadata) FindPropertyFromJsonPath(this IProxy proxy, string path)
+    public static (IProxy?, ProxyPropertyInfo) FindPropertyFromJsonPath(this IProxy proxy, string path)
     {
         return proxy.FindPropertyFromJsonPath(path.Split('.'));
     }
 
-    private static (IProxy?, PropertyMetadata) FindPropertyFromJsonPath(this IProxy proxy, IEnumerable<string> segments)
+    private static (IProxy?, ProxyPropertyInfo) FindPropertyFromJsonPath(this IProxy proxy, IEnumerable<string> segments)
     {
         var nextSegment = segments.First(); // TODO: Improve convert to upper camel case
         nextSegment = nextSegment[0].ToString().ToUpperInvariant() + nextSegment.Substring(1);

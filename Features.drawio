@@ -1,6 +1,6 @@
-<mxfile host="Electron" modified="2024-04-03T15:35:24.155Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.1.0 Chrome/120.0.6099.109 Electron/28.1.0 Safari/537.36" etag="L99RKbjmI1_M_nbOVnEz" version="24.1.0" type="device">
+<mxfile host="Electron" modified="2024-04-03T16:51:39.894Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.1.0 Chrome/120.0.6099.109 Electron/28.1.0 Safari/537.36" etag="z5qJ6XwU81D3tbGsdEE0" version="24.1.0" type="device">
   <diagram name="Page-1" id="Akw01ZIGIV-2cNeXsqmA">
-    <mxGraphModel dx="3753" dy="1187" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="1654" math="0" shadow="0">
+    <mxGraphModel dx="3241" dy="1187" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="1654" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -104,12 +104,6 @@
         </mxCell>
         <mxCell id="d9BL-mROPcZ20sLbiVwK-36" value="&lt;b&gt;Property attributes&lt;/b&gt;&lt;div&gt;property.GetPropertyAttributes()&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
           <mxGeometry x="900" y="710" width="240" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="d9BL-mROPcZ20sLbiVwK-39" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.25;entryY=1;entryDx=0;entryDy=0;" parent="1" source="d9BL-mROPcZ20sLbiVwK-38" target="d9BL-mROPcZ20sLbiVwK-8" edge="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="d9BL-mROPcZ20sLbiVwK-38" value="&lt;b&gt;JSON utilities&lt;/b&gt;&lt;div&gt;proxy.ToJsonObject()&lt;/div&gt;&lt;div&gt;property.GetJsonPropertyName()&lt;br&gt;&lt;/div&gt;" style="whiteSpace=wrap;html=1;" parent="1" vertex="1">
-          <mxGeometry x="890" y="910" width="230" height="80" as="geometry" />
         </mxCell>
         <mxCell id="EaddW8LMifSNtddjIqRl-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.75;entryY=1;entryDx=0;entryDy=0;" parent="1" source="EaddW8LMifSNtddjIqRl-1" target="d9BL-mROPcZ20sLbiVwK-8" edge="1">
           <mxGeometry relative="1" as="geometry">

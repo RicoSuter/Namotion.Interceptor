@@ -2,7 +2,7 @@
 
 public record struct ProxyPropertyReference(IProxy Proxy, string Name)
 {
-    public readonly PropertyMetadata Metadata => Proxy.Properties[Name];
+    public readonly ProxyPropertyInfo Metadata => Proxy.Properties[Name];
 
     public readonly void SetPropertyData(string key, object? value)
     {

@@ -86,7 +86,7 @@ namespace Namotion.Trackable.OpcUa
                 .Select(property => (property, node: property.Property.GetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey) as OpcDataVariableNode))
                 .Where(p => p.node is not null)
                 .Select(p => new ProxyPropertyPathReference(p.property.Property, p.property.Path,
-                    p.property.Property.Metadata.Info.PropertyType == typeof(decimal) ? Convert.ToDecimal(p.node!.Value) : p.node!.Value))
+                    p.property.Property.Metadata.Type == typeof(decimal) ? Convert.ToDecimal(p.node!.Value) : p.node!.Value))
                 .ToList());
         }
 

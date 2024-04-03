@@ -30,10 +30,10 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                     .Properties
                     .Select(p => new ProxyPropertyMetadata(new ProxyPropertyReference(context.Proxy, p.Key))
                     {
-                        Type = p.Value.Info.PropertyType,
+                        Type = p.Value.Type,
                         GetValue = p.Value.GetValue is not null ? () => p.Value.GetValue.Invoke(context.Proxy) : null,
                         SetValue = p.Value.SetValue is not null ? (value) => p.Value.SetValue.Invoke(context.Proxy, value) : null,
-                        Attributes = p.Value.Info.GetCustomAttributes().ToArray()
+                        Attributes = p.Value.Attributes
                     }));
 
                 _knownProxies[context.Proxy] = metadata;

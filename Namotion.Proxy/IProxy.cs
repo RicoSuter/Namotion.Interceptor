@@ -8,12 +8,13 @@ public interface IProxy
 
     ConcurrentDictionary<string, object?> Data { get; }
 
-    IReadOnlyDictionary<string, PropertyMetadata> Properties { get; }
+    IReadOnlyDictionary<string, ProxyPropertyInfo> Properties { get; }
 }
 
-public record struct PropertyMetadata(
-    string PropertyName, // TODO: Remove as already defined as key in the dictionary
-    System.Reflection.PropertyInfo Info,
+public record struct ProxyPropertyInfo(
+    string Name, // TODO: Remove as already defined as key in the dictionary
+    Type Type,
+    object[] Attributes,
     Func<object?, object?>? GetValue,
     Action<object?, object?>? SetValue)
 {
