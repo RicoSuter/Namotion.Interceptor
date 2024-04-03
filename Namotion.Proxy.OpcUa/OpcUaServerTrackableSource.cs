@@ -19,13 +19,14 @@ namespace Namotion.Trackable.OpcUa
         internal const string OpcVariableKey = "OpcVariable";
 
         private readonly IProxyContext _context;
-        internal readonly ISourcePathProvider _sourcePathProvider;
         private readonly ILogger _logger;
 
         private readonly OpcProviderBasedNodeManager<TProxy> _nodeManager;
         private readonly OpcNodeSet[] _nodeSets = Array.Empty<OpcNodeSet>();
 
         private OpcServer? _opcServer;
+
+        internal ISourcePathProvider SourcePathProvider { get; }
 
         public OpcUaServerTrackableSource(
             TProxy proxy,
@@ -36,7 +37,7 @@ namespace Namotion.Trackable.OpcUa
                 throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
             
             _nodeManager = new OpcProviderBasedNodeManager<TProxy>(_context.GetHandler<IProxyRegistry>(), proxy, this);
-            _sourcePathProvider = sourcePathProvider;
+            SourcePathProvider = sourcePathProvider;
             _logger = logger;
         }
 
@@ -111,7 +112,7 @@ namespace Namotion.Trackable.OpcUa
 
         public string? TryGetSourcePath(ProxyPropertyReference property)
         {
-            return _sourcePathProvider.TryGetSourcePath(property);
+            return SourcePathProvider.TryGetSourcePath(property);
         }
     }
 
@@ -188,16 +189,17 @@ namespace Namotion.Trackable.OpcUa
         {
             foreach (var property in metadata.Properties)
             {
-                var propertyName = _source._sourcePathProvider.TryGetSourcePropertyName(property.Value.Property);
+                var propertyName = _source.SourcePathProvider.TryGetSourcePropertyName(property.Value.Property);
                 if (property.Value.Children.Any())
                 {
                     var propertyNode = new OpcFolderNode(new OpcName(propertyName, DefaultNamespaceIndex));
                     foreach (var child in property.Value.Children)
                     {
-                        // TODO: Improve this
-                        var path = (prefix + "." + propertyName + (child.Index is not null ? $"[{child.Index}]" : string.Empty)).Trim('.');
+                        var index = child.Index is not null ? $"[{child.Index}]" : string.Empty;
+                        var path = prefix + propertyName + index;
+                        
                         var objectNode = new OpcObjectNode(path);
-                        CreateObjectNode(context, _registry.KnownProxies[child.Proxy], objectNode, path);
+                        CreateObjectNode(context, _registry.KnownProxies[child.Proxy], objectNode, path + ".");
 
                         propertyNode.AddChild(context.Context, objectNode);
                     }
