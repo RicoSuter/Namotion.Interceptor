@@ -17,7 +17,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
         _handlers = handlers;
     }
 
-    public object? GetProperty(ReadProxyPropertyContext context, Func<ReadProxyPropertyContext, object?> next)
+    public object? ReadProperty(ReadProxyPropertyContext context, Func<ReadProxyPropertyContext, object?> next)
     {
         if (context.Property.Metadata.IsDerived)
         {
@@ -40,7 +40,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
         }
     }
 
-    public void SetProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
+    public void WriteProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
     {
         next.Invoke(context);
 

@@ -1,5 +1,4 @@
 ﻿using Namotion.Proxy.Abstractions;
-
 using System.Reactive.Subjects;
 
 namespace Namotion.Proxy.ChangeTracking;
@@ -8,7 +7,7 @@ internal class PropertyChangedHandler : IProxyWriteHandler, IProxyPropertyChange
 {
     private Subject<ProxyPropertyChanged> _subject = new();
 
-    public void SetProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
+    public void WriteProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
     {
         var currentValue = context.GetValueBeforeWrite();
         var newValue = context.NewValue;

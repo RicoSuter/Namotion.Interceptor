@@ -37,7 +37,7 @@ public class ProxyContext : IProxyContext
             var previousReadValue = readValue;
             readValue = () =>
             {
-                return handler.GetProperty(context, ctx => previousReadValue());
+                return handler.ReadProperty(context, ctx => previousReadValue());
             };
         }
 
@@ -54,7 +54,7 @@ public class ProxyContext : IProxyContext
             var previousWriteValue = writeValue;
             writeValue = (value) =>
             {
-                handler.SetProperty(context with { NewValue = value }, ctx => previousWriteValue(ctx.NewValue));
+                handler.WriteProperty(context with { NewValue = value }, ctx => previousWriteValue(ctx.NewValue));
             };
         }
 
