@@ -1,5 +1,7 @@
 ﻿using Namotion.Proxy.Abstractions;
+using Namotion.Proxy.Registry;
 using Namotion.Proxy.Registry.Abstractions;
+using System.Text.Json;
 
 namespace Namotion.Proxy.Tests.Registry;
 
@@ -188,5 +190,32 @@ public class ProxyRegistryTests
         Assert.Contains(person, registry.KnownProxies.Keys);
         Assert.Contains(mother, registry.KnownProxies.Keys);
         Assert.DoesNotContain(grandmother, registry.KnownProxies.Keys);
+    }
+
+    [Fact]
+    public async Task WhenConvertingToJson_ThenGraphIsPreserved()
+    {
+        // Arrange
+        var context = ProxyContext
+            .CreateBuilder()
+            .WithRegistry()
+            .Build();
+
+        // Act
+        var person = new Person(context)
+        {
+            FirstName = "Child",
+            Mother = new Person
+            {
+                FirstName = "Susi",
+                Mother = new Person
+                {
+                    FirstName = "Susi2"
+                }
+            }
+        };
+
+        // Assert
+        await Verify(person.ToJsonObject().ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
     }
 }
