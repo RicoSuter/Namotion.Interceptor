@@ -2,9 +2,6 @@
 
 namespace Namotion.Proxy.ChangeTracking;
 
-// experimental
-// TODO: Add lots of tests!
-
 internal class ReadPropertyRecorder : IProxyReadHandler
 {
     internal static AsyncLocal<IDictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>> Scopes { get; } = new();
