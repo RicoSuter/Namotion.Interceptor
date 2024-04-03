@@ -1,11 +1,11 @@
 ﻿namespace Namotion.Proxy.ChangeTracking;
 
-public class PropertyChangeRecorderScope : IDisposable
+public class ReadPropertyRecorderScope : IDisposable
 {
     private readonly IProxyContext _context;
     private readonly HashSet<ProxyPropertyReference> _properties;
 
-    public PropertyChangeRecorderScope(IProxyContext context, HashSet<ProxyPropertyReference> properties)
+    public ReadPropertyRecorderScope(IProxyContext context, HashSet<ProxyPropertyReference> properties)
     {
         _context = context;
         _properties = properties;

@@ -1,6 +1,5 @@
 ﻿using Namotion.Proxy;
 using Namotion.Proxy.Abstractions;
-using Namotion.Proxy.ChangeTracking;
 
 namespace ConsoleApp1
 {

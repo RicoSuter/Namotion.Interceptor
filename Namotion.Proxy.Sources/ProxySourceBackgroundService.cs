@@ -8,13 +8,13 @@ using Namotion.Proxy.Sources.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
 
 using System.Reactive.Linq;
+using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Trackable.Sources;
 
 public class ProxySourceBackgroundService<TTrackable> : BackgroundService
     where TTrackable : IProxy
 {
-    private readonly object _lock = new();
     private readonly IProxyContext _context;
     private readonly IProxySource _source;
     private readonly ILogger _logger;
@@ -58,7 +58,7 @@ public class ProxySourceBackgroundService<TTrackable> : BackgroundService
                     .Where(p => p.Path != string.Empty)
                     .ToList();
 
-                lock (_lock)
+                lock (this)
                 {
                     _initializedProperties = new HashSet<string>();
                 }
@@ -68,7 +68,7 @@ public class ProxySourceBackgroundService<TTrackable> : BackgroundService
 
                 // read all properties (subscription during read will later be ignored)
                 var initialValues = await _source.ReadAsync(properties!, stoppingToken);
-                lock (_lock)
+                lock (this)
                 {
                     // ignore properties which have been updated via subscription
                     foreach (var value in initialValues
@@ -122,7 +122,7 @@ public class ProxySourceBackgroundService<TTrackable> : BackgroundService
     {
         if (_initializedProperties is not null)
         {
-            lock (_lock)
+            lock (this)
             {
                 if (_initializedProperties != null)
                 {

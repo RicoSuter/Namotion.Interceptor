@@ -1,6 +1,4 @@
-﻿using Namotion.Proxy.Abstractions;
-
-namespace Namotion.Proxy.ChangeTracking
+﻿namespace Namotion.Proxy.Abstractions
 {
     public interface IProxyPropertyChangedHandler : IObservable<ProxyPropertyChanged>, IProxyHandler
     {

@@ -1,6 +1,6 @@
 ﻿using HotChocolate.Subscriptions;
 using Microsoft.Extensions.Hosting;
-using Namotion.Proxy.ChangeTracking;
+using Namotion.Proxy.Abstractions;
 using System.Reactive.Linq;
 
 namespace Namotion.Proxy.GraphQL

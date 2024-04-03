@@ -1,8 +1,8 @@
 ﻿namespace Namotion.Proxy.ChangeTracking;
 
-public static class PropertyChangeRecorderExtensions
+public static class ReadPropertyRecorderExtensions
 {
-    public static PropertyChangeRecorderScope BeginReadPropertyRecording(this IProxyContext context)
+    public static ReadPropertyRecorderScope BeginReadPropertyRecording(this IProxyContext context)
     {
         ReadPropertyRecorder.Scopes.Value =
             ReadPropertyRecorder.Scopes.Value ??
@@ -12,6 +12,6 @@ public static class PropertyChangeRecorderExtensions
         ReadPropertyRecorder.Scopes.Value.TryAdd(context, new List<HashSet<ProxyPropertyReference>>());
         ReadPropertyRecorder.Scopes.Value[context].Add(scope);
 
-        return new PropertyChangeRecorderScope(context, scope);
+        return new ReadPropertyRecorderScope(context, scope);
     }
 }

@@ -1,5 +1,4 @@
 ﻿using Namotion.Proxy.Abstractions;
-using Namotion.Proxy.ChangeTracking;
 
 namespace Namotion.Proxy.Tests.ChangeTracking;
 

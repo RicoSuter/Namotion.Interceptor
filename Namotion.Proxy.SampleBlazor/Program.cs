@@ -1,5 +1,4 @@
 using Namotion.Proxy.Abstractions;
-using Namotion.Proxy.ChangeTracking;
 using Namotion.Proxy.SampleBlazor.Components;
 using Namotion.Proxy.SampleBlazor.Models;
 
