@@ -23,12 +23,15 @@ namespace Namotion.Trackable.SampleWeb
         }
 
         [ProxySource("mqtt", "name")]
+        [ProxySource("opc", "Name")]
         public virtual string Name { get; set; } = "My Car";
 
         [ProxySourcePath("mqtt", "tires")]
+        [ProxySourcePath("opc", "Tires")]
         public virtual Tire[] Tires { get; set; }
 
         [ProxySource("mqtt", "averagePressure")]
+        [ProxySource("opc", "AveragePressure")]
         public virtual decimal AveragePressure => Tires.Average(t => t.Pressure);
     }
 
@@ -36,6 +39,7 @@ namespace Namotion.Trackable.SampleWeb
     public abstract class TireBase
     {
         [ProxySource("mqtt", "pressure")]
+        [ProxySource("opc", "Pressure")]
         [Unit("bar")]
         public virtual decimal Pressure { get; set; }
 
@@ -85,7 +89,7 @@ namespace Namotion.Trackable.SampleWeb
             builder.Services.AddProxyControllers<Car, TrackablesController<Car>>();
 
             // trackable UPC UA
-            builder.Services.AddOpcUaServerProxySource<Car>("mqtt");
+            builder.Services.AddOpcUaServerProxySource<Car>("opc");
 
             // trackable mqtt
             builder.Services.AddMqttServerProxySource<Car>("mqtt");
