@@ -1,4 +1,4 @@
-﻿using Namotion.Proxy.Registry.Attributes;
+﻿using Namotion.Proxy.Attributes;
 
 namespace Namotion.Proxy.Registry.Abstractions;
 

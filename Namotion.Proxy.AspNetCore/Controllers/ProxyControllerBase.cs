@@ -6,10 +6,9 @@ using System.Linq;
 using System.Text.Json;
 
 using Microsoft.AspNetCore.Mvc;
-
+using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Registry;
 using Namotion.Proxy.Registry.Abstractions;
-using Namotion.Proxy.Registry.Attributes;
 using Namotion.Proxy.Validation;
 
 namespace Namotion.Proxy.AspNetCore.Controllers;
@@ -153,7 +152,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
                 .Where(p => p.Value.GetValue is not null &&
                             p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any() == false))
             {
-                var propertyName = property.GetJsonPropertyName();
+                var propertyName = property.Value.GetJsonPropertyName();
                 var value = property.Value.GetValue?.Invoke();
 
                 description.Properties[propertyName] = CreateDescription(register, metadata, property.Key, value);
