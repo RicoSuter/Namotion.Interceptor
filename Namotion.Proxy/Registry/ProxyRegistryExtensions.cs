@@ -31,6 +31,8 @@ public static class ProxyRegistryExtensions
 
     public static ProxyPropertyMetadata? TryGetPropertyAttribute(this ProxyPropertyReference property, string attributeName)
     {
+        // TODO: Also support non-registry scenario
+
         var registry = property.Proxy.Context?.GetHandler<IProxyRegistry>() 
             ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
         
@@ -44,6 +46,8 @@ public static class ProxyRegistryExtensions
 
     public static IEnumerable<KeyValuePair<string, ProxyPropertyMetadata>> GetPropertyAttributes(this ProxyPropertyReference property)
     {
+        // TODO: Also support non-registry scenario
+
         var registry = property.Proxy.Context?.GetHandler<IProxyRegistry>()
             ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
 
