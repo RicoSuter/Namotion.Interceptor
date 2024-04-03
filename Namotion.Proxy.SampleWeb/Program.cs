@@ -94,7 +94,7 @@ namespace Namotion.Trackable.SampleWeb
             // trackable mqtt
             builder.Services.AddMqttServerProxySource<Car>("mqtt");
 
-            // trackable graphql
+            // trackable GraphQL
             builder.Services
                 .AddGraphQLServer()
                 .AddInMemorySubscriptions()
