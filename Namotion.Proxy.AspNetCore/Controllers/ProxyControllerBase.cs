@@ -152,7 +152,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
                 .Where(p => p.Value.GetValue is not null &&
                             p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any() == false))
             {
-                var propertyName = property.Value.GetJsonPropertyName();
+                var propertyName = property.GetJsonPropertyName();
                 var value = property.Value.GetValue?.Invoke();
 
                 description.Properties[propertyName] = CreateDescription(register, metadata, property.Key, value);

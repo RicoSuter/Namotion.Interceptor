@@ -1,9 +1,9 @@
 ﻿using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Lifecycle;
+using Namotion.Proxy.Registry.Abstractions;
 
 using System.Collections;
-using System.Reflection;
 using System.Text.Json.Nodes;
 using System.Text.Json;
 
@@ -56,34 +56,71 @@ public static class ProxyExtensions
 
     public static string GetJsonPath(this ProxyPropertyReference property)
     {
-        // TODO: avoid endless recursion
-        string? path = null;
-        var parent = new ProxyParent(property, null);
-        do
+        var registry = property.Proxy.Context?.GetHandler<IProxyRegistry>()
+          ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
+
+        if (registry is not null)
         {
-            var attribute = parent.Property.Proxy
-                .Properties[parent.Property.Name]
-                .Attributes
-                .OfType<PropertyAttributeAttribute>()
-                .FirstOrDefault();
-
-            if (attribute is not null)
+            string? path = null;
+            var parent = new ProxyParent(property, null);
+            do
             {
-                return GetJsonPath(new ProxyPropertyReference(
-                    parent.Property.Proxy,
-                    attribute.PropertyName)) +
-                    "@" + attribute.AttributeName;
+                var attribute = registry
+                    .KnownProxies[parent.Property.Proxy]
+                    .Properties[parent.Property.Name]
+                    .Attributes
+                    .OfType<PropertyAttributeAttribute>()
+                    .FirstOrDefault();
+
+                if (attribute is not null)
+                {
+                    return GetJsonPath(new ProxyPropertyReference(
+                        parent.Property.Proxy,
+                        attribute.PropertyName)) +
+                        "@" + attribute.AttributeName;
+                }
+
+                path = JsonNamingPolicy.CamelCase.ConvertName(parent.Property.Name) +
+                    (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
+                    (path is not null ? "." + path : string.Empty);
+
+                parent = parent.Property.Proxy.GetParents().FirstOrDefault();
             }
+            while (parent.Property.Proxy is not null);
 
-            path = JsonNamingPolicy.CamelCase.ConvertName(parent.Property.Name) +
-                (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
-                (path is not null ? "." + path : string.Empty);
-
-            parent = parent.Property.Proxy.GetParents().FirstOrDefault();
+            return path.Trim('.');
         }
-        while (parent.Property.Proxy is not null);
+        else
+        {
+            // TODO: avoid endless recursion
+            string? path = null;
+            var parent = new ProxyParent(property, null);
+            do
+            {
+                var attribute = parent.Property.Proxy
+                    .Properties[parent.Property.Name]
+                    .Attributes
+                    .OfType<PropertyAttributeAttribute>()
+                    .FirstOrDefault();
 
-        return path.Trim('.');
+                if (attribute is not null)
+                {
+                    return GetJsonPath(new ProxyPropertyReference(
+                        parent.Property.Proxy,
+                        attribute.PropertyName)) +
+                        "@" + attribute.AttributeName;
+                }
+
+                path = JsonNamingPolicy.CamelCase.ConvertName(parent.Property.Name) +
+                    (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
+                    (path is not null ? "." + path : string.Empty);
+
+                parent = parent.Property.Proxy.GetParents().FirstOrDefault();
+            }
+            while (parent.Property.Proxy is not null);
+
+            return path.Trim('.');
+        }
     }
 
     public static JsonObject ToJsonObject(this IProxy proxy)
@@ -93,7 +130,7 @@ public static class ProxyExtensions
             .Properties
             .Where(p => p.Value.GetValue is not null))
         {
-            var propertyName = GetJsonPropertyName(property.Key, property.Value, proxy);
+            var propertyName = GetJsonPropertyName(proxy, property.Value);
             var value = property.Value.GetValue?.Invoke(proxy);
             if (value is IProxy childProxy)
             {
@@ -113,15 +150,43 @@ public static class ProxyExtensions
                 obj[propertyName] = JsonValue.Create(value);
             }
         }
+
+        var registry = proxy.Context?.GetHandler<IProxyRegistry>()
+            ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
+
+        if (registry?.KnownProxies.TryGetValue(proxy, out var metadata) == true)
+        {
+            foreach (var property in metadata
+                .Properties
+                .Where(p => p.Value.GetValue is not null && 
+                            proxy.Properties.ContainsKey(p.Key) == false))
+            {
+                var propertyName = property.GetJsonPropertyName();
+                var value = property.Value.GetValue?.Invoke();
+                if (value is IProxy childProxy)
+                {
+                    obj[propertyName] = childProxy.ToJsonObject();
+                }
+                else if (value is ICollection collection && collection.OfType<IProxy>().Any())
+                {
+                    var children = new JsonArray();
+                    foreach (var arrayProxyItem in collection.OfType<IProxy>())
+                    {
+                        children.Add(arrayProxyItem.ToJsonObject());
+                    }
+                    obj[propertyName] = children;
+                }
+                else
+                {
+                    obj[propertyName] = JsonValue.Create(value);
+                }
+            }
+        }
+
         return obj;
     }
 
-    public static string GetJsonPropertyName(this IProxy proxy, string propertyName)
-    {
-        return GetJsonPropertyName(propertyName, proxy.Properties[propertyName], proxy);
-    }
-
-    private static string GetJsonPropertyName(string key, ProxyPropertyInfo property, IProxy parent)
+    private static string GetJsonPropertyName(IProxy proxy, ProxyPropertyInfo property)
     {
         var attribute = property
             .Attributes
@@ -130,10 +195,29 @@ public static class ProxyExtensions
 
         if (attribute is not null)
         {
-            return GetJsonPropertyName(attribute.PropertyName, parent.Properties[attribute.PropertyName], parent) + "@" + attribute.AttributeName;
+            return GetJsonPropertyName(proxy, proxy.Properties[attribute.PropertyName]) + "@" + attribute.AttributeName;
         }
 
-        return JsonNamingPolicy.CamelCase.ConvertName(key);
+        return JsonNamingPolicy.CamelCase.ConvertName(property.Name);
+    }
+
+    public static string GetJsonPropertyName(this KeyValuePair<string, ProxyPropertyMetadata> property)
+    {
+        var attribute = property
+            .Value
+            .Attributes
+            .OfType<PropertyAttributeAttribute>()
+            .FirstOrDefault();
+
+        if (attribute is not null)
+        {
+            return property.Value
+                .Parent.Properties
+                .Single(p => p.Key == attribute.PropertyName) // TODO: Improve performance??
+                .GetJsonPropertyName() + "@" + attribute.AttributeName;
+        }
+
+        return JsonNamingPolicy.CamelCase.ConvertName(property.Key);
     }
 
     public static (IProxy?, ProxyPropertyInfo) FindPropertyFromJsonPath(this IProxy proxy, string path)

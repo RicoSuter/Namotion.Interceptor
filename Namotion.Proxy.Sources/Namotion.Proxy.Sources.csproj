@@ -13,7 +13,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Namotion.Proxy.Registry\Namotion.Proxy.Registry.csproj" />
 		<ProjectReference Include="..\Namotion.Proxy\Namotion.Proxy.csproj" />
 	</ItemGroup>
 

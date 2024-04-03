@@ -29,12 +29,6 @@ public static class ProxyRegistryExtensions
         return null;
     }
 
-
-    public static string GetJsonPropertyName(this ProxyPropertyMetadata property)
-    {
-        return property.Parent.Proxy.GetJsonPropertyName(property.Property.Name);
-    }
-
     public static ProxyPropertyMetadata? TryGetPropertyAttribute(this ProxyPropertyReference property, string attributeName)
     {
         var registry = property.Proxy.Context?.GetHandler<IProxyRegistry>() 
