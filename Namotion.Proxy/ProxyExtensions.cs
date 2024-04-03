@@ -202,7 +202,7 @@ public static class ProxyExtensions
         return JsonNamingPolicy.CamelCase.ConvertName(property.Name);
     }
 
-    public static string GetJsonPropertyName(this KeyValuePair<string, ProxyPropertyMetadata> property)
+    public static string GetJsonPropertyName(this KeyValuePair<string, RegisteredProxyProperty> property)
     {
         var attribute = property
             .Value

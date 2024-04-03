@@ -8,9 +8,9 @@ namespace Namotion.Proxy.Registry;
 
 internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
 {
-    private Dictionary<IProxy, ProxyMetadata> _knownProxies = new();
+    private Dictionary<IProxy, RegisteredProxy> _knownProxies = new();
 
-    public IReadOnlyDictionary<IProxy, ProxyMetadata> KnownProxies
+    public IReadOnlyDictionary<IProxy, RegisteredProxy> KnownProxies
     {
         get
         {
@@ -25,9 +25,9 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
         {
             if (!_knownProxies.TryGetValue(context.Proxy, out var metadata))
             {
-                metadata = new ProxyMetadata(context.Proxy, context.Proxy
+                metadata = new RegisteredProxy(context.Proxy, context.Proxy
                     .Properties
-                    .Select(p => new ProxyPropertyMetadata(new ProxyPropertyReference(context.Proxy, p.Key))
+                    .Select(p => new RegisteredProxyProperty(new ProxyPropertyReference(context.Proxy, p.Key))
                     {
                         Type = p.Value.Type,
                         GetValue = p.Value.GetValue is not null ? () => p.Value.GetValue.Invoke(context.Proxy) : null,

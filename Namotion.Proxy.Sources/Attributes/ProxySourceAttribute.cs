@@ -17,7 +17,7 @@ public class ProxySourceAttribute : Attribute, IProxyPropertyInitializer
         Path = path;
     }
 
-    public void InitializeProperty(ProxyPropertyMetadata property, object? index, IProxyContext context)
+    public void InitializeProperty(RegisteredProxyProperty property, object? index, IProxyContext context)
     {
         var prefix = property.Parent.Parents.Any() ?
             property.Parent.Parents.FirstOrDefault().TryGetAttributeBasedSourcePathPrefix(SourceName) : 

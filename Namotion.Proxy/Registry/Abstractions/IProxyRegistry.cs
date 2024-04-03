@@ -4,5 +4,5 @@ namespace Namotion.Proxy.Registry.Abstractions;
 
 public interface IProxyRegistry : IProxyHandler
 {
-    IReadOnlyDictionary<IProxy, ProxyMetadata> KnownProxies { get; }
+    IReadOnlyDictionary<IProxy, RegisteredProxy> KnownProxies { get; }
 }

@@ -184,7 +184,7 @@ namespace Namotion.Trackable.OpcUa
             }
         }
 
-        private void CreateObjectNode(OpcUaNodeProviderContext context, ProxyMetadata metadata, OpcInstanceNode parentNode, string prefix)
+        private void CreateObjectNode(OpcUaNodeProviderContext context, RegisteredProxy metadata, OpcInstanceNode parentNode, string prefix)
         {
             foreach (var property in metadata.Properties)
             {

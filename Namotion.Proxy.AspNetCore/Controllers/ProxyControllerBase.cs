@@ -172,8 +172,8 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
         public List<ProxyDescription>? Proxies { get; set; }
     }
 
-    private static ProxyPropertyDescription CreateDescription(IProxyRegistry registry, ProxyMetadata parent, 
-        string propertyName, ProxyPropertyMetadata property, object? value)
+    private static ProxyPropertyDescription CreateDescription(IProxyRegistry registry, RegisteredProxy parent, 
+        string propertyName, RegisteredProxyProperty property, object? value)
     {
         var attributes = parent.Properties
             .Where(p => p.Value.GetValue is not null &&

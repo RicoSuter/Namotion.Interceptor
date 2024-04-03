@@ -3,7 +3,7 @@
 namespace Namotion.Proxy.Registry.Abstractions;
 
 #pragma warning disable CS8618
-public record ProxyPropertyMetadata(ProxyPropertyReference Property)
+public record RegisteredProxyProperty(ProxyPropertyReference Property)
 #pragma warning restore CS8618
 {
     private readonly HashSet<ProxyPropertyChild> _children = new();
@@ -12,7 +12,7 @@ public record ProxyPropertyMetadata(ProxyPropertyReference Property)
 
     public required object[] Attributes { get; init; }
 
-    public ProxyMetadata Parent { get; internal set; }
+    public RegisteredProxy Parent { get; internal set; }
 
     public required Func<object?>? GetValue { get; init; }
 

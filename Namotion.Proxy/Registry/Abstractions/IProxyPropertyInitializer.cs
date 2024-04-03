@@ -2,5 +2,5 @@
 
 public interface IProxyPropertyInitializer
 {
-    void InitializeProperty(ProxyPropertyMetadata property, object? index, IProxyContext context);
+    void InitializeProperty(RegisteredProxyProperty property, object? index, IProxyContext context);
 }

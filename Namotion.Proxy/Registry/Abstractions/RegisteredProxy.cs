@@ -2,9 +2,11 @@
 
 namespace Namotion.Proxy.Registry.Abstractions;
 
-public record ProxyMetadata
+public record RegisteredProxy
 {
-    private readonly Dictionary<string, ProxyPropertyMetadata> _properties;
+    private readonly object _lock = new();
+
+    private readonly Dictionary<string, RegisteredProxyProperty> _properties;
     private readonly HashSet<ProxyPropertyReference> _parents = new();
 
     [JsonIgnore]
@@ -14,26 +16,26 @@ public record ProxyMetadata
     {
         get
         {
-            lock (this)
+            lock (_lock)
                 return _parents.ToArray();
         }
     }
 
-    public IReadOnlyDictionary<string, ProxyPropertyMetadata> Properties
+    public IReadOnlyDictionary<string, RegisteredProxyProperty> Properties
     {
         get
         {
-            lock (this)
+            lock (_lock)
                 return _properties!.ToDictionary(p => p.Key, p => p.Value);
         }
     }
 
-    internal ProxyMetadata(IProxy proxy, IEnumerable<ProxyPropertyMetadata> properties)
+    internal RegisteredProxy(IProxy proxy, IEnumerable<RegisteredProxyProperty> properties)
     {
         Proxy = proxy;
         _properties = properties
             .ToDictionary(
-                p => p.Property.Name, 
+                p => p.Property.Name,
                 p =>
                 {
                     p.Parent = this;
@@ -43,21 +45,21 @@ public record ProxyMetadata
 
     public void AddParent(ProxyPropertyReference parent)
     {
-        lock (this)
+        lock (_lock)
             _parents.Add(parent);
     }
 
     public void RemoveParent(ProxyPropertyReference parent)
     {
-        lock (this)
+        lock (_lock)
             _parents.Remove(parent);
     }
 
     public void AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params object[] attributes)
     {
-        lock (this)
+        lock (_lock)
         {
-            _properties!.Add(name, new ProxyPropertyMetadata(new ProxyPropertyReference(Proxy, name))
+            _properties!.Add(name, new RegisteredProxyProperty(new ProxyPropertyReference(Proxy, name))
             {
                 Parent = this,
                 Type = type,
