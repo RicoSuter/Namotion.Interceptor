@@ -61,6 +61,7 @@ public static class ProxyExtensions
 
         if (registry is not null)
         {
+            // TODO: avoid endless recursion
             string? path = null;
             var parent = new ProxyParent(property, null);
             do

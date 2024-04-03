@@ -2,6 +2,7 @@
 
 public record struct ProxyPropertyReference(IProxy Proxy, string Name)
 {
+    // TODO: Rename to Info?
     public readonly ProxyPropertyInfo Metadata => Proxy.Properties[Name];
 
     public readonly void SetPropertyData(string key, object? value)
