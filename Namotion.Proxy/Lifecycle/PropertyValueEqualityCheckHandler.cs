@@ -6,10 +6,7 @@ public class PropertyValueEqualityCheckHandler : IProxyWriteHandler
 {
     public void WriteProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
     {
-        var currentValue = context.GetValueBeforeWrite();
-        var newValue = context.NewValue;
-
-        if (!Equals(currentValue, newValue))
+        if (!Equals(context.CurrentValue, context.NewValue))
         {
             next(context);
         }

@@ -41,7 +41,7 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
 
     public void WriteProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
     {
-        var currentValue = context.GetValueBeforeWrite();
+        var currentValue = context.CurrentValue;
         next(context);
         var newValue = context.NewValue;
 

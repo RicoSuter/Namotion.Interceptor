@@ -46,7 +46,7 @@ public class ProxyContext : IProxyContext
 
     public void SetProperty(IProxy proxy, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
     {
-        var context = new WriteProxyPropertyContext(new ProxyPropertyReference(proxy, propertyName), null, GetReadValueFunctionWithCache(readValue), this);
+        var context = new WriteProxyPropertyContext(new ProxyPropertyReference(proxy, propertyName), null, readValue(), this);
 
         for (int i = 0; i < _writeHandlers.Length; i++)
         {
@@ -58,22 +58,6 @@ public class ProxyContext : IProxyContext
             };
         }
 
-        writeValue.Invoke(newValue);
-    }
-
-    private static Func<object?> GetReadValueFunctionWithCache(Func<object?> readValue)
-    {
-        // TODO: do we need a lock?
-        var isRead = false;
-        object? previousValue = null;
-        return () =>
-        {
-            if (isRead == false)
-            {
-                previousValue = readValue();
-                isRead = true;
-            }
-            return previousValue;
-        };
+        writeValue(newValue);
     }
 }

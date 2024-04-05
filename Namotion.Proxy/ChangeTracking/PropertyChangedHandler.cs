@@ -9,7 +9,7 @@ internal class PropertyChangedHandler : IProxyWriteHandler, IProxyPropertyChange
 
     public void WriteProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
     {
-        var currentValue = context.GetValueBeforeWrite();
+        var currentValue = context.CurrentValue;
         var newValue = context.NewValue;
 
         next(context);
