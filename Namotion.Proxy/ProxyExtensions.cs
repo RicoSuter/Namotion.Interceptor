@@ -196,7 +196,8 @@ public static class ProxyExtensions
 
         if (attribute is not null)
         {
-            return GetJsonPropertyName(proxy, proxy.Properties[attribute.PropertyName]) + "@" + attribute.AttributeName;
+            var propertyName = GetJsonPropertyName(proxy, proxy.Properties[attribute.PropertyName]);
+            return $"{propertyName}@{attribute.AttributeName}";
         }
 
         return JsonNamingPolicy.CamelCase.ConvertName(property.Name);
