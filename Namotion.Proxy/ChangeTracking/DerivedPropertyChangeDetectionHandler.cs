@@ -82,19 +82,16 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
         var newProperties = _currentTouchedProperties!.Pop();
 
         var previouslyRequiredProperties = context.Property.GetRequiredProperties();
-        foreach (var previouslyRequiredProperty in previouslyRequiredProperties)
+        foreach (var previouslyRequiredProperty in previouslyRequiredProperties.Except(newProperties))
         {
-            if (!newProperties.Contains(previouslyRequiredProperty))
-            {
-                var usedByProperties = previouslyRequiredProperty.GetUsedByProperties();
-                lock (usedByProperties)
-                    usedByProperties.Remove(previouslyRequiredProperty);
-            }
+            var usedByProperties = previouslyRequiredProperty.GetUsedByProperties();
+            lock (usedByProperties)
+                usedByProperties.Remove(previouslyRequiredProperty);
         }
 
         context.Property.SetRequiredProperties(newProperties);
 
-        foreach (var newlyRequiredProperty in newProperties)
+        foreach (var newlyRequiredProperty in newProperties.Except(previouslyRequiredProperties))
         {
             var usedByProperties = newlyRequiredProperty.GetUsedByProperties();
             lock (usedByProperties)
