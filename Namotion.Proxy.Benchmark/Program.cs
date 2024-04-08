@@ -28,8 +28,8 @@ public static class Program
     {
         var watch = Stopwatch.StartNew();
 
-        var outer = 10000;
-        var inner = 100;
+        var outer = 100;
+        var inner = 100000;
 
         var total = outer * inner;
         for (int i = 0; i < outer; ++i)
@@ -37,7 +37,7 @@ public static class Program
             watch.Restart();
             for (int j = 0; j < inner; ++j)
             {
-                benchmark.IncrementDerivedAverage();
+                benchmark.ChangeAllTires();
             }
             Console.WriteLine($"{i * inner}/{total} ({watch.ElapsedMilliseconds / inner} ms)");
         }

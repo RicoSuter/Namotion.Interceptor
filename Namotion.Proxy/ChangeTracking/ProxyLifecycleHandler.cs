@@ -19,9 +19,9 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
 
     public void OnProxyAttached(ProxyLifecycleContext context)
     {
-        var proxies = new HashSet<IProxy>();
+        var touchedProxies = new HashSet<IProxy>();
         var proxyProperties = new HashSet<(IProxy, ProxyPropertyReference, object?)>();
-        FindProxiesInProperties(context.Proxy, proxies, proxyProperties);
+        FindProxiesInProperties(context.Proxy, touchedProxies, proxyProperties);
         
         foreach (var child in proxyProperties)
         {
