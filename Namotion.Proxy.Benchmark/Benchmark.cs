@@ -39,7 +39,7 @@ public class Benchmark
         }
     }
 
-    [Benchmark]
+    //[Benchmark]
     public void AddLotsOfPreviousCars()
     {
         _object.PreviousCars = Enumerable.Range(0, 10000)
