@@ -6,12 +6,3 @@ public interface IProxyLifecycleHandler : IProxyHandler
 
     public void OnProxyDetached(ProxyLifecycleContext context);
 }
-
-public record struct ProxyLifecycleContext(
-    ProxyPropertyReference Property,
-    object? Index,
-    IProxy Proxy,
-    int ReferenceCount,
-    IProxyContext Context)
-{
-}

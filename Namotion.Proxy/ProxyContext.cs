@@ -46,7 +46,7 @@ public class ProxyContext : IProxyContext
 
     public void SetProperty(IProxy proxy, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
     {
-        var context = new WriteProxyPropertyContext(new ProxyPropertyReference(proxy, propertyName), null, readValue(), this);
+        var context = new WriteProxyPropertyContext(new ProxyPropertyReference(proxy, propertyName), readValue(), null, this);
 
         for (int i = 0; i < _writeHandlers.Length; i++)
         {

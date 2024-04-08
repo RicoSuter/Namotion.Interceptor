@@ -3,7 +3,7 @@ using System.Reactive.Subjects;
 
 namespace Namotion.Proxy.ChangeTracking;
 
-internal class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IProxyWriteHandler, IProxyDerivedPropertyChangedHandler
+internal class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IProxyWriteHandler
 {
     private Subject<ProxyPropertyChanged> _subject = new();
 
@@ -21,10 +21,5 @@ internal class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IP
     public IDisposable Subscribe(IObserver<ProxyPropertyChanged> observer)
     {
         return _subject.Subscribe(observer);
-    }
-
-    public void OnDerivedPropertyChanged(ProxyPropertyChanged changedContext)
-    {
-        _subject.OnNext(changedContext);
     }
 }
