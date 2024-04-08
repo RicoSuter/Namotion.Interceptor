@@ -136,11 +136,11 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
         if (register.KnownProxies.TryGetValue(proxy, out var metadata))
         {
             foreach (var property in metadata.Properties
-                .Where(p => p.Value.GetValue is not null &&
+                .Where(p => p.Value.HasGetter &&
                             p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any() == false))
             {
                 var propertyName = property.GetJsonPropertyName();
-                var value = property.Value.GetValue?.Invoke();
+                var value = property.Value.GetValue();
 
                 description.Properties[propertyName] = CreateDescription(register, metadata, property.Key, property.Value, value);
             }
@@ -176,11 +176,11 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
         string propertyName, RegisteredProxyProperty property, object? value)
     {
         var attributes = parent.Properties
-            .Where(p => p.Value.GetValue is not null &&
+            .Where(p => p.Value.HasGetter &&
                         p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any(a => a.PropertyName == propertyName))
             .ToDictionary(
                 p => p.Value.Attributes.OfType<PropertyAttributeAttribute>().Single().AttributeName,
-                p => CreateDescription(registry, parent, p.Key, p.Value, p.Value.GetValue?.Invoke()));
+                p => CreateDescription(registry, parent, p.Key, p.Value, p.Value.GetValue()));
 
         var description = new ProxyPropertyDescription
         {

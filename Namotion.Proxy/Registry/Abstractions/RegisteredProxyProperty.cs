@@ -14,9 +14,19 @@ public record RegisteredProxyProperty(ProxyPropertyReference Property)
 
     public RegisteredProxy Parent { get; internal set; }
 
-    public required Func<object?>? GetValue { get; init; }
+    public virtual bool HasGetter => Property.Metadata.GetValue is not null;
 
-    public required Action<object?>? SetValue { get; init; }
+    public virtual bool HasSetter => Property.Metadata.SetValue is not null;
+
+    public virtual object? GetValue()
+    {
+        return Property.Metadata.GetValue?.Invoke(Property.Proxy);
+    }
+
+    public virtual void SetValue(object? value)
+    {
+        Property.Metadata.SetValue?.Invoke(Property.Proxy, value);
+    }
 
     public ICollection<ProxyPropertyChild> Children
     {

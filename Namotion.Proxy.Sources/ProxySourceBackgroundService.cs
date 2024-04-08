@@ -45,16 +45,18 @@ public class ProxySourceBackgroundService<TTrackable> : BackgroundService
             {
                 // TODO: Currently newly added properties/trackable are not automatically tracked/subscribed to
 
-                var properties = _context
+                var propertiesWithSetter = _context
                     .GetHandler<IProxyRegistry>()
                     .KnownProxies
-                    .SelectMany(v => v.Value.Properties.Select(p =>
-                    {
-                        var reference = new ProxyPropertyReference(v.Key, p.Key);
-                        return new ProxyPropertyPathReference(reference,
-                            _source.TryGetSourcePath(reference) ?? string.Empty,
-                            p.Value.GetValue?.Invoke());
-                    }))
+                    .SelectMany(v => v.Value.Properties
+                        .Where(p => p.Value.HasSetter)
+                        .Select(p =>
+                        {
+                            var reference = new ProxyPropertyReference(v.Key, p.Key);
+                            return new ProxyPropertyPathReference(reference,
+                                _source.TryGetSourcePath(reference) ?? string.Empty,
+                                p.Value.HasGetter ? p.Value.GetValue() : null);
+                        }))
                     .Where(p => p.Path != string.Empty)
                     .ToList();
 
@@ -64,10 +66,10 @@ public class ProxySourceBackgroundService<TTrackable> : BackgroundService
                 }
 
                 // subscribe first and mark all properties as initialized which are updated before the read has completed 
-                using var disposable = await _source.InitializeAsync(properties!, UpdatePropertyValueFromSource, stoppingToken);
+                using var disposable = await _source.InitializeAsync(propertiesWithSetter!, UpdatePropertyValueFromSource, stoppingToken);
 
                 // read all properties (subscription during read will later be ignored)
-                var initialValues = await _source.ReadAsync(properties!, stoppingToken);
+                var initialValues = await _source.ReadAsync(propertiesWithSetter!, stoppingToken);
                 lock (this)
                 {
                     // ignore properties which have been updated via subscription

@@ -30,8 +30,6 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                     .Select(p => new RegisteredProxyProperty(new ProxyPropertyReference(context.Proxy, p.Key))
                     {
                         Type = p.Value.Type,
-                        GetValue = p.Value.GetValue is not null ? () => p.Value.GetValue.Invoke(context.Proxy) : null,
-                        SetValue = p.Value.SetValue is not null ? (value) => p.Value.SetValue.Invoke(context.Proxy, value) : null,
                         Attributes = p.Value.Attributes
                     }));
 
@@ -51,7 +49,7 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                     });
             }
 
-            foreach (var property in metadata.Properties.ToArray())
+            foreach (var property in metadata.Properties)
             {
                 foreach (var attribute in property.Value.Attributes.OfType<IProxyPropertyInitializer>())
                 {

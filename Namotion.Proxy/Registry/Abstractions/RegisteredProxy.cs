@@ -63,9 +63,7 @@ public record RegisteredProxy
             {
                 Parent = this,
                 Type = type,
-                Attributes = attributes,
-                GetValue = getValue,
-                SetValue = setValue
+                Attributes = attributes
             });
         }
     }

@@ -159,11 +159,11 @@ public static class ProxyExtensions
         {
             foreach (var property in metadata
                 .Properties
-                .Where(p => p.Value.GetValue is not null && 
+                .Where(p => p.Value.HasGetter && 
                             proxy.Properties.ContainsKey(p.Key) == false))
             {
                 var propertyName = property.GetJsonPropertyName();
-                var value = property.Value.GetValue?.Invoke();
+                var value = property.Value.GetValue();
                 if (value is IProxy childProxy)
                 {
                     obj[propertyName] = childProxy.ToJsonObject();

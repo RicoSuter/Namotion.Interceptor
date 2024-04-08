@@ -132,11 +132,12 @@ namespace Namotion.Trackable.Mqtt
             Task.Run(async () =>
             {
                 await Task.Delay(1000);
-                foreach (var property in _context.GetHandler<IProxyRegistry>()
+                foreach (var property in _context
+                    .GetHandler<IProxyRegistry>()
                     .GetProperties()
-                    .Where(p => p.GetValue is not null))
+                    .Where(p => p.HasGetter))
                 {
-                    await PublishPropertyValueAsync(property.GetValue?.Invoke(), property.Property);
+                    await PublishPropertyValueAsync(property.GetValue(), property.Property);
                 }
             });
 

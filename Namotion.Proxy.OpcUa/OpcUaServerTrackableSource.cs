@@ -210,7 +210,7 @@ namespace Namotion.Trackable.OpcUa
                     var sourcePath = _source.TryGetSourcePath(property.Value.Property);
                     if (sourcePath is not null)
                     {
-                        var value = property.Value.GetValue?.Invoke();
+                        var value = property.Value.GetValue();
                         var type = property.Value.Type;
 
                         if (type == typeof(decimal))
