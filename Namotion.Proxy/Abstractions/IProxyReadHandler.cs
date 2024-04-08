@@ -2,5 +2,5 @@
 
 public interface IProxyReadHandler : IProxyHandler
 {
-    object? ReadProperty(ReadProxyPropertyContext context, Func<ReadProxyPropertyContext, object?> next);
+    object? ReadProperty(ProxyPropertyReadContext context, Func<ProxyPropertyReadContext, object?> next);
 }

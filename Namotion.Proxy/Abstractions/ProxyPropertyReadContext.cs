@@ -1,6 +1,6 @@
 ﻿namespace Namotion.Proxy.Abstractions;
 
-public record struct ReadProxyPropertyContext(
+public record struct ProxyPropertyReadContext(
     ProxyPropertyReference Property,
     IProxyContext Context)
 {

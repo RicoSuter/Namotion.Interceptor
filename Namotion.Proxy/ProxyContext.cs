@@ -29,7 +29,7 @@ public class ProxyContext : IProxyContext
 
     public object? GetProperty(IProxy proxy, string propertyName, Func<object?> readValue)
     {
-        var context = new ReadProxyPropertyContext(new ProxyPropertyReference(proxy, propertyName), this);
+        var context = new ProxyPropertyReadContext(new ProxyPropertyReference(proxy, propertyName), this);
 
         for (int i = 0; i < _readHandlers.Length; i++)
         {
@@ -46,7 +46,7 @@ public class ProxyContext : IProxyContext
 
     public void SetProperty(IProxy proxy, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
     {
-        var context = new WriteProxyPropertyContext(new ProxyPropertyReference(proxy, propertyName), readValue(), null, this);
+        var context = new ProxyPropertyWriteContext(new ProxyPropertyReference(proxy, propertyName), readValue(), null, IsDerived: false, this);
 
         for (int i = 0; i < _writeHandlers.Length; i++)
         {

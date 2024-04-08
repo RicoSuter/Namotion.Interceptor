@@ -6,7 +6,7 @@ internal class ReadPropertyRecorder : IProxyReadHandler
 {
     internal static AsyncLocal<IDictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>> Scopes { get; } = new();
 
-    public object? ReadProperty(ReadProxyPropertyContext context, Func<ReadProxyPropertyContext, object?> next)
+    public object? ReadProperty(ProxyPropertyReadContext context, Func<ProxyPropertyReadContext, object?> next)
     {
         if (Scopes.Value is not null)
         {

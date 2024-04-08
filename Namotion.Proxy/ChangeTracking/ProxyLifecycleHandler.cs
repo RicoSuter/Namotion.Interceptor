@@ -39,7 +39,7 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
         //DetachProxy(context.Context, context.Property, context., child.Item3);
     }
 
-    public void WriteProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
+    public void WriteProperty(ProxyPropertyWriteContext context, Action<ProxyPropertyWriteContext> next)
     {
         var currentValue = context.CurrentValue;
         next(context);

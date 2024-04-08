@@ -7,7 +7,7 @@ internal class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IP
 {
     private Subject<ProxyPropertyChanged> _subject = new();
 
-    public void WriteProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
+    public void WriteProperty(ProxyPropertyWriteContext context, Action<ProxyPropertyWriteContext> next)
     {
         var currentValue = context.CurrentValue;
         var newValue = context.NewValue;

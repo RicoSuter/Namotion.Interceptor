@@ -17,7 +17,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
         _handlers = handlers;
     }
 
-    public object? ReadProperty(ReadProxyPropertyContext context, Func<ReadProxyPropertyContext, object?> next)
+    public object? ReadProperty(ProxyPropertyReadContext context, Func<ProxyPropertyReadContext, object?> next)
     {
         if (context.Property.Metadata.IsDerived)
         {
@@ -40,7 +40,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
         }
     }
 
-    public void WriteProperty(WriteProxyPropertyContext context, Action<WriteProxyPropertyContext> next)
+    public void WriteProperty(ProxyPropertyWriteContext context, Action<ProxyPropertyWriteContext> next)
     {
         next.Invoke(context);
 
@@ -57,7 +57,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
                         .GetValue?
                         .Invoke(usedByProperty.Proxy);
 
-                    var changedContext = new WriteProxyPropertyContext(usedByProperty, oldValue, newValue, context.Context);
+                    var changedContext = new ProxyPropertyWriteContext(usedByProperty, oldValue, newValue, IsDerived: true, context.Context);
                     foreach (var handler in _handlers.Value)
                     {
                         handler.WriteProperty(changedContext, delegate { });
@@ -77,7 +77,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
         _currentTouchedProperties.Push(new HashSet<ProxyPropertyReference>());
     }
 
-    private void StoreRecordedTouchedProperties(ReadProxyPropertyContext context)
+    private void StoreRecordedTouchedProperties(ProxyPropertyReadContext context)
     {
         var newProperties = _currentTouchedProperties!.Pop();
 
@@ -102,7 +102,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyReadHandler, IProxy
         }
     }
 
-    private void TouchProperty(ReadProxyPropertyContext context)
+    private void TouchProperty(ProxyPropertyReadContext context)
     {
         if (_currentTouchedProperties?.TryPeek(out var touchedProperties) == true)
         {
