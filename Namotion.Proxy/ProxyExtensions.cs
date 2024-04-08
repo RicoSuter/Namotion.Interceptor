@@ -229,11 +229,10 @@ public static class ProxyExtensions
 
     private static (IProxy?, ProxyPropertyInfo) FindPropertyFromJsonPath(this IProxy proxy, IEnumerable<string> segments)
     {
-        var nextSegment = segments.First(); // TODO: Improve convert to upper camel case
-        nextSegment = nextSegment[0].ToString().ToUpperInvariant() + nextSegment.Substring(1);
+        var nextSegment = segments.First();
+        nextSegment = ConvertToUpperCamelCase(nextSegment);
 
         segments = segments.Skip(1);
-
         if (segments.Any())
         {
             if (nextSegment.Contains('['))
@@ -256,5 +255,17 @@ public static class ProxyExtensions
         {
             return (proxy, proxy.Properties[nextSegment]);
         }
+    }
+
+    private static string ConvertToUpperCamelCase(string nextSegment)
+    {
+        if (string.IsNullOrEmpty(nextSegment))
+        {
+            return nextSegment;
+        }
+
+        var characters = nextSegment.ToCharArray();
+        characters[0] = char.ToUpperInvariant(characters[0]);
+        return new string(characters);
     }
 }
