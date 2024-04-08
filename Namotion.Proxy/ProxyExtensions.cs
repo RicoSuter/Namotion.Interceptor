@@ -83,7 +83,7 @@ public static class ProxyExtensions
 
                 path = JsonNamingPolicy.CamelCase.ConvertName(parent.Property.Name) +
                     (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
-                    (path is not null ? "." + path : string.Empty);
+                    (path is not null ? $".{path}" : string.Empty);
 
                 parent = parent.Property.Proxy.GetParents().FirstOrDefault();
             }
@@ -114,7 +114,7 @@ public static class ProxyExtensions
 
                 path = JsonNamingPolicy.CamelCase.ConvertName(parent.Property.Name) +
                     (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
-                    (path is not null ? "." + path : string.Empty);
+                    (path is not null ? $".{path}" : string.Empty);
 
                 parent = parent.Property.Proxy.GetParents().FirstOrDefault();
             }

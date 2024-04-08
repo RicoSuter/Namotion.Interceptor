@@ -81,7 +81,7 @@ public class ProxySourceBackgroundService<TTrackable> : BackgroundService
                 }
 
                 await _context
-                    .GetHandler<IProxyPropertyChangedHandler>()
+                    .GetPropertyChangedObservable()
                     .Where(change => 
                         !change.IsChangingFromSource(_source) &&
                         _source.TryGetSourcePath(change.Property) != null)

@@ -10,7 +10,7 @@ public class ReadPropertyRecorderTests
         // Arrange
         var context = ProxyContext
             .CreateBuilder()
-            .WithPropertyChangedHandlers()
+            .WithPropertyChangedObservable()
             .WithReadPropertyRecorder()
             .Build();
 

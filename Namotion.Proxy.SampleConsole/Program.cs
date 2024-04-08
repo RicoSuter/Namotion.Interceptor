@@ -14,7 +14,7 @@ namespace ConsoleApp1
                 .Build();
 
             context
-                .GetHandler<IProxyPropertyChangedHandler>()
+                .GetPropertyChangedObservable()
                 .Subscribe((change) => 
                     Console.WriteLine($"Property {change.Property.Name} changed from {change.OldValue} to {change.NewValue}."));
 

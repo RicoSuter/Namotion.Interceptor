@@ -11,11 +11,11 @@ public class PropertyChangedHandlerTests
         var changes = new List<ProxyPropertyChanged>();
         var context = ProxyContext
             .CreateBuilder()
-            .WithPropertyChangedHandlers()
+            .WithPropertyChangedObservable()
             .Build();
 
         context
-            .GetHandler<IProxyPropertyChangedHandler>()
+            .GetPropertyChangedObservable()
             .Subscribe(changes.Add);
 
         // Act

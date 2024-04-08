@@ -15,7 +15,7 @@ public class DerivedPropertyChangeDetectionHandlerTests
             .Build();
 
         context
-            .GetHandler<IProxyPropertyChangedHandler>()
+            .GetPropertyChangedObservable()
             .Subscribe(changes.Add);
 
         // Act

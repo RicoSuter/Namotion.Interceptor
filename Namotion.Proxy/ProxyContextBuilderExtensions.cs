@@ -26,8 +26,8 @@ public static class ProxyContextBuilderExtensions
     {
         return builder
             .TryAddSingleHandler(new InitiallyLoadDerivedPropertiesHandler())
-            .TryAddSingleHandler(new DerivedPropertyChangeDetectionHandler(builder.GetLazyHandlers<IProxyPropertyChangedHandler>()))
-            .WithPropertyChangedHandlers();
+            .TryAddSingleHandler(new DerivedPropertyChangeDetectionHandler(builder.GetLazyHandlers<IProxyDerivedPropertyChangedHandler>()))
+            .WithPropertyChangedObservable();
     }
 
     public static IProxyContextBuilder WithReadPropertyRecorder(this IProxyContextBuilder builder)
@@ -59,10 +59,15 @@ public static class ProxyContextBuilderExtensions
             .WithPropertyValidation();
     }
 
-    public static IProxyContextBuilder WithPropertyChangedHandlers(this IProxyContextBuilder builder)
+    /// <summary>
+    /// Registers the property changed observable which can be retrieved using proxy.GetPropertyChangedObservable().
+    /// </summary>
+    /// <param name="builder">The builder.</param>
+    /// <returns>The builder.</returns>
+    public static IProxyContextBuilder WithPropertyChangedObservable(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new PropertyChangedHandler());
+            .TryAddSingleHandler(new PropertyChangedObservable());
     }
 
     /// <summary>
@@ -100,6 +105,11 @@ public static class ProxyContextBuilderExtensions
             .WithAutomaticContextAssignment();
     }
 
+    /// <summary>
+    /// Automatically assigns the parents to the proxy data.
+    /// </summary>
+    /// <param name="builder">The builder.</param>
+    /// <returns>The builder.</returns>
     public static IProxyContextBuilder WithParents(this IProxyContextBuilder builder)
     {
         return builder
