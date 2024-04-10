@@ -12,7 +12,9 @@ internal class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IP
         var currentValue = context.CurrentValue;
         var newValue = context.NewValue;
 
-        next(context);
+        next(context); 
+        
+        // TODO: Should retrieve actual new value
 
         var changedContext = new ProxyPropertyChanged(context.Property, currentValue, newValue, context.Context);
         _subject.OnNext(changedContext);
