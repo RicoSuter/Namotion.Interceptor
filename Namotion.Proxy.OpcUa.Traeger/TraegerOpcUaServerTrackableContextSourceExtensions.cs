@@ -1,9 +1,9 @@
 ﻿using Microsoft.Extensions.Logging;
 
 using Namotion.Trackable.Sources;
-using Namotion.Trackable.OpcUa;
 using Namotion.Proxy.Sources;
 using Namotion.Proxy;
+using Namotion.Proxy.OpcUa.Traeger;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;

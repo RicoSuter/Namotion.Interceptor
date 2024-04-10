@@ -7,11 +7,10 @@ using Opc.UaFx.Server;
 using System.Reactive.Linq;
 using System.Collections.ObjectModel;
 
-using Namotion.Proxy;
 using Namotion.Proxy.Sources.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
 
-namespace Namotion.Trackable.OpcUa
+namespace Namotion.Proxy.OpcUa.Traeger
 {
     internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
         where TProxy : IProxy
@@ -35,7 +34,7 @@ namespace Namotion.Trackable.OpcUa
         {
             _context = proxy.Context  ??
                 throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
-            
+
             _nodeManager = new OpcProviderBasedNodeManager<TProxy>(proxy, this);
             SourcePathProvider = sourcePathProvider;
             _logger = logger;
@@ -197,7 +196,7 @@ namespace Namotion.Trackable.OpcUa
                     {
                         var index = child.Index is not null ? $"[{child.Index}]" : string.Empty;
                         var path = prefix + propertyName + index;
-                        
+
                         var objectNode = new OpcObjectNode(path);
                         CreateObjectNode(context, _registry.KnownProxies[child.Proxy], objectNode, path + ".");
 

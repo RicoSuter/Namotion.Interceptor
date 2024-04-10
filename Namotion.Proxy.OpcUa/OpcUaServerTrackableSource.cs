@@ -11,7 +11,9 @@ using Opc.Ua.Server;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 
-namespace Namotion.Trackable.OpcUa
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Namotion.Proxy.OpcUa
 {
     internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
         where TProxy : IProxy
@@ -45,16 +47,16 @@ namespace Namotion.Trackable.OpcUa
             {
                 try
                 {
+                    using var stream = typeof(OpcUaServerTrackableContextSourceExtensions).Assembly.GetManifestResourceStream("Namotion.Proxy.OpcUa.MyOpcUaServer.Config.xml");
                     _application = new ApplicationInstance
                     {
                         ApplicationName = "MyOpcUaServer",
                         ApplicationType = ApplicationType.Server,
-                        ConfigSectionName = "MyOpcUaServer"
+                        ApplicationConfiguration = await ApplicationConfiguration.Load(stream, ApplicationType.Server, typeof(ApplicationConfiguration), false)
                     };
                     _server = new ProxyOpcUaServer<TProxy>(_proxy, this);
 
-                    //Opc.Ua.ApplicationConfiguration config = await application.LoadApplicationConfiguration(false);
-                    // await application.CheckApplicationInstanceCertificate(false, 0);
+                    await _application.CheckApplicationInstanceCertificate(true, CertificateFactory.DefaultKeySize);
                     await _application.Start(_server);
 
                     await Task.Delay(-1, stoppingToken);
@@ -206,11 +208,11 @@ namespace Namotion.Trackable.OpcUa
                         var value = property.Value.GetValue();
                         var type = property.Value.Type;
 
-                        if (type == typeof(decimal))
-                        {
-                            type = typeof(double);
-                            value = Convert.ToDouble(value);
-                        }
+                        //if (type == typeof(decimal))
+                        //{
+                        //    type = typeof(double);
+                        //    value = Convert.ToDouble(value);
+                        //}
 
                         var path = prefix + propertyName;
                         var variable = CreateVariable(parentNode, path, propertyName, NamespaceIndex, TypeInfo.Construct(type), 1);
@@ -252,11 +254,11 @@ namespace Namotion.Trackable.OpcUa
             var variable = new BaseDataVariableState(parentNode)
             {
                 NodeId = new NodeId(path, namespaceIndex),
-              
+
                 SymbolicName = name,
                 BrowseName = new QualifiedName(name, namespaceIndex),
                 DisplayName = new LocalizedText(name),
-              
+
                 TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
                 DataType = TypeInfo.GetDataTypeId(dataType),
                 ValueRank = valueRank,
