@@ -301,5 +301,4 @@ namespace Namotion.Trackable.OpcUa
 
         public static OpcNodeId HasAddIn { get; } = new OpcNodeId(HasAddIn_NodeValue);
     }
-
 }
