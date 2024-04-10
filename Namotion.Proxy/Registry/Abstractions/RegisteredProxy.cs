@@ -59,7 +59,7 @@ public record RegisteredProxy
     {
         lock (_lock)
         {
-            _properties!.Add(name, new RegisteredProxyProperty(new ProxyPropertyReference(Proxy, name))
+            _properties!.Add(name, new CustomRegisteredProxyProperty(new ProxyPropertyReference(Proxy, name), getValue, setValue)
             {
                 Parent = this,
                 Type = type,

@@ -8,7 +8,7 @@ using Namotion.Proxy;
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class OpcUaServerTrackableContextSourceExtensions
+public static class TraegerOpcUaServerTrackableContextSourceExtensions
 {
     public static IServiceCollection AddOpcUaServerProxySource<TProxy>(
         this IServiceCollection serviceCollection, string sourceName, string? pathPrefix = null)

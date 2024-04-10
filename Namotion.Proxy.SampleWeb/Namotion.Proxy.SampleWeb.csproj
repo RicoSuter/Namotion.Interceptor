@@ -7,6 +7,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="MyOpcUaServer.Config.xml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="MyOpcUaServer.Config.xml" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="HotChocolate.AspNetCore" Version="13.9.0" />
     <PackageReference Include="NSwag.AspNetCore" Version="14.0.3" />
   </ItemGroup>
@@ -16,8 +24,7 @@
     <ProjectReference Include="..\Namotion.Proxy.Generator\Namotion.Proxy.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\Namotion.Proxy.GraphQL\Namotion.Proxy.GraphQL.csproj" />
     <ProjectReference Include="..\Namotion.Proxy.Mqtt\Namotion.Proxy.Mqtt.csproj" />
-    <ProjectReference Include="..\Namotion.Proxy.OpcUa.Traeger\Namotion.Proxy.OpcUa.Traeger.csproj" />
-    <ProjectReference Include="..\Namotion.Proxy.OpcUa\Namotion.Proxy.OpcUa.Traeger.csproj" />
+    <ProjectReference Include="..\Namotion.Proxy.OpcUa\Namotion.Proxy.OpcUa.csproj" />
     <ProjectReference Include="..\Namotion.Proxy.Sources\Namotion.Proxy.Sources.csproj" />
   </ItemGroup>
 

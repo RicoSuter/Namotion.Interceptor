@@ -1,30 +1,29 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-using Opc.UaFx;
-using Opc.UaFx.Server;
-
 using System.Reactive.Linq;
-using System.Collections.ObjectModel;
 
 using Namotion.Proxy;
 using Namotion.Proxy.Sources.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
 
+using Opc.Ua.Server;
+using Opc.Ua;
+using Opc.Ua.Configuration;
+
 namespace Namotion.Trackable.OpcUa
 {
-    public class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
+    internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
         where TProxy : IProxy
     {
         internal const string OpcVariableKey = "OpcVariable";
 
         private readonly IProxyContext _context;
+        private readonly TProxy _proxy;
         private readonly ILogger _logger;
 
-        private readonly OpcProviderBasedNodeManager<TProxy> _nodeManager;
-        private readonly OpcNodeSet[] _nodeSets = Array.Empty<OpcNodeSet>();
-
-        private OpcServer? _opcServer;
+        private ApplicationInstance _application;
+        private MyOpcUaServer<TProxy> _server;
 
         internal ISourcePathProvider SourcePathProvider { get; }
 
@@ -35,8 +34,7 @@ namespace Namotion.Trackable.OpcUa
         {
             _context = proxy.Context  ??
                 throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
-            
-            _nodeManager = new OpcProviderBasedNodeManager<TProxy>(_context.GetHandler<IProxyRegistry>(), proxy, this);
+            _proxy=proxy;
             SourcePathProvider = sourcePathProvider;
             _logger = logger;
         }
@@ -47,15 +45,17 @@ namespace Namotion.Trackable.OpcUa
             {
                 try
                 {
-                    _opcServer = _nodeManager.CreateServer();
-                    _opcServer.Start();
-
-                    OpcUaNamespace.GetNamespace(_opcServer.SystemContext).Resolve(_opcServer);
-
-                    foreach (var ns in _nodeSets.SelectMany(ns => ns.Namespaces))
+                    _application = new ApplicationInstance
                     {
-                        ns.Resolve(_opcServer);
-                    }
+                        ApplicationName = "MyOpcUaServer",
+                        ApplicationType = ApplicationType.Server,
+                        ConfigSectionName = "MyOpcUaServer"
+                    };
+                    _server = new MyOpcUaServer<TProxy>(_proxy, this);
+
+                    //Opc.Ua.ApplicationConfiguration config = await application.LoadApplicationConfiguration(false);
+                    // await application.CheckApplicationInstanceCertificate(false, 0);
+                    await _application.Start(_server);
 
                     await Task.Delay(-1, stoppingToken);
                 }
@@ -65,6 +65,10 @@ namespace Namotion.Trackable.OpcUa
                     {
                         _logger.LogError(ex, "Failed to start OPC UA server.");
                         await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+                    }
+                    else
+                    {
+                        _application.Stop();
                     }
                 }
             }
@@ -84,7 +88,7 @@ namespace Namotion.Trackable.OpcUa
         {
             return Task.FromResult<IEnumerable<ProxyPropertyPathReference>>(properties
                 .Where(p => p.Property.TryGetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, out var _))
-                .Select(property => (property, node: property.Property.GetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey) as OpcDataVariableNode))
+                .Select(property => (property, node: property.Property.GetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey) as BaseDataVariableState))
                 .Where(p => p.node is not null)
                 .Select(p => new ProxyPropertyPathReference(p.property.Property, p.property.Path,
                     p.property.Property.Metadata.Type == typeof(decimal) ? Convert.ToDecimal(p.node!.Value) : p.node!.Value))
@@ -102,9 +106,9 @@ namespace Namotion.Trackable.OpcUa
                     actualValue = Convert.ToDouble(actualValue);
                 }
 
-                var node = property.Property.GetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey) as OpcDataVariableNode;
+                var node = property.Property.GetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey) as BaseDataVariableState;
                 node!.Value = actualValue;
-                node.UpdateChanges(_opcServer!.SystemContext, OpcNodeChanges.Value);
+                node.ClearChangeMasks(_server.CurrentInstance.DefaultSystemContext, false);
             }
 
             return Task.CompletedTask;
@@ -116,94 +120,80 @@ namespace Namotion.Trackable.OpcUa
         }
     }
 
-    public class OpcProviderBasedNodeManager<TProxy> : OpcNodeManager
+    internal class MyOpcUaServer<TProxy> : StandardServer
+        where TProxy : IProxy
+    {
+        public MyOpcUaServer(TProxy proxy, OpcUaServerTrackableSource<TProxy> source)
+        {
+            AddNodeManager(new CustomNodeManagerFactory<TProxy>(proxy, source));
+        }
+    }
+
+    internal class CustomNodeManagerFactory<TProxy> : INodeManagerFactory
         where TProxy : IProxy
     {
         private readonly TProxy _proxy;
-        private readonly IProxyRegistry _registry;
-        private readonly IEnumerable<IOpcUaNodeProvider> _nodeProviders = Enumerable.Empty<IOpcUaNodeProvider>();
+        private readonly OpcUaServerTrackableSource<TProxy> _source;
 
-        private OpcUaServerTrackableSource<TProxy> _source;
+        public StringCollection NamespacesUris => new StringCollection(new[] { "http://rico.com" });
 
-        public OpcProviderBasedNodeManager(IProxyRegistry registry, TProxy proxy, OpcUaServerTrackableSource<TProxy> source)
-            : base("https://foobar/")
+        public CustomNodeManagerFactory(TProxy proxy, OpcUaServerTrackableSource<TProxy> source)
         {
             _proxy = proxy;
-            _registry = registry;
             _source = source;
         }
 
-        public OpcServer CreateServer()
+        public INodeManager Create(IServerInternal server, ApplicationConfiguration configuration)
         {
-            var companionSpecsManager = OpcNodeSetManager.Create(
-                NodeSetFactory.LoadNodeSetFromEmbeddedResource<OpcProviderBasedNodeManager<TProxy>>("NodeSets.Opc.Ua.Di.NodeSet2.xml"),
-                _nodeProviders
-                    .SelectMany(p => p.CreateNodeSets())
-                    .DistinctBy(n => n.Name)
-                    .ToArray()
-            );
+            return new CustomNodeManager<TProxy>(_proxy, _source, server, configuration);
+        }
+    }
 
-            return new OpcServer(/*"opc.tcp://localhost:4840/",*/ companionSpecsManager, this);
+    internal class CustomNodeManager<TProxy> : CustomNodeManager2
+        where TProxy : IProxy
+    {
+        private readonly TProxy _proxy;
+        private readonly OpcUaServerTrackableSource<TProxy> _source;
+        private readonly IProxyRegistry _registry;
+
+        public CustomNodeManager(TProxy proxy, OpcUaServerTrackableSource<TProxy> source, IServerInternal server, ApplicationConfiguration configuration) :
+           base(server, configuration, new string[] { "http://yourcompany.com/yourcustomnamespace" }) // Define your namespace here
+        {
+            _proxy = proxy;
+            _source = source;
+            _registry = proxy.Context?.GetHandler<IProxyRegistry>() ?? throw new ArgumentException($"Registry could not be found.");
         }
 
-        protected override IEnumerable<OpcNodeSet> ImportNodes()
+        public override void CreateAddressSpace(IDictionary<NodeId, IList<IReference>> externalReferences)
         {
-            return _nodeProviders
-                .SelectMany(p => p.CreateNodeSets())
-                .DistinctBy(n => n.Name)
-                .ToArray();
-        }
-
-        protected override IEnumerable<IOpcNode> CreateNodes(OpcNodeReferenceCollection references)
-        {
-            // OPC UA Modelling overview: https://reference.opcfoundation.org/Machinery/v102/docs/4
-
-            var context = new OpcUaNodeProviderContext
-            {
-                Context = SystemContext,
-                Manager = this,
-                References = references
-            };
+            base.CreateAddressSpace(externalReferences);
 
             var metadata = _registry.KnownProxies[_proxy];
             if (metadata is not null)
             {
-                var node = new OpcFolderNode(new OpcName("Root", DefaultNamespaceIndex));
-                CreateObjectNode(context, metadata, node, string.Empty);
-                context.Nodes.Add(node);
-                context.References.Add(node, OpcObjectTypes.ObjectsFolder);
-            }
-
-            foreach (var provider in _nodeProviders)
-            {
-                provider.CreateNodes(context);
-            }
-
-            foreach (var node in context.Nodes)
-            {
-                yield return node;
+                var node = CreateFolder(ObjectIds.ObjectsFolder, "Root", "Root", NamespaceIndex);
+                CreateObjectNode(metadata, node.NodeId, string.Empty);
             }
         }
 
-        private void CreateObjectNode(OpcUaNodeProviderContext context, RegisteredProxy metadata, OpcInstanceNode parentNode, string prefix)
+        private void CreateObjectNode(RegisteredProxy metadata, NodeId parentNode, string prefix)
         {
             foreach (var property in metadata.Properties)
             {
-                var propertyName = _source.SourcePathProvider.TryGetSourcePropertyName(property.Value.Property);
+                var propertyName = _source.SourcePathProvider.TryGetSourcePropertyName(property.Value.Property)!;
                 if (property.Value.Children.Any())
                 {
-                    var propertyNode = new OpcFolderNode(new OpcName(propertyName, DefaultNamespaceIndex));
+                    var innerPrefix = prefix + propertyName;
+                    var propertyNode = CreateFolder(parentNode, prefix + propertyName, propertyName, NamespaceIndex);
+
                     foreach (var child in property.Value.Children)
                     {
                         var index = child.Index is not null ? $"[{child.Index}]" : string.Empty;
-                        var path = prefix + propertyName + index;
-                        
-                        var objectNode = new OpcObjectNode(path);
-                        CreateObjectNode(context, _registry.KnownProxies[child.Proxy], objectNode, path + ".");
+                        var path = innerPrefix + "." + propertyName + index;
 
-                        propertyNode.AddChild(context.Context, objectNode);
+                        var objectNode = CreateFolder(propertyNode.NodeId, path, propertyName + index, NamespaceIndex);
+                        CreateObjectNode(_registry.KnownProxies[child.Proxy], objectNode.NodeId, path + ".");
                     }
-                    parentNode.AddChild(context.Context, propertyNode);
                 }
                 else
                 {
@@ -219,87 +209,67 @@ namespace Namotion.Trackable.OpcUa
                             value = Convert.ToDouble(value);
                         }
 
-                        var opcName = new OpcName(propertyName, DefaultNamespaceIndex);
-                        var opcType = typeof(OpcDataVariableNode<>).MakeGenericType(type);
-                        var variable = (OpcDataVariableNode)Activator.CreateInstance(opcType, opcName)!;
+                        var path = prefix + propertyName;
+                        var variable = CreateVariable(parentNode, path, propertyName, NamespaceIndex, TypeInfo.Construct(type), 1);
 
                         variable.Value = value;
                         property.Value.Property.SetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, variable);
-
-                        parentNode.AddChild(context.Context, variable);
                     }
                 }
             }
         }
-    }
 
-    public static class OpcUaMachinery
-    {
-        private const int MachineIdentificationType_NodeValue = 1012;
-        private const int MachineryItemState_StateMachineType_NodeValue = 1002;
-
-        public static OpcNamespace GetNamespace(OpcContext context)
+        private FolderState CreateFolder(NodeId parentNodeId, string path, string name, ushort namespaceIndex)
         {
-            return context.Namespaces.Single(ns => ns.Uri.OriginalString == "http://opcfoundation.org/UA/Machinery/");
+            var parentNode = FindNodeInAddressSpace(parentNodeId);
+
+            var folder = new FolderState(parentNode)
+            {
+                NodeId = new NodeId(path, namespaceIndex),
+                BrowseName = new QualifiedName(name, namespaceIndex),
+                DisplayName = new LocalizedText(name),
+                TypeDefinitionId = ObjectTypeIds.FolderType,
+                WriteMask = AttributeWriteMask.None,
+                UserWriteMask = AttributeWriteMask.None
+            };
+
+            if (parentNode != null)
+            {
+                parentNode.AddChild(folder);
+            }
+
+            AddPredefinedNode(SystemContext, folder);
+            return folder;
         }
 
-        public static OpcNodeId GetMachineIdentificationType(OpcContext context)
+        private BaseDataVariableState CreateVariable(NodeId parentNodeId, string path, string name, ushort namespaceIndex, TypeInfo dataType, int valueRank)
         {
-            return new OpcNodeId(MachineIdentificationType_NodeValue, GetNamespace(context));
-        }
+            var parentNode = FindNodeInAddressSpace(parentNodeId);
 
-        public static OpcNodeId GetMachineryItemStateStateMachineType(OpcContext context)
-        {
-            // MachineryItemState_StateMachineType
-            return new OpcNodeId(MachineryItemState_StateMachineType_NodeValue, GetNamespace(context));
-        }
-    }
+            var variable = new BaseDataVariableState(parentNode)
+            {
+                NodeId = new NodeId(path, namespaceIndex),
+              
+                SymbolicName = name,
+                BrowseName = new QualifiedName(name, namespaceIndex),
+                DisplayName = new LocalizedText(name),
+              
+                TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
+                DataType = TypeInfo.GetDataTypeId(dataType),
+                ValueRank = valueRank,
+                AccessLevel = AccessLevels.CurrentReadOrWrite,
+                UserAccessLevel = AccessLevels.CurrentReadOrWrite,
+                StatusCode = StatusCodes.Good,
+                Timestamp = DateTime.UtcNow
+            };
 
+            if (parentNode != null)
+            {
+                parentNode.AddChild(variable);
+            }
 
-    public interface IOpcUaNodeProvider
-    {
-        IEnumerable<OpcNodeSet> CreateNodeSets();
-
-        void CreateNodes(OpcUaNodeProviderContext context);
-    }
-
-    public record OpcUaNodeProviderContext
-    {
-        public required OpcContext Context { get; init; }
-
-        public required OpcNodeManager Manager { get; init; }
-
-        public required OpcNodeReferenceCollection References { get; init; }
-
-        public Collection<IOpcNode> Nodes { get; } = new Collection<IOpcNode>();
-    }
-
-    public static class NodeSetFactory
-    {
-        public static OpcNodeSet LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name)
-        {
-            var assembly = typeof(TAssemblyType).Assembly;
-            using var stream = assembly.GetManifestResourceStream($"{assembly.FullName!.Split(',')[0]}.{name}");
-            return OpcNodeSet.Load(stream ?? throw new ArgumentException("Embedded resource could not be found.", nameof(name)));
+            AddPredefinedNode(SystemContext, variable);
+            return variable;
         }
     }
-
-    public static class OpcUaNamespace
-    {
-        private const int StateMachineType_NodeValue = 2755;
-        private const int HasAddIn_NodeValue = 17604;
-
-        public static OpcNamespace GetNamespace(OpcContext context)
-        {
-            return context.Namespaces.Single(ns => ns.Uri.OriginalString == "http://opcfoundation.org/UA/");
-        }
-
-        public static OpcNodeId GetStateMachineType(OpcContext context)
-        {
-            return new OpcNodeId(StateMachineType_NodeValue, GetNamespace(context));
-        }
-
-        public static OpcNodeId HasAddIn { get; } = new OpcNodeId(HasAddIn_NodeValue);
-    }
-
 }
