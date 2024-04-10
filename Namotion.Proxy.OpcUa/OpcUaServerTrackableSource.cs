@@ -157,15 +157,15 @@ namespace Namotion.Proxy.OpcUa
         private const string PathDelimiter = ".";
 
         private readonly TProxy _proxy;
-        private readonly OpcUaServerTrackableSource<TProxy> _source;
         private readonly IProxyRegistry _registry;
+        private readonly OpcUaServerTrackableSource<TProxy> _source;
 
         public CustomNodeManager(TProxy proxy, OpcUaServerTrackableSource<TProxy> source, IServerInternal server, ApplicationConfiguration configuration) :
            base(server, configuration, new string[] { "https://foobar/" })
         {
             _proxy = proxy;
-            _source = source;
             _registry = proxy.Context?.GetHandler<IProxyRegistry>() ?? throw new ArgumentException($"Registry could not be found.");
+            _source = source;
         }
 
         public override void CreateAddressSpace(IDictionary<NodeId, IList<IReference>> externalReferences)
