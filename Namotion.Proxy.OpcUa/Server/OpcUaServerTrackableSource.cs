@@ -12,7 +12,7 @@ using Opc.Ua.Configuration;
 
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Namotion.Proxy.OpcUa;
+namespace Namotion.Proxy.OpcUa.Server;
 
 internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
     where TProxy : IProxy
@@ -32,7 +32,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
         ISourcePathProvider sourcePathProvider,
         ILogger<OpcUaServerTrackableSource<TProxy>> logger)
     {
-        _context = proxy.Context  ??
+        _context = proxy.Context ??
             throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
         _proxy = proxy;
@@ -45,7 +45,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            using var stream = typeof(OpcUaServerTrackableContextSourceExtensions).Assembly
+            using var stream = typeof(OpcUaProxyExtensions).Assembly
                 .GetManifestResourceStream("Namotion.Proxy.OpcUa.MyOpcUaServer.Config.xml");
 
             var application = new ApplicationInstance

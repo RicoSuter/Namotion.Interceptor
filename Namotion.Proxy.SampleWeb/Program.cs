@@ -13,13 +13,10 @@ namespace Namotion.Trackable.SampleWeb
     {
         public CarBase()
         {
-            Tires = new Tire[]
-            {
-                new(),
-                new(),
-                new(),
-                new()
-            };
+            Tires = Enumerable
+                .Range(1, 4)
+                .Select(_ => new Tire())
+                .ToArray();
         }
 
         [ProxySource("mqtt", "name")]

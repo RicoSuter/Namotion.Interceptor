@@ -10,7 +10,7 @@ using System.Collections.ObjectModel;
 using Namotion.Proxy.Sources.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
 
-namespace Namotion.Proxy.OpcUa.Traeger
+namespace Namotion.Proxy.OpcUa.Traeger.Server
 {
     internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
         where TProxy : IProxy
@@ -32,7 +32,7 @@ namespace Namotion.Proxy.OpcUa.Traeger
             ISourcePathProvider sourcePathProvider,
             ILogger<OpcUaServerTrackableSource<TProxy>> logger)
         {
-            _context = proxy.Context  ??
+            _context = proxy.Context ??
                 throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
             _nodeManager = new OpcProviderBasedNodeManager<TProxy>(proxy, this);

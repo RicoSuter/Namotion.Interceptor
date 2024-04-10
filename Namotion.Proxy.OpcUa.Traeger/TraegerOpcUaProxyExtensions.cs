@@ -3,12 +3,12 @@
 using Namotion.Trackable.Sources;
 using Namotion.Proxy.Sources;
 using Namotion.Proxy;
-using Namotion.Proxy.OpcUa;
+using Namotion.Proxy.OpcUa.Traeger.Server;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class OpcUaServerTrackableContextSourceExtensions
+public static class TraegerOpcUaProxyExtensions
 {
     public static IServiceCollection AddOpcUaServerProxySource<TProxy>(
         this IServiceCollection serviceCollection, string sourceName, string? pathPrefix = null)
