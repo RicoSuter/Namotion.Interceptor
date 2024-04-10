@@ -24,8 +24,8 @@ namespace Namotion.Proxy.OpcUa
         private readonly TProxy _proxy;
         private readonly ILogger _logger;
 
-        private ApplicationInstance _application;
-        private ProxyOpcUaServer<TProxy> _server;
+        private ApplicationInstance? _application;
+        private ProxyOpcUaServer<TProxy>? _server;
 
         internal ISourcePathProvider SourcePathProvider { get; }
 
