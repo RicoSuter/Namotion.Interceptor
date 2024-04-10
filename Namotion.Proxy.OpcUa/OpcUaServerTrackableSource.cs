@@ -23,7 +23,7 @@ namespace Namotion.Trackable.OpcUa
         private readonly ILogger _logger;
 
         private ApplicationInstance _application;
-        private MyOpcUaServer<TProxy> _server;
+        private ProxyOpcUaServer<TProxy> _server;
 
         internal ISourcePathProvider SourcePathProvider { get; }
 
@@ -51,7 +51,7 @@ namespace Namotion.Trackable.OpcUa
                         ApplicationType = ApplicationType.Server,
                         ConfigSectionName = "MyOpcUaServer"
                     };
-                    _server = new MyOpcUaServer<TProxy>(_proxy, this);
+                    _server = new ProxyOpcUaServer<TProxy>(_proxy, this);
 
                     //Opc.Ua.ApplicationConfiguration config = await application.LoadApplicationConfiguration(false);
                     // await application.CheckApplicationInstanceCertificate(false, 0);
@@ -120,10 +120,10 @@ namespace Namotion.Trackable.OpcUa
         }
     }
 
-    internal class MyOpcUaServer<TProxy> : StandardServer
+    internal class ProxyOpcUaServer<TProxy> : StandardServer
         where TProxy : IProxy
     {
-        public MyOpcUaServer(TProxy proxy, OpcUaServerTrackableSource<TProxy> source)
+        public ProxyOpcUaServer(TProxy proxy, OpcUaServerTrackableSource<TProxy> source)
         {
             AddNodeManager(new CustomNodeManagerFactory<TProxy>(proxy, source));
         }
@@ -135,7 +135,7 @@ namespace Namotion.Trackable.OpcUa
         private readonly TProxy _proxy;
         private readonly OpcUaServerTrackableSource<TProxy> _source;
 
-        public StringCollection NamespacesUris => new StringCollection(new[] { "http://rico.com" });
+        public StringCollection NamespacesUris => new StringCollection(new[] { "https://foobar/" });
 
         public CustomNodeManagerFactory(TProxy proxy, OpcUaServerTrackableSource<TProxy> source)
         {
@@ -152,12 +152,14 @@ namespace Namotion.Trackable.OpcUa
     internal class CustomNodeManager<TProxy> : CustomNodeManager2
         where TProxy : IProxy
     {
+        private const string PathDelimiter = ".";
+
         private readonly TProxy _proxy;
         private readonly OpcUaServerTrackableSource<TProxy> _source;
         private readonly IProxyRegistry _registry;
 
         public CustomNodeManager(TProxy proxy, OpcUaServerTrackableSource<TProxy> source, IServerInternal server, ApplicationConfiguration configuration) :
-           base(server, configuration, new string[] { "http://yourcompany.com/yourcustomnamespace" }) // Define your namespace here
+           base(server, configuration, new string[] { "https://foobar/" })
         {
             _proxy = proxy;
             _source = source;
@@ -171,8 +173,9 @@ namespace Namotion.Trackable.OpcUa
             var metadata = _registry.KnownProxies[_proxy];
             if (metadata is not null)
             {
-                var node = CreateFolder(ObjectIds.ObjectsFolder, "Root", "Root", NamespaceIndex);
-                CreateObjectNode(metadata, node.NodeId, string.Empty);
+                var rootName = "Root";
+                var node = CreateFolder(ObjectIds.ObjectsFolder, rootName, rootName, NamespaceIndex);
+                CreateObjectNode(metadata, node.NodeId, rootName + PathDelimiter);
             }
         }
 
@@ -189,10 +192,10 @@ namespace Namotion.Trackable.OpcUa
                     foreach (var child in property.Value.Children)
                     {
                         var index = child.Index is not null ? $"[{child.Index}]" : string.Empty;
-                        var path = innerPrefix + "." + propertyName + index;
+                        var path = innerPrefix + PathDelimiter + propertyName + index;
 
                         var objectNode = CreateFolder(propertyNode.NodeId, path, propertyName + index, NamespaceIndex);
-                        CreateObjectNode(_registry.KnownProxies[child.Proxy], objectNode.NodeId, path + ".");
+                        CreateObjectNode(_registry.KnownProxies[child.Proxy], objectNode.NodeId, path + PathDelimiter);
                     }
                 }
                 else
