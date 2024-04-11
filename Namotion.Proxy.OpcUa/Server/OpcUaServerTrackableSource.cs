@@ -208,11 +208,11 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
                     var value = property.Value.GetValue();
                     var type = property.Value.Type;
 
-                    //if (type == typeof(decimal))
-                    //{
-                    //    type = typeof(double);
-                    //    value = Convert.ToDouble(value);
-                    //}
+                    if (type == typeof(decimal))
+                    {
+                        type = typeof(double);
+                        value = Convert.ToDouble(value);
+                    }
 
                     var path = prefix + propertyName;
                     var variable = CreateVariable(parentNode, path, propertyName, NamespaceIndex, TypeInfo.Construct(type), 1);
