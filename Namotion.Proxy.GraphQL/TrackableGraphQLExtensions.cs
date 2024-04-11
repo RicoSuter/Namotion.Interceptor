@@ -1,4 +1,7 @@
 ﻿using HotChocolate.Execution.Configuration;
+
+using Microsoft.Extensions.Hosting;
+
 using Namotion.Proxy;
 using Namotion.Proxy.GraphQL;
 
@@ -12,7 +15,7 @@ public static class TrackableGraphQLExtensions
     {
         builder
             .Services
-            .AddHostedService<GraphQLSubscriptionSender<TProxy>>();
+            .AddSingleton<IHostedService, GraphQLSubscriptionSender<TProxy>>();
 
         builder
             .AddQueryType<Query<TProxy>>()

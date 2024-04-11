@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 
 using Namotion.Trackable.Sources;
 using Namotion.Trackable.Mqtt;
@@ -30,8 +31,8 @@ public static class MqttServerTrackableContextSourceExtensions
                     sourcePathProvider,
                     sp.GetRequiredService<ILogger<MqttServerTrackableSource<TProxy>>>());
             })
-            .AddHostedService(sp => sp.GetRequiredService<MqttServerTrackableSource<TProxy>>())
-            .AddHostedService(sp =>
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredService<MqttServerTrackableSource<TProxy>>())
+            .AddSingleton<IHostedService>(sp =>
             {
                 var context = sp.GetRequiredService<TProxy>().Context ??
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");

@@ -8,7 +8,6 @@ using Namotion.Proxy.Sources.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
 
 using System.Reactive.Linq;
-using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Trackable.Sources;
 
@@ -84,9 +83,7 @@ public class ProxySourceBackgroundService<TTrackable> : BackgroundService
 
                 await _context
                     .GetPropertyChangedObservable()
-                    .Where(change => 
-                        !change.IsChangingFromSource(_source) &&
-                        _source.TryGetSourcePath(change.Property) != null)
+                    .Where(change => !change.IsChangingFromSource(_source) && _source.TryGetSourcePath(change.Property) != null)
                     .BufferChanges(_bufferTime)
                     .Where(changes => changes.Any())
                     .ForEachAsync(async changes =>

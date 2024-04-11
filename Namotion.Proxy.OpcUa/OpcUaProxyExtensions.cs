@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 
 using Namotion.Trackable.Sources;
 using Namotion.Proxy.Sources;
@@ -28,8 +29,8 @@ public static class OpcUaProxyExtensions
                     sourcePathProvider,
                     sp.GetRequiredService<ILogger<OpcUaServerTrackableSource<TProxy>>>());
             })
-            .AddHostedService(sp => sp.GetRequiredService<OpcUaServerTrackableSource<TProxy>>())
-            .AddHostedService(sp =>
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaServerTrackableSource<TProxy>>())
+            .AddSingleton<IHostedService>(sp =>
             {
                 var context = sp.GetRequiredService<TProxy>().Context ??
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
