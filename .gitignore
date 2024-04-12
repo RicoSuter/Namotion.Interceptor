@@ -362,5 +362,5 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
-/Namotion.Proxy.SampleWeb/CertificateStores
+**/Namotion.Proxy.SampleWeb/CertificateStores
 /.$Features.drawio.bkp
