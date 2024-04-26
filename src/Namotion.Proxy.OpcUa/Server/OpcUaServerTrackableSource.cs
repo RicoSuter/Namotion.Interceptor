@@ -22,7 +22,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
     private readonly IProxyContext _context;
     private readonly TProxy _proxy;
     private readonly ILogger _logger;
-
+    private readonly string? _rootName;
     private ProxyOpcUaServer<TProxy>? _server;
 
     internal ISourcePathProvider SourcePathProvider { get; }
@@ -30,13 +30,15 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
     public OpcUaServerTrackableSource(
         TProxy proxy,
         ISourcePathProvider sourcePathProvider,
-        ILogger<OpcUaServerTrackableSource<TProxy>> logger)
+        ILogger<OpcUaServerTrackableSource<TProxy>> logger,
+        string? rootName)
     {
         _context = proxy.Context ??
             throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
         _proxy = proxy;
         _logger = logger;
+        _rootName = rootName;
 
         SourcePathProvider = sourcePathProvider;
     }
@@ -58,7 +60,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
 
             try
             {
-                _server = new ProxyOpcUaServer<TProxy>(_proxy, this);
+                _server = new ProxyOpcUaServer<TProxy>(_proxy, this, _rootName);
 
                 await application.CheckApplicationInstanceCertificate(true, CertificateFactory.DefaultKeySize);
                 await application.Start(_server);
@@ -125,9 +127,9 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
 internal class ProxyOpcUaServer<TProxy> : StandardServer
     where TProxy : IProxy
 {
-    public ProxyOpcUaServer(TProxy proxy, OpcUaServerTrackableSource<TProxy> source)
+    public ProxyOpcUaServer(TProxy proxy, OpcUaServerTrackableSource<TProxy> source, string? rootName)
     {
-        AddNodeManager(new CustomNodeManagerFactory<TProxy>(proxy, source));
+        AddNodeManager(new CustomNodeManagerFactory<TProxy>(proxy, source, rootName));
     }
 }
 
@@ -136,18 +138,20 @@ internal class CustomNodeManagerFactory<TProxy> : INodeManagerFactory
 {
     private readonly TProxy _proxy;
     private readonly OpcUaServerTrackableSource<TProxy> _source;
+    private readonly string? _rootName;
 
     public StringCollection NamespacesUris => new StringCollection(new[] { "https://foobar/" });
 
-    public CustomNodeManagerFactory(TProxy proxy, OpcUaServerTrackableSource<TProxy> source)
+    public CustomNodeManagerFactory(TProxy proxy, OpcUaServerTrackableSource<TProxy> source, string? rootName)
     {
         _proxy = proxy;
         _source = source;
+        _rootName = rootName;
     }
 
     public INodeManager Create(IServerInternal server, ApplicationConfiguration configuration)
     {
-        return new CustomNodeManager<TProxy>(_proxy, _source, server, configuration);
+        return new CustomNodeManager<TProxy>(_proxy, _source, server, configuration, _rootName);
     }
 }
 
@@ -159,13 +163,20 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     private readonly TProxy _proxy;
     private readonly IProxyRegistry _registry;
     private readonly OpcUaServerTrackableSource<TProxy> _source;
+    private readonly string? _rootName;
 
-    public CustomNodeManager(TProxy proxy, OpcUaServerTrackableSource<TProxy> source, IServerInternal server, ApplicationConfiguration configuration) :
+    public CustomNodeManager(
+        TProxy proxy, 
+        OpcUaServerTrackableSource<TProxy> source, 
+        IServerInternal server, 
+        ApplicationConfiguration configuration, 
+        string? rootName) :
        base(server, configuration, new string[] { "https://foobar/" })
     {
         _proxy = proxy;
         _registry = proxy.Context?.GetHandler<IProxyRegistry>() ?? throw new ArgumentException($"Registry could not be found.");
         _source = source;
+        _rootName = rootName;
     }
 
     public override void CreateAddressSpace(IDictionary<NodeId, IList<IReference>> externalReferences)
@@ -175,9 +186,15 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         var metadata = _registry.KnownProxies[_proxy];
         if (metadata is not null)
         {
-            var rootName = "Root";
-            var node = CreateFolder(ObjectIds.ObjectsFolder, rootName, rootName, NamespaceIndex);
-            CreateObjectNode(metadata, node.NodeId, rootName + PathDelimiter);
+            if (_rootName is not null)
+            {
+                var node = CreateFolder(ObjectIds.ObjectsFolder, _rootName, _rootName, NamespaceIndex);
+                CreateObjectNode(metadata, node.NodeId, _rootName + PathDelimiter);
+            }
+            else
+            {
+                CreateObjectNode(metadata, ObjectIds.ObjectsFolder, string.Empty);
+            }
         }
     }
 
@@ -186,19 +203,26 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         foreach (var property in metadata.Properties)
         {
             var propertyName = _source.SourcePathProvider.TryGetSourcePropertyName(property.Value.Property)!;
-            if (property.Value.Children.Any())
+            if (propertyName is null)
+            {
+                continue;
+            }
+
+            var children = property.Value.Children;
+            if (children.Count > 1)
             {
                 var innerPrefix = prefix + propertyName;
                 var propertyNode = CreateFolder(parentNode, prefix + propertyName, propertyName, NamespaceIndex);
 
                 foreach (var child in property.Value.Children)
                 {
-                    var index = child.Index is not null ? $"[{child.Index}]" : string.Empty;
-                    var path = innerPrefix + PathDelimiter + propertyName + index;
-
-                    var objectNode = CreateFolder(propertyNode.NodeId, path, propertyName + index, NamespaceIndex);
-                    CreateObjectNode(_registry.KnownProxies[child.Proxy], objectNode.NodeId, path + PathDelimiter);
+                    CreateChildObject(propertyNode.NodeId, propertyName, child, innerPrefix);
                 }
+            }
+            else if (children.Count == 1)
+            {
+                var child = children.Single();
+                CreateChildObject(parentNode, propertyName, child, prefix + propertyName);
             }
             else
             {
@@ -222,6 +246,15 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
                 }
             }
         }
+    }
+
+    private void CreateChildObject(NodeId parentNode, string propertyName, ProxyPropertyChild child, string prefix)
+    {
+        var index = child.Index is not null ? $"[{child.Index}]" : string.Empty;
+        var path = prefix + PathDelimiter + propertyName + index;
+
+        var objectNode = CreateFolder(parentNode, path, propertyName + index, NamespaceIndex);
+        CreateObjectNode(_registry.KnownProxies[child.Proxy], objectNode.NodeId, path + PathDelimiter);
     }
 
     private FolderState CreateFolder(NodeId parentNodeId, string path, string name, ushort namespaceIndex)

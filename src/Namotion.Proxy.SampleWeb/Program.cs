@@ -86,7 +86,7 @@ namespace Namotion.Trackable.SampleWeb
             builder.Services.AddProxyControllers<Car, TrackablesController<Car>>();
 
             // trackable UPC UA
-            builder.Services.AddOpcUaServerProxySource<Car>("opc");
+            builder.Services.AddOpcUaServerProxySource<Car>("opc", rootName: "Root");
 
             // trackable mqtt
             builder.Services.AddMqttServerProxySource<Car>("mqtt");
