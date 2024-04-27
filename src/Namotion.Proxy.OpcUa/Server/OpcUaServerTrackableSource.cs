@@ -2,9 +2,11 @@
 using Microsoft.Extensions.Logging;
 
 using System.Reactive.Linq;
+using System.Reflection;
 
 using Namotion.Proxy.Sources.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
+using Namotion.Proxy.OpcUa.Annotations;
 
 using Opc.Ua.Server;
 using Opc.Ua;
@@ -166,10 +168,10 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     private readonly string? _rootName;
 
     public CustomNodeManager(
-        TProxy proxy, 
-        OpcUaServerTrackableSource<TProxy> source, 
-        IServerInternal server, 
-        ApplicationConfiguration configuration, 
+        TProxy proxy,
+        OpcUaServerTrackableSource<TProxy> source,
+        IServerInternal server,
+        ApplicationConfiguration configuration,
         string? rootName) :
        base(server, configuration, new string[] { "https://foobar/" })
     {
@@ -203,26 +205,28 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         foreach (var property in metadata.Properties)
         {
             var propertyName = _source.SourcePathProvider.TryGetSourcePropertyName(property.Value.Property)!;
-            if (propertyName is null)
-            {
-                continue;
-            }
 
             var children = property.Value.Children;
-            if (children.Count > 1)
+            if (children.Count >= 1)
             {
-                var innerPrefix = prefix + propertyName;
-                var propertyNode = CreateFolder(parentNode, prefix + propertyName, propertyName, NamespaceIndex);
-
-                foreach (var child in property.Value.Children)
+                if (propertyName is not null)
                 {
-                    CreateChildObject(propertyNode.NodeId, propertyName, child, innerPrefix);
+                    if (children.Count > 1)
+                    {
+                        var innerPrefix = prefix + propertyName;
+                        var propertyNode = CreateFolder(parentNode, prefix + propertyName, propertyName, NamespaceIndex);
+
+                        foreach (var child in property.Value.Children)
+                        {
+                            CreateChildObject(propertyNode.NodeId, property.Value, propertyName, child, innerPrefix);
+                        }
+                    }
+                    else if (children.Count == 1)
+                    {
+                        var child = children.Single();
+                        CreateChildObject(parentNode, property.Value, propertyName, child, prefix + propertyName);
+                    }
                 }
-            }
-            else if (children.Count == 1)
-            {
-                var child = children.Single();
-                CreateChildObject(parentNode, propertyName, child, prefix + propertyName);
             }
             else
             {
@@ -238,8 +242,17 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
                         value = Convert.ToDouble(value);
                     }
 
+                    var referenceTypeAttribute = property.Value.Attributes
+                        .OfType<OpcUaReferenceTypeAttribute>()
+                        .FirstOrDefault();
+
+                    var referenceType =
+                        referenceTypeAttribute is not null ?
+                        typeof(ReferenceTypeIds).GetField(referenceTypeAttribute.Type)?.GetValue(null) as NodeId : null;
+
                     var path = prefix + propertyName;
-                    var variable = CreateVariable(parentNode, path, propertyName, NamespaceIndex, TypeInfo.Construct(type), 1);
+                    var variable = CreateVariable(parentNode, path, propertyName, NamespaceIndex, 
+                        Opc.Ua.TypeInfo.Construct(type), 1, referenceType);
 
                     variable.Value = value;
                     property.Value.Property.SetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, variable);
@@ -248,16 +261,32 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         }
     }
 
-    private void CreateChildObject(NodeId parentNode, string propertyName, ProxyPropertyChild child, string prefix)
+    private void CreateChildObject(NodeId parentNode, RegisteredProxyProperty property, string propertyName, ProxyPropertyChild child, string prefix)
     {
         var index = child.Index is not null ? $"[{child.Index}]" : string.Empty;
         var path = prefix + PathDelimiter + propertyName + index;
 
-        var objectNode = CreateFolder(parentNode, path, propertyName + index, NamespaceIndex);
+        var typeDefinitionAttribute = child.Proxy.GetType().GetCustomAttribute<OpcUaTypeDefinitionAttribute>();
+
+        var typeDefinition =
+            typeDefinitionAttribute is not null ?
+            typeof(ObjectTypeIds).GetField(typeDefinitionAttribute.Type)?.GetValue(null) as NodeId : null;
+
+        var referenceTypeAttribute = property.Attributes
+            .OfType<OpcUaReferenceTypeAttribute>()
+            .FirstOrDefault();
+
+        var referenceType =
+            referenceTypeAttribute is not null ?
+            typeof(ReferenceTypeIds).GetField(referenceTypeAttribute.Type)?.GetValue(null) as NodeId : null;
+
+        var objectNode = CreateFolder(parentNode, path, propertyName + index, NamespaceIndex, typeDefinition, referenceType);
         CreateObjectNode(_registry.KnownProxies[child.Proxy], objectNode.NodeId, path + PathDelimiter);
     }
 
-    private FolderState CreateFolder(NodeId parentNodeId, string path, string name, ushort namespaceIndex)
+    private FolderState CreateFolder(NodeId parentNodeId,
+        string path, string name, ushort namespaceIndex,
+        NodeId? typeDefinition = null, NodeId? referenceType = null)
     {
         var parentNode = FindNodeInAddressSpace(parentNodeId);
 
@@ -266,9 +295,10 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
             NodeId = new NodeId(path, namespaceIndex),
             BrowseName = new QualifiedName(name, namespaceIndex),
             DisplayName = new LocalizedText(name),
-            TypeDefinitionId = ObjectTypeIds.FolderType,
+            TypeDefinitionId = typeDefinition ?? ObjectTypeIds.FolderType,
             WriteMask = AttributeWriteMask.None,
-            UserWriteMask = AttributeWriteMask.None
+            UserWriteMask = AttributeWriteMask.None,
+            ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasComponent
         };
 
         if (parentNode != null)
@@ -280,7 +310,8 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         return folder;
     }
 
-    private BaseDataVariableState CreateVariable(NodeId parentNodeId, string path, string name, ushort namespaceIndex, TypeInfo dataType, int valueRank)
+    private BaseDataVariableState CreateVariable(NodeId parentNodeId, string path, string name, ushort namespaceIndex, 
+        Opc.Ua.TypeInfo dataType, int valueRank, NodeId? referenceType)
     {
         var parentNode = FindNodeInAddressSpace(parentNodeId);
 
@@ -293,12 +324,14 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
             DisplayName = new LocalizedText(name),
 
             TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
-            DataType = TypeInfo.GetDataTypeId(dataType),
+            DataType = Opc.Ua.TypeInfo.GetDataTypeId(dataType),
             ValueRank = valueRank,
             AccessLevel = AccessLevels.CurrentReadOrWrite,
             UserAccessLevel = AccessLevels.CurrentReadOrWrite,
             StatusCode = StatusCodes.Good,
-            Timestamp = DateTime.UtcNow
+            Timestamp = DateTime.UtcNow,
+
+            ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasProperty
         };
 
         if (parentNode != null)

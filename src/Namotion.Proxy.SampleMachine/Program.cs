@@ -1,47 +1,17 @@
 using Microsoft.AspNetCore.Mvc;
 using Namotion.Proxy;
 using Namotion.Proxy.AspNetCore.Controllers;
-using Namotion.Proxy.Registry.Abstractions;
+using Namotion.Proxy.OpcUa.Annotations;
 using Namotion.Proxy.Sources.Attributes;
 using NSwag.Annotations;
 
 namespace Namotion.Trackable.SampleMachine
 {
-    public class OpcUaReferenceAttribute : Attribute, IProxyPropertyInitializer
-    {
-        private readonly string _type;
-
-        public OpcUaReferenceAttribute(string type)
-        {
-            _type = type;
-        }
-
-        public void InitializeProperty(RegisteredProxyProperty property, object? index, IProxyContext context)
-        {
-            property.AddAttribute("ReferenceType", typeof(string), () => _type, null);
-        }
-    }
-
-    public class OpcUaTypeDefinitionAttribute : Attribute, IProxyPropertyInitializer
-    {
-        private readonly string _type;
-
-        public OpcUaTypeDefinitionAttribute(string type)
-        {
-            _type = type;
-        }
-
-        public void InitializeProperty(RegisteredProxyProperty property, object? index, IProxyContext context)
-        {
-            property.AddAttribute("TypeDefinition", typeof(string), () => _type, null);
-        }
-    }
-
     [GenerateProxy]
     public class RootBase
     {
         [ProxySourcePath("opc", "Machines")]
-        [OpcUaReference("Organizes")]
+        [OpcUaReferenceType("Organizes")]
         public virtual Machines Machines { get; } = new Machines();
     }
 
@@ -50,7 +20,7 @@ namespace Namotion.Trackable.SampleMachine
     public class MachinesBase
     {
         [ProxySourcePath("opc", "MyMachine")]
-        [OpcUaReference("Organizes")]
+        [OpcUaReferenceType("Organizes")]
         public virtual MyMachine MyMachine { get; } = new MyMachine();
     }
 
@@ -59,10 +29,12 @@ namespace Namotion.Trackable.SampleMachine
     public class MyMachineBase
     {
         [ProxySourcePath("opc", "Identification")]
-        [OpcUaReference("HasAddIn")]
+        [OpcUaName("Identification", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaReferenceType("HasAddIn")]
         public virtual Identification Identification { get; }
 
-        [OpcUaReference("HasComponent")]
+        [ProxySourcePath("opc", "MachineryBuildingBlocks")]
+        [OpcUaReferenceType("HasComponent")]
         public virtual MachineryBuildingBlocks MachineryBuildingBlocks { get; }
 
         public MyMachineBase()
@@ -76,7 +48,9 @@ namespace Namotion.Trackable.SampleMachine
     [OpcUaTypeDefinition("FolderType")]
     public class MachineryBuildingBlocksBase
     {
-        [OpcUaReference("HasAddIn")]
+        [ProxySourcePath("opc", "Identification")]
+        [OpcUaReferenceType("HasAddIn")]
+        [OpcUaName("Identification", "http://opcfoundation.org/UA/DI/")]
         public virtual Identification Identification { get; }
 
         public MachineryBuildingBlocksBase(Identification identification)
@@ -86,13 +60,15 @@ namespace Namotion.Trackable.SampleMachine
     }
 
     [GenerateProxy]
-    [OpcUaTypeDefinition("MachineIdentificationType")]
+    [OpcUaTypeDefinition("MachineIdentificationType", "http://opcfoundation.org/UA/Machinery/")]
     public class IdentificationBase
     {
         [ProxySource("opc", "Manufacturer")]
+        [OpcUaName("Manufacturer", "http://opcfoundation.org/UA/DI/")]
         public virtual string? Manufacturer { get; set; } = "My Manufacturer";
 
         [ProxySource("opc", "SerialNumber")]
+        [OpcUaName("SerialNumber", "http://opcfoundation.org/UA/DI/")]
         public virtual string? SerialNumber { get; set; } = "My Serial Number";
     }
 
