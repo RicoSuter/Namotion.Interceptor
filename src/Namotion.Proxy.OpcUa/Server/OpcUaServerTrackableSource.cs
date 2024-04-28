@@ -167,13 +167,15 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     private readonly OpcUaServerTrackableSource<TProxy> _source;
     private readonly string? _rootName;
 
+    private Dictionary<RegisteredProxy, FolderState> _proxies = new();
+
     public CustomNodeManager(
         TProxy proxy,
         OpcUaServerTrackableSource<TProxy> source,
         IServerInternal server,
         ApplicationConfiguration configuration,
         string? rootName) :
-       base(server, configuration, new string[] { "https://foobar/" })
+        base(server, configuration, new string[] { "https://foobar/" })
     {
         _proxy = proxy;
         _registry = proxy.Context?.GetHandler<IProxyRegistry>() ?? throw new ArgumentException($"Registry could not be found.");
@@ -191,18 +193,18 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
             if (_rootName is not null)
             {
                 var node = CreateFolder(ObjectIds.ObjectsFolder, _rootName, _rootName, NamespaceIndex);
-                CreateObjectNode(metadata, node.NodeId, _rootName + PathDelimiter);
+                CreateObjectNode(node.NodeId, metadata, _rootName + PathDelimiter);
             }
             else
             {
-                CreateObjectNode(metadata, ObjectIds.ObjectsFolder, string.Empty);
+                CreateObjectNode(ObjectIds.ObjectsFolder, metadata, string.Empty);
             }
         }
     }
 
-    private void CreateObjectNode(RegisteredProxy metadata, NodeId parentNode, string prefix)
+    private void CreateObjectNode(NodeId parentNode, RegisteredProxy proxy, string prefix)
     {
-        foreach (var property in metadata.Properties)
+        foreach (var property in proxy.Properties)
         {
             var propertyName = _source.SourcePathProvider.TryGetSourcePropertyName(property.Value.Property)!;
 
@@ -213,7 +215,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
                 {
                     if (children.Count > 1)
                     {
-                        var innerPrefix = prefix + propertyName;
+                        var innerPrefix = prefix + propertyName + PathDelimiter;
                         var propertyNode = CreateFolder(parentNode, prefix + propertyName, propertyName, NamespaceIndex);
 
                         foreach (var child in property.Value.Children)
@@ -224,7 +226,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
                     else if (children.Count == 1)
                     {
                         var child = children.Single();
-                        CreateChildObject(parentNode, property.Value, propertyName, child, prefix + propertyName);
+                        CreateChildObject(parentNode, property.Value, propertyName, child, prefix);
                     }
                 }
             }
@@ -261,16 +263,10 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         }
     }
 
-    private void CreateChildObject(NodeId parentNode, RegisteredProxyProperty property, string propertyName, ProxyPropertyChild child, string prefix)
+    private void CreateChildObject(NodeId parentNodeId, RegisteredProxyProperty property, string propertyName, ProxyPropertyChild child, string prefix)
     {
         var index = child.Index is not null ? $"[{child.Index}]" : string.Empty;
-        var path = prefix + PathDelimiter + propertyName + index;
-
-        var typeDefinitionAttribute = child.Proxy.GetType().GetCustomAttribute<OpcUaTypeDefinitionAttribute>();
-
-        var typeDefinition =
-            typeDefinitionAttribute is not null ?
-            typeof(ObjectTypeIds).GetField(typeDefinitionAttribute.Type)?.GetValue(null) as NodeId : null;
+        var path = prefix + propertyName + index;
 
         var referenceTypeAttribute = property.Attributes
             .OfType<OpcUaReferenceTypeAttribute>()
@@ -280,8 +276,24 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
             referenceTypeAttribute is not null ?
             typeof(ReferenceTypeIds).GetField(referenceTypeAttribute.Type)?.GetValue(null) as NodeId : null;
 
-        var objectNode = CreateFolder(parentNode, path, propertyName + index, NamespaceIndex, typeDefinition, referenceType);
-        CreateObjectNode(_registry.KnownProxies[child.Proxy], objectNode.NodeId, path + PathDelimiter);
+        var proxy = _registry.KnownProxies[child.Proxy];
+        if (_proxies.TryGetValue(proxy, out var objectNode))
+        {
+            var parentNode = FindNodeInAddressSpace(parentNodeId);
+            parentNode.AddReference(referenceType ?? ReferenceTypeIds.HasComponent, false, objectNode.NodeId);
+        }
+        else
+        {
+            var typeDefinitionAttribute = child.Proxy.GetType().GetCustomAttribute<OpcUaTypeDefinitionAttribute>();
+
+            var typeDefinition =
+                typeDefinitionAttribute is not null ?
+                typeof(ObjectTypeIds).GetField(typeDefinitionAttribute.Type)?.GetValue(null) as NodeId : null;
+
+            var node = CreateFolder(parentNodeId, path, propertyName + index, NamespaceIndex, typeDefinition, referenceType);
+            CreateObjectNode(node.NodeId, proxy, path + PathDelimiter);
+            _proxies[proxy] = node;
+        }
     }
 
     private FolderState CreateFolder(NodeId parentNodeId,
