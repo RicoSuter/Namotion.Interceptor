@@ -29,7 +29,7 @@ namespace Namotion.Trackable.SampleMachine
     public class MyMachineBase
     {
         [ProxySourcePath("opc", "Identification")]
-        [OpcUaName("Identification", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaBrowseName("Identification", "http://opcfoundation.org/UA/DI/")]
         [OpcUaReferenceType("HasAddIn")]
         public virtual Identification Identification { get; }
 
@@ -50,7 +50,7 @@ namespace Namotion.Trackable.SampleMachine
     {
         [ProxySourcePath("opc", "Identification")]
         [OpcUaReferenceType("HasAddIn")]
-        [OpcUaName("Identification", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaBrowseName("Identification", "http://opcfoundation.org/UA/DI/")]
         public virtual Identification Identification { get; }
 
         public MachineryBuildingBlocksBase(Identification identification)
@@ -64,11 +64,11 @@ namespace Namotion.Trackable.SampleMachine
     public class IdentificationBase
     {
         [ProxySource("opc", "Manufacturer")]
-        [OpcUaName("Manufacturer", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaBrowseName("Manufacturer", "http://opcfoundation.org/UA/DI/")]
         public virtual string? Manufacturer { get; set; } = "My Manufacturer";
 
         [ProxySource("opc", "SerialNumber")]
-        [OpcUaName("SerialNumber", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaBrowseName("SerialNumber", "http://opcfoundation.org/UA/DI/")]
         public virtual string? SerialNumber { get; set; } = "My Serial Number";
     }
 

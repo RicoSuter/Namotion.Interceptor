@@ -1,8 +1,8 @@
 ﻿namespace Namotion.Proxy.OpcUa.Annotations;
 
-public class OpcUaNameAttribute : Attribute
+public class OpcUaBrowseNameAttribute : Attribute
 {
-    public OpcUaNameAttribute(string name, string ns)
+    public OpcUaBrowseNameAttribute(string name, string ns)
     {
         Name = name;
 

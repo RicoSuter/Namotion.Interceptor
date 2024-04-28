@@ -8,10 +8,12 @@
 
   <ItemGroup>
     <None Remove="MyOpcUaServer.Config.xml" />
+    <None Remove="NodeSets\*" />
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="MyOpcUaServer.Config.xml" />
+    <EmbeddedResource Include="NodeSets\*" />
   </ItemGroup>
 
   <ItemGroup>
