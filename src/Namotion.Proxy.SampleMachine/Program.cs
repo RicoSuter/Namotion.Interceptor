@@ -9,9 +9,9 @@ namespace Namotion.Trackable.SampleMachine
     [GenerateProxy]
     public class RootBase
     {
-        [OpcUaProperty("Machines", "http://opcfoundation.org/UA/Machinery/")]
-        [OpcUaPropertyReferenceType("Organizes")]
-        [OpcUaPropertyItemReferenceType("Organizes")]
+        [OpcUaNode("Machines", "http://opcfoundation.org/UA/Machinery/")]
+        [OpcUaNodeReferenceType("Organizes")]
+        [OpcUaNodeItemReferenceType("Organizes")]
         public virtual IReadOnlyDictionary<string, Machine> Machines { get; set; } = new Dictionary<string, Machine>();
     }
 
@@ -19,12 +19,12 @@ namespace Namotion.Trackable.SampleMachine
     [OpcUaTypeDefinition("BaseObjectType")]
     public class MachineBase
     {
-        [OpcUaProperty("Identification", "http://opcfoundation.org/UA/DI/")]
-        [OpcUaPropertyReferenceType("HasAddIn")]
+        [OpcUaNode("Identification", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaNodeReferenceType("HasAddIn")]
         public virtual Identification Identification { get; }
 
-        [OpcUaProperty("MachineryBuildingBlocks", "http://opcfoundation.org/UA/")]
-        [OpcUaPropertyReferenceType("HasComponent")]
+        [OpcUaNode("MachineryBuildingBlocks", "http://opcfoundation.org/UA/")]
+        [OpcUaNodeReferenceType("HasComponent")]
         public virtual MachineryBuildingBlocks MachineryBuildingBlocks { get; }
 
         public MachineBase()
@@ -38,8 +38,8 @@ namespace Namotion.Trackable.SampleMachine
     [OpcUaTypeDefinition("FolderType")]
     public class MachineryBuildingBlocksBase
     {
-        [OpcUaProperty("Identification", "http://opcfoundation.org/UA/DI/")]
-        [OpcUaPropertyReferenceType("HasAddIn")]
+        [OpcUaNode("Identification", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaNodeReferenceType("HasAddIn")]
         public virtual Identification Identification { get; }
 
         public MachineryBuildingBlocksBase(Identification identification)
@@ -98,9 +98,6 @@ namespace Namotion.Trackable.SampleMachine
             // trackable UPC UA
             builder.Services.AddOpcUaServerProxySource<Root>("opc");
 
-            // trackable mqtt
-            builder.Services.AddMqttServerProxySource<Root>("mqtt");
-
             // trackable GraphQL
             builder.Services
                 .AddGraphQLServer()
@@ -125,8 +122,8 @@ namespace Namotion.Trackable.SampleMachine
             app.Run();
         }
 
-        [OpenApiTag("Car")]
-        [Route("/api/car")]
+        [OpenApiTag("Root")]
+        [Route("/api/root")]
         public class TrackablesController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IProxy
         {
             public TrackablesController(TProxy proxy) : base(proxy)

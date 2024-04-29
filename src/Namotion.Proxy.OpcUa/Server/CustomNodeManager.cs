@@ -45,9 +45,9 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     {
         var collection = base.LoadPredefinedNodes(context);
 
-        LoadNodeSetFromEmbeddedResource<OpcUaPropertyAttribute>("NodeSets.Opc.Ua.NodeSet2.xml", context, collection);
-        LoadNodeSetFromEmbeddedResource<OpcUaPropertyAttribute>("NodeSets.Opc.Ua.Di.NodeSet2.xml", context, collection);
-        LoadNodeSetFromEmbeddedResource<OpcUaPropertyAttribute>("NodeSets.Opc.Ua.Machinery.NodeSet2.xml", context, collection);
+        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.NodeSet2.xml", context, collection);
+        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Di.NodeSet2.xml", context, collection);
+        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Machinery.NodeSet2.xml", context, collection);
 
         return collection;
     }
@@ -215,7 +215,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     private static NodeId? GetReferenceTypeId(RegisteredProxyProperty property)
     {
         var referenceTypeAttribute = property.Attributes
-            .OfType<OpcUaPropertyReferenceTypeAttribute>()
+            .OfType<OpcUaNodeReferenceTypeAttribute>()
             .FirstOrDefault();
 
         return referenceTypeAttribute is not null ?
@@ -225,7 +225,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     private static NodeId? GetChildReferenceTypeId(RegisteredProxyProperty property)
     {
         var referenceTypeAttribute = property.Attributes
-            .OfType<OpcUaPropertyItemReferenceTypeAttribute>()
+            .OfType<OpcUaNodeItemReferenceTypeAttribute>()
             .FirstOrDefault();
 
         return referenceTypeAttribute is not null ?

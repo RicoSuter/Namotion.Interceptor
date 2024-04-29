@@ -4,9 +4,9 @@ using System.IO;
 
 namespace Namotion.Proxy.OpcUa.Annotations;
 
-public class OpcUaPropertyAttribute : ProxySourcePathAttribute, IOpcUaBrowseNameProvider
+public class OpcUaNodeAttribute : ProxySourcePathAttribute, IOpcUaBrowseNameProvider
 {
-    public OpcUaPropertyAttribute(string browseName, string browseNamespace, string? sourceName = null, string? path = null)
+    public OpcUaNodeAttribute(string browseName, string browseNamespace, string? sourceName = null, string? path = null)
         : base(sourceName ?? "opc", path ?? browseName)
     {
         BrowseName = browseName;
