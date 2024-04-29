@@ -96,14 +96,16 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
                         // reference property
                         var child = children.Single();
                         var childPath = prefix + propertyName;
-                        CreateChildObject(parentNodeId, property.Value, child, childPath);
+                        var browseName = GetBrowseName(property.Value, NamespaceIndex, child.Index);
+
+                        CreateChildObject(browseName, property.Value, child.Proxy, childPath, parentNodeId);
                     }
-                    else
+                    else if (children.All(c => c.Index is int))
                     {
-                        // dictionary property
+                        // array property
                         var nodeId = new NodeId(prefix + propertyName, NamespaceIndex);
                         var browseName = GetBrowseName(property.Value, NamespaceIndex, null);
-                     
+
                         var propertyNode = CreateFolder(parentNodeId, nodeId, browseName);
                         var innerPrefix = prefix + propertyName + PathDelimiter;
 
@@ -111,8 +113,26 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
                         {
                             var index = child.Index is not null ? $"[{child.Index}]" : string.Empty;
                             var path = innerPrefix + propertyName + index;
+                            var childBrowseName = GetBrowseName(property.Value, NamespaceIndex, child.Index);
 
-                            CreateChildObject(propertyNode.NodeId, property.Value, child, path);
+                            CreateChildObject(childBrowseName, property.Value, child.Proxy, path, propertyNode.NodeId);
+                        }
+                    }
+                    else
+                    {
+                        // dictionary property
+                        var nodeId = new NodeId(prefix + propertyName, NamespaceIndex);
+                        var browseName = GetBrowseName(property.Value, NamespaceIndex, null);
+
+                        var propertyNode = CreateFolder(parentNodeId, nodeId, browseName);
+
+                        foreach (var child in property.Value.Children)
+                        {
+                            var index = child.Index is not null ? $"[{child.Index}]" : string.Empty;
+                            var path = prefix + propertyName + index;
+                            var childBrowseName = new QualifiedName(child.Index!.ToString(), NamespaceIndex);
+
+                            CreateChildObject(childBrowseName, property.Value, child.Proxy, path, propertyNode.NodeId);
                         }
                     }
                 }
@@ -153,7 +173,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         }
     }
 
-    private void CreateChildObject(NodeId parentNodeId, RegisteredProxyProperty property, ProxyPropertyChild child, string path)
+    private void CreateChildObject(QualifiedName browseName, RegisteredProxyProperty property, IProxy value, string path, NodeId parentNodeId)
     {
         var referenceTypeAttribute = property.Attributes
             .OfType<OpcUaReferenceTypeAttribute>()
@@ -163,7 +183,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
             referenceTypeAttribute is not null ?
             typeof(ReferenceTypeIds).GetField(referenceTypeAttribute.Type)?.GetValue(null) as NodeId : null;
 
-        var registeredProxy = _registry.KnownProxies[child.Proxy];
+        var registeredProxy = _registry.KnownProxies[value];
         if (_proxies.TryGetValue(registeredProxy, out var objectNode))
         {
             var parentNode = FindNodeInAddressSpace(parentNodeId);
@@ -171,10 +191,8 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         }
         else
         {
-            var typeDefinition = GetTypeDefinition(child.Proxy);
-
+            var typeDefinition = GetTypeDefinition(value);
             var nodeId = new NodeId(path, NamespaceIndex);
-            var browseName = GetBrowseName(property, NamespaceIndex, child.Index);
 
             var node = CreateFolder(parentNodeId, nodeId, browseName, typeDefinition, referenceType);
             CreateObjectNode(node.NodeId, registeredProxy, path + PathDelimiter);

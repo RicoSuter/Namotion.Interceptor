@@ -13,21 +13,19 @@ namespace Namotion.Trackable.SampleMachine
         [ProxySourcePath("opc", "Machines")]
         [OpcUaReferenceType("Organizes")]
         [OpcUaBrowseName("Machines", "http://opcfoundation.org/UA/Machinery/")]
-        public virtual Machines Machines { get; } = new Machines();
+        public virtual Dictionary<string, Machine> Machines { get; } = new();
     }
 
-    [GenerateProxy]
-    [OpcUaTypeDefinition("FolderType")]
-    public class MachinesBase
-    {
-        [ProxySourcePath("opc", "MyMachine")]
-        [OpcUaReferenceType("Organizes")]
-        public virtual MyMachine MyMachine { get; } = new MyMachine();
-    }
+    //[GenerateProxy]
+    //[OpcUaTypeDefinition("FolderType")]
+    //[OpcUaReferenceType("Organizes")]
+    //public class MachinesBase : Dictionary<string, Machine>
+    //{
+    //}
 
     [GenerateProxy]
     [OpcUaTypeDefinition("BaseObjectType")]
-    public class MyMachineBase
+    public class MachineBase
     {
         [ProxySourcePath("opc", "Identification")]
         [OpcUaBrowseName("Identification", "http://opcfoundation.org/UA/DI/")]
@@ -39,7 +37,7 @@ namespace Namotion.Trackable.SampleMachine
         [OpcUaReferenceType("HasComponent")]
         public virtual MachineryBuildingBlocks MachineryBuildingBlocks { get; }
 
-        public MyMachineBase()
+        public MachineBase()
         {
             Identification = new Identification();
             MachineryBuildingBlocks = new MachineryBuildingBlocks(Identification);
@@ -88,10 +86,19 @@ namespace Namotion.Trackable.SampleMachine
                 .WithDataAnnotationValidation()
                 .Build();
 
-            var car = new Root(context);
+            var root = new Root();
+            root.Machines.Add("MyMachine", new Machine
+            {
+                Identification =
+                {
+                    SerialNumber = "Hello world!"
+                }
+            });
+
+            root.SetContext(context);
 
             // trackable
-            builder.Services.AddSingleton(car);
+            builder.Services.AddSingleton(root);
 
             // trackable api controllers
             builder.Services.AddProxyControllers<Root, TrackablesController<Root>>();

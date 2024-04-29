@@ -91,7 +91,8 @@ namespace {namespaceName}
 ";
                 foreach (var property in cls.SelectMany(c => c.Properties))
                 {
-                    var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
+                    //var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
+                    var fullyQualifiedName = property.Type.Type!.ToString();
                     var propertyName = property.Property.Identifier.Value;
 
                     generatedCode +=
@@ -139,12 +140,13 @@ $@"
 
                 foreach (var property in cls.SelectMany(c => c.Properties))
                 {
-                    var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
+                    //var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
+                    var fullyQualifiedName = property.Type.Type!.ToString();
                     var propertyName = property.Property.Identifier.Value;
 
                     generatedCode +=
 $@"
-        public override {(property.IsRequired ? "required" : "")} {fullyQualifiedName} {propertyName}
+        public override {(property.IsRequired ? "required " : "")}{fullyQualifiedName} {propertyName}
         {{
 ";
                     if (property.HasGetter)
