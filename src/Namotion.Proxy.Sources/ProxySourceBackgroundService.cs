@@ -11,8 +11,8 @@ using System.Reactive.Linq;
 
 namespace Namotion.Trackable.Sources;
 
-public class ProxySourceBackgroundService<TTrackable> : BackgroundService
-    where TTrackable : IProxy
+public class ProxySourceBackgroundService<TProxy> : BackgroundService
+    where TProxy : IProxy
 {
     private readonly IProxyContext _context;
     private readonly IProxySource _source;

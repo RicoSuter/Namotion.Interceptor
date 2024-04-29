@@ -18,8 +18,8 @@ using Namotion.Proxy.Registry;
 
 namespace Namotion.Trackable.Mqtt
 {
-    public class MqttServerTrackableSource<TTrackable> : BackgroundService, IProxySource
-        where TTrackable : IProxy
+    public class MqttServerTrackableSource<TProxy> : BackgroundService, IProxySource
+        where TProxy : IProxy
     {
         private readonly IProxyContext _context;
         private readonly ISourcePathProvider _sourcePathProvider;
@@ -41,7 +41,7 @@ namespace Namotion.Trackable.Mqtt
         public MqttServerTrackableSource(
             IProxyContext context,
             ISourcePathProvider sourcePathProvider,
-            ILogger<MqttServerTrackableSource<TTrackable>> logger)
+            ILogger<MqttServerTrackableSource<TProxy>> logger)
         {
             _context = context;
             _sourcePathProvider = sourcePathProvider;
