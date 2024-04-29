@@ -12,6 +12,7 @@ namespace Namotion.Trackable.SampleMachine
     {
         [ProxySourcePath("opc", "Machines")]
         [OpcUaReferenceType("Organizes")]
+        [OpcUaBrowseName("Machines", "http://opcfoundation.org/UA/Machinery/")]
         public virtual Machines Machines { get; } = new Machines();
     }
 
@@ -34,6 +35,7 @@ namespace Namotion.Trackable.SampleMachine
         public virtual Identification Identification { get; }
 
         [ProxySourcePath("opc", "MachineryBuildingBlocks")]
+        [OpcUaBrowseName("MachineryBuildingBlocks", "http://opcfoundation.org/UA/")]
         [OpcUaReferenceType("HasComponent")]
         public virtual MachineryBuildingBlocks MachineryBuildingBlocks { get; }
 
