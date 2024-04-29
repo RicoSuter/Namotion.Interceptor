@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Mvc;
 using Namotion.Proxy;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.OpcUa.Annotations;
-using Namotion.Proxy.Sources.Attributes;
 using NSwag.Annotations;
 
 namespace Namotion.Trackable.SampleMachine
@@ -10,31 +9,22 @@ namespace Namotion.Trackable.SampleMachine
     [GenerateProxy]
     public class RootBase
     {
-        [ProxySourcePath("opc", "Machines")]
-        [OpcUaReferenceType("Organizes")]
-        [OpcUaBrowseName("Machines", "http://opcfoundation.org/UA/Machinery/")]
-        public virtual Dictionary<string, Machine> Machines { get; } = new();
+        [OpcUaProperty("Machines", "http://opcfoundation.org/UA/Machinery/")]
+        [OpcUaPropertyReferenceType("Organizes")]
+        [OpcUaPropertyItemReferenceType("Organizes")]
+        public virtual IReadOnlyDictionary<string, Machine> Machines { get; set; } = new Dictionary<string, Machine>();
     }
-
-    //[GenerateProxy]
-    //[OpcUaTypeDefinition("FolderType")]
-    //[OpcUaReferenceType("Organizes")]
-    //public class MachinesBase : Dictionary<string, Machine>
-    //{
-    //}
 
     [GenerateProxy]
     [OpcUaTypeDefinition("BaseObjectType")]
     public class MachineBase
     {
-        [ProxySourcePath("opc", "Identification")]
-        [OpcUaBrowseName("Identification", "http://opcfoundation.org/UA/DI/")]
-        [OpcUaReferenceType("HasAddIn")]
+        [OpcUaProperty("Identification", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaPropertyReferenceType("HasAddIn")]
         public virtual Identification Identification { get; }
 
-        [ProxySourcePath("opc", "MachineryBuildingBlocks")]
-        [OpcUaBrowseName("MachineryBuildingBlocks", "http://opcfoundation.org/UA/")]
-        [OpcUaReferenceType("HasComponent")]
+        [OpcUaProperty("MachineryBuildingBlocks", "http://opcfoundation.org/UA/")]
+        [OpcUaPropertyReferenceType("HasComponent")]
         public virtual MachineryBuildingBlocks MachineryBuildingBlocks { get; }
 
         public MachineBase()
@@ -48,9 +38,8 @@ namespace Namotion.Trackable.SampleMachine
     [OpcUaTypeDefinition("FolderType")]
     public class MachineryBuildingBlocksBase
     {
-        [ProxySourcePath("opc", "Identification")]
-        [OpcUaReferenceType("HasAddIn")]
-        [OpcUaBrowseName("Identification", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaProperty("Identification", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaPropertyReferenceType("HasAddIn")]
         public virtual Identification Identification { get; }
 
         public MachineryBuildingBlocksBase(Identification identification)
@@ -63,12 +52,10 @@ namespace Namotion.Trackable.SampleMachine
     [OpcUaTypeDefinition("MachineIdentificationType", "http://opcfoundation.org/UA/Machinery/")]
     public class IdentificationBase
     {
-        [ProxySource("opc", "Manufacturer")]
-        [OpcUaBrowseName("Manufacturer", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaVariable("Manufacturer", "http://opcfoundation.org/UA/DI/")]
         public virtual string? Manufacturer { get; set; } = "My Manufacturer";
 
-        [ProxySource("opc", "SerialNumber")]
-        [OpcUaBrowseName("SerialNumber", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaVariable("SerialNumber", "http://opcfoundation.org/UA/DI/")]
         public virtual string? SerialNumber { get; set; } = "My Serial Number";
     }
 
@@ -86,16 +73,21 @@ namespace Namotion.Trackable.SampleMachine
                 .WithDataAnnotationValidation()
                 .Build();
 
-            var root = new Root();
-            root.Machines.Add("MyMachine", new Machine
+            var root = new Root(context)
             {
-                Identification =
+                Machines = new Dictionary<string, Machine>
                 {
-                    SerialNumber = "Hello world!"
+                    {
+                        "MyMachine", new Machine
+                        {
+                            Identification =
+                            {
+                                SerialNumber = "Hello world!"
+                            }
+                        }
+                    }
                 }
-            });
-
-            root.SetContext(context);
+            };
 
             // trackable
             builder.Services.AddSingleton(root);
