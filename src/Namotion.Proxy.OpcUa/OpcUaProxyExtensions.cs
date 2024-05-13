@@ -12,17 +12,31 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class OpcUaProxyExtensions
 {
     public static IServiceCollection AddOpcUaServerProxySource<TProxy>(
-        this IServiceCollection serviceCollection, 
-        
-        string sourceName, 
-        string? pathPrefix = null, 
+        this IServiceCollection serviceCollection,
+        string sourceName,
+        string? pathPrefix = null,
+        string? rootName = null)
+        where TProxy : IProxy
+    {
+        return serviceCollection.AddOpcUaServerProxySource(
+            sourceName,
+            sp => sp.GetRequiredService<TProxy>(),
+            pathPrefix,
+            rootName);
+    }
+
+    public static IServiceCollection AddOpcUaServerProxySource<TProxy>(
+        this IServiceCollection serviceCollection,
+        string sourceName,
+        Func<IServiceProvider, TProxy> resolveProxy,
+        string? pathPrefix = null,
         string? rootName = null)
         where TProxy : IProxy
     {
         return serviceCollection
             .AddSingleton(sp =>
             {
-                var proxy = sp.GetRequiredService<TProxy>();
+                var proxy = resolveProxy(sp);
                 var context = proxy.Context ?? 
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
@@ -38,7 +52,7 @@ public static class OpcUaProxyExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaServerTrackableSource<TProxy>>())
             .AddSingleton<IHostedService>(sp =>
             {
-                var proxy = sp.GetRequiredService<TProxy>();
+                var proxy = resolveProxy(sp);
                 var context = proxy.Context ??
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
