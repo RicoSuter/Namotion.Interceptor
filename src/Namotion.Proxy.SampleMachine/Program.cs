@@ -95,8 +95,10 @@ namespace Namotion.Trackable.SampleMachine
             // trackable api controllers
             builder.Services.AddProxyControllers<Root, TrackablesController<Root>>();
 
-            // trackable UPC UA
+            // OPC UA server
             builder.Services.AddOpcUaServerProxySource<Root>("opc");
+
+            //builder.Services.AddOpcUaClientProxySource<Root>("opc", "opc.tcp://localhost:4840");
 
             // trackable GraphQL
             builder.Services
