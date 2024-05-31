@@ -62,4 +62,60 @@ public static class OpcUaProxyExtensions
                     sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TProxy>>>());
             });
     }
+
+    //public static IServiceCollection AddOpcUaClientProxySource<TProxy>(
+    //    this IServiceCollection serviceCollection,
+    //    string sourceName,
+    //    string serverUrl,
+    //    string? pathPrefix = null,
+    //    string? rootName = null)
+    //    where TProxy : IProxy
+    //{
+    //    return serviceCollection.AddOpcUaClientProxySource(
+    //        sourceName,
+    //        serverUrl,
+    //        sp => sp.GetRequiredService<TProxy>(),
+    //        pathPrefix,
+    //        rootName);
+    //}
+
+    //public static IServiceCollection AddOpcUaClientProxySource<TProxy>(
+    //    this IServiceCollection serviceCollection,
+    //    string sourceName,
+    //    string serverUrl,
+    //    Func<IServiceProvider, TProxy> resolveProxy,
+    //    string? pathPrefix = null,
+    //    string? rootName = null)
+    //    where TProxy : IProxy
+    //{
+    //    return serviceCollection
+    //        .AddSingleton(sp =>
+    //        {
+    //            var proxy = resolveProxy(sp);
+    //            var context = proxy.Context ??
+    //                throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
+
+    //            var sourcePathProvider = new AttributeBasedSourcePathProvider(
+    //                sourceName, context, pathPrefix);
+
+    //            return new OpcUaClientTrackableSource<TProxy>(
+    //                proxy,
+    //                serverUrl,
+    //                sourcePathProvider,
+    //                sp.GetRequiredService<ILogger<OpcUaClientTrackableSource<TProxy>>>(),
+    //                rootName);
+    //        })
+    //        .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaClientTrackableSource<TProxy>>())
+    //        .AddSingleton<IHostedService>(sp =>
+    //        {
+    //            var proxy = resolveProxy(sp);
+    //            var context = proxy.Context ??
+    //                throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
+
+    //            return new ProxySourceBackgroundService<TProxy>(
+    //                sp.GetRequiredService<OpcUaClientTrackableSource<TProxy>>(),
+    //                context,
+    //                sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TProxy>>>());
+    //        });
+    //}
 }
