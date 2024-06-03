@@ -2,9 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Namotion.Proxy;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.OpcUa.Annotations;
-using Namotion.Proxy.Sources.Attributes;
 using NSwag.Annotations;
-using Opc.Ua;
 
 namespace Namotion.Trackable.SampleMachine
 {
@@ -13,14 +11,6 @@ namespace Namotion.Trackable.SampleMachine
     {
         [OpcUaNode("Stages", "http://jf.com")]
         public virtual Stages Stages { get; } = new Stages();
-
-
-
-
-        //[OpcUaNode("Machines", "http://opcfoundation.org/UA/Machinery/")]
-        //[OpcUaNodeReferenceType("Organizes")]
-        //[OpcUaNodeItemReferenceType("Organizes")]
-        //public virtual IReadOnlyDictionary<string, Machine> Machines { get; set; } = new Dictionary<string, Machine>();
     }
 
     [GenerateProxy]
@@ -39,13 +29,11 @@ namespace Namotion.Trackable.SampleMachine
         public virtual DryStage DryStage { get; } = new DryStage();
     }
 
-
     [GenerateProxy]
     public class PreWashStageBase
     {
 
     }
-
 
     [GenerateProxy]
     public class CareStageBase
@@ -58,7 +46,6 @@ namespace Namotion.Trackable.SampleMachine
     {
 
     }
-
 
     [GenerateProxy]
     public class WashStageBase
