@@ -32,7 +32,9 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
             "https://foobar/",
             "http://opcfoundation.org/UA/",
             "http://opcfoundation.org/UA/DI/",
-            "http://opcfoundation.org/UA/Machinery/" 
+            "http://opcfoundation.org/UA/PADIM",
+            "http://opcfoundation.org/UA/Machinery/",
+            "http://opcfoundation.org/UA/Machinery/ProcessValues"
         })
     {
         _proxy = proxy;
@@ -47,7 +49,9 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
 
         LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.NodeSet2.xml", context, collection);
         LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Di.NodeSet2.xml", context, collection);
+        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.PADIM.NodeSet2.xml", context, collection);
         LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Machinery.NodeSet2.xml", context, collection);
+        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Machinery.ProcessValues.NodeSet2.xml", context, collection);
 
         return collection;
     }
