@@ -20,7 +20,9 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
     private readonly TProxy _proxy;
     private readonly ILogger _logger;
     private readonly string? _rootName;
+
     private ProxyOpcUaServer<TProxy>? _server;
+    private Action<ProxyPropertyPathReference>? _propertyUpdateAction;
 
     internal ISourcePathProvider SourcePathProvider { get; }
 
@@ -77,8 +79,14 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
         }
     }
 
+    internal void UpdateProperty(ProxyPropertyReference property, string sourcePath, object value)
+    {
+        _propertyUpdateAction?.Invoke(new ProxyPropertyPathReference(property, sourcePath, value));
+    }
+
     public Task<IDisposable?> InitializeAsync(IEnumerable<ProxyPropertyPathReference> properties, Action<ProxyPropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
     {
+        _propertyUpdateAction = propertyUpdateAction;
         return Task.FromResult<IDisposable?>(null);
     }
 

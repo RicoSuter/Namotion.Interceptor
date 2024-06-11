@@ -180,9 +180,17 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
             var dataType = Opc.Ua.TypeInfo.Construct(type);
             var referenceTypeId = GetReferenceTypeId(property.Value);
 
-            var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataType, 1, referenceTypeId);
-
+            // TODO: Add support for arrays (valueRank >= 0)
+            var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataType, -1, referenceTypeId);
             variable.Value = value;
+            variable.StateChanged += (context, node, changes) =>
+            {
+                if (changes.HasFlag(NodeStateChangeMasks.Value))
+                {
+                    _source.UpdateProperty(property.Value.Property, sourcePath, variable.Value);
+                }
+            };
+
             property.Value.Property.SetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, variable);
         }
     }
