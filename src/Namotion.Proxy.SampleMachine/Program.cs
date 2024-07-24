@@ -27,11 +27,41 @@ namespace Namotion.Trackable.SampleMachine
         [OpcUaNodeReferenceType("HasComponent")]
         public virtual MachineryBuildingBlocks MachineryBuildingBlocks { get; }
 
+        [OpcUaNode("Monitoring", "http://opcfoundation.org/UA/")]
+        [OpcUaNodeReferenceType("HasComponent")]
+        [OpcUaNodeItemReferenceType("HasComponent")]
+        public virtual IReadOnlyDictionary<string, ProcessValueType> Monitoring { get; set; } = new Dictionary<string, ProcessValueType>();
+
         public MachineBase()
         {
             Identification = new Identification();
             MachineryBuildingBlocks = new MachineryBuildingBlocks(Identification);
         }
+    }
+
+    [GenerateProxy]
+    [OpcUaTypeDefinition("ProcessValueType", "http://opcfoundation.org/UA/Machinery/ProcessValues/")]
+    public class ProcessValueTypeBase
+    {
+        [OpcUaVariable("AnalogSignal", "http://opcfoundation.org/UA/PADIM/")]
+        public virtual AnalogSignalVariable AnalogSignal { get; } = new AnalogSignalVariable();
+
+        [OpcUaVariable("SignalTag", "http://opcfoundation.org/UA/PADIM/")]
+        public virtual string? SignalTag { get; set; }
+    }
+
+    [GenerateProxy]
+    [OpcUaTypeDefinition("AnalogSignalVariableType", "http://opcfoundation.org/UA/PADIM/")]
+    public class AnalogSignalVariableBase
+    {
+        [OpcUaVariable("ActualValue", "http://opcfoundation.org/UA/")]
+        public virtual object? ActualValue { get; set; } = "My Manufacturer";
+
+        [OpcUaVariable("EURange", "http://opcfoundation.org/UA/")]
+        public virtual object? EURange { get; set; } = "My Manufacturer";
+
+        [OpcUaVariable("EngineeringUnits", "http://opcfoundation.org/UA/")]
+        public virtual object? EngineeringUnits { get; set; } = "My Manufacturer";
     }
 
     [GenerateProxy]
@@ -83,6 +113,20 @@ namespace Namotion.Trackable.SampleMachine
                             Identification =
                             {
                                 SerialNumber = "Hello world!"
+                            },
+                            Monitoring = new Dictionary<string, ProcessValueType>
+                            {
+                                {
+                                    "MyProcess", 
+                                    new ProcessValueType
+                                    {
+                                        SignalTag = "MySignal",
+                                        AnalogSignal =
+                                        {
+                                            ActualValue = 42.0,
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

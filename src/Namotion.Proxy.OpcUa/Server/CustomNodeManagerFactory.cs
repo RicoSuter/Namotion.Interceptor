@@ -15,7 +15,9 @@ internal class CustomNodeManagerFactory<TProxy> : INodeManagerFactory
         "https://foobar/",
         "http://opcfoundation.org/UA/",
         "http://opcfoundation.org/UA/DI/",
-        "http://opcfoundation.org/UA/Machinery/"
+        "http://opcfoundation.org/UA/PADIM",
+        "http://opcfoundation.org/UA/Machinery/",
+        "http://opcfoundation.org/UA/Machinery/ProcessValues"
     });
 
     public CustomNodeManagerFactory(TProxy proxy, OpcUaServerTrackableSource<TProxy> source, string? rootName)

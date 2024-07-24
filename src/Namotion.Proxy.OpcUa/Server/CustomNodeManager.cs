@@ -32,7 +32,9 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
             "https://foobar/",
             "http://opcfoundation.org/UA/",
             "http://opcfoundation.org/UA/DI/",
-            "http://opcfoundation.org/UA/Machinery/" 
+            "http://opcfoundation.org/UA/PADIM",
+            "http://opcfoundation.org/UA/Machinery/",
+            "http://opcfoundation.org/UA/Machinery/ProcessValues"
         })
     {
         _proxy = proxy;
@@ -47,7 +49,9 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
 
         LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.NodeSet2.xml", context, collection);
         LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Di.NodeSet2.xml", context, collection);
+        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.PADIM.NodeSet2.xml", context, collection);
         LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Machinery.NodeSet2.xml", context, collection);
+        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Machinery.ProcessValues.NodeSet2.xml", context, collection);
 
         return collection;
     }
@@ -180,9 +184,17 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
             var dataType = Opc.Ua.TypeInfo.Construct(type);
             var referenceTypeId = GetReferenceTypeId(property.Value);
 
-            var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataType, 1, referenceTypeId);
-
+            // TODO: Add support for arrays (valueRank >= 0)
+            var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataType, -1, referenceTypeId);
             variable.Value = value;
+            variable.StateChanged += (context, node, changes) =>
+            {
+                if (changes.HasFlag(NodeStateChangeMasks.Value))
+                {
+                    _source.UpdateProperty(property.Value.Property, sourcePath, variable.Value);
+                }
+            };
+
             property.Value.Property.SetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, variable);
         }
     }
