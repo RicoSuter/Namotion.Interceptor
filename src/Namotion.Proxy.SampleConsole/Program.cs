@@ -51,19 +51,25 @@ namespace ConsoleApp1
     }
 
     [GenerateProxy]
-    public abstract class PersonBase
+    public partial class Person
     {
-        public virtual required string FirstName { get; set; }
+        public partial string FirstName { get; set; }
 
-        public virtual string? LastName { get; set; }
+        public partial string? LastName { get; set; }
 
-        public virtual string FullName => $"{FirstName} {LastName}";
+        [Derived]
+        public string FullName => $"{FirstName} {LastName}";
 
-        public virtual Person? Father { get; set; }
+        public partial Person? Father { get; set; }
 
-        public virtual Person? Mother { get; set; }
+        public partial Person? Mother { get; set; }
 
-        public virtual Person[] Children { get; set; } = [];
+        public partial Person[] Children { get; set; }
+
+        public Person()
+        {
+            Children = [];
+        }
 
         public override string ToString()
         {
