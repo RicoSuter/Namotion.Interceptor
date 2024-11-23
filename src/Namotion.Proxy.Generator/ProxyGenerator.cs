@@ -151,7 +151,7 @@ namespace {namespaceName}
                         generatedCode +=
     $@"
         private {fullyQualifiedName} _{propertyName};
-        public partial {(property.IsRequired ? "required " : "")}{fullyQualifiedName} {propertyName}
+        public {(property.IsRequired ? "required " : "")}partial {fullyQualifiedName} {propertyName}
         {{";
                         if (property.HasGetter)
                         {
