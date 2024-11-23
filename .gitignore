@@ -364,3 +364,7 @@ FodyWeavers.xsd
 
 **/Namotion.Proxy.SampleWeb/CertificateStores
 /.$Features.drawio.bkp
+
+# Verify
+*.received.*
+*.received/
