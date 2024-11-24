@@ -81,12 +81,12 @@ namespace ConsoleApp1
     {
         public void OnProxyAttached(ProxyLifecycleContext context)
         {
-            Console.WriteLine($"Attach Proxy: {context.Proxy}");
+            Console.WriteLine($"Attach proxy: {context.Proxy}");
         }
 
         public void OnProxyDetached(ProxyLifecycleContext context)
         {
-            Console.WriteLine($"Detach Proxy: {context.Proxy}");
+            Console.WriteLine($"Detach proxy: {context.Proxy}");
         }
     }
 }

@@ -10,7 +10,7 @@ Feature map:
 
 ![features](./features.png)
 
-## Sample
+## Change tracking sample
 
 First you can define a proxied class:
 
@@ -30,13 +30,11 @@ public partial class Person
 With this implemented you can now create a proxy context and start tracking changes of these persons:
 
 ```csharp
-// Create a proxy context with property tracking
 var context = ProxyContext
     .CreateBuilder()
     .WithFullPropertyTracking()
     .Build();
 
-// Subscribe to property change notifications
 context
     .GetPropertyChangedObservable()
     .Subscribe(change =>
@@ -46,27 +44,90 @@ context
             $"from '{change.OldValue}' to '{change.NewValue}'.");
     });
 
-// Create a person with proxy tracking
 var person = new Person(context)
 {
     FirstName = "John",
+// Property 'FirstName' changed from '' to 'John'.
+// Property 'FullName' changed from ' ' to 'John '.
+
     LastName = "Doe"
+// Property 'LastName' changed from '' to 'Doe'.
+// Property 'FullName' changed from 'John ' to 'John Doe'.
 };
 
-// Modify properties to trigger change notifications
 person.FirstName = "Jane";
+// Property 'FirstName' changed from 'John' to 'Jane'.
+// Property 'FullName' changed from 'John Doe' to 'Jane Doe'.
+
 person.LastName = "Smith";
+// Property 'LastName' changed from 'Doe' to 'Smith'.
+// Property 'FullName' changed from 'Jane Doe' to 'Jane Smith'.
 ```
 
-The output looks as follows:
+## Proxy attach and detach tacking sample
 
-```ps
-Property 'FirstName' changed from '' to 'John'.
-Property 'FullName' changed from ' ' to 'John '.
-Property 'LastName' changed from '' to 'Doe'.
-Property 'FullName' changed from 'John ' to 'John Doe'.
-Property 'FirstName' changed from 'John' to 'Jane'.
-Property 'FullName' changed from 'John Doe' to 'Jane Doe'.
-Property 'LastName' changed from 'Doe' to 'Smith'.
-Property 'FullName' changed from 'Jane Doe' to 'Jane Smith'.
+Implement a class with properties which reference other proxied objects:
+
+```csharp
+[GenerateProxy]
+public partial class Person
+{
+    public partial Person[] Children { get; set; }
+
+    public Person()
+    {
+        Children = [];
+    }
+ }
+```
+
+The context now automatically tracks the attachment and detachment of referenced proxies:
+
+```csharp
+var context = ProxyContext
+    .CreateBuilder()
+    .AddHandler(new LogPropertyChangesHandler())
+    .WithFullPropertyTracking() // this will track property changes and proxy attaches/detaches
+    .Build();
+
+var child1 = new Person { FirstName = "Child1" };
+var child2 = new Person { FirstName = "Child2" };
+var child3 = new Person { FirstName = "Child3" };
+
+var person = new Person(context)
+// Attach proxy: Person:
+
+person.Children = 
+[
+    child1,
+    child2
+];
+// Attach proxy: Person: Child1
+// Attach proxy: Person: Child2
+
+person.Children = 
+[
+    child1,
+    child2,
+    child3
+];
+// Attach proxy: Person: Child3
+
+person.Children = [];
+// Detach proxy: Person: Child1
+// Detach proxy: Person: Child2
+// Detach proxy: Person: Child3
+
+public class LogPropertyChangesHandler : IProxyLifecycleHandler
+{
+    public void OnProxyAttached(ProxyLifecycleContext context)
+    {
+        Console.WriteLine($"Attach proxy: {context.Proxy}");
+    }
+
+    public void OnProxyDetached(ProxyLifecycleContext context)
+    {
+        Console.WriteLine($"Detach proxy: {context.Proxy}");
+    }
+}
 ```
