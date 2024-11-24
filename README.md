@@ -72,11 +72,19 @@ Implement a class with properties which reference other proxied objects:
 [GenerateProxy]
 public partial class Person
 {
+    public partial string Name { get; set; }
+
     public partial Person[] Children { get; set; }
 
     public Person()
     {
+        Name = "n/a";
         Children = [];
+    }
+
+    public override string ToString()
+    {
+        return "Person: " + Name;
     }
  }
 ```
@@ -90,12 +98,12 @@ var context = ProxyContext
     .WithFullPropertyTracking() // this will track property changes and proxy attaches/detaches
     .Build();
 
-var child1 = new Person { FirstName = "Child1" };
-var child2 = new Person { FirstName = "Child2" };
-var child3 = new Person { FirstName = "Child3" };
+var child1 = new Person { Name = "Child1" };
+var child2 = new Person { Name = "Child2" };
+var child3 = new Person { Name = "Child3" };
 
 var person = new Person(context)
-// Attach proxy: Person:
+// Attach proxy: Person: n/a
 
 person.Children = 
 [
