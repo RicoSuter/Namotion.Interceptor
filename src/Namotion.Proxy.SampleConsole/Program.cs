@@ -44,9 +44,9 @@ namespace ConsoleApp1
                 child3
             ];
 
-            person.Children = Array.Empty<Person>();
+            person.Children = [];
 
-            Console.WriteLine(person.FirstName);
+            Console.WriteLine($"Person's first name is: {person.FirstName}");
         }
     }
 
