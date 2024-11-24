@@ -139,3 +139,7 @@ public class LogPropertyChangesHandler : IProxyLifecycleHandler
     }
 }
 ```
+
+## More samples
+
+For more samples, check out the "Samples" directory in the Visual Studio solution.
