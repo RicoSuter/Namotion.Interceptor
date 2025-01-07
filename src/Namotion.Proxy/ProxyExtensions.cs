@@ -56,9 +56,7 @@ public static class ProxyExtensions
 
     public static string GetJsonPath(this ProxyPropertyReference property)
     {
-        var registry = property.Proxy.Context?.GetHandler<IProxyRegistry>()
-          ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
-
+        var registry = property.Proxy.Context?.GetHandler<IProxyRegistry>();
         if (registry is not null)
         {
             // TODO: avoid endless recursion

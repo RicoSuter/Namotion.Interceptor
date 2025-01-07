@@ -161,7 +161,7 @@ namespace Namotion.Trackable.SampleMachine
             builder.Services.AddSingleton(root);
 
             // trackable api controllers
-            builder.Services.AddProxyControllers<Root, TrackablesController<Root>>();
+            builder.Services.AddProxyControllers<Root, ProxyController<Root>>();
 
             // OPC UA server
             builder.Services.AddOpcUaServerProxySource<Root>("opc");
@@ -196,9 +196,9 @@ namespace Namotion.Trackable.SampleMachine
 
         [OpenApiTag("Root")]
         [Route("/api/root")]
-        public class TrackablesController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IProxy
+        public class ProxyController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IProxy
         {
-            public TrackablesController(TProxy proxy) : base(proxy)
+            public ProxyController(TProxy proxy) : base(proxy)
             {
             }
         }

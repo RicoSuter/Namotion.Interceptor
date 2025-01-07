@@ -43,7 +43,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
             var resolvedUpdates = updates
                 .Select(t =>
                 {
-                    (var proxy, var property) = _proxy.FindPropertyFromJsonPath(t.Key);
+                    var (proxy, property) = _proxy.FindPropertyFromJsonPath(t.Key);
                     return new
                     {
                         t.Key,
