@@ -16,7 +16,6 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
 {
     internal const string OpcVariableKey = "OpcVariable";
 
-    private readonly IProxyContext _context;
     private readonly TProxy _proxy;
     private readonly ILogger _logger;
     private readonly string? _rootName;
@@ -32,9 +31,6 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
         ILogger<OpcUaServerTrackableSource<TProxy>> logger,
         string? rootName)
     {
-        _context = proxy.Context ??
-            throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
-
         _proxy = proxy;
         _logger = logger;
         _rootName = rootName;
@@ -68,11 +64,15 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
             }
             catch (Exception ex)
             {
+                if (ex is not TaskCanceledException)
+                {
+                    _logger.LogError(ex, "Failed to start OPC UA server.");
+                }
+                
                 application.Stop();
 
                 if (ex is not TaskCanceledException)
                 {
-                    _logger.LogError(ex, "Failed to start OPC UA server.");
                     await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
                 }
             }
@@ -94,8 +94,8 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
     public Task<IEnumerable<ProxyPropertyPathReference>> ReadAsync(IEnumerable<ProxyPropertyPathReference> properties, CancellationToken cancellationToken)
     {
         return Task.FromResult<IEnumerable<ProxyPropertyPathReference>>(properties
-            .Where(p => p.Property.TryGetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, out var _))
-            .Select(property => (property, node: property.Property.GetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey) as BaseDataVariableState))
+            .Where(p => p.Property.TryGetPropertyData(OpcVariableKey, out _))
+            .Select(property => (property, node: property.Property.GetPropertyData(OpcVariableKey) as BaseDataVariableState))
             .Where(p => p.node is not null)
             .Select(p => new ProxyPropertyPathReference(p.property.Property, p.property.Path,
                 p.property.Property.Metadata.Type == typeof(decimal) ? Convert.ToDecimal(p.node!.Value) : p.node!.Value))
@@ -105,10 +105,9 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
     public Task WriteAsync(IEnumerable<ProxyPropertyPathReference> propertyChanges, CancellationToken cancellationToken)
     {
         foreach (var property in propertyChanges
-            .Where(p => p.Property.TryGetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, out var _)))
+            .Where(p => p.Property.TryGetPropertyData(OpcVariableKey, out var _)))
         {
-            var node = property.Property.GetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey) as BaseDataVariableState;
-            if (node is not null)
+            if (property.Property.GetPropertyData(OpcVariableKey) is BaseDataVariableState node)
             {
                 var actualValue = property.Value;
                 if (actualValue is decimal)

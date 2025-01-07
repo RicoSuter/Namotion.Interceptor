@@ -14,26 +14,26 @@
     <!-- Where the application instance certificate is stored-->
     <ApplicationCertificate>
       <StoreType>Directory</StoreType>
-      <StorePath>%CommonApplicationData%\OPC Foundation\pki\own</StorePath>
-      <SubjectName>CN=Quickstart Reference Server, C=US, S=Arizona, O=OPC Foundation, DC=localhost</SubjectName>
+      <StorePath>OpcUaServer/pki/own</StorePath>
+      <SubjectName>CN=OPC UA Server, C=US, S=Arizona, O=Namotion, DC=localhost</SubjectName>
     </ApplicationCertificate>
 
     <!-- Where the issuer certificate are stored (certificate authorities) -->
     <TrustedIssuerCertificates>
       <StoreType>Directory</StoreType>
-      <StorePath>%CommonApplicationData%\OPC Foundation\pki\issuer</StorePath>
+      <StorePath>OpcUaServer/pki/issuer</StorePath>
     </TrustedIssuerCertificates>
 
     <!-- Where the trust list is stored -->
     <TrustedPeerCertificates>
       <StoreType>Directory</StoreType>
-      <StorePath>%CommonApplicationData%\OPC Foundation\pki\trusted</StorePath>
+      <StorePath>OpcUaServer/pki/trusted</StorePath>
     </TrustedPeerCertificates>
 
     <!-- The directory used to store invalid certificates for later review by the administrator. -->
     <RejectedCertificateStore>
       <StoreType>Directory</StoreType>
-      <StorePath>%CommonApplicationData%\OPC Foundation\pki\rejected</StorePath>
+      <StorePath>OpcUaServer/pki/rejected</StorePath>
     </RejectedCertificateStore>
 
     <!-- WARNING: The following setting (to automatically accept untrusted certificates) should be used
@@ -51,13 +51,13 @@
     <!-- Where the User issuer certificates are stored -->
     <UserIssuerCertificates>
       <StoreType>Directory</StoreType>
-      <StorePath>%CommonApplicationData%\OPC Foundation\pki\issuerUser</StorePath>
+      <StorePath>OpcUaServer\OPC Foundation\pki\issuerUser</StorePath>
     </UserIssuerCertificates>
 
     <!-- Where the User trust list is stored-->
     <TrustedUserCertificates>
       <StoreType>Directory</StoreType>
-      <StorePath>%CommonApplicationData%\OPC Foundation\pki\trustedUser</StorePath>
+      <StorePath>OpcUaServer\OPC Foundation\pki\trustedUser</StorePath>
     </TrustedUserCertificates>
   </SecurityConfiguration>
 
@@ -293,7 +293,7 @@
   </Extensions>
 
   <TraceConfiguration>
-    <OutputFilePath>%CommonApplicationData%\OPC Foundation\Logs\Quickstarts.ReferenceServer.log.txt</OutputFilePath>
+    <OutputFilePath>OpcUaServer\OPC Foundation\Logs\Quickstarts.ReferenceServer.log.txt</OutputFilePath>
     <DeleteOnLoad>true</DeleteOnLoad>
     <!-- Show Only Errors -->
     <!-- <TraceMasks>1</TraceMasks> -->

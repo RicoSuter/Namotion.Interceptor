@@ -17,8 +17,10 @@ public static class Program
 
     private static void Run()
     {
-        var benchmark = new Benchmark();
-        benchmark.Type = "proxy";
+        var benchmark = new Benchmark
+        {
+            Type = "proxy"
+        };
         benchmark.Setup();
         RunCode(benchmark);
     }
@@ -28,14 +30,14 @@ public static class Program
     {
         var watch = Stopwatch.StartNew();
 
-        var outer = 100;
-        var inner = 100000;
-
-        var total = outer * inner;
-        for (int i = 0; i < outer; ++i)
+        const int outer = 100;
+        const int inner = 100000;
+        
+        const int total = outer * inner;
+        for (var i = 0; i < outer; ++i)
         {
             watch.Restart();
-            for (int j = 0; j < inner; ++j)
+            for (var j = 0; j < inner; ++j)
             {
                 benchmark.ChangeAllTires();
             }

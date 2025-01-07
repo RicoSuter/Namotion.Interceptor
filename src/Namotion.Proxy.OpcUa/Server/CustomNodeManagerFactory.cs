@@ -10,15 +10,14 @@ internal class CustomNodeManagerFactory<TProxy> : INodeManagerFactory
     private readonly OpcUaServerTrackableSource<TProxy> _source;
     private readonly string? _rootName;
 
-    public StringCollection NamespacesUris => new StringCollection(new[]
-    {
+    public StringCollection NamespacesUris => new StringCollection([
         "https://foobar/",
         "http://opcfoundation.org/UA/",
         "http://opcfoundation.org/UA/DI/",
         "http://opcfoundation.org/UA/PADIM",
         "http://opcfoundation.org/UA/Machinery/",
         "http://opcfoundation.org/UA/Machinery/ProcessValues"
-    });
+    ]);
 
     public CustomNodeManagerFactory(TProxy proxy, OpcUaServerTrackableSource<TProxy> source, string? rootName)
     {

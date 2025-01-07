@@ -7,13 +7,13 @@ namespace Namotion.Proxy.Benchmark
     {
         public Car()
         {
-            Tires = new Tire[]
-            {
+            Tires =
+            [
                 new Tire(),
                 new Tire(),
                 new Tire(),
                 new Tire()
-            };
+            ];
 
             Name = "My Car";
         }

@@ -371,3 +371,5 @@ FodyWeavers.xsd
 
 # Rider
 /src/.idea/*
+
+**/OpcUaServer/

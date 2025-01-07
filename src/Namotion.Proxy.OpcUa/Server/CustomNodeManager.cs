@@ -15,11 +15,12 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     private const string PathDelimiter = ".";
 
     private readonly TProxy _proxy;
-    private readonly IProxyRegistry _registry;
     private readonly OpcUaServerTrackableSource<TProxy> _source;
     private readonly string? _rootName;
 
-    private Dictionary<RegisteredProxy, FolderState> _proxies = new();
+    private readonly IProxyRegistry _registry;
+
+    private readonly Dictionary<RegisteredProxy, FolderState> _proxies = new();
 
     public CustomNodeManager(
         TProxy proxy,
@@ -27,7 +28,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         IServerInternal server,
         ApplicationConfiguration configuration,
         string? rootName) :
-        base(server, configuration, new string[] 
+        base(server, configuration, new[] 
         {
             "https://foobar/",
             "http://opcfoundation.org/UA/",
@@ -38,9 +39,10 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         })
     {
         _proxy = proxy;
-        _registry = proxy.Context?.GetHandler<IProxyRegistry>() ?? throw new ArgumentException($"Registry could not be found.");
         _source = source;
         _rootName = rootName;
+
+        _registry = proxy.Context?.GetHandler<IProxyRegistry>() ?? throw new ArgumentException($"Registry could not be found.");
     }
 
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)
@@ -56,7 +58,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         return collection;
     }
 
-    public static void LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name, ISystemContext context, NodeStateCollection nodes)
+    private static void LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name, ISystemContext context, NodeStateCollection nodes)
     {
         var assembly = typeof(TAssemblyType).Assembly;
         using var stream = assembly.GetManifestResourceStream($"{assembly.FullName!.Split(',')[0]}.{name}");
@@ -68,19 +70,16 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     public override void CreateAddressSpace(IDictionary<NodeId, IList<IReference>> externalReferences)
     {
         base.CreateAddressSpace(externalReferences);
-
         var metadata = _registry.KnownProxies[_proxy];
-        if (metadata is not null)
+       
+        if (_rootName is not null)
         {
-            if (_rootName is not null)
-            {
-                var node = CreateFolder(ObjectIds.ObjectsFolder, new NodeId(_rootName, NamespaceIndex), _rootName, null, null);
-                CreateObjectNode(node.NodeId, metadata, _rootName + PathDelimiter);
-            }
-            else
-            {
-                CreateObjectNode(ObjectIds.ObjectsFolder, metadata, string.Empty);
-            }
+            var node = CreateFolder(ObjectIds.ObjectsFolder, new NodeId(_rootName, NamespaceIndex), _rootName, null, null);
+            CreateObjectNode(node.NodeId, metadata, _rootName + PathDelimiter);
+        }
+        else
+        {
+            CreateObjectNode(ObjectIds.ObjectsFolder, metadata, string.Empty);
         }
     }
 
@@ -89,11 +88,10 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         foreach (var property in proxy.Properties)
         {
             var propertyName = _source.SourcePathProvider.TryGetSourcePropertyName(property.Value.Property)!;
-
-            var children = property.Value.Children;
-            if (children.Count >= 1)
+            if (propertyName is not null)
             {
-                if (propertyName is not null)
+                var children = property.Value.Children;
+                if (children.Count >= 1)
                 {
                     if (children.Count == 1 && children.All(c => c.Index is null))
                     {
@@ -108,10 +106,10 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
                         CreateDictionaryObjectNode(propertyName, property.Value, property.Value.Children, parentNodeId, prefix);
                     }
                 }
-            }
-            else
-            {
-                CreateVariableNode(propertyName, property, parentNodeId, prefix);
+                else
+                {
+                    CreateVariableNode(propertyName, property, parentNodeId, prefix);
+                }
             }
         }
     }

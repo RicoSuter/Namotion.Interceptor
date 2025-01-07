@@ -27,7 +27,8 @@ namespace Namotion.Proxy.Mqtt
         private MqttServer? _mqttServer;
 
         private Action<ProxyPropertyPathReference>? _propertyUpdateAction;
-        private ConcurrentDictionary<ProxyPropertyReference, object?> _state = new();
+        
+        private readonly ConcurrentDictionary<ProxyPropertyReference, object?> _state = new();
 
         public int Port { get; set; } = 1883;
 

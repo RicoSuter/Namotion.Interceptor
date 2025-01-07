@@ -18,12 +18,12 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     where TProxy : IProxy
 {
     private readonly TProxy _proxy;
-    private readonly IProxyContext _context;
+    private readonly IProxyRegistry _registry;
 
     protected ProxyControllerBase(TProxy proxy)
     {
         _proxy = proxy;
-        _context = proxy.Context ?? throw new ArgumentException($"The proxy context is null.");
+        _registry = proxy.Context?.GetHandler<IProxyRegistry>() ?? throw new ArgumentException($"The proxy context is null or registry not available.");
     }
 
     [HttpGet]
@@ -78,7 +78,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
             {
                 var updateErrors = propertyValidators
                     .SelectMany(v => v.Validate(
-                        new ProxyPropertyReference(update.Proxy!, update.Property.Name), update.Value, _context))
+                        new ProxyPropertyReference(update.Proxy!, update.Property.Name), update.Value))
                     .ToArray();
 
                 if (updateErrors.Any())
@@ -123,7 +123,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     [HttpGet("properties")]
     public ActionResult<ProxyDescription> GetProperties()
     {
-        return Ok(CreateProxyDescription(_proxy, _context.GetHandler<IProxyRegistry>()));
+        return Ok(CreateProxyDescription(_proxy, _registry));
     }
 
     private static ProxyDescription CreateProxyDescription(IProxy proxy, IProxyRegistry register)
@@ -153,7 +153,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     {
         public required string Type { get; init; }
 
-        public Dictionary<string, ProxyPropertyDescription> Properties { get; } = new Dictionary<string, ProxyPropertyDescription>();
+        public Dictionary<string, ProxyPropertyDescription> Properties { get; } = new();
     }
 
     public class ProxyPropertyDescription

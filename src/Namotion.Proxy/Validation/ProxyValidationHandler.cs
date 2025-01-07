@@ -17,7 +17,7 @@ public class ProxyValidationHandler : IProxyWriteHandler
     public void WriteProperty(ProxyPropertyWriteContext context, Action<ProxyPropertyWriteContext> next)
     {
         var errors = _propertyValidators.Value
-            .SelectMany(v => v.Validate(context.Property, context.NewValue, context.Context))
+            .SelectMany(v => v.Validate(context.Property, context.NewValue))
             .ToArray();
 
         if (errors.Any())
