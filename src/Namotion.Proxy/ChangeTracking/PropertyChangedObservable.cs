@@ -5,7 +5,7 @@ namespace Namotion.Proxy.ChangeTracking;
 
 internal class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IProxyWriteHandler
 {
-    private Subject<ProxyPropertyChanged> _subject = new();
+    private readonly Subject<ProxyPropertyChanged> _subject = new();
 
     public void WriteProperty(ProxyPropertyWriteContext context, Action<ProxyPropertyWriteContext> next)
     {
