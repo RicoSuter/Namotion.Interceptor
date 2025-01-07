@@ -91,7 +91,7 @@ namespace Namotion.Proxy.SampleWeb
             builder.Services.AddSingleton(car);
 
             // trackable api controllers
-            builder.Services.AddProxyControllers<Car, ProxiesController<Car>>();
+            builder.Services.AddProxyControllers<Car, ProxyController<Car>>();
 
             // trackable UPC UA
             builder.Services.AddOpcUaServerProxySource<Car>("opc", rootName: "Root");
@@ -127,9 +127,9 @@ namespace Namotion.Proxy.SampleWeb
 
         [OpenApiTag("Car")]
         [Route("/api/car")]
-        public class ProxiesController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IProxy
+        public class ProxyController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IProxy
         {
-            public ProxiesController(TProxy proxy) : base(proxy)
+            public ProxyController(TProxy proxy) : base(proxy)
             {
             }
         }
