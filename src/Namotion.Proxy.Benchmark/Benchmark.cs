@@ -22,20 +22,22 @@ public class Benchmark
     [GlobalSetup]
     public void Setup()
     {
-        if (Type == "regular")
+        switch (Type)
         {
-            _object = new Car();
-        }
-        else if (Type == "proxy")
-        {
-            _context = ProxyContext
-                .CreateBuilder()
-                .WithFullPropertyTracking()
-                .WithRegistry()
-                .Build();
+            case "regular":
+                _object = new Car();
+                break;
+            
+            case "proxy":
+                _context = ProxyContext
+                    .CreateBuilder()
+                    .WithFullPropertyTracking()
+                    .WithRegistry()
+                    .Build();
 
-            _object = new Car(_context);
-            AddLotsOfPreviousCars();
+                _object = new Car(_context);
+                AddLotsOfPreviousCars();
+                break;
         }
     }
 
