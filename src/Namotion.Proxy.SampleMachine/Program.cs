@@ -1,10 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
-using Namotion.Proxy;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.OpcUa.Annotations;
 using NSwag.Annotations;
 
-namespace Namotion.Trackable.SampleMachine
+namespace Namotion.Proxy.SampleMachine
 {
     [GenerateProxy]
     public partial class Root
