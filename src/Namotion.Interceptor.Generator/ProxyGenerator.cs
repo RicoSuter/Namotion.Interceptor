@@ -66,6 +66,7 @@ public class ProxyGenerator : IIncrementalGenerator
 // </auto-generated>
 
 using Namotion.Proxy;
+using Namotion.Interceptor;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -77,23 +78,23 @@ using System.Text.Json.Serialization;
 
 namespace {namespaceName} 
 {{
-    public partial class {baseClassName} : IProxy
+    public partial class {baseClassName} : IInterceptable
     {{
-        private IProxyContext? _context;
+        private IInterceptor? _context;
         private ConcurrentDictionary<string, object?> _data = new ConcurrentDictionary<string, object?>();
 
         [JsonIgnore]
-        IProxyContext? IProxy.Context
+        IInterceptor? IInterceptable.Context
         {{
             get => _context;
             set => _context = value;
         }}
 
         [JsonIgnore]
-        ConcurrentDictionary<string, object?> IProxy.Data => _data;
+        ConcurrentDictionary<string, object?> IInterceptable.Data => _data;
 
         [JsonIgnore]
-        IReadOnlyDictionary<string, ProxyPropertyInfo> IProxy.Properties => _properties;
+        IReadOnlyDictionary<string, ProxyPropertyInfo> IInterceptable.Properties => _properties;
 
         private static IReadOnlyDictionary<string, ProxyPropertyInfo> _properties = new Dictionary<string, ProxyPropertyInfo>
         {{";
