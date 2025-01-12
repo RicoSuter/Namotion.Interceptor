@@ -6,36 +6,37 @@ using Namotion.Proxy.Registry.Abstractions;
 using System.Collections;
 using System.Text.Json.Nodes;
 using System.Text.Json;
+using Namotion.Interceptor;
 
 namespace Namotion.Proxy;
 
 public static class ProxyExtensions
 {
     /// <summary>
-    /// Will attach the proxy and its children to the context and 
-    /// detach only the proxy itself from the previous context.
+    /// Will attach the subject and its children to the context and 
+    /// detach only the subject itself from the previous context.
     /// </summary>
-    /// <param name="proxy">The proxy.</param>
+    /// <param name="subject">The subject.</param>
     /// <param name="context">The context.</param>
-    public static void SetContext(this IProxy proxy, IProxyContext? context)
+    public static void SetContext(this IInterceptorSubject subject, IProxyContext? context)
     {
-        var currentContext = proxy.Context;
+        var currentContext = subject.Interceptor as IProxyContext;
         if (currentContext != context)
         {
             if (currentContext is not null)
             {
-                var registryContext = new ProxyLifecycleContext(default, null, proxy, 0, currentContext);
+                var registryContext = new ProxyLifecycleContext(default, null, subject, 0, currentContext);
                 foreach (var handler in currentContext.GetHandlers<IProxyLifecycleHandler>())
                 {
                     handler.OnProxyDetached(registryContext);
                 }
             }
 
-            proxy.Context = context;
+            subject.Interceptor = context;
 
             if (context is not null)
             {
-                var registryContext = new ProxyLifecycleContext(default, null, proxy, 1, context);
+                var registryContext = new ProxyLifecycleContext(default, null, subject, 1, context);
                 foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
                 {
                     handler.OnProxyAttached(registryContext);
@@ -44,19 +45,20 @@ public static class ProxyExtensions
         }
     }
 
-    public static void SetData(this IProxy proxy, string key, object? value)
+    public static void SetData(this IInterceptorSubject subject, string key, object? value)
     {
-        proxy.Data[key] = value;
+        subject.Data[key] = value;
     }
 
-    public static bool TryGetData(this IProxy proxy, string key, out object? value)
+    public static bool TryGetData(this IInterceptorSubject subject, string key, out object? value)
     {
-        return proxy.Data.TryGetValue(key, out value);
+        return subject.Data.TryGetValue(key, out value);
     }
 
     public static string GetJsonPath(this ProxyPropertyReference property)
     {
-        var registry = property.Proxy.Context?.GetHandler<IProxyRegistry>();
+        var context = property.Subject.Interceptor as IProxyContext;
+        var registry = context?.GetHandler<IProxyRegistry>();
         if (registry is not null)
         {
             // TODO: avoid endless recursion
@@ -65,7 +67,7 @@ public static class ProxyExtensions
             do
             {
                 var attribute = registry
-                    .KnownProxies[parent.Property.Proxy]
+                    .KnownProxies[parent.Property.Subject]
                     .Properties[parent.Property.Name]
                     .Attributes
                     .OfType<PropertyAttributeAttribute>()
@@ -74,7 +76,7 @@ public static class ProxyExtensions
                 if (attribute is not null)
                 {
                     return GetJsonPath(new ProxyPropertyReference(
-                        parent.Property.Proxy,
+                        parent.Property.Subject,
                         attribute.PropertyName)) +
                         "@" + attribute.AttributeName;
                 }
@@ -83,9 +85,9 @@ public static class ProxyExtensions
                     (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
                     (path is not null ? $".{path}" : string.Empty);
 
-                parent = parent.Property.Proxy.GetParents().FirstOrDefault();
+                parent = parent.Property.Subject.GetParents().FirstOrDefault();
             }
-            while (parent.Property.Proxy is not null);
+            while (parent.Property.Subject is not null);
 
             return path.Trim('.');
         }
@@ -96,7 +98,7 @@ public static class ProxyExtensions
             var parent = new ProxyParent(property, null);
             do
             {
-                var attribute = parent.Property.Proxy
+                var attribute = parent.Property.Subject
                     .Properties[parent.Property.Name]
                     .Attributes
                     .OfType<PropertyAttributeAttribute>()
@@ -105,7 +107,7 @@ public static class ProxyExtensions
                 if (attribute is not null)
                 {
                     return GetJsonPath(new ProxyPropertyReference(
-                        parent.Property.Proxy,
+                        parent.Property.Subject,
                         attribute.PropertyName)) +
                         "@" + attribute.AttributeName;
                 }
@@ -114,31 +116,31 @@ public static class ProxyExtensions
                     (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
                     (path is not null ? $".{path}" : string.Empty);
 
-                parent = parent.Property.Proxy.GetParents().FirstOrDefault();
+                parent = parent.Property.Subject.GetParents().FirstOrDefault();
             }
-            while (parent.Property.Proxy is not null);
+            while (parent.Property.Subject is not null);
 
             return path.Trim('.');
         }
     }
 
-    public static JsonObject ToJsonObject(this IProxy proxy)
+    public static JsonObject ToJsonObject(this IInterceptorSubject subject)
     {
         var obj = new JsonObject();
-        foreach (var property in proxy
+        foreach (var property in subject
             .Properties
             .Where(p => p.Value.GetValue is not null))
         {
-            var propertyName = GetJsonPropertyName(proxy, property.Value);
-            var value = property.Value.GetValue?.Invoke(proxy);
-            if (value is IProxy childProxy)
+            var propertyName = GetJsonPropertyName(subject, property.Value);
+            var value = property.Value.GetValue?.Invoke(subject);
+            if (value is IInterceptorSubject childProxy)
             {
                 obj[propertyName] = childProxy.ToJsonObject();
             }
-            else if (value is ICollection collection && collection.OfType<IProxy>().Any())
+            else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
             {
                 var children = new JsonArray();
-                foreach (var arrayProxyItem in collection.OfType<IProxy>())
+                foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
                 {
                     children.Add(arrayProxyItem.ToJsonObject());
                 }
@@ -150,26 +152,27 @@ public static class ProxyExtensions
             }
         }
 
-        var registry = proxy.Context?.GetHandler<IProxyRegistry>()
+        var context = subject.Interceptor as IProxyContext;
+        var registry = context?.GetHandler<IProxyRegistry>()
             ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
 
-        if (registry?.KnownProxies.TryGetValue(proxy, out var metadata) == true)
+        if (registry?.KnownProxies.TryGetValue(subject, out var metadata) == true)
         {
             foreach (var property in metadata
                 .Properties
                 .Where(p => p.Value.HasGetter && 
-                            proxy.Properties.ContainsKey(p.Key) == false))
+                            subject.Properties.ContainsKey(p.Key) == false))
             {
                 var propertyName = property.GetJsonPropertyName();
                 var value = property.Value.GetValue();
-                if (value is IProxy childProxy)
+                if (value is IInterceptorSubject childProxy)
                 {
                     obj[propertyName] = childProxy.ToJsonObject();
                 }
-                else if (value is ICollection collection && collection.OfType<IProxy>().Any())
+                else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
                 {
                     var children = new JsonArray();
-                    foreach (var arrayProxyItem in collection.OfType<IProxy>())
+                    foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
                     {
                         children.Add(arrayProxyItem.ToJsonObject());
                     }
@@ -185,7 +188,7 @@ public static class ProxyExtensions
         return obj;
     }
 
-    private static string GetJsonPropertyName(IProxy proxy, ProxyPropertyInfo property)
+    private static string GetJsonPropertyName(IInterceptorSubject subject, SubjectPropertyInfo property)
     {
         var attribute = property
             .Attributes
@@ -194,7 +197,7 @@ public static class ProxyExtensions
 
         if (attribute is not null)
         {
-            var propertyName = GetJsonPropertyName(proxy, proxy.Properties[attribute.PropertyName]);
+            var propertyName = GetJsonPropertyName(subject, subject.Properties[attribute.PropertyName]);
             return $"{propertyName}@{attribute.AttributeName}";
         }
 
@@ -220,12 +223,12 @@ public static class ProxyExtensions
         return JsonNamingPolicy.CamelCase.ConvertName(property.Key);
     }
 
-    public static (IProxy?, ProxyPropertyInfo) FindPropertyFromJsonPath(this IProxy proxy, string path)
+    public static (IInterceptorSubject?, SubjectPropertyInfo) FindPropertyFromJsonPath(this IInterceptorSubject subject, string path)
     {
-        return proxy.FindPropertyFromJsonPath(path.Split('.'));
+        return subject.FindPropertyFromJsonPath(path.Split('.'));
     }
 
-    private static (IProxy?, ProxyPropertyInfo) FindPropertyFromJsonPath(this IProxy proxy, IEnumerable<string> segments)
+    private static (IInterceptorSubject?, SubjectPropertyInfo) FindPropertyFromJsonPath(this IInterceptorSubject subject, IEnumerable<string> segments)
     {
         var nextSegment = segments.First();
         nextSegment = ConvertToUpperCamelCase(nextSegment);
@@ -239,19 +242,19 @@ public static class ProxyExtensions
                 var index = int.Parse(arraySegments[1]);
                 nextSegment = arraySegments[0];
 
-                var collection = proxy.Properties[nextSegment].GetValue?.Invoke(proxy) as ICollection;
-                var child = collection?.OfType<IProxy>().ElementAt(index);
+                var collection = subject.Properties[nextSegment].GetValue?.Invoke(subject) as ICollection;
+                var child = collection?.OfType<IInterceptorSubject>().ElementAt(index);
                 return child is not null ? FindPropertyFromJsonPath(child, segments) : (null, default);
             }
             else
             {
-                var child = proxy.Properties[nextSegment].GetValue?.Invoke(proxy) as IProxy;
+                var child = subject.Properties[nextSegment].GetValue?.Invoke(subject) as IInterceptorSubject;
                 return child is not null ? FindPropertyFromJsonPath(child, segments) : (null, default);
             }
         }
         else
         {
-            return (proxy, proxy.Properties[nextSegment]);
+            return (subject, subject.Properties[nextSegment]);
         }
     }
 

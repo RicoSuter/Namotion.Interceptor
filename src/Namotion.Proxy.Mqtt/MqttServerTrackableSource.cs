@@ -10,6 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Server;
+using Namotion.Interceptor;
 using Namotion.Proxy.Registry;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Sources.Abstractions;
@@ -17,7 +18,7 @@ using Namotion.Proxy.Sources.Abstractions;
 namespace Namotion.Proxy.Mqtt
 {
     public class MqttServerTrackableSource<TProxy> : BackgroundService, IProxySource
-        where TProxy : IProxy
+        where TProxy : IInterceptorSubject
     {
         private readonly IProxyContext _context;
         private readonly ISourcePathProvider _sourcePathProvider;

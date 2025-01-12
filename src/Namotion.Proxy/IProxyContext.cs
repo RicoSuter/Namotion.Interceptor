@@ -1,14 +1,10 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy;
 
-public interface IProxyContext
+public interface IProxyContext : IInterceptor
 {
-    // TODO: Move to another interface
     IEnumerable<THandler> GetHandlers<THandler>()
         where THandler : IProxyHandler;
-
-    object? GetProperty(IProxy proxy, string propertyName, Func<object?> readValue);
-
-    void SetProperty(IProxy proxy, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue);
 }

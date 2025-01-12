@@ -1,6 +1,7 @@
 ﻿using System;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor;
 using Namotion.Proxy;
 using Namotion.Proxy.Mqtt;
 using Namotion.Proxy.Sources;
@@ -12,12 +13,12 @@ public static class MqttServerTrackableContextSourceExtensions
 {
     public static IServiceCollection AddMqttServerProxySource<TProxy>(
         this IServiceCollection serviceCollection, string sourceName, string? pathPrefix = null)
-        where TProxy : IProxy
+        where TProxy : IInterceptorSubject
     {
         return serviceCollection
             .AddSingleton(sp =>
             {
-                var context = sp.GetRequiredService<TProxy>().Context ??
+                var context = sp.GetRequiredService<TProxy>().Interceptor as IProxyContext ??
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(
@@ -31,7 +32,7 @@ public static class MqttServerTrackableContextSourceExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<MqttServerTrackableSource<TProxy>>())
             .AddSingleton<IHostedService>(sp =>
             {
-                var context = sp.GetRequiredService<TProxy>().Context ??
+                var context = sp.GetRequiredService<TProxy>().Interceptor as IProxyContext ??
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
                 return new ProxySourceBackgroundService<TProxy>(

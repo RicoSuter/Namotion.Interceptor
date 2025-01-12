@@ -1,4 +1,5 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy;
 
@@ -17,8 +18,8 @@ public class ProxyContext : IProxyContext
     public ProxyContext(IEnumerable<IProxyHandler> handlers)
     {
         _handlers = handlers.ToArray();
-        _readHandlers = handlers.OfType<IProxyReadHandler>().Reverse().ToArray();
-        _writeHandlers = handlers.OfType<IProxyWriteHandler>().Reverse().ToArray();
+        _readHandlers = _handlers.OfType<IProxyReadHandler>().Reverse().ToArray();
+        _writeHandlers = _handlers.OfType<IProxyWriteHandler>().Reverse().ToArray();
     }
 
     public IEnumerable<THandler> GetHandlers<THandler>()
@@ -27,9 +28,9 @@ public class ProxyContext : IProxyContext
         return _handlers.OfType<THandler>();
     }
 
-    public object? GetProperty(IProxy proxy, string propertyName, Func<object?> readValue)
+    public object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue)
     {
-        var context = new ProxyPropertyReadContext(new ProxyPropertyReference(proxy, propertyName), this);
+        var context = new ProxyPropertyReadContext(new ProxyPropertyReference(subject, propertyName), this);
 
         for (int i = 0; i < _readHandlers.Length; i++)
         {
@@ -44,9 +45,9 @@ public class ProxyContext : IProxyContext
         return readValue.Invoke();
     }
 
-    public void SetProperty(IProxy proxy, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
+    public void SetProperty(IInterceptorSubject subject, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
     {
-        var context = new ProxyPropertyWriteContext(new ProxyPropertyReference(proxy, propertyName), readValue(), null, IsDerived: false, this);
+        var context = new ProxyPropertyWriteContext(new ProxyPropertyReference(subject, propertyName), readValue(), null, IsDerived: false, this);
         context.CallWriteProperty(newValue, writeValue, _writeHandlers);
     }
 }

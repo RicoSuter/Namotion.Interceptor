@@ -1,4 +1,5 @@
-﻿using Namotion.Proxy;
+﻿using Namotion.Interceptor.Attributes;
+using Namotion.Proxy;
 using Namotion.Proxy.Abstractions;
 
 namespace ConsoleApp1

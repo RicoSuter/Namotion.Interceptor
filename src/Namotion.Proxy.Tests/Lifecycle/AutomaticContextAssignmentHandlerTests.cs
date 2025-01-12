@@ -1,4 +1,6 @@
-﻿namespace Namotion.Proxy.Tests.Lifecycle;
+﻿using Namotion.Interceptor;
+
+namespace Namotion.Proxy.Tests.Lifecycle;
 
 public class AutomaticContextAssignmentHandlerTests
 {
@@ -16,7 +18,7 @@ public class AutomaticContextAssignmentHandlerTests
         person.Mother = new Person { FirstName = "Susi" };
 
         // Assert
-        Assert.Equal(context, ((IProxy)person.Mother).Context);
+        Assert.Equal(context, ((IInterceptorSubject)person.Mother).Interceptor);
     }
 
     [Fact]
@@ -47,9 +49,9 @@ public class AutomaticContextAssignmentHandlerTests
         };
 
         // Assert
-        Assert.Equal(context, ((IProxy)person).Context);
-        Assert.Equal(context, ((IProxy)mother).Context);
-        Assert.Equal(context, ((IProxy)grandmother).Context);
+        Assert.Equal(context, ((IInterceptorSubject)person).Interceptor);
+        Assert.Equal(context, ((IInterceptorSubject)mother).Interceptor);
+        Assert.Equal(context, ((IInterceptorSubject)grandmother).Interceptor);
     }
 
     [Fact]
@@ -82,9 +84,9 @@ public class AutomaticContextAssignmentHandlerTests
         person.Mother = null;
 
         // Assert
-        Assert.Equal(context, ((IProxy)person).Context);
-        Assert.Null(((IProxy)mother).Context);
-        Assert.Null(((IProxy)grandmother).Context);
+        Assert.Equal(context, ((IInterceptorSubject)person).Interceptor);
+        Assert.Null(((IInterceptorSubject)mother).Interceptor);
+        Assert.Null(((IInterceptorSubject)grandmother).Interceptor);
     }
 
     [Fact]
@@ -110,9 +112,9 @@ public class AutomaticContextAssignmentHandlerTests
         };
 
         // Assert
-        Assert.Equal(context, ((IProxy)person).Context);
-        Assert.Equal(context, ((IProxy)child1).Context);
-        Assert.Equal(context, ((IProxy)child2).Context);
+        Assert.Equal(context, ((IInterceptorSubject)person).Interceptor);
+        Assert.Equal(context, ((IInterceptorSubject)child1).Interceptor);
+        Assert.Equal(context, ((IInterceptorSubject)child2).Interceptor);
     }
 
     [Fact]
@@ -134,8 +136,8 @@ public class AutomaticContextAssignmentHandlerTests
         child3.Mother = child1;
 
         // Assert
-        Assert.Equal(context, ((IProxy)child1).Context);
-        Assert.Equal(context, ((IProxy)child2).Context);
-        Assert.Equal(context, ((IProxy)child3).Context);
+        Assert.Equal(context, ((IInterceptorSubject)child1).Interceptor);
+        Assert.Equal(context, ((IInterceptorSubject)child2).Interceptor);
+        Assert.Equal(context, ((IInterceptorSubject)child3).Interceptor);
     }
 }

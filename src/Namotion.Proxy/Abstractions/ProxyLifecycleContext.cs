@@ -1,9 +1,11 @@
-﻿namespace Namotion.Proxy.Abstractions;
+﻿using Namotion.Interceptor;
+
+namespace Namotion.Proxy.Abstractions;
 
 public record struct ProxyLifecycleContext(
     ProxyPropertyReference Property,
     object? Index,
-    IProxy Proxy,
+    IInterceptorSubject Proxy,
     int ReferenceCount,
     IProxyContext Context)
 {

@@ -1,4 +1,5 @@
-﻿using Namotion.Proxy;
+﻿using Namotion.Interceptor;
+using Namotion.Proxy;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Trackable.AspNetCore.Controllers;
 
@@ -11,12 +12,12 @@ public static class ProxyAspNetCoreServiceCollection
     /// Registers a generic controller with the signature 'ProxyController{TProxy} : ProxyControllerBase{TProxy} where TProxy : class'.
     /// </summary>
     /// <typeparam name="TController">The controller type.</typeparam>
-    /// <typeparam name="TProxy">The proxy type.</typeparam>
+    /// <typeparam name="TProxy">The interceptable type.</typeparam>
     /// <param name="services">The service collection.</param>
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddProxyControllers<TProxy, TController>(this IServiceCollection services)
         where TController : ProxyControllerBase<TProxy>
-        where TProxy : class, IProxy
+        where TProxy : class, IInterceptorSubject
     {
         services
             .AddControllers()

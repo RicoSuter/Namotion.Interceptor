@@ -1,4 +1,5 @@
 ﻿using System.Text.Json.Serialization;
+using Namotion.Interceptor;
 
 namespace Namotion.Proxy.Registry.Abstractions;
 
@@ -10,7 +11,7 @@ public record RegisteredProxy
     private readonly HashSet<ProxyPropertyReference> _parents = new();
 
     [JsonIgnore]
-    public IProxy Proxy { get; }
+    public IInterceptorSubject Subject { get; }
 
     public ICollection<ProxyPropertyReference> Parents
     {
@@ -30,9 +31,9 @@ public record RegisteredProxy
         }
     }
 
-    internal RegisteredProxy(IProxy proxy, IEnumerable<RegisteredProxyProperty> properties)
+    internal RegisteredProxy(IInterceptorSubject subject, IEnumerable<RegisteredProxyProperty> properties)
     {
-        Proxy = proxy;
+        Subject = subject;
         _properties = properties
             .ToDictionary(
                 p => p.Property.Name,
@@ -59,7 +60,7 @@ public record RegisteredProxy
     {
         lock (_lock)
         {
-            _properties!.Add(name, new CustomRegisteredProxyProperty(new ProxyPropertyReference(Proxy, name), getValue, setValue)
+            _properties!.Add(name, new CustomRegisteredProxyProperty(new ProxyPropertyReference(Subject, name), getValue, setValue)
             {
                 Parent = this,
                 Type = type,

@@ -19,7 +19,7 @@ public static class Program
     {
         var benchmark = new Benchmark
         {
-            Type = "proxy"
+            Type = "interceptable"
         };
         benchmark.Setup();
         RunCode(benchmark);

@@ -20,12 +20,12 @@ public record RegisteredProxyProperty(ProxyPropertyReference Property)
 
     public virtual object? GetValue()
     {
-        return Property.Metadata.GetValue?.Invoke(Property.Proxy);
+        return Property.Metadata.GetValue?.Invoke(Property.Subject);
     }
 
     public virtual void SetValue(object? value)
     {
-        Property.Metadata.SetValue?.Invoke(Property.Proxy, value);
+        Property.Metadata.SetValue?.Invoke(Property.Subject, value);
     }
 
     public ICollection<ProxyPropertyChild> Children

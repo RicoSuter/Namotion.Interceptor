@@ -23,10 +23,10 @@ public static class SourceExtensions
         {
             var newValue = valueFromSource;
 
-            var currentValue = property.Metadata.GetValue?.Invoke(property.Proxy);
+            var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
             if (!Equals(currentValue, newValue))
             {
-                property.Metadata.SetValue?.Invoke(property.Proxy, newValue);
+                property.Metadata.SetValue?.Invoke(property.Subject, newValue);
             }
         }
         finally

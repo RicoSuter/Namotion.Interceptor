@@ -1,7 +1,7 @@
 ﻿using HotChocolate.Execution.Configuration;
 
 using Microsoft.Extensions.Hosting;
-
+using Namotion.Interceptor;
 using Namotion.Proxy;
 using Namotion.Proxy.GraphQL;
 
@@ -11,7 +11,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class ProxyGraphQLExtensions
 {
     public static void AddTrackedGraphQL<TProxy>(this IRequestExecutorBuilder builder)
-        where TProxy : IProxy
+        where TProxy : IInterceptorSubject
     {
         builder
             .Services

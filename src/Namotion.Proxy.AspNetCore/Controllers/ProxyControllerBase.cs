@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 using Microsoft.AspNetCore.Mvc;
-
+using Namotion.Interceptor;
 using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Validation;
@@ -15,7 +15,7 @@ using Namotion.Proxy.Validation;
 namespace Namotion.Proxy.AspNetCore.Controllers;
 
 public abstract class ProxyControllerBase<TProxy> : ControllerBase
-    where TProxy : IProxy
+    where TProxy : IInterceptorSubject
 {
     private readonly TProxy _proxy;
     private readonly IProxyRegistry _registry;
@@ -23,7 +23,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     protected ProxyControllerBase(TProxy proxy)
     {
         _proxy = proxy;
-        _registry = proxy.Context?.GetHandler<IProxyRegistry>() ?? throw new ArgumentException($"The proxy context is null or registry not available.");
+        _registry = (proxy.Interceptor as IProxyContext)?.GetHandler<IProxyRegistry>() ?? throw new ArgumentException($"The proxy context is null or registry not available.");
     }
 
     [HttpGet]
@@ -126,14 +126,14 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
         return Ok(CreateProxyDescription(_proxy, _registry));
     }
 
-    private static ProxyDescription CreateProxyDescription(IProxy proxy, IProxyRegistry register)
+    private static ProxyDescription CreateProxyDescription(IInterceptorSubject subject, IProxyRegistry register)
     {
         var description = new ProxyDescription
         {
-            Type = proxy.GetType().Name
+            Type = subject.GetType().Name
         };
 
-        if (register.KnownProxies.TryGetValue(proxy, out var metadata))
+        if (register.KnownProxies.TryGetValue(subject, out var metadata))
         {
             foreach (var property in metadata.Properties
                 .Where(p => p.Value.HasGetter &&
@@ -188,14 +188,14 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
             Attributes = attributes.Any() ? attributes : null
         };
 
-        if (value is IProxy childProxy)
+        if (value is IInterceptorSubject childProxy)
         {
             description.Proxy = CreateProxyDescription(childProxy, registry);
         }
-        else if (value is ICollection collection && collection.OfType<IProxy>().Any())
+        else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
         {
             var children = new List<ProxyDescription>();
-            foreach (var arrayProxyItem in collection.OfType<IProxy>())
+            foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
             {
                 children.Add(CreateProxyDescription(arrayProxyItem, registry));
             }

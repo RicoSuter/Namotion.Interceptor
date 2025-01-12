@@ -1,8 +1,9 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.Registry.Abstractions;
 
 public interface IProxyRegistry : IProxyHandler
 {
-    IReadOnlyDictionary<IProxy, RegisteredProxy> KnownProxies { get; }
+    IReadOnlyDictionary<IInterceptorSubject, RegisteredProxy> KnownProxies { get; }
 }

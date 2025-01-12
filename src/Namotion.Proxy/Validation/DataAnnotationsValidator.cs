@@ -10,7 +10,7 @@ public class DataAnnotationsValidator : IProxyPropertyValidator
 
         if (value is not null)
         {
-            var validationContext = new ValidationContext(property.Proxy)
+            var validationContext = new ValidationContext(property.Subject)
             {
                 MemberName = property.Name
             };

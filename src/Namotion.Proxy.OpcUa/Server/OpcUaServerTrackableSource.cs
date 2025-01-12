@@ -8,11 +8,12 @@ using Opc.Ua;
 using Opc.Ua.Configuration;
 
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
 
 namespace Namotion.Proxy.OpcUa.Server;
 
 internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
-    where TProxy : IProxy
+    where TProxy : IInterceptorSubject
 {
     internal const string OpcVariableKey = "OpcVariable";
 

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor;
 using Namotion.Proxy.Sources;
 using Namotion.Proxy;
 using Namotion.Proxy.OpcUa.Server;
@@ -14,7 +15,7 @@ public static class OpcUaProxyExtensions
         string sourceName,
         string? pathPrefix = null,
         string? rootName = null)
-        where TProxy : IProxy
+        where TProxy : IInterceptorSubject
     {
         return serviceCollection.AddOpcUaServerProxySource(
             sourceName,
@@ -29,13 +30,13 @@ public static class OpcUaProxyExtensions
         Func<IServiceProvider, TProxy> resolveProxy,
         string? pathPrefix = null,
         string? rootName = null)
-        where TProxy : IProxy
+        where TProxy : IInterceptorSubject
     {
         return serviceCollection
             .AddSingleton(sp =>
             {
                 var proxy = resolveProxy(sp);
-                var context = proxy.Context ?? 
+                var context = proxy.Interceptor as IProxyContext ?? 
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(
@@ -51,7 +52,7 @@ public static class OpcUaProxyExtensions
             .AddSingleton<IHostedService>(sp =>
             {
                 var proxy = resolveProxy(sp);
-                var context = proxy.Context ??
+                var context = proxy.Interceptor as IProxyContext ??
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
                 return new ProxySourceBackgroundService<TProxy>(
@@ -67,7 +68,7 @@ public static class OpcUaProxyExtensions
     //    string serverUrl,
     //    string? pathPrefix = null,
     //    string? rootName = null)
-    //    where TProxy : IProxy
+    //    where TProxy : IInterceptor
     //{
     //    return serviceCollection.AddOpcUaClientProxySource(
     //        sourceName,
@@ -84,20 +85,20 @@ public static class OpcUaProxyExtensions
     //    Func<IServiceProvider, TProxy> resolveProxy,
     //    string? pathPrefix = null,
     //    string? rootName = null)
-    //    where TProxy : IProxy
+    //    where TProxy : IInterceptor
     //{
     //    return serviceCollection
     //        .AddSingleton(sp =>
     //        {
-    //            var proxy = resolveProxy(sp);
-    //            var context = proxy.Context ??
+    //            var interceptable = resolveProxy(sp);
+    //            var context = interceptable.Context ??
     //                throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
     //            var sourcePathProvider = new AttributeBasedSourcePathProvider(
     //                sourceName, context, pathPrefix);
 
     //            return new OpcUaClientTrackableSource<TProxy>(
-    //                proxy,
+    //                interceptable,
     //                serverUrl,
     //                sourcePathProvider,
     //                sp.GetRequiredService<ILogger<OpcUaClientTrackableSource<TProxy>>>(),
@@ -106,8 +107,8 @@ public static class OpcUaProxyExtensions
     //        .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaClientTrackableSource<TProxy>>())
     //        .AddSingleton<IHostedService>(sp =>
     //        {
-    //            var proxy = resolveProxy(sp);
-    //            var context = proxy.Context ??
+    //            var interceptable = resolveProxy(sp);
+    //            var context = interceptable.Context ??
     //                throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
     //            return new ProxySourceBackgroundService<TProxy>(

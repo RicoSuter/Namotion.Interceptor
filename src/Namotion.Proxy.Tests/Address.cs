@@ -1,4 +1,6 @@
-﻿namespace Namotion.Proxy.Tests
+﻿using Namotion.Interceptor.Attributes;
+
+namespace Namotion.Proxy.Tests
 {
     // test different property types
 
