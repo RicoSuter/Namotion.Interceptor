@@ -8,13 +8,13 @@ public static class ParentsHandlerExtensions
 {
     private const string ParentsKey = "Namotion.Parents";
 
-    public static void AddParent(this IInterceptorSubject subject, ProxyPropertyReference parent, object? index)
+    public static void AddParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
     {
         var parents = subject.GetParents();
         parents.Add(new ProxyParent(parent, index));
     }
 
-    public static void RemoveParent(this IInterceptorSubject subject, ProxyPropertyReference parent, object? index)
+    public static void RemoveParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
     {
         var parents = subject.GetParents();
         parents.Remove(new ProxyParent(parent, index));
@@ -27,7 +27,7 @@ public static class ParentsHandlerExtensions
 }
 
 public record struct ProxyParent(
-    ProxyPropertyReference Property,
+    PropertyReference Property,
     object? Index)
 {
 }

@@ -1,13 +1,14 @@
 ﻿using Namotion.Proxy.Abstractions;
 using System.Reactive.Subjects;
+using Namotion.Interceptor;
 
 namespace Namotion.Proxy.ChangeTracking;
 
-internal class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IProxyWriteHandler
+internal class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IWriteInterceptor
 {
     private readonly Subject<ProxyPropertyChanged> _subject = new();
 
-    public void WriteProperty(ProxyPropertyWriteContext context, Action<ProxyPropertyWriteContext> next)
+    public void WriteProperty(WritePropertyInterception context, Action<WritePropertyInterception> next)
     {
         var currentValue = context.CurrentValue;
         var newValue = context.NewValue;
@@ -16,7 +17,7 @@ internal class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IP
         
         // TODO: Should retrieve actual new value
 
-        var changedContext = new ProxyPropertyChanged(context.Property, currentValue, newValue, context.Context);
+        var changedContext = new ProxyPropertyChanged(context.Property, currentValue, newValue, (IProxyContext)context.Context);
         _subject.OnNext(changedContext);
     }
 

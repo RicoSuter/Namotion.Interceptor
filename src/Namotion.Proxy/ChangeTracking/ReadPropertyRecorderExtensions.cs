@@ -8,10 +8,10 @@ public static class ReadPropertyRecorderExtensions
     {
         ReadPropertyRecorder.Scopes.Value =
             ReadPropertyRecorder.Scopes.Value ??
-            new Dictionary<IInterceptor, List<HashSet<ProxyPropertyReference>>>();
+            new Dictionary<IInterceptor, List<HashSet<PropertyReference>>>();
 
-        var scope = new HashSet<ProxyPropertyReference>();
-        ReadPropertyRecorder.Scopes.Value.TryAdd(context, new List<HashSet<ProxyPropertyReference>>());
+        var scope = new HashSet<PropertyReference>();
+        ReadPropertyRecorder.Scopes.Value.TryAdd(context, new List<HashSet<PropertyReference>>());
         ReadPropertyRecorder.Scopes.Value[context].Add(scope);
 
         return new ReadPropertyRecorderScope(context, scope);

@@ -94,9 +94,9 @@ namespace {namespaceName}
         ConcurrentDictionary<string, object?> IInterceptorSubject.Data => _data;
 
         [JsonIgnore]
-        IReadOnlyDictionary<string, SubjectPropertyInfo> IInterceptorSubject.Properties => _properties;
+        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
 
-        private static IReadOnlyDictionary<string, SubjectPropertyInfo> _properties = new Dictionary<string, SubjectPropertyInfo>
+        private static IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties = new Dictionary<string, SubjectPropertyMetadata>
         {{";
                     foreach (var property in cls.SelectMany(c => c.Properties))
                     {
@@ -108,7 +108,7 @@ namespace {namespaceName}
     $@"
             {{
                 ""{propertyName}"",       
-                new SubjectPropertyInfo(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")})
+                new SubjectPropertyMetadata(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")})
             }},";
                     }
 

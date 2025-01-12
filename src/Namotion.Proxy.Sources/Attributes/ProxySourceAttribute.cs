@@ -1,4 +1,5 @@
-﻿using Namotion.Proxy.Registry.Abstractions;
+﻿using Namotion.Interceptor;
+using Namotion.Proxy.Registry.Abstractions;
 
 namespace Namotion.Proxy.Sources.Attributes;
 
@@ -30,7 +31,7 @@ public class ProxySourceAttribute : Attribute, IProxyPropertyInitializer
         property.Property.SetAttributeBasedSourceProperty(SourceName, Path ?? property.Property.Name);
     }
 
-    private string GetSourcePath(string? basePath, ProxyPropertyReference property)
+    private string GetSourcePath(string? basePath, PropertyReference property)
     {
         if (AbsolutePath != null)
         {

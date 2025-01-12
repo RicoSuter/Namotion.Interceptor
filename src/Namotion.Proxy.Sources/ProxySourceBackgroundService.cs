@@ -48,7 +48,7 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
                         .Where(p => p.Value.HasSetter)
                         .Select(p =>
                         {
-                            var reference = new ProxyPropertyReference(v.Key, p.Key);
+                            var reference = new PropertyReference(v.Key, p.Key);
                             return new ProxyPropertyPathReference(reference,
                                 _source.TryGetSourcePath(reference) ?? string.Empty,
                                 p.Value.HasGetter ? p.Value.GetValue() : null);

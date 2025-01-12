@@ -17,5 +17,5 @@ public interface IInterceptorSubject
     /// <summary>
     /// Gets the reflected properties (should be cached).
     /// </summary>
-    IReadOnlyDictionary<string, SubjectPropertyInfo> Properties { get; }
+    IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; }
 }

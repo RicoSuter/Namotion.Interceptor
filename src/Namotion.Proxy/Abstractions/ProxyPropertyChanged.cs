@@ -1,7 +1,9 @@
-﻿namespace Namotion.Proxy.Abstractions;
+﻿using Namotion.Interceptor;
+
+namespace Namotion.Proxy.Abstractions;
 
 public record struct ProxyPropertyChanged(
-    ProxyPropertyReference Property,
+    PropertyReference Property,
     object? OldValue,
     object? NewValue,
     IProxyContext Context)

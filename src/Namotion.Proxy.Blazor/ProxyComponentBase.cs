@@ -10,7 +10,7 @@ namespace Namotion.Proxy.Blazor
     {
         private IDisposable? _subscription;
         private ReadPropertyRecorderScope? _recorder;
-        public ProxyPropertyReference[]? _properties;
+        public PropertyReference[]? _properties;
 
         [Inject]
         public IObservable<ProxyPropertyChanged>? ProxyPropertyChanges { get; set; }

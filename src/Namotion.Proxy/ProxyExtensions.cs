@@ -55,7 +55,7 @@ public static class ProxyExtensions
         return subject.Data.TryGetValue(key, out value);
     }
 
-    public static string GetJsonPath(this ProxyPropertyReference property)
+    public static string GetJsonPath(this PropertyReference property)
     {
         var context = property.Subject.Interceptor as IProxyContext;
         var registry = context?.GetHandler<IProxyRegistry>();
@@ -75,7 +75,7 @@ public static class ProxyExtensions
 
                 if (attribute is not null)
                 {
-                    return GetJsonPath(new ProxyPropertyReference(
+                    return GetJsonPath(new PropertyReference(
                         parent.Property.Subject,
                         attribute.PropertyName)) +
                         "@" + attribute.AttributeName;
@@ -106,7 +106,7 @@ public static class ProxyExtensions
 
                 if (attribute is not null)
                 {
-                    return GetJsonPath(new ProxyPropertyReference(
+                    return GetJsonPath(new PropertyReference(
                         parent.Property.Subject,
                         attribute.PropertyName)) +
                         "@" + attribute.AttributeName;
@@ -188,7 +188,7 @@ public static class ProxyExtensions
         return obj;
     }
 
-    private static string GetJsonPropertyName(IInterceptorSubject subject, SubjectPropertyInfo property)
+    private static string GetJsonPropertyName(IInterceptorSubject subject, SubjectPropertyMetadata property)
     {
         var attribute = property
             .Attributes
@@ -223,12 +223,12 @@ public static class ProxyExtensions
         return JsonNamingPolicy.CamelCase.ConvertName(property.Key);
     }
 
-    public static (IInterceptorSubject?, SubjectPropertyInfo) FindPropertyFromJsonPath(this IInterceptorSubject subject, string path)
+    public static (IInterceptorSubject?, SubjectPropertyMetadata) FindPropertyFromJsonPath(this IInterceptorSubject subject, string path)
     {
         return subject.FindPropertyFromJsonPath(path.Split('.'));
     }
 
-    private static (IInterceptorSubject?, SubjectPropertyInfo) FindPropertyFromJsonPath(this IInterceptorSubject subject, IEnumerable<string> segments)
+    private static (IInterceptorSubject?, SubjectPropertyMetadata) FindPropertyFromJsonPath(this IInterceptorSubject subject, IEnumerable<string> segments)
     {
         var nextSegment = segments.First();
         nextSegment = ConvertToUpperCamelCase(nextSegment);

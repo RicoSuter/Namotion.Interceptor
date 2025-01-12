@@ -1,13 +1,10 @@
-﻿using Namotion.Interceptor;
+﻿namespace Namotion.Interceptor;
 
-namespace Namotion.Proxy;
-
-public record struct ProxyPropertyReference(IInterceptorSubject Subject, string Name)
+public readonly record struct PropertyReference(IInterceptorSubject Subject, string Name)
 {
-    // TODO: Rename to Info?
-    public readonly SubjectPropertyInfo Metadata => Subject.Properties[Name];
+    public SubjectPropertyMetadata Metadata => Subject.Properties[Name];
 
-    public readonly void SetPropertyData(string key, object? value)
+    public void SetPropertyData(string key, object? value)
     {
         Subject.Data[$"{key}:{Name}"] = value;
     }

@@ -1,4 +1,5 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.ChangeTracking;
 using Namotion.Proxy.Lifecycle;
 using Namotion.Proxy.Registry;
@@ -25,7 +26,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithDerivedPropertyChangeDetection(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new DerivedPropertyChangeDetectionHandler(builder.GetLazyHandlers<IProxyWriteHandler>()))
+            .TryAddSingleHandler(new DerivedPropertyChangeDetectionHandler(builder.GetLazyHandlers<IWriteInterceptor>()))
             .WithPropertyChangedObservable();
     }
 
