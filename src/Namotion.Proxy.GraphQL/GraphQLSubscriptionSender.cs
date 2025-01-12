@@ -1,10 +1,11 @@
 ﻿using HotChocolate.Subscriptions;
 using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor;
 
 namespace Namotion.Proxy.GraphQL
 {
     public class GraphQLSubscriptionSender<TProxy> : BackgroundService
-        where TProxy : IProxy
+        where TProxy : IInterceptorSubject
     {
         private readonly TProxy _proxy;
         private readonly IProxyContext _context;
@@ -12,7 +13,7 @@ namespace Namotion.Proxy.GraphQL
 
         public GraphQLSubscriptionSender(TProxy proxy, ITopicEventSender sender)
         {
-            _context = proxy.Context  ??
+            _context = proxy.Interceptor as IProxyContext ??
                 throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
             _proxy = proxy;

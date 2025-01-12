@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Proxy.Tests
 {

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Namotion.Interceptor;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.OpcUa.Annotations;
 using NSwag.Annotations;
@@ -195,7 +196,7 @@ namespace Namotion.Proxy.SampleMachine
 
         [OpenApiTag("Root")]
         [Route("/api/root")]
-        public class ProxyController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IProxy
+        public class ProxyController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IInterceptorSubject
         {
             public ProxyController(TProxy proxy) : base(proxy)
             {

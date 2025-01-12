@@ -1,10 +1,11 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.ChangeTracking;
 
 internal class ReadPropertyRecorder : IProxyReadHandler
 {
-    internal static AsyncLocal<IDictionary<IProxyContext, List<HashSet<ProxyPropertyReference>>>> Scopes { get; } = new();
+    internal static AsyncLocal<IDictionary<IInterceptor, List<HashSet<ProxyPropertyReference>>>> Scopes { get; } = new();
 
     public object? ReadProperty(ProxyPropertyReadContext context, Func<ProxyPropertyReadContext, object?> next)
     {

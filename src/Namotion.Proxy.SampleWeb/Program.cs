@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Registry.Abstractions;
@@ -127,7 +129,7 @@ namespace Namotion.Proxy.SampleWeb
 
         [OpenApiTag("Car")]
         [Route("/api/car")]
-        public class ProxyController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IProxy
+        public class ProxyController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IInterceptorSubject
         {
             public ProxyController(TProxy proxy) : base(proxy)
             {

@@ -1,12 +1,12 @@
 ﻿using Microsoft.AspNetCore.Components;
-
+using Namotion.Interceptor;
 using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.ChangeTracking;
 
 namespace Namotion.Proxy.Blazor
 {
     public class ProxyComponentBase<TProxy> : ComponentBase, IDisposable
-        where TProxy : IProxy
+        where TProxy : IInterceptorSubject
     {
         private IDisposable? _subscription;
         private ReadPropertyRecorderScope? _recorder;
@@ -35,7 +35,7 @@ namespace Namotion.Proxy.Blazor
             var result = base.ShouldRender();
             if (result)
             {
-                _recorder = Proxy?.Context?.BeginReadPropertyRecording();
+                _recorder = (Proxy?.Interceptor as IProxyContext)?.BeginReadPropertyRecording();
             }
 
             return result;

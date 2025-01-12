@@ -1,6 +1,7 @@
 ﻿using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
 using System.Collections.Immutable;
+using Namotion.Interceptor;
 
 namespace Namotion.Proxy.Registry;
 
@@ -8,9 +9,9 @@ namespace Namotion.Proxy.Registry;
 
 internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
 {
-    private Dictionary<IProxy, RegisteredProxy> _knownProxies = new();
+    private readonly Dictionary<IInterceptorSubject, RegisteredProxy> _knownProxies = new();
 
-    public IReadOnlyDictionary<IProxy, RegisteredProxy> KnownProxies
+    public IReadOnlyDictionary<IInterceptorSubject, RegisteredProxy> KnownProxies
     {
         get
         {

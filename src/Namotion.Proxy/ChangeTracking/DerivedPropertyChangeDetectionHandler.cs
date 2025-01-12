@@ -57,10 +57,10 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, I
                     TryStartRecordTouchedProperties();
 
                     var newValue = usedByProperty
-                        .Proxy
+                        .Subject
                         .Properties[usedByProperty.Name]
                         .GetValue?
-                        .Invoke(usedByProperty.Proxy);
+                        .Invoke(usedByProperty.Subject);
 
                     StoreRecordedTouchedProperties(usedByProperty);
                     TouchProperty(usedByProperty);
@@ -100,7 +100,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, I
         {
             var usedByProperties = newlyRequiredProperty.GetUsedByProperties();
             lock (usedByProperties)
-                usedByProperties.Add(new ProxyPropertyReference(property.Proxy, property.Name));
+                usedByProperties.Add(new ProxyPropertyReference(property.Subject, property.Name));
         }
     }
 

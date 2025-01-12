@@ -15,7 +15,7 @@ public class Benchmark
 
     [Params(
         "regular",
-        "proxy"
+        "interceptable"
     )]
     public string? Type;
 
@@ -28,7 +28,7 @@ public class Benchmark
                 _object = new Car();
                 break;
             
-            case "proxy":
+            case "interceptable":
                 _context = ProxyContext
                     .CreateBuilder()
                     .WithFullPropertyTracking()

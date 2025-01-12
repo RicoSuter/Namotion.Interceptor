@@ -8,7 +8,7 @@ internal class AutomaticContextAssignmentHandler : IProxyLifecycleHandler
     {
         if (context.ReferenceCount == 1)
         {
-            context.Proxy.Context = context.Context;
+            context.Proxy.Interceptor = context.Context;
         }
     }
 
@@ -16,7 +16,7 @@ internal class AutomaticContextAssignmentHandler : IProxyLifecycleHandler
     {
         if (context.ReferenceCount == 0)
         {
-            context.Proxy.Context = null;
+            context.Proxy.Interceptor = null;
         }
     }
 }

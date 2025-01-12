@@ -47,7 +47,7 @@ public static class ProxyContextBuilderExtensions
     }
 
     /// <summary>
-    /// Adds support for data annotations on the proxy properties and <see cref="WithPropertyValidation"/>.
+    /// Adds support for data annotations on the interceptable properties and <see cref="WithPropertyValidation"/>.
     /// </summary>
     /// <param name="builder">The builder.</param>
     /// <returns>The builder.</returns>
@@ -59,7 +59,7 @@ public static class ProxyContextBuilderExtensions
     }
 
     /// <summary>
-    /// Registers the property changed observable which can be retrieved using proxy.GetPropertyChangedObservable().
+    /// Registers the property changed observable which can be retrieved using interceptable.GetPropertyChangedObservable().
     /// </summary>
     /// <param name="builder">The builder.</param>
     /// <returns>The builder.</returns>
@@ -105,7 +105,7 @@ public static class ProxyContextBuilderExtensions
     }
 
     /// <summary>
-    /// Automatically assigns the parents to the proxy data.
+    /// Automatically assigns the parents to the interceptable data.
     /// </summary>
     /// <param name="builder">The builder.</param>
     /// <returns>The builder.</returns>

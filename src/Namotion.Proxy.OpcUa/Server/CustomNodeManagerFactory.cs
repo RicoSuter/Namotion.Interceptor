@@ -1,10 +1,11 @@
-﻿using Opc.Ua.Server;
+﻿using Namotion.Interceptor;
+using Opc.Ua.Server;
 using Opc.Ua;
 
 namespace Namotion.Proxy.OpcUa.Server;
 
 internal class CustomNodeManagerFactory<TProxy> : INodeManagerFactory
-    where TProxy : IProxy
+    where TProxy : IInterceptorSubject
 {
     private readonly TProxy _proxy;
     private readonly OpcUaServerTrackableSource<TProxy> _source;

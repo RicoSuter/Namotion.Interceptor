@@ -1,6 +1,7 @@
 ﻿using System.Reactive.Linq;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor;
 using Namotion.Proxy.ChangeTracking;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Sources.Abstractions;
@@ -8,7 +9,7 @@ using Namotion.Proxy.Sources.Abstractions;
 namespace Namotion.Proxy.Sources;
 
 public class ProxySourceBackgroundService<TProxy> : BackgroundService
-    where TProxy : IProxy
+    where TProxy : IInterceptorSubject
 {
     private readonly IProxyContext _context;
     private readonly IProxySource _source;
@@ -112,7 +113,7 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to set value of property {PropertyName} of type {Type}.",
-                property.Property.Proxy.GetType().FullName, property.Property.Name);
+                property.Property.Subject.GetType().FullName, property.Property.Name);
         }
     }
 

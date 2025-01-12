@@ -2,9 +2,9 @@
 
 public static class DerivedPropertyChangeDetectionHandlerExtensions
 {
-    private const string UsedByPropertiesKey = "Namotion.Proxy.UsedByProperties";
-    private const string RequiredPropertiesKey = "Namotion.Proxy.RequiredProperties";
-    private const string LastKnownValueKey = "Namotion.Proxy.LastKnownValue";
+    private const string UsedByPropertiesKey = "Namotion.Interceptable.UsedByProperties";
+    private const string RequiredPropertiesKey = "Namotion.Interceptable.RequiredProperties";
+    private const string LastKnownValueKey = "Namotion.Interceptable.LastKnownValue";
 
     public static HashSet<ProxyPropertyReference> GetUsedByProperties(this ProxyPropertyReference property)
     {

@@ -1,4 +1,5 @@
-﻿using Namotion.Proxy.Attributes;
+﻿using Namotion.Interceptor;
+using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Registry.Abstractions;
 
 namespace Namotion.Proxy.Registry;
@@ -16,9 +17,9 @@ public static class ProxyRegistryExtensions
         }
     }
 
-    public static RegisteredProxyProperty? TryGetProperty(this IReadOnlyDictionary<IProxy, RegisteredProxy> properties, ProxyPropertyReference property)
+    public static RegisteredProxyProperty? TryGetProperty(this IReadOnlyDictionary<IInterceptorSubject, RegisteredProxy> properties, ProxyPropertyReference property)
     {
-        if (properties.TryGetValue(property.Proxy, out var metadata))
+        if (properties.TryGetValue(property.Subject, out var metadata))
         {
             if (metadata.Properties.TryGetValue(property.Name, out var result))
             {
@@ -33,10 +34,11 @@ public static class ProxyRegistryExtensions
     {
         // TODO: Also support non-registry scenario
 
-        var registry = property.Proxy.Context?.GetHandler<IProxyRegistry>() 
-            ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
+        var context = property.Subject.Interceptor as IProxyContext;
+        var registry = context?.GetHandler<IProxyRegistry>() 
+                       ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
         
-        var attribute = registry.KnownProxies[property.Proxy].Properties
+        var attribute = registry.KnownProxies[property.Subject].Properties
             .SingleOrDefault(p => p.Value.Attributes
                 .OfType<PropertyAttributeAttribute>()
                 .Any(a => a.PropertyName == property.Name && a.AttributeName == attributeName));
@@ -48,10 +50,11 @@ public static class ProxyRegistryExtensions
     {
         // TODO: Also support non-registry scenario
 
-        var registry = property.Proxy.Context?.GetHandler<IProxyRegistry>()
-            ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
+        var context = property.Subject.Interceptor as IProxyContext;
+        var registry = context?.GetHandler<IProxyRegistry>()
+                       ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
 
-        return registry.KnownProxies[property.Proxy].Properties
+        return registry.KnownProxies[property.Subject].Properties
             .Where(p => p.Value.Attributes
                 .OfType<PropertyAttributeAttribute>()
                 .Any(a => a.PropertyName == property.Name));
