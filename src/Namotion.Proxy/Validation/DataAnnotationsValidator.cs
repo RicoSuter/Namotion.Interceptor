@@ -1,10 +1,11 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Namotion.Interceptor;
 
 namespace Namotion.Proxy.Validation;
 
 public class DataAnnotationsValidator : IProxyPropertyValidator
 {
-    public IEnumerable<ValidationResult> Validate(ProxyPropertyReference property, object? value)
+    public IEnumerable<ValidationResult> Validate(PropertyReference property, object? value)
     {
         var results = new List<ValidationResult>();
 

@@ -169,7 +169,7 @@
 //        return Task.CompletedTask;
 //    }
 
-//    public string? TryGetSourcePath(ProxyPropertyReference property)
+//    public string? TryGetSourcePath(PropertyReference property)
 //    {
 //        return SourcePathProvider.TryGetSourcePath(property);
 //    }

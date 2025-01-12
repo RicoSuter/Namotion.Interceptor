@@ -29,7 +29,7 @@ namespace Namotion.Proxy.Mqtt
 
         private Action<ProxyPropertyPathReference>? _propertyUpdateAction;
         
-        private readonly ConcurrentDictionary<ProxyPropertyReference, object?> _state = new();
+        private readonly ConcurrentDictionary<PropertyReference, object?> _state = new();
 
         public int Port { get; set; } = 1883;
 
@@ -122,7 +122,7 @@ namespace Namotion.Proxy.Mqtt
             }
         }
 
-        public string? TryGetSourcePath(ProxyPropertyReference property)
+        public string? TryGetSourcePath(PropertyReference property)
         {
             return _sourcePathProvider.TryGetSourcePath(property);
         }
@@ -146,7 +146,7 @@ namespace Namotion.Proxy.Mqtt
             return Task.CompletedTask;
         }
 
-        private async Task PublishPropertyValueAsync(object? value, ProxyPropertyReference property)
+        private async Task PublishPropertyValueAsync(object? value, PropertyReference property)
         {
             var sourcePath = _sourcePathProvider.TryGetSourcePath(property);
             if (sourcePath != null)

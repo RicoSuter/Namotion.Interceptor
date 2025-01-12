@@ -5,7 +5,7 @@ using Namotion.Interceptor;
 
 namespace Namotion.Proxy.ChangeTracking;
 
-internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandler
+internal class ProxyLifecycleHandler : IWriteInterceptor, IProxyLifecycleHandler
 {
     private const string ReferenceCountKey = "Namotion.ReferenceCount";
  
@@ -21,7 +21,7 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
     public void OnProxyAttached(ProxyLifecycleContext context)
     {
         var touchedProxies = new HashSet<IInterceptorSubject>();
-        var proxyProperties = new HashSet<(IInterceptorSubject, ProxyPropertyReference, object?)>();
+        var proxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
         FindProxiesInProperties(context.Proxy, touchedProxies, proxyProperties);
         
         foreach (var child in proxyProperties)
@@ -41,7 +41,7 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
         //DetachProxy(context.Context, context.Property, context., child.Item3);
     }
 
-    public void WriteProperty(ProxyPropertyWriteContext context, Action<ProxyPropertyWriteContext> next)
+    public void WriteProperty(WritePropertyInterception context, Action<WritePropertyInterception> next)
     {
         var currentValue = context.CurrentValue;
         next(context);
@@ -50,11 +50,11 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
         if (!Equals(currentValue, newValue))
         {
             var oldProxies = new HashSet<IInterceptorSubject>();
-            var oldProxyProperties = new HashSet<(IInterceptorSubject, ProxyPropertyReference, object?)>();
+            var oldProxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
             FindProxies(context.Property, currentValue, null, oldProxies, oldProxyProperties);
 
             var newProxies = new HashSet<IInterceptorSubject>();
-            var newProxyProperties = new HashSet<(IInterceptorSubject, ProxyPropertyReference, object?)>();
+            var newProxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
             FindProxies(context.Property, newValue, null, newProxies, newProxyProperties);
 
             if (oldProxyProperties.Count != 0 || newProxyProperties.Count != 0)
@@ -62,19 +62,19 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
                 foreach (var d in oldProxyProperties
                     .Where(u => !newProxies.Contains(u.Item1)))
                 {
-                    DetachProxy(context.Context, d.Item2, d.Item1, d.Item3);
+                    DetachProxy((IProxyContext)context.Context, d.Item2, d.Item1, d.Item3);
                 }
 
                 foreach (var d in newProxyProperties
                     .Where(u => !oldProxies.Contains(u.Item1)))
                 {
-                    AttachProxy(context.Context, d.Item2, d.Item1, d.Item3);
+                    AttachProxy((IProxyContext)context.Context, d.Item2, d.Item1, d.Item3);
                 }
             }
         }
     }
 
-    private void AttachProxy(IProxyContext context, ProxyPropertyReference property, IInterceptorSubject subject, object? index)
+    private void AttachProxy(IProxyContext context, PropertyReference property, IInterceptorSubject subject, object? index)
     {
         var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
         var registryContext = new ProxyLifecycleContext(property, index, subject, count ?? 1, context);
@@ -88,7 +88,7 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
         }
     }
 
-    private void DetachProxy(IProxyContext context, ProxyPropertyReference property, IInterceptorSubject subject, object? index)
+    private void DetachProxy(IProxyContext context, PropertyReference property, IInterceptorSubject subject, object? index)
     {
         var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
         var registryContext = new ProxyLifecycleContext(property, index, subject, count ?? 1, context);
@@ -103,10 +103,10 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
     }
 
     private void FindProxies(
-        ProxyPropertyReference property,
+        PropertyReference property,
         object? value, object? index,
         HashSet<IInterceptorSubject> touchedProxies,
-        HashSet<(IInterceptorSubject, ProxyPropertyReference, object?)> result)
+        HashSet<(IInterceptorSubject, PropertyReference, object?)> result)
     {
         if (value is IDictionary dictionary)
         {
@@ -142,14 +142,14 @@ internal class ProxyLifecycleHandler : IProxyWriteHandler, IProxyLifecycleHandle
 
     private void FindProxiesInProperties(IInterceptorSubject subject,
         HashSet<IInterceptorSubject> touchedProxies,
-        HashSet<(IInterceptorSubject, ProxyPropertyReference, object?)> result)
+        HashSet<(IInterceptorSubject, PropertyReference, object?)> result)
     {
         foreach (var property in subject.Properties)
         {
             var childValue = property.Value.GetValue?.Invoke(subject);
             if (childValue is not null)
             {
-                FindProxies(new ProxyPropertyReference(subject, property.Key), childValue, null, touchedProxies, result);
+                FindProxies(new PropertyReference(subject, property.Key), childValue, null, touchedProxies, result);
             }
         }
     }

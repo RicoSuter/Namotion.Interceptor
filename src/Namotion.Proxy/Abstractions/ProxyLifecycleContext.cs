@@ -3,7 +3,7 @@
 namespace Namotion.Proxy.Abstractions;
 
 public record struct ProxyLifecycleContext(
-    ProxyPropertyReference Property,
+    PropertyReference Property,
     object? Index,
     IInterceptorSubject Proxy,
     int ReferenceCount,

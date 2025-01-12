@@ -1,8 +1,10 @@
-﻿namespace Namotion.Proxy.Sources.Abstractions;
+﻿using Namotion.Interceptor;
+
+namespace Namotion.Proxy.Sources.Abstractions;
 
 public interface ISourcePathProvider
 {
-    string? TryGetSourcePropertyName(ProxyPropertyReference property);
+    string? TryGetSourcePropertyName(PropertyReference property);
 
-    string? TryGetSourcePath(ProxyPropertyReference property);
+    string? TryGetSourcePath(PropertyReference property);
 }

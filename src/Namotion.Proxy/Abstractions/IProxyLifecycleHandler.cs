@@ -1,4 +1,6 @@
-﻿namespace Namotion.Proxy.Abstractions;
+﻿using Namotion.Interceptor;
+
+namespace Namotion.Proxy.Abstractions;
 
 public interface IProxyLifecycleHandler : IProxyHandler
 {

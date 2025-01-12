@@ -1,11 +1,13 @@
-﻿namespace Namotion.Proxy.Registry.Abstractions;
+﻿using Namotion.Interceptor;
+
+namespace Namotion.Proxy.Registry.Abstractions;
 
 public record CustomRegisteredProxyProperty : RegisteredProxyProperty
 {
     private readonly Func<object?>? _getValue;
     private readonly Action<object?>? _setValue;
 
-    public CustomRegisteredProxyProperty(ProxyPropertyReference property, Func<object?>? getValue, Action<object?>? setValue)
+    public CustomRegisteredProxyProperty(PropertyReference property, Func<object?>? getValue, Action<object?>? setValue)
         : base(property)
     {
         _getValue = getValue;

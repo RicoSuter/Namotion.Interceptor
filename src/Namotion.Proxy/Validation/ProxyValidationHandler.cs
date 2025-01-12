@@ -2,10 +2,11 @@
 
 using System.ComponentModel.DataAnnotations;
 using System.Reactive.Linq;
+using Namotion.Interceptor;
 
 namespace Namotion.Proxy.Validation;
 
-public class ProxyValidationHandler : IProxyWriteHandler
+public class ProxyValidationHandler : IWriteInterceptor
 {
     private readonly Lazy<IProxyPropertyValidator[]> _propertyValidators;
 
@@ -14,7 +15,7 @@ public class ProxyValidationHandler : IProxyWriteHandler
         _propertyValidators = propertyValidators;
     }
 
-    public void WriteProperty(ProxyPropertyWriteContext context, Action<ProxyPropertyWriteContext> next)
+    public void WriteProperty(WritePropertyInterception context, Action<WritePropertyInterception> next)
     {
         var errors = _propertyValidators.Value
             .SelectMany(v => v.Validate(context.Property, context.NewValue))

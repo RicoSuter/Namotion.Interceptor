@@ -5,15 +5,15 @@ namespace Namotion.Proxy.ChangeTracking;
 public class ReadPropertyRecorderScope : IDisposable
 {
     private readonly IInterceptor _context;
-    private readonly HashSet<ProxyPropertyReference> _properties;
+    private readonly HashSet<PropertyReference> _properties;
 
-    public ReadPropertyRecorderScope(IInterceptor context, HashSet<ProxyPropertyReference> properties)
+    public ReadPropertyRecorderScope(IInterceptor context, HashSet<PropertyReference> properties)
     {
         _context = context;
         _properties = properties;
     }
 
-    public ProxyPropertyReference[] Properties
+    public PropertyReference[] Properties
     {
         get
         {
@@ -24,7 +24,7 @@ public class ReadPropertyRecorderScope : IDisposable
         }
     }
 
-    public ProxyPropertyReference[] GetPropertiesAndReset()
+    public PropertyReference[] GetPropertiesAndReset()
     {
         lock (typeof(ReadPropertyRecorder))
         {
@@ -34,7 +34,7 @@ public class ReadPropertyRecorderScope : IDisposable
         }
     }
 
-    public ProxyPropertyReference[] GetPropertiesAndDispose()
+    public PropertyReference[] GetPropertiesAndDispose()
     {
         lock (typeof(ReadPropertyRecorder))
         {

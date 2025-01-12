@@ -1,9 +1,10 @@
-﻿using Namotion.Proxy.Attributes;
+﻿using Namotion.Interceptor;
+using Namotion.Proxy.Attributes;
 
 namespace Namotion.Proxy.Registry.Abstractions;
 
 #pragma warning disable CS8618
-public record RegisteredProxyProperty(ProxyPropertyReference Property)
+public record RegisteredProxyProperty(PropertyReference Property)
 #pragma warning restore CS8618
 {
     private readonly HashSet<ProxyPropertyChild> _children = new();

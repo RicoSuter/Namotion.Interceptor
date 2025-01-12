@@ -17,7 +17,7 @@ public static class ProxyRegistryExtensions
         }
     }
 
-    public static RegisteredProxyProperty? TryGetProperty(this IReadOnlyDictionary<IInterceptorSubject, RegisteredProxy> properties, ProxyPropertyReference property)
+    public static RegisteredProxyProperty? TryGetProperty(this IReadOnlyDictionary<IInterceptorSubject, RegisteredProxy> properties, PropertyReference property)
     {
         if (properties.TryGetValue(property.Subject, out var metadata))
         {
@@ -30,7 +30,7 @@ public static class ProxyRegistryExtensions
         return null;
     }
 
-    public static RegisteredProxyProperty? TryGetPropertyAttribute(this ProxyPropertyReference property, string attributeName)
+    public static RegisteredProxyProperty? TryGetPropertyAttribute(this PropertyReference property, string attributeName)
     {
         // TODO: Also support non-registry scenario
 
@@ -46,7 +46,7 @@ public static class ProxyRegistryExtensions
         return attribute.Value;
     }
 
-    public static IEnumerable<KeyValuePair<string, RegisteredProxyProperty>> GetPropertyAttributes(this ProxyPropertyReference property)
+    public static IEnumerable<KeyValuePair<string, RegisteredProxyProperty>> GetPropertyAttributes(this PropertyReference property)
     {
         // TODO: Also support non-registry scenario
 

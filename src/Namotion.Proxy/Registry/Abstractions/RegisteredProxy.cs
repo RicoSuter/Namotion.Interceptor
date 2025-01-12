@@ -8,12 +8,12 @@ public record RegisteredProxy
     private readonly object _lock = new();
 
     private readonly Dictionary<string, RegisteredProxyProperty> _properties;
-    private readonly HashSet<ProxyPropertyReference> _parents = new();
+    private readonly HashSet<PropertyReference> _parents = new();
 
     [JsonIgnore]
     public IInterceptorSubject Subject { get; }
 
-    public ICollection<ProxyPropertyReference> Parents
+    public ICollection<PropertyReference> Parents
     {
         get
         {
@@ -44,13 +44,13 @@ public record RegisteredProxy
                 });
     }
 
-    public void AddParent(ProxyPropertyReference parent)
+    public void AddParent(PropertyReference parent)
     {
         lock (_lock)
             _parents.Add(parent);
     }
 
-    public void RemoveParent(ProxyPropertyReference parent)
+    public void RemoveParent(PropertyReference parent)
     {
         lock (_lock)
             _parents.Remove(parent);
@@ -60,7 +60,7 @@ public record RegisteredProxy
     {
         lock (_lock)
         {
-            _properties!.Add(name, new CustomRegisteredProxyProperty(new ProxyPropertyReference(Subject, name), getValue, setValue)
+            _properties!.Add(name, new CustomRegisteredProxyProperty(new PropertyReference(Subject, name), getValue, setValue)
             {
                 Parent = this,
                 Type = type,

@@ -80,7 +80,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
         }
     }
 
-    internal void UpdateProperty(ProxyPropertyReference property, string sourcePath, object? value)
+    internal void UpdateProperty(PropertyReference property, string sourcePath, object? value)
     {
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type); // TODO: improve conversion here
         _propertyUpdateAction?.Invoke(new ProxyPropertyPathReference(property, sourcePath, convertedValue));
@@ -124,7 +124,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
         return Task.CompletedTask;
     }
 
-    public string? TryGetSourcePath(ProxyPropertyReference property)
+    public string? TryGetSourcePath(PropertyReference property)
     {
         return SourcePathProvider.TryGetSourcePath(property);
     }

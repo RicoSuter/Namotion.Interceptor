@@ -2,7 +2,7 @@
 
 namespace Namotion.Interceptor;
 
-public readonly record struct SubjectPropertyInfo(
+public readonly record struct SubjectPropertyMetadata(
     string Name, // TODO: Remove as already defined as key in the dictionary
     Type Type,
     object[] Attributes,

@@ -1,4 +1,5 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy;
 

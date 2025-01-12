@@ -1,15 +1,16 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.ChangeTracking;
 
-internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, IProxyReadHandler, IProxyWriteHandler
+internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, IReadInterceptor, IWriteInterceptor
 {
-    private readonly Lazy<IProxyWriteHandler[]> _handlers;
+    private readonly Lazy<IWriteInterceptor[]> _handlers;
 
     [ThreadStatic]
-    private static Stack<HashSet<ProxyPropertyReference>>? _currentTouchedProperties;
+    private static Stack<HashSet<PropertyReference>>? _currentTouchedProperties;
 
-    public DerivedPropertyChangeDetectionHandler(Lazy<IProxyWriteHandler[]> handlers)
+    public DerivedPropertyChangeDetectionHandler(Lazy<IWriteInterceptor[]> handlers)
     {
         _handlers = handlers;
     }
@@ -18,7 +19,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, I
     {
         foreach (var property in context.Proxy.Properties.Where(p => p.Value.IsDerived))
         {
-            var propertyReference = new ProxyPropertyReference(context.Proxy, property.Key);
+            var propertyReference = new PropertyReference(context.Proxy, property.Key);
 
             TryStartRecordTouchedProperties();
 
@@ -34,14 +35,14 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, I
     {
     }
 
-    public object? ReadProperty(ProxyPropertyReadContext context, Func<ProxyPropertyReadContext, object?> next)
+    public object? ReadProperty(ReadPropertyInterception context, Func<ReadPropertyInterception, object?> next)
     {
         var result = next(context);
         TouchProperty(context.Property);
         return result;
     }
 
-    public void WriteProperty(ProxyPropertyWriteContext context, Action<ProxyPropertyWriteContext> next)
+    public void WriteProperty(WritePropertyInterception context, Action<WritePropertyInterception> next)
     {
         next.Invoke(context);
 
@@ -67,7 +68,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, I
 
                     usedByProperty.SetLastKnownValue(newValue);
 
-                    var changedContext = new ProxyPropertyWriteContext(usedByProperty, oldValue, newValue, 
+                    var changedContext = new WritePropertyInterception(usedByProperty, oldValue, newValue, 
                         usedByProperty.Metadata.IsDerived, context.Context);
                     
                     changedContext.CallWriteProperty(newValue, delegate { }, _handlers.Value);
@@ -78,11 +79,11 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, I
 
     private static void TryStartRecordTouchedProperties()
     {
-        _currentTouchedProperties ??= new Stack<HashSet<ProxyPropertyReference>>();
+        _currentTouchedProperties ??= new Stack<HashSet<PropertyReference>>();
         _currentTouchedProperties.Push([]);
     }
 
-    private static void StoreRecordedTouchedProperties(ProxyPropertyReference property)
+    private static void StoreRecordedTouchedProperties(PropertyReference property)
     {
         var newProperties = _currentTouchedProperties!.Pop();
 
@@ -100,11 +101,11 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, I
         {
             var usedByProperties = newlyRequiredProperty.GetUsedByProperties();
             lock (usedByProperties)
-                usedByProperties.Add(new ProxyPropertyReference(property.Subject, property.Name));
+                usedByProperties.Add(new PropertyReference(property.Subject, property.Name));
         }
     }
 
-    private static void TouchProperty(ProxyPropertyReference property)
+    private static void TouchProperty(PropertyReference property)
     {
         if (_currentTouchedProperties?.TryPeek(out var touchedProperties) == true)
         {
