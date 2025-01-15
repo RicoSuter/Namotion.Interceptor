@@ -6,6 +6,7 @@ using Namotion.Proxy.Registry.Abstractions;
 using System.Collections;
 using System.Text.Json.Nodes;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 
 namespace Namotion.Proxy;
@@ -26,7 +27,7 @@ public static class ProxyExtensions
             if (currentContext is not null)
             {
                 var registryContext = new ProxyLifecycleContext(default, null, subject, 0);
-                foreach (var handler in currentContext.GetHandlers<IProxyLifecycleHandler>())
+                foreach (var handler in currentContext.GetServices<IProxyLifecycleHandler>())
                 {
                     handler.OnProxyDetached(registryContext);
                 }
@@ -37,7 +38,7 @@ public static class ProxyExtensions
             if (context is not null)
             {
                 var registryContext = new ProxyLifecycleContext(default, null, subject, 1);
-                foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
+                foreach (var handler in context.GetServices<IProxyLifecycleHandler>())
                 {
                     handler.OnProxyAttached(registryContext);
                 }
@@ -58,7 +59,7 @@ public static class ProxyExtensions
     public static string GetJsonPath(this PropertyReference property)
     {
         var context = property.Subject.Interceptor as IProxyContext;
-        var registry = context?.GetHandler<IProxyRegistry>();
+        var registry = context?.GetRequiredService<IProxyRegistry>();
         if (registry is not null)
         {
             // TODO: avoid endless recursion
@@ -153,7 +154,7 @@ public static class ProxyExtensions
         }
 
         var context = subject.Interceptor as IProxyContext;
-        var registry = context?.GetHandler<IProxyRegistry>()
+        var registry = context?.GetRequiredService<IProxyRegistry>()
             ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
 
         if (registry?.KnownProxies.TryGetValue(subject, out var metadata) == true)

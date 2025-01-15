@@ -1,5 +1,5 @@
 ﻿namespace Namotion.Interceptor;
 
-public interface IProxyHandler
+public interface IInterceptor
 {
 }

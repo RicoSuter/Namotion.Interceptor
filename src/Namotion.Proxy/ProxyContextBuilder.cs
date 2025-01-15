@@ -1,37 +1,60 @@
-﻿using Namotion.Interceptor;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
 using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy;
 
 public class ProxyContextBuilder : IProxyContextBuilder
 {
-    private readonly List<(Func<IProxyContext, IProxyHandler>, Type)> _handlers = [];
+    private readonly ServiceCollection _serviceCollection = [];
 
-    public ProxyContextBuilder AddHandler<T>(Func<IProxyContext, T> handler)
-        where T : IProxyHandler
-    {
-        _handlers.Add((context => handler(context), typeof(T)));
-        return this;
-    }
+    public IServiceCollection ServiceCollection => _serviceCollection;
 
-    public ProxyContextBuilder TryAddSingleHandler<T>(Func<IProxyContext, T> handler)
-        where T : IProxyHandler
+    public ProxyContextBuilder TryAddSingleton<TService, TImplementation>(Func<IProxyContext, TImplementation> handler) 
+        where TService : class
+        where TImplementation : class, TService
     {
-        if (_handlers.Any(h => h.Item2 == typeof(T)) == false)
+        if (_serviceCollection.Any(p => 
+            p.ServiceType == typeof(TService) &&
+            p.ImplementationType == typeof(TImplementation)))
         {
-            _handlers.Add((context => handler(context), typeof(T)));
+            return this;
         }
+        
+        _serviceCollection.AddSingleton<TService, TImplementation>(sp => handler(sp.GetRequiredService<IProxyContext>()));
+        return this; 
+    }
+    
+    public ProxyContextBuilder TryAddInterceptor<TService>(Func<IProxyContext, TService> handler)
+        where TService : class, IInterceptor
+    {
+        if (_serviceCollection.Any(p => p.ServiceType == typeof(TService)))
+        {
+            return this;
+        }
+        
+        _serviceCollection.AddSingleton(sp => handler(sp.GetRequiredService<IProxyContext>()));
+
+        if (typeof(TService).IsAssignableTo(typeof(IWriteInterceptor)))
+        {
+            _serviceCollection.AddSingleton<IWriteInterceptor>(sp => (IWriteInterceptor)sp.GetRequiredService<TService>());
+        }
+        
+        if (typeof(TService).IsAssignableTo(typeof(IReadInterceptor)))
+        {
+            _serviceCollection.AddSingleton<IReadInterceptor>(sp => (IReadInterceptor)sp.GetRequiredService<TService>());
+        }
+        
+        if (typeof(TService).IsAssignableTo(typeof(IInterceptor)))
+        {
+            _serviceCollection.AddSingleton<IInterceptor>(sp => sp.GetRequiredService<TService>());
+        }
+        
         return this;
     }
 
     public ProxyContext Build()
     {
-        return new ProxyContext(_handlers.Select(p => p.Item1));
-    }
-
-    public Lazy<THandler[]> GetLazyHandlers<THandler>(IProxyContext context)
-        where THandler : IProxyHandler
-    {
-        return new Lazy<THandler[]>(() => context.GetHandlers<THandler>().ToArray());
+        return new ProxyContext(_serviceCollection);
     }
 }

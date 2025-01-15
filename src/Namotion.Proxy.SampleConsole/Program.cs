@@ -9,7 +9,7 @@ namespace Namotion.Proxy.SampleConsole
         {
             var context = ProxyContext
                 .CreateBuilder()
-                .AddHandler(_ => new LogPropertyChangesHandler())
+                .TryAddSingleton<IProxyLifecycleHandler, LogPropertyChangesHandler>(_ => new LogPropertyChangesHandler())
                 .WithFullPropertyTracking()
                 .Build();
 

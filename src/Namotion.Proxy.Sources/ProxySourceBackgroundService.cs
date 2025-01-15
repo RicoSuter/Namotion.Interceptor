@@ -1,4 +1,5 @@
 ﻿using System.Reactive.Linq;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -42,7 +43,7 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
                 // TODO: Currently newly added properties/trackable are not automatically tracked/subscribed to
 
                 var propertiesWithSetter = _context
-                    .GetHandler<IProxyRegistry>()
+                    .GetRequiredService<IProxyRegistry>()
                     .KnownProxies
                     .SelectMany(v => v.Value.Properties
                         .Where(p => p.Value.HasSetter)

@@ -1,5 +1,6 @@
 ﻿using System.Reactive.Linq;
 using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.OpcUa.Annotations;
@@ -43,7 +44,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         _source = source;
         _rootName = rootName;
 
-        _registry = (proxy.Interceptor as IProxyContext)?.GetHandler<IProxyRegistry>() ?? throw new ArgumentException($"Registry could not be found.");
+        _registry = (proxy.Interceptor as IProxyContext)?.GetRequiredService<IProxyRegistry>() ?? throw new ArgumentException($"Registry could not be found.");
     }
 
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)

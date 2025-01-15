@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
@@ -135,7 +136,7 @@ namespace Namotion.Proxy.Mqtt
             {
                 await Task.Delay(1000);
                 foreach (var property in _context
-                    .GetHandler<IProxyRegistry>()
+                    .GetRequiredService<IProxyRegistry>()
                     .GetProperties()
                     .Where(p => p.HasGetter))
                 {
@@ -167,7 +168,7 @@ namespace Namotion.Proxy.Mqtt
             {
                 var sourcePath = args.ApplicationMessage.Topic.Replace('/', '.');
                 var property = _context
-                    .GetHandler<IProxyRegistry>()
+                    .GetRequiredService<IProxyRegistry>()
                     .GetProperties()
                     .SingleOrDefault(p => _sourcePathProvider.TryGetSourcePath(p.Property) == sourcePath);
 

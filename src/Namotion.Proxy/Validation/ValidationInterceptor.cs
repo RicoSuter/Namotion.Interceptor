@@ -6,18 +6,18 @@ using Namotion.Interceptor;
 
 namespace Namotion.Proxy.Validation;
 
-public class ProxyValidationHandler : IWriteInterceptor
+public class ValidationInterceptor : IWriteInterceptor
 {
-    private readonly Lazy<IProxyPropertyValidator[]> _propertyValidators;
+    private readonly IProxyPropertyValidator[] _propertyValidators;
 
-    public ProxyValidationHandler(Lazy<IProxyPropertyValidator[]> propertyValidators)
+    public ValidationInterceptor(IEnumerable<IProxyPropertyValidator> propertyValidators)
     {
-        _propertyValidators = propertyValidators;
+        _propertyValidators = propertyValidators.ToArray();
     }
 
     public void WriteProperty(WritePropertyInterception context, Action<WritePropertyInterception> next)
     {
-        var errors = _propertyValidators.Value
+        var errors = _propertyValidators
             .SelectMany(v => v.Validate(context.Property, context.NewValue))
             .ToArray();
 

@@ -3,7 +3,7 @@
 namespace Namotion.Interceptor;
 
 public readonly record struct SubjectPropertyMetadata(
-    string Name, // TODO: Remove as already defined as key in the dictionary
+    string Name,
     Type Type,
     object[] Attributes,
     Func<object?, object?>? GetValue,
