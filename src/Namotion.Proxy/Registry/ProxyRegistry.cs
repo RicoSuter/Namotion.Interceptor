@@ -9,8 +9,14 @@ namespace Namotion.Proxy.Registry;
 
 internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
 {
+    private readonly IProxyContext _context;
     private readonly Dictionary<IInterceptorSubject, RegisteredProxy> _knownProxies = new();
 
+    public ProxyRegistry(IProxyContext context)
+    {
+        _context = context;
+    }
+    
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredProxy> KnownProxies
     {
         get
@@ -54,7 +60,7 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
             {
                 foreach (var attribute in property.Value.Attributes.OfType<IProxyPropertyInitializer>())
                 {
-                    attribute.InitializeProperty(property.Value, context.Index, context.Context);
+                    attribute.InitializeProperty(property.Value, context.Index, _context);
                 }
             }
         }

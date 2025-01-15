@@ -26,7 +26,7 @@ internal class ProxyLifecycleHandler : IWriteInterceptor, IProxyLifecycleHandler
         
         foreach (var child in proxyProperties)
         {
-            AttachProxy(context.Context, child.Item2, child.Item1, child.Item3);
+            AttachProxy(child.Item2, child.Item1, child.Item3);
         }
     }
 
@@ -62,22 +62,22 @@ internal class ProxyLifecycleHandler : IWriteInterceptor, IProxyLifecycleHandler
                 foreach (var d in oldProxyProperties
                     .Where(u => !newProxies.Contains(u.Item1)))
                 {
-                    DetachProxy((IProxyContext)context.Context, d.Item2, d.Item1, d.Item3);
+                    DetachProxy(d.Item2, d.Item1, d.Item3);
                 }
 
                 foreach (var d in newProxyProperties
                     .Where(u => !oldProxies.Contains(u.Item1)))
                 {
-                    AttachProxy((IProxyContext)context.Context, d.Item2, d.Item1, d.Item3);
+                    AttachProxy(d.Item2, d.Item1, d.Item3);
                 }
             }
         }
     }
 
-    private void AttachProxy(IProxyContext context, PropertyReference property, IInterceptorSubject subject, object? index)
+    private void AttachProxy(PropertyReference property, IInterceptorSubject subject, object? index)
     {
         var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
-        var registryContext = new ProxyLifecycleContext(property, index, subject, count ?? 1, context);
+        var registryContext = new ProxyLifecycleContext(property, index, subject, count ?? 1);
 
         foreach (var handler in _handlers.Value)
         {
@@ -88,10 +88,10 @@ internal class ProxyLifecycleHandler : IWriteInterceptor, IProxyLifecycleHandler
         }
     }
 
-    private void DetachProxy(IProxyContext context, PropertyReference property, IInterceptorSubject subject, object? index)
+    private void DetachProxy(PropertyReference property, IInterceptorSubject subject, object? index)
     {
         var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
-        var registryContext = new ProxyLifecycleContext(property, index, subject, count ?? 1, context);
+        var registryContext = new ProxyLifecycleContext(property, index, subject, count ?? 1);
        
         foreach (var handler in _handlers.Value)
         {

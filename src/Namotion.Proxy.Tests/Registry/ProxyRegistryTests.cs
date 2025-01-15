@@ -19,7 +19,7 @@ public class ProxyRegistryTests
         var context = ProxyContext
             .CreateBuilder()
             .WithRegistry()
-            .AddHandler(handler)
+            .AddHandler(_ => handler)
             .Build();
 
         // Act
@@ -55,7 +55,7 @@ public class ProxyRegistryTests
         var context = ProxyContext
             .CreateBuilder()
             .WithRegistry()
-            .AddHandler(handler)
+            .AddHandler(_ => handler)
             .Build();
 
         // Act
@@ -92,7 +92,7 @@ public class ProxyRegistryTests
         var context = ProxyContext
             .CreateBuilder()
             .WithRegistry()
-            .AddHandler(handler)
+            .AddHandler(_ => handler)
             .Build();
 
         // Act

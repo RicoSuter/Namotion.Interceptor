@@ -20,20 +20,20 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithEqualityCheck(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new PropertyValueEqualityCheckHandler());
+            .TryAddSingleHandler(_ => new PropertyValueEqualityCheckHandler());
     }
 
     public static IProxyContextBuilder WithDerivedPropertyChangeDetection(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new DerivedPropertyChangeDetectionHandler(builder.GetLazyHandlers<IWriteInterceptor>()))
+            .TryAddSingleHandler(context => new DerivedPropertyChangeDetectionHandler(builder.GetLazyHandlers<IWriteInterceptor>(context)))
             .WithPropertyChangedObservable();
     }
 
     public static IProxyContextBuilder WithReadPropertyRecorder(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new ReadPropertyRecorder());
+            .TryAddSingleHandler(_ => new ReadPropertyRecorder());
     }
 
     /// <summary>
@@ -44,7 +44,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithPropertyValidation(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new ProxyValidationHandler(builder.GetLazyHandlers<IProxyPropertyValidator>()));
+            .TryAddSingleHandler(context => new ProxyValidationHandler(builder.GetLazyHandlers<IProxyPropertyValidator>(context)));
     }
 
     /// <summary>
@@ -55,7 +55,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithDataAnnotationValidation(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new DataAnnotationsValidator())
+            .TryAddSingleHandler(_ => new DataAnnotationsValidator())
             .WithPropertyValidation();
     }
 
@@ -67,7 +67,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithPropertyChangedObservable(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new PropertyChangedObservable());
+            .TryAddSingleHandler(context => new PropertyChangedObservable(context));
     }
 
     /// <summary>
@@ -78,7 +78,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithAutomaticContextAssignment(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new AutomaticContextAssignmentHandler())
+            .TryAddSingleHandler(context => new AutomaticContextAssignmentHandler(context))
             .WithProxyLifecycle();
     }
 
@@ -90,7 +90,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithProxyLifecycle(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new ProxyLifecycleHandler(builder.GetLazyHandlers<IProxyLifecycleHandler>()));
+            .TryAddSingleHandler(context => new ProxyLifecycleHandler(builder.GetLazyHandlers<IProxyLifecycleHandler>(context)));
     }
 
     /// <summary>
@@ -101,7 +101,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithRegistry(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new ProxyRegistry())
+            .TryAddSingleHandler(context => new ProxyRegistry(context))
             .WithAutomaticContextAssignment();
     }
 
@@ -113,7 +113,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithParents(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(new ParentsHandler())
+            .TryAddSingleHandler(_ => new ParentsHandler())
             .WithProxyLifecycle();
     }
 }

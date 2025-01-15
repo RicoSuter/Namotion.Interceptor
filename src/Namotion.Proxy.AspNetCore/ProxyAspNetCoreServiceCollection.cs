@@ -1,7 +1,6 @@
 ﻿using Namotion.Interceptor;
 using Namotion.Proxy;
 using Namotion.Proxy.AspNetCore.Controllers;
-using Namotion.Trackable.AspNetCore.Controllers;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;

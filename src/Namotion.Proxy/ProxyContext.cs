@@ -5,7 +5,7 @@ namespace Namotion.Proxy;
 
 public class ProxyContext : InterceptorManager, IProxyContext
 {
-    private readonly IEnumerable<IProxyHandler> _handlers;
+    private IEnumerable<IProxyHandler> _handlers = null!;
 
     public static ProxyContextBuilder CreateBuilder()
     {
@@ -13,11 +13,22 @@ public class ProxyContext : InterceptorManager, IProxyContext
     }
 
     public ProxyContext(IEnumerable<IProxyHandler> handlers)
-        : base(
-            handlers.OfType<IReadInterceptor>().Reverse().ToArray(), 
-            handlers.OfType<IWriteInterceptor>().Reverse().ToArray())
+    {
+        SetHandlers(handlers);
+    }
+    
+    public ProxyContext(IEnumerable<Func<IProxyContext, IProxyHandler>> handlers)
+    {
+        SetHandlers(handlers.Select(h => h(this)).ToArray());
+    }
+    
+    private void SetHandlers(IEnumerable<IProxyHandler> handlers)
     {
         _handlers = handlers.ToArray();
+
+        SetHandlers(
+            _handlers.OfType<IReadInterceptor>().Reverse().ToArray(), 
+            _handlers.OfType<IWriteInterceptor>().Reverse().ToArray());
     }
 
     public IEnumerable<THandler> GetHandlers<THandler>()
