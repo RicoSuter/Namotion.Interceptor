@@ -5,15 +5,15 @@ using Namotion.Interceptor;
 
 namespace Namotion.Proxy.ChangeTracking;
 
-internal class ProxyLifecycleHandler : IWriteInterceptor, IProxyLifecycleHandler
+internal class ProxyLifecycleHandler : IWriteInterceptor
 {
     private const string ReferenceCountKey = "Namotion.ReferenceCount";
  
-    private readonly Lazy<IProxyLifecycleHandler[]> _handlers;
+    private readonly IProxyLifecycleHandler[] _handlers;
 
-    public ProxyLifecycleHandler(Lazy<IProxyLifecycleHandler[]> handlers)
+    public ProxyLifecycleHandler(IEnumerable<IProxyLifecycleHandler> handlers)
     {
-        _handlers = handlers;
+        _handlers = handlers.ToArray();
     }
 
     // TODO: does it make sense that the two methods are not "the same"?
@@ -79,7 +79,7 @@ internal class ProxyLifecycleHandler : IWriteInterceptor, IProxyLifecycleHandler
         var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
         var registryContext = new ProxyLifecycleContext(property, index, subject, count ?? 1);
 
-        foreach (var handler in _handlers.Value)
+        foreach (var handler in _handlers)
         {
             if (handler != this)
             {
@@ -93,7 +93,7 @@ internal class ProxyLifecycleHandler : IWriteInterceptor, IProxyLifecycleHandler
         var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
         var registryContext = new ProxyLifecycleContext(property, index, subject, count ?? 1);
        
-        foreach (var handler in _handlers.Value)
+        foreach (var handler in _handlers)
         {
             if (handler != this)
             {

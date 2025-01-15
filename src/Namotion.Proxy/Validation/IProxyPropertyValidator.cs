@@ -5,7 +5,7 @@ using Namotion.Interceptor;
 
 namespace Namotion.Proxy.Validation;
 
-public interface IProxyPropertyValidator : IProxyHandler
+public interface IProxyPropertyValidator
 {
     IEnumerable<ValidationResult> Validate(PropertyReference property, object? value);
 }

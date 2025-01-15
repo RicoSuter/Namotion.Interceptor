@@ -3,6 +3,7 @@ using Namotion.Proxy.Registry;
 using Namotion.Proxy.Registry.Abstractions;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Namotion.Proxy.Tests.Registry;
 
@@ -19,7 +20,7 @@ public class ProxyRegistryTests
         var context = ProxyContext
             .CreateBuilder()
             .WithRegistry()
-            .AddHandler(_ => handler)
+            .TryAddSingleton<IProxyLifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -40,7 +41,7 @@ public class ProxyRegistryTests
         Assert.Equal(3, attaches.Count);
         Assert.Empty(detaches);
 
-        var registry = context.GetHandler<IProxyRegistry>();
+        var registry = context.GetRequiredService<IProxyRegistry>();
         Assert.Equal(3, registry.KnownProxies.Count());
     }
 
@@ -55,7 +56,7 @@ public class ProxyRegistryTests
         var context = ProxyContext
             .CreateBuilder()
             .WithRegistry()
-            .AddHandler(_ => handler)
+            .TryAddSingleton<IProxyLifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -77,7 +78,7 @@ public class ProxyRegistryTests
         Assert.Equal(3, attaches.Count);
         Assert.Empty(detaches);
 
-        var registry = context.GetHandler<IProxyRegistry>();
+        var registry = context.GetRequiredService<IProxyRegistry>();
         Assert.Equal(3, registry.KnownProxies.Count());
     }
 
@@ -92,7 +93,7 @@ public class ProxyRegistryTests
         var context = ProxyContext
             .CreateBuilder()
             .WithRegistry()
-            .AddHandler(_ => handler)
+            .TryAddSingleton<IProxyLifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -115,7 +116,7 @@ public class ProxyRegistryTests
         Assert.Equal(3, attaches.Count);
         Assert.Equal(2, detaches.Count);
 
-        var registry = context.GetHandler<IProxyRegistry>();
+        var registry = context.GetRequiredService<IProxyRegistry>();
         Assert.Single(registry.KnownProxies);
     }
 
@@ -128,7 +129,7 @@ public class ProxyRegistryTests
             .WithRegistry()
             .Build();
 
-        var registry = context.GetHandler<IProxyRegistry>();
+        var registry = context.GetRequiredService<IProxyRegistry>();
 
         // Act
         var grandmother = new Person
@@ -164,7 +165,7 @@ public class ProxyRegistryTests
             .WithRegistry()
             .Build();
 
-        var registry = context.GetHandler<IProxyRegistry>();
+        var registry = context.GetRequiredService<IProxyRegistry>();
 
         // Act
         var grandmother = new Person

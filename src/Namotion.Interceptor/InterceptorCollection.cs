@@ -2,31 +2,40 @@
 
 public class InterceptorCollection : IInterceptorCollection
 {
-    private IReadInterceptor[] _readHandlers = [];
-    private IWriteInterceptor[] _writeHandlers = [];
+    private readonly List<IReadInterceptor> _readInterceptors = [];
+    private readonly List<IWriteInterceptor> _writeInterceptors = [];
 
-    public InterceptorCollection(
-        IEnumerable<IReadInterceptor> readInterceptors, 
-        IEnumerable<IWriteInterceptor> writeInterceptors)
+    public void AddInterceptor(IInterceptor interceptor)
     {
-        SetHandlers(readInterceptors, writeInterceptors);
-    }
-    
-    protected InterceptorCollection()
-    {
+        if (interceptor is IReadInterceptor readInterceptor)
+            _readInterceptors.Add(readInterceptor);
+        
+        if (interceptor is IWriteInterceptor writeInterceptor) 
+            _writeInterceptors.Add(writeInterceptor);
     }
 
-    protected void SetHandlers(IEnumerable<IReadInterceptor> readHandlers, IEnumerable<IWriteInterceptor> writeHandlers)
+    protected void AddInterceptors(IEnumerable<IInterceptor> interceptors)
     {
-        _readHandlers = readHandlers.Reverse().ToArray();
-        _writeHandlers = writeHandlers.Reverse().ToArray();
+        foreach (var interceptor in interceptors)
+        {
+            AddInterceptor(interceptor);
+        }
+    }
+
+    public void RemoveInterceptor(IInterceptor interceptor)
+    {
+        if (interceptor is IReadInterceptor readInterceptor)
+            _readInterceptors.Remove(readInterceptor);
+        
+        if (interceptor is IWriteInterceptor writeInterceptor) 
+            _writeInterceptors.Remove(writeInterceptor);
     }
 
     public object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue)
     {
         var context = new ReadPropertyInterception(new PropertyReference(subject, propertyName));
 
-        foreach (var handler in _readHandlers)
+        foreach (var handler in _readInterceptors)
         {
             var previousReadValue = readValue;
             var contextCopy = context;
@@ -43,7 +52,7 @@ public class InterceptorCollection : IInterceptorCollection
     {
         var context = new WritePropertyInterception(new PropertyReference(subject, propertyName), readValue(), null, IsDerived: false);
 
-        foreach (var handler in _writeHandlers)
+        foreach (var handler in _writeInterceptors)
         {
             var previousWriteValue = writeValue;
             var contextCopy = context;

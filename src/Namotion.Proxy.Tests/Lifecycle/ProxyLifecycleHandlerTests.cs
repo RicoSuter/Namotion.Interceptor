@@ -15,7 +15,7 @@ public class ProxyLifecycleHandlerTests
         var context = ProxyContext
             .CreateBuilder()
             .WithProxyLifecycle()
-            .AddHandler(_ => handler)
+            .TryAddSingleton<IProxyLifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -42,7 +42,7 @@ public class ProxyLifecycleHandlerTests
         var context = ProxyContext
             .CreateBuilder()
             .WithProxyLifecycle()
-            .AddHandler(_ => handler)
+            .TryAddSingleton<IProxyLifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -69,7 +69,7 @@ public class ProxyLifecycleHandlerTests
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .WithProxyLifecycle()
-            .AddHandler(_ => handler)
+            .TryAddSingleton<IProxyLifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -99,7 +99,7 @@ public class ProxyLifecycleHandlerTests
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .WithProxyLifecycle()
-            .AddHandler(_ => handler)
+            .TryAddSingleton<IProxyLifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -127,7 +127,7 @@ public class ProxyLifecycleHandlerTests
         var context = ProxyContext
             .CreateBuilder()
             .WithProxyLifecycle()
-            .AddHandler(_ => handler)
+            .TryAddSingleton<IProxyLifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -154,7 +154,7 @@ public class ProxyLifecycleHandlerTests
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .WithProxyLifecycle()
-            .AddHandler(_ => handler)
+            .TryAddSingleton<IProxyLifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act

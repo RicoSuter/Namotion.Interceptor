@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Registry.Abstractions;
@@ -23,7 +24,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     protected ProxyControllerBase(TProxy proxy)
     {
         _proxy = proxy;
-        _registry = (proxy.Interceptor as IProxyContext)?.GetHandler<IProxyRegistry>() ?? throw new ArgumentException($"The proxy context is null or registry not available.");
+        _registry = (proxy.Interceptor as IProxyContext)?.GetRequiredService<IProxyRegistry>() ?? throw new ArgumentException($"The proxy context is null or registry not available.");
     }
 
     [HttpGet]

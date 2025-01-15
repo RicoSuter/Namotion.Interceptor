@@ -1,39 +1,27 @@
-﻿using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
 
 namespace Namotion.Proxy;
 
 public class ProxyContext : InterceptorCollection, IProxyContext
 {
-    private IEnumerable<IProxyHandler> _handlers = null!;
+    private readonly IServiceProvider _serviceProvider;
 
     public static ProxyContextBuilder CreateBuilder()
     {
         return new ProxyContextBuilder();
     }
-
-    public ProxyContext(IEnumerable<IProxyHandler> handlers)
-    {
-        SetHandlers(handlers);
-    }
     
-    public ProxyContext(IEnumerable<Func<IProxyContext, IProxyHandler>> handlers)
+    public ProxyContext(ServiceCollection serviceCollection)
     {
-        SetHandlers(handlers.Select(h => h(this)).ToArray());
-    }
-    
-    private void SetHandlers(IEnumerable<IProxyHandler> handlers)
-    {
-        _handlers = handlers.ToArray();
+        serviceCollection.AddSingleton<IProxyContext>(this);
 
-        SetHandlers(
-            _handlers.OfType<IReadInterceptor>().Reverse().ToArray(), 
-            _handlers.OfType<IWriteInterceptor>().Reverse().ToArray());
+        _serviceProvider = serviceCollection.BuildServiceProvider();
+        AddInterceptors(_serviceProvider.GetServices<IInterceptor>().Reverse());
     }
 
-    public IEnumerable<THandler> GetHandlers<THandler>()
-        where THandler : IProxyHandler
+    public object? GetService(Type serviceType)
     {
-        return _handlers.OfType<THandler>();
+        return _serviceProvider.GetService(serviceType);
     }
 }

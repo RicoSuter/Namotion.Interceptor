@@ -3,7 +3,7 @@ using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.ChangeTracking;
 
-internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, IReadInterceptor, IWriteInterceptor
+internal class DerivedPropertyChangeDetectionHandler : IReadInterceptor, IWriteInterceptor, IProxyLifecycleHandler
 {
     private readonly IInterceptorCollection _interceptorCollection;
 

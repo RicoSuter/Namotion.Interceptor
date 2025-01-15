@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Namotion.Proxy.Tests.Validation;
 
-public class ProxyValidationHandlerTests
+public class ValidationInterceptorTests
 {
     [Fact]
     public void ShouldValidateProperty()
