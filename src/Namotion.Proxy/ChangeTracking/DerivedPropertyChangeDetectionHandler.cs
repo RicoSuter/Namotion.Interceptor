@@ -5,14 +5,14 @@ namespace Namotion.Proxy.ChangeTracking;
 
 internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, IReadInterceptor, IWriteInterceptor
 {
-    private readonly IInterceptor _interceptor;
+    private readonly IInterceptorCollection _interceptorCollection;
 
     [ThreadStatic]
     private static Stack<HashSet<PropertyReference>>? _currentTouchedProperties;
     
-    public DerivedPropertyChangeDetectionHandler(IInterceptor interceptor)
+    public DerivedPropertyChangeDetectionHandler(IInterceptorCollection interceptorCollection)
     {
-        _interceptor = interceptor;
+        _interceptorCollection = interceptorCollection;
     }
 
     public void OnProxyAttached(ProxyLifecycleContext context)
@@ -69,7 +69,7 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, I
 
                 usedByProperty.SetLastKnownValue(newValue);
                 
-                _interceptor.SetProperty(usedByProperty.Subject, usedByProperty.Name, newValue, () => oldValue, delegate {});
+                _interceptorCollection.SetProperty(usedByProperty.Subject, usedByProperty.Name, newValue, () => oldValue, delegate {});
             }
         }
     }

@@ -4,10 +4,10 @@ namespace Namotion.Proxy.ChangeTracking;
 
 public class ReadPropertyRecorderScope : IDisposable
 {
-    private readonly IInterceptor _context;
+    private readonly IInterceptorCollection _context;
     private readonly HashSet<PropertyReference> _properties;
 
-    public ReadPropertyRecorderScope(IInterceptor context, HashSet<PropertyReference> properties)
+    public ReadPropertyRecorderScope(IInterceptorCollection context, HashSet<PropertyReference> properties)
     {
         _context = context;
         _properties = properties;

@@ -33,7 +33,7 @@ internal class ProxyLifecycleHandler : IWriteInterceptor, IProxyLifecycleHandler
     // TODO: What should we do here?
     public void OnProxyDetached(ProxyLifecycleContext context)
     {
-        //foreach (var child in FindProxiesInProperties(context.Interceptable, new HashSet<IInterceptor>()))
+        //foreach (var child in FindProxiesInProperties(context.Interceptable, new HashSet<IInterceptorCollection>()))
         //{
         //    DetachProxy(context.Context, child.Item1, child.Item2, child.Item3);
         //}

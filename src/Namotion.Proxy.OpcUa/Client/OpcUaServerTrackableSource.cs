@@ -13,7 +13,7 @@
 //namespace Namotion.Interceptable.OpcUa.Server;
 
 //internal class OpcUaClientTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
-//    where TProxy : IInterceptor
+//    where TProxy : IInterceptorCollection
 //{
 //    internal const string OpcVariableKey = "OpcVariable";
 
