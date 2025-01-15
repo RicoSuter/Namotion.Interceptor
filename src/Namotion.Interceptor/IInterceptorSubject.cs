@@ -7,7 +7,7 @@ public interface IInterceptorSubject
     /// <summary>
     /// Gets the currently associated context.
     /// </summary>
-    IInterceptor? Interceptor { get; set; }
+    IInterceptorCollection? Interceptor { get; set; }
 
     /// <summary>
     /// Gets the additional data of this proxy.

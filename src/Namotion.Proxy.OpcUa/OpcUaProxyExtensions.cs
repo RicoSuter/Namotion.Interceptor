@@ -68,7 +68,7 @@ public static class OpcUaProxyExtensions
     //    string serverUrl,
     //    string? pathPrefix = null,
     //    string? rootName = null)
-    //    where TProxy : IInterceptor
+    //    where TProxy : IInterceptorCollection
     //{
     //    return serviceCollection.AddOpcUaClientProxySource(
     //        sourceName,
@@ -85,7 +85,7 @@ public static class OpcUaProxyExtensions
     //    Func<IServiceProvider, TProxy> resolveProxy,
     //    string? pathPrefix = null,
     //    string? rootName = null)
-    //    where TProxy : IInterceptor
+    //    where TProxy : IInterceptorCollection
     //{
     //    return serviceCollection
     //        .AddSingleton(sp =>

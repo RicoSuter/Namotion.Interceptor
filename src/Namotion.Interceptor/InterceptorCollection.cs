@@ -1,15 +1,15 @@
 ﻿namespace Namotion.Interceptor;
 
-public class InterceptorCollection : IInterceptor
+public class InterceptorCollection : IInterceptorCollection
 {
     private IReadInterceptor[] _readHandlers = [];
     private IWriteInterceptor[] _writeHandlers = [];
 
     public InterceptorCollection(
-        IEnumerable<IReadInterceptor> readHandlers, 
-        IEnumerable<IWriteInterceptor> writeHandlers)
+        IEnumerable<IReadInterceptor> readInterceptors, 
+        IEnumerable<IWriteInterceptor> writeInterceptors)
     {
-        SetHandlers(readHandlers, writeHandlers);
+        SetHandlers(readInterceptors, writeInterceptors);
     }
     
     protected InterceptorCollection()
@@ -29,10 +29,10 @@ public class InterceptorCollection : IInterceptor
         foreach (var handler in _readHandlers)
         {
             var previousReadValue = readValue;
-            var copy = context;
+            var contextCopy = context;
             readValue = () =>
             {
-                return handler.ReadProperty(copy, _ => previousReadValue());
+                return handler.ReadProperty(contextCopy, _ => previousReadValue());
             };
         }
         
@@ -46,10 +46,10 @@ public class InterceptorCollection : IInterceptor
         foreach (var handler in _writeHandlers)
         {
             var previousWriteValue = writeValue;
-            var copy = context;
+            var contextCopy = context;
             writeValue = (value) =>
             {
-                handler.WriteProperty(copy with { NewValue = value }, ctx => previousWriteValue(ctx.NewValue));
+                handler.WriteProperty(contextCopy with { NewValue = value }, ctx => previousWriteValue(ctx.NewValue));
             };
         }
 

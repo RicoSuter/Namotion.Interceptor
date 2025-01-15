@@ -80,11 +80,11 @@ namespace {namespaceName}
 {{
     public partial class {baseClassName} : IInterceptorSubject
     {{
-        private IInterceptor? _interceptor;
+        private IInterceptorCollection? _interceptor;
         private ConcurrentDictionary<string, object?> _data = new ConcurrentDictionary<string, object?>();
 
         [JsonIgnore]
-        IInterceptor? IInterceptorSubject.Interceptor
+        IInterceptorCollection? IInterceptorSubject.Interceptor
         {{
             get => _interceptor;
             set => _interceptor = value;

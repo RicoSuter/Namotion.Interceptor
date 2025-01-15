@@ -6,7 +6,7 @@ namespace Namotion.Proxy.ChangeTracking;
 internal class ReadPropertyRecorder : IReadInterceptor
 {
     private readonly IProxyContext _context;
-    internal static AsyncLocal<IDictionary<IInterceptor, List<HashSet<PropertyReference>>>> Scopes { get; } = new();
+    internal static AsyncLocal<IDictionary<IInterceptorCollection, List<HashSet<PropertyReference>>>> Scopes { get; } = new();
 
     public ReadPropertyRecorder(IProxyContext context)
     {
