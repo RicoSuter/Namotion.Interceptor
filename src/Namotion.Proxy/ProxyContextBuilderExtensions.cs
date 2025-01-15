@@ -26,14 +26,14 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithDerivedPropertyChangeDetection(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(context => new DerivedPropertyChangeDetectionHandler(builder.GetLazyHandlers<IWriteInterceptor>(context)))
+            .TryAddSingleHandler(context => new DerivedPropertyChangeDetectionHandler(context))
             .WithPropertyChangedObservable();
     }
 
     public static IProxyContextBuilder WithReadPropertyRecorder(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleHandler(_ => new ReadPropertyRecorder());
+            .TryAddSingleHandler(context => new ReadPropertyRecorder(context));
     }
 
     /// <summary>

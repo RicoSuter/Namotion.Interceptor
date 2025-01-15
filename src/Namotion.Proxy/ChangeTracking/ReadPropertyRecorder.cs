@@ -5,8 +5,14 @@ namespace Namotion.Proxy.ChangeTracking;
 
 internal class ReadPropertyRecorder : IReadInterceptor
 {
+    private readonly IProxyContext _context;
     internal static AsyncLocal<IDictionary<IInterceptor, List<HashSet<PropertyReference>>>> Scopes { get; } = new();
 
+    public ReadPropertyRecorder(IProxyContext context)
+    {
+        _context = context;
+    }
+    
     public object? ReadProperty(ReadPropertyInterception context, Func<ReadPropertyInterception, object?> next)
     {
         if (Scopes.Value is not null)
@@ -14,7 +20,7 @@ internal class ReadPropertyRecorder : IReadInterceptor
             lock (typeof(ReadPropertyRecorder))
             {
                 if (Scopes.Value is not null &&
-                    Scopes.Value.TryGetValue(context.Context, out var scopes))
+                    Scopes.Value.TryGetValue(_context, out var scopes))
                 {
                     foreach (var scope in scopes)
                     {

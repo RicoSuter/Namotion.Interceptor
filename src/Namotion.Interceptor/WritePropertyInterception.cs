@@ -6,19 +6,4 @@ public readonly record struct WritePropertyInterception(
     object? NewValue,
     bool IsDerived)
 {
-    public void CallWriteProperty(object? newValue, Action<object?> writeValue, IWriteInterceptor[] writeHandlers)
-    {
-        for (int i = 0; i < writeHandlers.Length; i++)
-        {
-            var handler = writeHandlers[i];
-            var previousWriteValue = writeValue;
-            var copy = this;
-            writeValue = (value) =>
-            {
-                handler.WriteProperty(copy with { NewValue = value }, ctx => previousWriteValue(ctx.NewValue));
-            };
-        }
-
-        writeValue(newValue);
-    }
 }
