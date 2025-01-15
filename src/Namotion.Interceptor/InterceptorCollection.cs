@@ -24,13 +24,35 @@ public class InterceptorCollection : IInterceptor
 
     public object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue)
     {
-        var context = new ReadPropertyInterception(new PropertyReference(subject, propertyName), this);
-        return context.CallReadProperty(readValue, _readHandlers);
+        var context = new ReadPropertyInterception(new PropertyReference(subject, propertyName));
+
+        foreach (var handler in _readHandlers)
+        {
+            var previousReadValue = readValue;
+            var copy = context;
+            readValue = () =>
+            {
+                return handler.ReadProperty(copy, _ => previousReadValue());
+            };
+        }
+        
+        return readValue.Invoke();
     }
 
     public void SetProperty(IInterceptorSubject subject, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
     {
         var context = new WritePropertyInterception(new PropertyReference(subject, propertyName), readValue(), null, IsDerived: false);
-        context.CallWriteProperty(newValue, writeValue, _writeHandlers);
+
+        foreach (var handler in _writeHandlers)
+        {
+            var previousWriteValue = writeValue;
+            var copy = context;
+            writeValue = (value) =>
+            {
+                handler.WriteProperty(copy with { NewValue = value }, ctx => previousWriteValue(ctx.NewValue));
+            };
+        }
+
+        writeValue(newValue);
     }
 }
