@@ -4,13 +4,13 @@ using Namotion.Interceptor;
 
 namespace Namotion.Interception.Lifecycle.Handlers;
 
-public class ProxyLifecycleHandler : IWriteInterceptor
+public class LifecycleInterceptor : IWriteInterceptor, IProxyLifecycleHandler
 {
     private const string ReferenceCountKey = "Namotion.ReferenceCount";
  
     private readonly IProxyLifecycleHandler[] _handlers;
 
-    public ProxyLifecycleHandler(IEnumerable<IProxyLifecycleHandler> handlers)
+    public LifecycleInterceptor(IEnumerable<IProxyLifecycleHandler> handlers)
     {
         _handlers = handlers.ToArray();
     }

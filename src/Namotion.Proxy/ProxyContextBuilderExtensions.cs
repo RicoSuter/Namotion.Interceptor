@@ -96,7 +96,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithProxyLifecycle(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddInterceptor(context => new ProxyLifecycleHandler(context.GetServices<IProxyLifecycleHandler>()));
+            .TryAddInterceptor(context => new LifecycleInterceptor(context.GetServices<IProxyLifecycleHandler>()));
     }
 
     /// <summary>

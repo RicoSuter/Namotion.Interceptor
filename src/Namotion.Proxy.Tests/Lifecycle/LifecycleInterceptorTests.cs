@@ -1,9 +1,10 @@
 ﻿using Namotion.Interception.Lifecycle.Abstractions;
+using Namotion.Interceptor;
 using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.Tests.Lifecycle;
 
-public class ProxyLifecycleHandlerTests
+public class LifecycleInterceptorTests
 {
     [Fact]
     public void WhenAssigningArray_ThenAllProxiesAreAttached()
@@ -52,6 +53,8 @@ public class ProxyLifecycleHandlerTests
         var child3 = new Person { FirstName = "Child2" };
 
         mother.Children = [child2, child3];
+        
+        // mother.AddInterceptors(context);
         mother.SetContext(context);
 
         // Assert
