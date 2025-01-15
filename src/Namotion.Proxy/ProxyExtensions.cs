@@ -1,13 +1,14 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Attributes;
-using Namotion.Proxy.Lifecycle;
 using Namotion.Proxy.Registry.Abstractions;
 
 using System.Collections;
 using System.Text.Json.Nodes;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor;
+using Namotion.Interception.Lifecycle;
+using Namotion.Interception.Lifecycle.Abstractions;
 
 namespace Namotion.Proxy;
 
@@ -19,7 +20,7 @@ public static class ProxyExtensions
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="context">The context.</param>
-    public static void SetContext(this IInterceptorSubject subject, IProxyContext? context)
+    public static void SetContext(this IInterceptorSubject subject, IInterceptorCollection? context)
     {
         var currentContext = subject.Interceptor as IProxyContext;
         if (currentContext != context)
@@ -35,10 +36,10 @@ public static class ProxyExtensions
 
             subject.Interceptor = context;
 
-            if (context is not null)
+            if (context is IProxyContext proxyContext)
             {
                 var registryContext = new ProxyLifecycleContext(default, null, subject, 1);
-                foreach (var handler in context.GetServices<IProxyLifecycleHandler>())
+                foreach (var handler in proxyContext.GetServices<IProxyLifecycleHandler>())
                 {
                     handler.OnProxyAttached(registryContext);
                 }
@@ -64,7 +65,7 @@ public static class ProxyExtensions
         {
             // TODO: avoid endless recursion
             string? path = null;
-            var parent = new ProxyParent(property, null);
+            var parent = new SubjectParent(property, null);
             do
             {
                 var attribute = registry
@@ -96,7 +97,7 @@ public static class ProxyExtensions
         {
             // TODO: avoid endless recursion
             string? path = null;
-            var parent = new ProxyParent(property, null);
+            var parent = new SubjectParent(property, null);
             do
             {
                 var attribute = parent.Property.Subject

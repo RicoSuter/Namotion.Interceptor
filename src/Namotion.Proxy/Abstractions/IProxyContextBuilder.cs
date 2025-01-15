@@ -14,6 +14,6 @@ namespace Namotion.Proxy.Abstractions
         
         IServiceCollection ServiceCollection { get; }
         
-        ProxyContext Build();
+        IProxyContext Build();
     }
 }

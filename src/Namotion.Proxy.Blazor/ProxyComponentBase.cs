@@ -1,7 +1,8 @@
 ﻿using Microsoft.AspNetCore.Components;
+using Namotion.Interception.Lifecycle;
+using Namotion.Interception.Lifecycle.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Proxy.Abstractions;
-using Namotion.Proxy.ChangeTracking;
 
 namespace Namotion.Proxy.Blazor
 {

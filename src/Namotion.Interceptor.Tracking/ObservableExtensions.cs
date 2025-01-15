@@ -1,8 +1,7 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using System.Reactive.Linq;
+using Namotion.Interception.Lifecycle.Abstractions;
 
-using System.Reactive.Linq;
-
-namespace Namotion.Proxy.ChangeTracking;
+namespace Namotion.Interception.Lifecycle;
 
 public static class ObservableExtensions
 {

@@ -1,7 +1,8 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interception.Lifecycle;
+using Namotion.Interception.Lifecycle.Abstractions;
+using Namotion.Interception.Lifecycle.Handlers;
 using Namotion.Proxy.Abstractions;
-using Namotion.Proxy.ChangeTracking;
-using Namotion.Proxy.Lifecycle;
 using Namotion.Proxy.Registry;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Validation;
@@ -83,7 +84,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithAutomaticContextAssignment(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleton<IProxyLifecycleHandler, AutomaticContextAssignmentHandler>(context => new AutomaticContextAssignmentHandler(context))
+            .TryAddSingleton<IProxyLifecycleHandler, InterceptorCollectionAssignmentHandler>(context => new InterceptorCollectionAssignmentHandler(context))
             .WithProxyLifecycle();
     }
 
@@ -119,7 +120,7 @@ public static class ProxyContextBuilderExtensions
     public static IProxyContextBuilder WithParents(this IProxyContextBuilder builder)
     {
         return builder
-            .TryAddSingleton<IProxyLifecycleHandler, ParentsHandler>(context => new ParentsHandler())
+            .TryAddSingleton<IProxyLifecycleHandler, ParentTrackingHandler>(context => new ParentTrackingHandler())
             .WithProxyLifecycle();
     }
 }

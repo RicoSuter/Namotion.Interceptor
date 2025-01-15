@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Proxy.Sources;
 using Namotion.Proxy;
+using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.OpcUa.Server;
 
 // ReSharper disable once CheckNamespace

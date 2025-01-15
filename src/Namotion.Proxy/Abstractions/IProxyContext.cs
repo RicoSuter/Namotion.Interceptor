@@ -1,7 +1,6 @@
 ﻿using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
 
-namespace Namotion.Proxy;
+namespace Namotion.Proxy.Abstractions;
 
 public interface IProxyContext : IInterceptorCollection, IServiceProvider
 {

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Registry.Abstractions;

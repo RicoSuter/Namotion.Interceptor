@@ -53,7 +53,7 @@ public class ProxyContextBuilder : IProxyContextBuilder
         return this;
     }
 
-    public ProxyContext Build()
+    public IProxyContext Build()
     {
         return new ProxyContext(_serviceCollection);
     }

@@ -1,4 +1,4 @@
-﻿using Namotion.Proxy.ChangeTracking;
+﻿using Namotion.Interception.Lifecycle;
 
 namespace Namotion.Proxy.Tests.ChangeTracking;
 
