@@ -1,9 +1,9 @@
-﻿using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
+﻿using Namotion.Interception.Lifecycle.Abstractions;
+using Namotion.Interceptor;
 
-namespace Namotion.Proxy.ChangeTracking;
+namespace Namotion.Interception.Lifecycle.Handlers;
 
-internal class DerivedPropertyChangeDetectionHandler : IReadInterceptor, IWriteInterceptor, IProxyLifecycleHandler
+public class DerivedPropertyChangeDetectionHandler : IReadInterceptor, IWriteInterceptor, IProxyLifecycleHandler
 {
     private readonly IInterceptorCollection _interceptorCollection;
 

@@ -1,8 +1,8 @@
-﻿using Namotion.Proxy.Lifecycle;
+﻿using Namotion.Interception.Lifecycle;
 
 namespace Namotion.Proxy.Tests.Lifecycle;
 
-public class ParentsHandlerTests
+public class ParentTrackingHandlerTests
 {
     [Fact]
     public void WhenProxyIsReferencedByTwoPropertiesOfTheSameProxy_ThenOnlyOneParentIsSet()

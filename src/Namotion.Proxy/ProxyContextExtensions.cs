@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interception.Lifecycle;
+using Namotion.Interception.Lifecycle.Abstractions;
 using Namotion.Proxy.Abstractions;
-using Namotion.Proxy.ChangeTracking;
 
 namespace Namotion.Proxy;
 

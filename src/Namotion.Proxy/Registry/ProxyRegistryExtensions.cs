@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Registry.Abstractions;
 

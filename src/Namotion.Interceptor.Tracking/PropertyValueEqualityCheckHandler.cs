@@ -1,7 +1,6 @@
 ﻿using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
 
-namespace Namotion.Proxy.Lifecycle;
+namespace Namotion.Interception.Lifecycle;
 
 public class PropertyValueEqualityCheckHandler : IWriteInterceptor
 {

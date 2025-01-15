@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy;
 

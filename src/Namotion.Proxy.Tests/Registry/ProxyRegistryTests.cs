@@ -4,6 +4,7 @@ using Namotion.Proxy.Registry.Abstractions;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interception.Lifecycle.Abstractions;
 
 namespace Namotion.Proxy.Tests.Registry;
 

@@ -1,6 +1,7 @@
 ﻿using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
 using System.Collections.Immutable;
+using Namotion.Interception.Lifecycle.Abstractions;
 using Namotion.Interceptor;
 
 namespace Namotion.Proxy.Registry;

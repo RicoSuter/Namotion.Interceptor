@@ -9,6 +9,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Validation;

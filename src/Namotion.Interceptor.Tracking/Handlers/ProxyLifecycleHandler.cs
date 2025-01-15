@@ -1,11 +1,10 @@
-﻿using Namotion.Proxy.Abstractions;
-
-using System.Collections;
+﻿using System.Collections;
+using Namotion.Interception.Lifecycle.Abstractions;
 using Namotion.Interceptor;
 
-namespace Namotion.Proxy.ChangeTracking;
+namespace Namotion.Interception.Lifecycle.Handlers;
 
-internal class ProxyLifecycleHandler : IWriteInterceptor
+public class ProxyLifecycleHandler : IWriteInterceptor
 {
     private const string ReferenceCountKey = "Namotion.ReferenceCount";
  

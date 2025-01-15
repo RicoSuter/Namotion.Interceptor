@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Attributes;
+﻿using Namotion.Interception.Lifecycle.Abstractions;
+using Namotion.Interceptor.Attributes;
 using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.SampleConsole

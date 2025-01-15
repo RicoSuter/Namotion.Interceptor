@@ -2,6 +2,7 @@
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.OpcUa.Annotations;
 

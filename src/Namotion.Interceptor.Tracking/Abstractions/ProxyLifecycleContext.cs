@@ -1,6 +1,6 @@
 ﻿using Namotion.Interceptor;
 
-namespace Namotion.Proxy.Abstractions;
+namespace Namotion.Interception.Lifecycle.Abstractions;
 
 public record struct ProxyLifecycleContext(
     PropertyReference Property,

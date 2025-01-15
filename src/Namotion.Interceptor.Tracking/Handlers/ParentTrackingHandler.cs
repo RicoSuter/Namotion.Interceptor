@@ -1,8 +1,8 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using Namotion.Interception.Lifecycle.Abstractions;
 
-namespace Namotion.Proxy.Lifecycle;
+namespace Namotion.Interception.Lifecycle.Handlers;
 
-internal class ParentsHandler : IProxyLifecycleHandler
+public class ParentTrackingHandler : IProxyLifecycleHandler
 {
     public void OnProxyAttached(ProxyLifecycleContext context)
     {

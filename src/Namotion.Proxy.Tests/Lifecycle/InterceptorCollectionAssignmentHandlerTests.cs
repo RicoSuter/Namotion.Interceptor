@@ -2,7 +2,7 @@
 
 namespace Namotion.Proxy.Tests.Lifecycle;
 
-public class AutomaticContextAssignmentHandlerTests
+public class InterceptorCollectionAssignmentHandlerTests
 {
     [Fact]
     public void WhenPropertyIsAssigned_ThenContextIsSet()

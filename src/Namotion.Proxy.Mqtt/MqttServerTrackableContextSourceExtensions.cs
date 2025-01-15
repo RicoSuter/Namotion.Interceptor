@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Proxy;
+using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Mqtt;
 using Namotion.Proxy.Sources;
 

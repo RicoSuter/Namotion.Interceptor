@@ -2,8 +2,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interception.Lifecycle;
 using Namotion.Interceptor;
-using Namotion.Proxy.ChangeTracking;
+using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Sources.Abstractions;
 

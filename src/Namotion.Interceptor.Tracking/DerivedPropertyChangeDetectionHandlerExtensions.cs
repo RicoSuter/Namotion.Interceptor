@@ -1,6 +1,6 @@
 ﻿using Namotion.Interceptor;
 
-namespace Namotion.Proxy.ChangeTracking;
+namespace Namotion.Interception.Lifecycle;
 
 public static class DerivedPropertyChangeDetectionHandlerExtensions
 {

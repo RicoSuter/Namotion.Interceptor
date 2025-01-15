@@ -1,15 +1,15 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using System.Reactive.Subjects;
+using Namotion.Interception.Lifecycle.Abstractions;
 using Namotion.Interceptor;
-using System.Reactive.Subjects;
 
-namespace Namotion.Proxy.ChangeTracking;
+namespace Namotion.Interception.Lifecycle;
 
-internal class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IWriteInterceptor
+public class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IWriteInterceptor
 {
-    private readonly IProxyContext _context;
+    private readonly IInterceptorCollection _context;
     private readonly Subject<ProxyPropertyChanged> _subject = new();
 
-    public PropertyChangedObservable(IProxyContext context)
+    public PropertyChangedObservable(IInterceptorCollection context)
     {
         _context = context;
     }

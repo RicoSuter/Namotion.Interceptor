@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Server;
 using Namotion.Interceptor;
+using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Registry;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Sources.Abstractions;

@@ -136,7 +136,7 @@ namespace {namespaceName}
                     {
                         generatedCode +=
     $@"
-        public {baseClassName}(IProxyContext context) : this()
+        public {baseClassName}(IInterceptorCollection context) : this()
         {{
             this.SetContext(context);
         }}
