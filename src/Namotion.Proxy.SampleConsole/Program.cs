@@ -1,8 +1,7 @@
 ﻿using Namotion.Interceptor.Attributes;
-using Namotion.Proxy;
 using Namotion.Proxy.Abstractions;
 
-namespace ConsoleApp1
+namespace Namotion.Proxy.SampleConsole
 {
     internal class Program
     {
@@ -10,7 +9,7 @@ namespace ConsoleApp1
         {
             var context = ProxyContext
                 .CreateBuilder()
-                .AddHandler(new LogPropertyChangesHandler())
+                .AddHandler(_ => new LogPropertyChangesHandler())
                 .WithFullPropertyTracking()
                 .Build();
 

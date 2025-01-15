@@ -126,14 +126,14 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
         return Ok(CreateProxyDescription(_proxy, _registry));
     }
 
-    private static ProxyDescription CreateProxyDescription(IInterceptorSubject subject, IProxyRegistry register)
+    private static ProxyDescription CreateProxyDescription(IInterceptorSubject subject, IProxyRegistry registry)
     {
         var description = new ProxyDescription
         {
             Type = subject.GetType().Name
         };
 
-        if (register.KnownProxies.TryGetValue(subject, out var metadata))
+        if (registry.KnownProxies.TryGetValue(subject, out var metadata))
         {
             foreach (var property in metadata.Properties
                 .Where(p => p.Value.HasGetter &&
@@ -142,7 +142,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
                 var propertyName = property.GetJsonPropertyName();
                 var value = property.Value.GetValue();
 
-                description.Properties[propertyName] = CreateDescription(register, metadata, property.Key, property.Value, value);
+                description.Properties[propertyName] = CreateDescription(registry, metadata, property.Key, property.Value, value);
             }
         }
 

@@ -47,32 +47,32 @@ internal class DerivedPropertyChangeDetectionHandler : IProxyLifecycleHandler, I
         next.Invoke(context);
 
         var usedByProperties = context.Property.GetUsedByProperties();
-        if (usedByProperties.Any())
+        if (usedByProperties.Count == 0) 
+            return;
+        
+        lock (usedByProperties)
         {
-            lock (usedByProperties)
+            foreach (var usedByProperty in usedByProperties)
             {
-                foreach (var usedByProperty in usedByProperties)
-                {
-                    var oldValue = usedByProperty.GetLastKnownValue();
+                var oldValue = usedByProperty.GetLastKnownValue();
 
-                    TryStartRecordTouchedProperties();
+                TryStartRecordTouchedProperties();
 
-                    var newValue = usedByProperty
-                        .Subject
-                        .Properties[usedByProperty.Name]
-                        .GetValue?
-                        .Invoke(usedByProperty.Subject);
+                var newValue = usedByProperty
+                    .Subject
+                    .Properties[usedByProperty.Name]
+                    .GetValue?
+                    .Invoke(usedByProperty.Subject);
 
-                    StoreRecordedTouchedProperties(usedByProperty);
-                    TouchProperty(usedByProperty);
+                StoreRecordedTouchedProperties(usedByProperty);
+                TouchProperty(usedByProperty);
 
-                    usedByProperty.SetLastKnownValue(newValue);
+                usedByProperty.SetLastKnownValue(newValue);
 
-                    var changedContext = new WritePropertyInterception(usedByProperty, oldValue, newValue, 
-                        usedByProperty.Metadata.IsDerived, context.Context);
+                var changedContext = new WritePropertyInterception(
+                    usedByProperty, oldValue, newValue, usedByProperty.Metadata.IsDerived);
                     
-                    changedContext.CallWriteProperty(newValue, delegate { }, _handlers.Value);
-                }
+                changedContext.CallWriteProperty(newValue, delegate { }, _handlers.Value);
             }
         }
     }

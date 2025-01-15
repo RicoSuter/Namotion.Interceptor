@@ -4,8 +4,7 @@ public readonly record struct WritePropertyInterception(
     PropertyReference Property,
     object? CurrentValue,
     object? NewValue,
-    bool IsDerived,
-    IInterceptor Context)
+    bool IsDerived)
 {
     public void CallWriteProperty(object? newValue, Action<object?> writeValue, IWriteInterceptor[] writeHandlers)
     {

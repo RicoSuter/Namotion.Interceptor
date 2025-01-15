@@ -25,7 +25,7 @@ public static class ProxyExtensions
         {
             if (currentContext is not null)
             {
-                var registryContext = new ProxyLifecycleContext(default, null, subject, 0, currentContext);
+                var registryContext = new ProxyLifecycleContext(default, null, subject, 0);
                 foreach (var handler in currentContext.GetHandlers<IProxyLifecycleHandler>())
                 {
                     handler.OnProxyDetached(registryContext);
@@ -36,7 +36,7 @@ public static class ProxyExtensions
 
             if (context is not null)
             {
-                var registryContext = new ProxyLifecycleContext(default, null, subject, 1, context);
+                var registryContext = new ProxyLifecycleContext(default, null, subject, 1);
                 foreach (var handler in context.GetHandlers<IProxyLifecycleHandler>())
                 {
                     handler.OnProxyAttached(registryContext);
