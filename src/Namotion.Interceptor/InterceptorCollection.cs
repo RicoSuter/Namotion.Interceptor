@@ -1,18 +1,18 @@
 ﻿namespace Namotion.Interceptor;
 
-public class InterceptorManager : IInterceptor
+public class InterceptorCollection : IInterceptor
 {
     private IReadInterceptor[] _readHandlers = [];
     private IWriteInterceptor[] _writeHandlers = [];
 
-    public InterceptorManager(
+    public InterceptorCollection(
         IEnumerable<IReadInterceptor> readHandlers, 
         IEnumerable<IWriteInterceptor> writeHandlers)
     {
         SetHandlers(readHandlers, writeHandlers);
     }
     
-    protected InterceptorManager()
+    protected InterceptorCollection()
     {
     }
 

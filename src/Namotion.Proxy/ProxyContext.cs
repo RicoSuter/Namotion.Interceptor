@@ -3,7 +3,7 @@ using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy;
 
-public class ProxyContext : InterceptorManager, IProxyContext
+public class ProxyContext : InterceptorCollection, IProxyContext
 {
     private IEnumerable<IProxyHandler> _handlers = null!;
 
