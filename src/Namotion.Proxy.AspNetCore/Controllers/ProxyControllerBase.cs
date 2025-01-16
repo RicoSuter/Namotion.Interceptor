@@ -25,7 +25,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     protected ProxyControllerBase(TProxy proxy)
     {
         _proxy = proxy;
-        _registry = (proxy.Interceptor as IProxyContext)?.GetRequiredService<IProxyRegistry>() ?? throw new ArgumentException($"The proxy context is null or registry not available.");
+        _registry = (proxy.Interceptors as IInterceptorContext)?.GetRequiredService<IProxyRegistry>() ?? throw new ArgumentException($"The proxy context is null or registry not available.");
     }
 
     [HttpGet]

@@ -2,21 +2,21 @@
 
 namespace Namotion.Interception.Lifecycle.Handlers;
 
-public class ParentTrackingHandler : IProxyLifecycleHandler
+public class ParentTrackingHandler : ILifecycleHandler
 {
-    public void OnProxyAttached(ProxyLifecycleContext context)
+    public void AddChild(LifecycleContext context)
     {
         if (context.Property != default)
         {
-            context.Proxy.AddParent(context.Property, context.Index);
+            context.Subject.AddParent(context.Property, context.Index);
         }
     }
 
-    public void OnProxyDetached(ProxyLifecycleContext context)
+    public void RemoveChild(LifecycleContext context)
     {
         if (context.Property != default)
         {
-            context.Proxy.RemoveParent(context.Property, context.Index);
+            context.Subject.RemoveParent(context.Property, context.Index);
         }
     }
 }

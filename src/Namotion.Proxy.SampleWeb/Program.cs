@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Namotion.Interception.Lifecycle.Attributes;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Attributes;
 using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.Attributes;
@@ -68,7 +68,7 @@ namespace Namotion.Proxy.SampleWeb
             _unit = unit;
         }
 
-        public void InitializeProperty(RegisteredProxyProperty property, object? index, IProxyContext context)
+        public void InitializeProperty(RegisteredProxyProperty property, object? index, IInterceptorContext context)
         {
             property.AddAttribute("Unit", typeof(string), () => _unit, null);
         }
@@ -80,7 +80,7 @@ namespace Namotion.Proxy.SampleWeb
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var context = ProxyContext
+            var context = InterceptorContext
                 .CreateBuilder()
                 .WithRegistry()
                 .WithFullPropertyTracking()

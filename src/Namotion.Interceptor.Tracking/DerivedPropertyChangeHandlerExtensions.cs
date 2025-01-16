@@ -2,7 +2,7 @@
 
 namespace Namotion.Interception.Lifecycle;
 
-public static class DerivedPropertyChangeDetectionHandlerExtensions
+public static class DerivedPropertyChangeHandlerExtensions
 {
     private const string UsedByPropertiesKey = "Namotion.Interceptable.UsedByProperties";
     private const string RequiredPropertiesKey = "Namotion.Interceptable.RequiredProperties";

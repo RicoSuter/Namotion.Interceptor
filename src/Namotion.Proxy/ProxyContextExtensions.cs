@@ -7,7 +7,7 @@ namespace Namotion.Proxy;
 
 public static class ProxyContextExtensions
 {
-    public static IObservable<ProxyPropertyChanged> GetPropertyChangedObservable(this IProxyContext context)
+    public static IObservable<PropertyChangedContext> GetPropertyChangedObservable(this IInterceptorContext context)
     {
         return context.GetRequiredService<PropertyChangedObservable>();
     }

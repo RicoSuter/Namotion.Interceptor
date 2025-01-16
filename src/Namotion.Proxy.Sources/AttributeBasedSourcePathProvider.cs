@@ -8,10 +8,10 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
 {
     private readonly string _sourceName;
 
-    private readonly IProxyContext _context;
+    private readonly IInterceptorContext _context;
     private readonly string? _pathPrefix;
 
-    public AttributeBasedSourcePathProvider(string sourceName, IProxyContext context, string? pathPrefix = null)
+    public AttributeBasedSourcePathProvider(string sourceName, IInterceptorContext context, string? pathPrefix = null)
     {
         _sourceName = sourceName;
         _context = context;

@@ -8,12 +8,12 @@ namespace Namotion.Proxy.Registry;
 
 // TODO: Add lots of tests!
 
-internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
+internal class ProxyRegistry : IProxyRegistry, ILifecycleHandler
 {
-    private readonly IProxyContext _context;
+    private readonly IInterceptorContext _context;
     private readonly Dictionary<IInterceptorSubject, RegisteredProxy> _knownProxies = new();
 
-    public ProxyRegistry(IProxyContext context)
+    public ProxyRegistry(IInterceptorContext context)
     {
         _context = context;
     }
@@ -27,21 +27,21 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
         }
     }
 
-    public void OnProxyAttached(ProxyLifecycleContext context)
+    public void AddChild(LifecycleContext context)
     {
         lock (_knownProxies)
         {
-            if (!_knownProxies.TryGetValue(context.Proxy, out var metadata))
+            if (!_knownProxies.TryGetValue(context.Subject, out var metadata))
             {
-                metadata = new RegisteredProxy(context.Proxy, context.Proxy
+                metadata = new RegisteredProxy(context.Subject, context.Subject
                     .Properties
-                    .Select(p => new RegisteredProxyProperty(new PropertyReference(context.Proxy, p.Key))
+                    .Select(p => new RegisteredProxyProperty(new PropertyReference(context.Subject, p.Key))
                     {
                         Type = p.Value.Type,
                         Attributes = p.Value.Attributes
                     }));
 
-                _knownProxies[context.Proxy] = metadata;
+                _knownProxies[context.Subject] = metadata;
             }
 
             if (context.Property != default)
@@ -52,7 +52,7 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
                     .TryGetProperty(context.Property)?
                     .AddChild(new ProxyPropertyChild
                     {
-                        Proxy = context.Proxy,
+                        Proxy = context.Subject,
                         Index = context.Index
                     });
             }
@@ -67,7 +67,7 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
         }
     }
 
-    public void OnProxyDetached(ProxyLifecycleContext context)
+    public void RemoveChild(LifecycleContext context)
     {
         lock (_knownProxies)
         {
@@ -75,19 +75,19 @@ internal class ProxyRegistry : IProxyRegistry, IProxyLifecycleHandler
             {
                 if (context.Property != default)
                 {
-                    var metadata = _knownProxies[context.Proxy];
+                    var metadata = _knownProxies[context.Subject];
                     metadata.RemoveParent(context.Property);
 
                     _knownProxies
                         .TryGetProperty(context.Property)?
                         .RemoveChild(new ProxyPropertyChild
                         {
-                            Proxy = context.Proxy,
+                            Proxy = context.Subject,
                             Index = context.Index
                         });
                 }
 
-                _knownProxies.Remove(context.Proxy);
+                _knownProxies.Remove(context.Subject);
             }
         }
     }

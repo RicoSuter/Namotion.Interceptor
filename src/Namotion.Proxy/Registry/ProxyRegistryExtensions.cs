@@ -36,7 +36,7 @@ public static class ProxyRegistryExtensions
     {
         // TODO: Also support non-registry scenario
 
-        var context = property.Subject.Interceptor as IProxyContext;
+        var context = property.Subject.Interceptors as IInterceptorContext;
         var registry = context?.GetRequiredService<IProxyRegistry>() 
                        ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
         
@@ -52,7 +52,7 @@ public static class ProxyRegistryExtensions
     {
         // TODO: Also support non-registry scenario
 
-        var context = property.Subject.Interceptor as IProxyContext;
+        var context = property.Subject.Interceptors as IInterceptorContext;
         var registry = context?.GetRequiredService<IProxyRegistry>()
                        ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
 

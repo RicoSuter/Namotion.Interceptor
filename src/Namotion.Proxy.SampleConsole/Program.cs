@@ -1,5 +1,5 @@
 ﻿using Namotion.Interception.Lifecycle.Abstractions;
-using Namotion.Interceptor.Attributes;
+using Namotion.Interception.Lifecycle.Attributes;
 using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.SampleConsole
@@ -8,9 +8,9 @@ namespace Namotion.Proxy.SampleConsole
     {
         static void Main(string[] args)
         {
-            var context = ProxyContext
+            var context = InterceptorContext
                 .CreateBuilder()
-                .TryAddSingleton<IProxyLifecycleHandler, LogPropertyChangesHandler>(_ => new LogPropertyChangesHandler())
+                .TryAddSingleton<ILifecycleHandler, LogPropertyChangesHandler>((_, _) => new LogPropertyChangesHandler())
                 .WithFullPropertyTracking()
                 .Build();
 
@@ -78,16 +78,16 @@ namespace Namotion.Proxy.SampleConsole
         }
     }
 
-    public class LogPropertyChangesHandler : IProxyLifecycleHandler
+    public class LogPropertyChangesHandler : ILifecycleHandler
     {
-        public void OnProxyAttached(ProxyLifecycleContext context)
+        public void AddChild(LifecycleContext context)
         {
-            Console.WriteLine($"Attach proxy: {context.Proxy}");
+            Console.WriteLine($"Attach proxy: {context.Subject}");
         }
 
-        public void OnProxyDetached(ProxyLifecycleContext context)
+        public void RemoveChild(LifecycleContext context)
         {
-            Console.WriteLine($"Detach proxy: {context.Proxy}");
+            Console.WriteLine($"Detach proxy: {context.Subject}");
         }
     }
 }

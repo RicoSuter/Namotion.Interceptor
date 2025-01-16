@@ -9,8 +9,8 @@ public class PropertyChangedHandlerTests
     public void WhenPropertyIsChanged_ThenChangeHandlerIsTriggered()
     {
         // Arrange
-        var changes = new List<ProxyPropertyChanged>();
-        var context = ProxyContext
+        var changes = new List<PropertyChangedContext>();
+        var context = InterceptorContext
             .CreateBuilder()
             .WithPropertyChangedObservable()
             .Build();

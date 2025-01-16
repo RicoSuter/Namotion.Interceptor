@@ -4,10 +4,10 @@ using Namotion.Interceptor;
 
 namespace Namotion.Interception.Lifecycle;
 
-public class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IWriteInterceptor
+public class PropertyChangedObservable : IObservable<PropertyChangedContext>, IWriteInterceptor
 {
     private readonly IInterceptorCollection _context;
-    private readonly Subject<ProxyPropertyChanged> _subject = new();
+    private readonly Subject<PropertyChangedContext> _subject = new();
 
     public PropertyChangedObservable(IInterceptorCollection context)
     {
@@ -23,11 +23,11 @@ public class PropertyChangedObservable : IObservable<ProxyPropertyChanged>, IWri
         
         // TODO: Should retrieve actual new value
 
-        var changedContext = new ProxyPropertyChanged(context.Property, currentValue, newValue, _context);
+        var changedContext = new PropertyChangedContext(context.Property, currentValue, newValue, _context);
         _subject.OnNext(changedContext);
     }
 
-    public IDisposable Subscribe(IObserver<ProxyPropertyChanged> observer)
+    public IDisposable Subscribe(IObserver<PropertyChangedContext> observer)
     {
         return _subject.Subscribe(observer);
     }

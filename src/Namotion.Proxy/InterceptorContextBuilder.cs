@@ -4,13 +4,13 @@ using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy;
 
-public class ProxyContextBuilder : IProxyContextBuilder
+public class InterceptorContextBuilder : IInterceptorContextBuilder
 {
     private readonly ServiceCollection _serviceCollection = [];
 
     public IServiceCollection ServiceCollection => _serviceCollection;
 
-    public ProxyContextBuilder TryAddSingleton<TService, TImplementation>(Func<IProxyContext, TImplementation> handler) 
+    public InterceptorContextBuilder TryAddSingleton<TService, TImplementation>(Func<IInterceptorCollection, IServiceProvider, TImplementation> handler) 
         where TService : class
         where TImplementation : class, TService
     {
@@ -21,11 +21,15 @@ public class ProxyContextBuilder : IProxyContextBuilder
             return this;
         }
         
-        _serviceCollection.AddSingleton<TService, TImplementation>(sp => handler(sp.GetRequiredService<IProxyContext>()));
+        _serviceCollection.AddSingleton<TService, TImplementation>(sp => 
+            handler(
+                sp.GetRequiredService<IInterceptorContext>(),
+                sp.GetRequiredService<IServiceProvider>()));
+      
         return this; 
     }
     
-    public ProxyContextBuilder TryAddInterceptor<TService>(Func<IProxyContext, TService> handler)
+    public InterceptorContextBuilder TryAddInterceptor<TService>(Func<IInterceptorCollection, IServiceProvider, TService> handler)
         where TService : class, IInterceptor
     {
         if (_serviceCollection.Any(p => p.ServiceType == typeof(TService)))
@@ -33,7 +37,9 @@ public class ProxyContextBuilder : IProxyContextBuilder
             return this;
         }
         
-        _serviceCollection.AddSingleton(sp => handler(sp.GetRequiredService<IProxyContext>()));
+        _serviceCollection.AddSingleton(sp => handler(
+            sp.GetRequiredService<IInterceptorContext>(),
+            sp.GetRequiredService<IServiceProvider>()));
 
         if (typeof(TService).IsAssignableTo(typeof(IWriteInterceptor)))
         {
@@ -53,8 +59,8 @@ public class ProxyContextBuilder : IProxyContextBuilder
         return this;
     }
 
-    public IProxyContext Build()
+    public IInterceptorContext Build()
     {
-        return new ProxyContext(_serviceCollection);
+        return new InterceptorContext(_serviceCollection);
     }
 }

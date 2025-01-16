@@ -1,6 +1,4 @@
-﻿using Namotion.Interceptor.Attributes;
-
-namespace Namotion.Interceptor;
+﻿namespace Namotion.Interceptor;
 
 public readonly record struct SubjectPropertyMetadata(
     string Name,
@@ -9,5 +7,4 @@ public readonly record struct SubjectPropertyMetadata(
     Func<object?, object?>? GetValue,
     Action<object?, object?>? SetValue)
 {
-    public readonly bool IsDerived => Attributes.Any(a => a is DerivedAttribute);
 }

@@ -3,27 +3,28 @@ using Namotion.Interceptor;
 
 namespace Namotion.Interception.Lifecycle.Handlers;
 
-public class DerivedPropertyChangeDetectionHandler : IReadInterceptor, IWriteInterceptor, IProxyLifecycleHandler
+public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, ILifecycleHandler
 {
     private readonly IInterceptorCollection _interceptorCollection;
 
     [ThreadStatic]
     private static Stack<HashSet<PropertyReference>>? _currentTouchedProperties;
     
-    public DerivedPropertyChangeDetectionHandler(IInterceptorCollection interceptorCollection)
+    public DerivedPropertyChangeHandler(IInterceptorCollection interceptorCollection)
     {
         _interceptorCollection = interceptorCollection;
     }
 
-    public void OnProxyAttached(ProxyLifecycleContext context)
+    public void AddChild(LifecycleContext context)
     {
-        foreach (var property in context.Proxy.Properties.Where(p => p.Value.IsDerived))
+        foreach (var property in context
+            .Subject.Properties.Where(p => p.Value.IsDerived()))
         {
-            var propertyReference = new PropertyReference(context.Proxy, property.Key);
+            var propertyReference = new PropertyReference(context.Subject, property.Key);
 
             TryStartRecordTouchedProperties();
 
-            var result = property.Value.GetValue?.Invoke(context.Proxy);
+            var result = property.Value.GetValue?.Invoke(context.Subject);
             propertyReference.SetLastKnownValue(result);
 
             StoreRecordedTouchedProperties(propertyReference);
@@ -31,7 +32,7 @@ public class DerivedPropertyChangeDetectionHandler : IReadInterceptor, IWriteInt
         }
     }
 
-    public void OnProxyDetached(ProxyLifecycleContext context)
+    public void RemoveChild(LifecycleContext context)
     {
     }
 

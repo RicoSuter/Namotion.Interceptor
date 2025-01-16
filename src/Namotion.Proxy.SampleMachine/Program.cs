@@ -119,7 +119,7 @@ namespace Namotion.Proxy.SampleMachine
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var context = ProxyContext
+            var context = InterceptorContext
                 .CreateBuilder()
                 .WithRegistry()
                 .WithFullPropertyTracking()

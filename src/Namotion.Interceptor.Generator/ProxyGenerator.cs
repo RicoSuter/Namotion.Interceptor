@@ -80,14 +80,13 @@ namespace {namespaceName}
 {{
     public partial class {baseClassName} : IInterceptorSubject
     {{
-        private IInterceptorCollection? _interceptor;
+        private IInterceptorCollection? _interceptors;
         private ConcurrentDictionary<string, object?> _data = new ConcurrentDictionary<string, object?>();
 
         [JsonIgnore]
-        IInterceptorCollection? IInterceptorSubject.Interceptor
+        IInterceptorCollection IInterceptorSubject.Interceptors
         {{
-            get => _interceptor;
-            set => _interceptor = value;
+            get => _interceptors = _interceptors ?? new InterceptorCollection(this);
         }}
 
         [JsonIgnore]
@@ -136,9 +135,9 @@ namespace {namespaceName}
                     {
                         generatedCode +=
     $@"
-        public {baseClassName}(IInterceptorCollection context) : this()
+        public {baseClassName}(IInterceptorCollection interceptors) : this()
         {{
-            this.SetContext(context);
+            ((IInterceptorSubject)this).AddInterceptors(interceptors);
         }}
 ";
                     }
@@ -190,18 +189,18 @@ namespace {namespaceName}
     $@"
         private T GetProperty<T>(string propertyName, Func<object?> readValue)
         {{
-            return _interceptor is not null ? (T?)_interceptor.GetProperty(this, propertyName, readValue)! : (T?)readValue()!;
+            return _interceptors is not null ? (T?)_interceptors.GetProperty(this, propertyName, readValue)! : (T?)readValue()!;
         }}
 
         private void SetProperty<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)
         {{
-            if (_interceptor is null)
+            if (_interceptors is null)
             {{
                 setValue(newValue);
             }}
             else
             {{
-                _interceptor.SetProperty(this, propertyName, newValue, readValue, setValue);
+                _interceptors.SetProperty(this, propertyName, newValue, readValue, setValue);
             }}
         }}
     }}

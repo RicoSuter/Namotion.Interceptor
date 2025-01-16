@@ -8,45 +8,11 @@ using System.Text.Json.Nodes;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interception.Lifecycle;
-using Namotion.Interception.Lifecycle.Abstractions;
 
 namespace Namotion.Proxy;
 
 public static class ProxyExtensions
 {
-    /// <summary>
-    /// Will attach the subject and its children to the context and 
-    /// detach only the subject itself from the previous context.
-    /// </summary>
-    /// <param name="subject">The subject.</param>
-    /// <param name="context">The context.</param>
-    public static void SetContext(this IInterceptorSubject subject, IInterceptorCollection? context)
-    {
-        var currentContext = subject.Interceptor as IProxyContext;
-        if (currentContext != context)
-        {
-            if (currentContext is not null)
-            {
-                var registryContext = new ProxyLifecycleContext(default, null, subject, 0);
-                foreach (var handler in currentContext.GetServices<IProxyLifecycleHandler>())
-                {
-                    handler.OnProxyDetached(registryContext);
-                }
-            }
-
-            subject.Interceptor = context;
-
-            if (context is IProxyContext proxyContext)
-            {
-                var registryContext = new ProxyLifecycleContext(default, null, subject, 1);
-                foreach (var handler in proxyContext.GetServices<IProxyLifecycleHandler>())
-                {
-                    handler.OnProxyAttached(registryContext);
-                }
-            }
-        }
-    }
-
     public static void SetData(this IInterceptorSubject subject, string key, object? value)
     {
         subject.Data[key] = value;
@@ -59,7 +25,7 @@ public static class ProxyExtensions
 
     public static string GetJsonPath(this PropertyReference property)
     {
-        var context = property.Subject.Interceptor as IProxyContext;
+        var context = property.Subject.Interceptors as IInterceptorContext;
         var registry = context?.GetRequiredService<IProxyRegistry>();
         if (registry is not null)
         {
@@ -154,7 +120,7 @@ public static class ProxyExtensions
             }
         }
 
-        var context = subject.Interceptor as IProxyContext;
+        var context = subject.Interceptors as IInterceptorContext;
         var registry = context?.GetRequiredService<IProxyRegistry>()
             ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
 

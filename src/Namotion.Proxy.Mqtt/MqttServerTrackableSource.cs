@@ -22,7 +22,7 @@ namespace Namotion.Proxy.Mqtt
     public class MqttServerTrackableSource<TProxy> : BackgroundService, IProxySource
         where TProxy : IInterceptorSubject
     {
-        private readonly IProxyContext _context;
+        private readonly IInterceptorContext _context;
         private readonly ISourcePathProvider _sourcePathProvider;
         private readonly ILogger _logger;
 
@@ -39,9 +39,9 @@ namespace Namotion.Proxy.Mqtt
 
         public int? NumberOfClients => _numberOfClients;
 
-        // TODO: Inject IProxyContext<TProxy> so that multiple contexts are supported.
+        // TODO: Inject IInterceptorContext<TProxy> so that multiple contexts are supported.
         public MqttServerTrackableSource(
-            IProxyContext context,
+            IInterceptorContext context,
             ISourcePathProvider sourcePathProvider,
             ILogger<MqttServerTrackableSource<TProxy>> logger)
         {

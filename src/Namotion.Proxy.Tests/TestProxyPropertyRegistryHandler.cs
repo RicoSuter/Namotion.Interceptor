@@ -3,25 +3,25 @@ using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.Tests
 {
-    public class TestProxyPropertyRegistryHandler : IProxyLifecycleHandler
+    public class TestProxyPropertyRegistryHandler : ILifecycleHandler
     {
-        private readonly List<ProxyLifecycleContext> _attaches;
-        private readonly List<ProxyLifecycleContext> _detaches;
+        private readonly List<LifecycleContext> _attaches;
+        private readonly List<LifecycleContext> _detaches;
 
         public TestProxyPropertyRegistryHandler(
-            List<ProxyLifecycleContext> attaches,
-            List<ProxyLifecycleContext> detaches)
+            List<LifecycleContext> attaches,
+            List<LifecycleContext> detaches)
         {
             _attaches = attaches;
             _detaches = detaches;
         }
 
-        public void OnProxyAttached(ProxyLifecycleContext context)
+        public void AddChild(LifecycleContext context)
         {
             _attaches.Add(context);
         }
 
-        public void OnProxyDetached(ProxyLifecycleContext context)
+        public void RemoveChild(LifecycleContext context)
         {
             _detaches.Add(context);
         }
