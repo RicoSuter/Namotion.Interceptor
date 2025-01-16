@@ -2,10 +2,10 @@
 
 namespace Namotion.Interception.Lifecycle.Abstractions;
 
-public record struct ProxyLifecycleContext(
+public record struct PropertyChangedContext(
     PropertyReference Property,
-    object? Index,
-    IInterceptorSubject Proxy,
-    int ReferenceCount)
+    object? OldValue,
+    object? NewValue,
+    IInterceptorCollection Context)
 {
 }

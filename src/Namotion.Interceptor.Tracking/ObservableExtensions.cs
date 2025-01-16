@@ -5,7 +5,7 @@ namespace Namotion.Interception.Lifecycle;
 
 public static class ObservableExtensions
 {
-    public static IObservable<IEnumerable<ProxyPropertyChanged>> BufferChanges(this IObservable<ProxyPropertyChanged> observable, TimeSpan bufferTime)
+    public static IObservable<IEnumerable<PropertyChangedContext>> BufferChanges(this IObservable<PropertyChangedContext> observable, TimeSpan bufferTime)
     {
         return observable
             .Buffer(bufferTime)

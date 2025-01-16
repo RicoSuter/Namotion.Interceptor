@@ -45,7 +45,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         _source = source;
         _rootName = rootName;
 
-        _registry = (proxy.Interceptor as IProxyContext)?.GetRequiredService<IProxyRegistry>() ?? throw new ArgumentException($"Registry could not be found.");
+        _registry = (proxy.Interceptors as IInterceptorContext)?.GetRequiredService<IProxyRegistry>() ?? throw new ArgumentException($"Registry could not be found.");
     }
 
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)

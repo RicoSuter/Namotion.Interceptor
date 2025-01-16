@@ -1,25 +1,29 @@
 ﻿namespace Namotion.Interceptor;
 
-public class InterceptorCollection : IInterceptorCollection
+public readonly struct InterceptorCollection : IInterceptorCollection
 {
+    private readonly IInterceptorSubject _subject;
     private readonly List<IReadInterceptor> _readInterceptors = [];
     private readonly List<IWriteInterceptor> _writeInterceptors = [];
+
+    public InterceptorCollection(IInterceptorSubject subject)
+    {
+        _subject = subject;
+    }
+
+    public IEnumerable<IInterceptor> Interceptors => _readInterceptors
+        .OfType<IInterceptor>()
+        .Union(_writeInterceptors);
 
     public void AddInterceptor(IInterceptor interceptor)
     {
         if (interceptor is IReadInterceptor readInterceptor)
             _readInterceptors.Add(readInterceptor);
-        
-        if (interceptor is IWriteInterceptor writeInterceptor) 
-            _writeInterceptors.Add(writeInterceptor);
-    }
 
-    protected void AddInterceptors(IEnumerable<IInterceptor> interceptors)
-    {
-        foreach (var interceptor in interceptors)
-        {
-            AddInterceptor(interceptor);
-        }
+        if (interceptor is IWriteInterceptor writeInterceptor)
+            _writeInterceptors.Add(writeInterceptor);
+
+        interceptor.AttachTo(_subject);
     }
 
     public void RemoveInterceptor(IInterceptor interceptor)
@@ -29,6 +33,8 @@ public class InterceptorCollection : IInterceptorCollection
         
         if (interceptor is IWriteInterceptor writeInterceptor) 
             _writeInterceptors.Remove(writeInterceptor);
+
+        interceptor.DetachFrom(_subject);
     }
 
     public object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue)

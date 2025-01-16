@@ -4,7 +4,7 @@ namespace Namotion.Interception.Lifecycle;
 
 public static class ReadPropertyRecorderExtensions
 {
-    public static ReadPropertyRecorderScope BeginReadPropertyRecording(this IInterceptorCollection context)
+    public static ReadPropertyRecorderScope StartRecordingPropertyReadCalls(this IInterceptorCollection context)
     {
         ReadPropertyRecorder.Scopes.Value =
             ReadPropertyRecorder.Scopes.Value ??

@@ -40,7 +40,7 @@ public static class SourceExtensions
         }
     }
 
-    public static bool IsChangingFromSource(this ProxyPropertyChanged change, IProxySource source)
+    public static bool IsChangingFromSource(this PropertyChangedContext change, IProxySource source)
     {
         var contexts = change.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<IProxySource>())!;
         lock (contexts)
@@ -54,7 +54,7 @@ public static class SourceExtensions
         return property.TryGetPropertyData($"{SourcePropertyNameKey}{sourceName}", out var value) ? value as string : null;
     }
 
-    public static string? TryGetAttributeBasedSourcePath(this PropertyReference property, string sourceName, IProxyContext context)
+    public static string? TryGetAttributeBasedSourcePath(this PropertyReference property, string sourceName, IInterceptorContext context)
     {
         return property.TryGetPropertyData($"{SourcePathKey}{sourceName}", out var value) ? value as string : null;
     }

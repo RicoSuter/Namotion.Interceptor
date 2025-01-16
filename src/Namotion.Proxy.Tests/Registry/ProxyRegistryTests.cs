@@ -14,14 +14,14 @@ public class ProxyRegistryTests
     public void WhenTwoChildrenAreAttachedSequentially_ThenWeHaveThreeAttaches()
     {
         // Arrange
-        var attaches = new List<ProxyLifecycleContext>();
-        var detaches = new List<ProxyLifecycleContext>();
+        var attaches = new List<LifecycleContext>();
+        var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = ProxyContext
+        var context = InterceptorContext
             .CreateBuilder()
             .WithRegistry()
-            .TryAddSingleton<IProxyLifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
+            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>((_, _) => handler)
             .Build();
 
         // Act
@@ -50,14 +50,14 @@ public class ProxyRegistryTests
     public void WhenTwoChildrenAreAttachedInOneBranch_ThenWeHaveThreeAttaches()
     {
         // Arrange
-        var attaches = new List<ProxyLifecycleContext>();
-        var detaches = new List<ProxyLifecycleContext>();
+        var attaches = new List<LifecycleContext>();
+        var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = ProxyContext
+        var context = InterceptorContext
             .CreateBuilder()
             .WithRegistry()
-            .TryAddSingleton<IProxyLifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
+            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>((_, _) => handler)
             .Build();
 
         // Act
@@ -87,14 +87,14 @@ public class ProxyRegistryTests
     public void WhenProxyWithChildProxyIsRemoved_ThenWeHaveTwoDetaches()
     {
         // Arrange
-        var attaches = new List<ProxyLifecycleContext>();
-        var detaches = new List<ProxyLifecycleContext>();
+        var attaches = new List<LifecycleContext>();
+        var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = ProxyContext
+        var context = InterceptorContext
             .CreateBuilder()
             .WithRegistry()
-            .TryAddSingleton<IProxyLifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
+            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>((_, _) => handler)
             .Build();
 
         // Act
@@ -125,7 +125,7 @@ public class ProxyRegistryTests
     public void WhenAddingTransitiveProxies_ThenAllAreAvailable()
     {
         // Arrange
-        var context = ProxyContext
+        var context = InterceptorContext
             .CreateBuilder()
             .WithRegistry()
             .Build();
@@ -161,7 +161,7 @@ public class ProxyRegistryTests
     public void WhenRemovingMiddleElement_ThenChildrensAreAlsoRemoved()
     {
         // Arrange
-        var context = ProxyContext
+        var context = InterceptorContext
             .CreateBuilder()
             .WithRegistry()
             .Build();
@@ -199,7 +199,7 @@ public class ProxyRegistryTests
     public async Task WhenConvertingToJson_ThenGraphIsPreserved()
     {
         // Arrange
-        var context = ProxyContext
+        var context = InterceptorContext
             .CreateBuilder()
             .WithRegistry()
             .Build();

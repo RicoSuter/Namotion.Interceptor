@@ -8,7 +8,7 @@ public class ReadPropertyRecorderTests
     public void WhenPropertyIsChanged_ThenItIsPartOfRecordedProperties()
     {
         // Arrange
-        var context = ProxyContext
+        var context = InterceptorContext
             .CreateBuilder()
             .WithPropertyChangedObservable()
             .WithReadPropertyRecorder()
@@ -17,7 +17,7 @@ public class ReadPropertyRecorderTests
         // Act
         var person = new Person(context);
 
-        var recorder = context.BeginReadPropertyRecording();
+        var recorder = context.StartRecordingPropertyReadCalls();
         using (recorder)
         {
             var firstName = person.FirstName;

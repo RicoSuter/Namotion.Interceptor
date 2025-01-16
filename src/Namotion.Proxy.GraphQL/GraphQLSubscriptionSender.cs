@@ -9,12 +9,12 @@ namespace Namotion.Proxy.GraphQL
         where TProxy : IInterceptorSubject
     {
         private readonly TProxy _proxy;
-        private readonly IProxyContext _context;
+        private readonly IInterceptorContext _context;
         private readonly ITopicEventSender _sender;
 
         public GraphQLSubscriptionSender(TProxy proxy, ITopicEventSender sender)
         {
-            _context = proxy.Interceptor as IProxyContext ??
+            _context = proxy.Interceptors as IInterceptorContext ??
                 throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
             _proxy = proxy;

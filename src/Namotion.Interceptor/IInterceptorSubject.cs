@@ -5,9 +5,9 @@ namespace Namotion.Interceptor;
 public interface IInterceptorSubject
 {
     /// <summary>
-    /// Gets the currently associated context.
+    /// Gets the interceptor collection.
     /// </summary>
-    IInterceptorCollection? Interceptor { get; set; }
+    IInterceptorCollection Interceptors { get; }
 
     /// <summary>
     /// Gets the additional data of this proxy.

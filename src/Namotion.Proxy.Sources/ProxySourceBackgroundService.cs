@@ -13,7 +13,7 @@ namespace Namotion.Proxy.Sources;
 public class ProxySourceBackgroundService<TProxy> : BackgroundService
     where TProxy : IInterceptorSubject
 {
-    private readonly IProxyContext _context;
+    private readonly IInterceptorContext _context;
     private readonly IProxySource _source;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
@@ -23,7 +23,7 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
 
     public ProxySourceBackgroundService(
         IProxySource source,
-        IProxyContext context,
+        IInterceptorContext context,
         ILogger logger,
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null)

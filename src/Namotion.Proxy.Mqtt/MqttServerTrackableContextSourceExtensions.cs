@@ -19,7 +19,7 @@ public static class MqttServerTrackableContextSourceExtensions
         return serviceCollection
             .AddSingleton(sp =>
             {
-                var context = sp.GetRequiredService<TProxy>().Interceptor as IProxyContext ??
+                var context = sp.GetRequiredService<TProxy>().Interceptors as IInterceptorContext ??
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(
@@ -33,7 +33,7 @@ public static class MqttServerTrackableContextSourceExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<MqttServerTrackableSource<TProxy>>())
             .AddSingleton<IHostedService>(sp =>
             {
-                var context = sp.GetRequiredService<TProxy>().Interceptor as IProxyContext ??
+                var context = sp.GetRequiredService<TProxy>().Interceptors as IInterceptorContext ??
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
                 return new ProxySourceBackgroundService<TProxy>(

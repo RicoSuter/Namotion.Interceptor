@@ -10,7 +10,7 @@ public class Benchmark
 #pragma warning disable CS8618
 
     private Car _object;
-    private IProxyContext? _context;
+    private IInterceptorContext? _context;
 
 #pragma warning restore CS8618
 
@@ -30,7 +30,7 @@ public class Benchmark
                 break;
             
             case "interceptable":
-                _context = ProxyContext
+                _context = InterceptorContext
                     .CreateBuilder()
                     .WithFullPropertyTracking()
                     .WithRegistry()

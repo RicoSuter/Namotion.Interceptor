@@ -37,7 +37,7 @@ public static class OpcUaProxyExtensions
             .AddSingleton(sp =>
             {
                 var proxy = resolveProxy(sp);
-                var context = proxy.Interceptor as IProxyContext ?? 
+                var context = proxy.Interceptors as IInterceptorContext ?? 
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(
@@ -53,7 +53,7 @@ public static class OpcUaProxyExtensions
             .AddSingleton<IHostedService>(sp =>
             {
                 var proxy = resolveProxy(sp);
-                var context = proxy.Interceptor as IProxyContext ??
+                var context = proxy.Interceptors as IInterceptorContext ??
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
                 return new ProxySourceBackgroundService<TProxy>(

@@ -3,14 +3,14 @@ using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.Tests.ChangeTracking;
 
-public class DerivedPropertyChangeDetectionHandlerTests
+public class DerivedPropertyChangeHandlerTests
 {
     [Fact]
     public void WhenChangingPropertyWhichIsUsedInDerivedProperty_ThenDerivedPropertyIsChanged()
     {
         // Arrange
-        var changes = new List<ProxyPropertyChanged>();
-        var context = ProxyContext
+        var changes = new List<PropertyChangedContext>();
+        var context = InterceptorContext
             .CreateBuilder()
             .WithDerivedPropertyChangeDetection()
             .Build();

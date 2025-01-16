@@ -14,7 +14,7 @@ namespace Namotion.Proxy.Blazor
         public PropertyReference[]? _properties;
 
         [Inject]
-        public IObservable<ProxyPropertyChanged>? ProxyPropertyChanges { get; set; }
+        public IObservable<PropertyChangedContext>? ProxyPropertyChanges { get; set; }
 
         [Inject]
         public TProxy? Proxy { get; set; }
@@ -36,7 +36,7 @@ namespace Namotion.Proxy.Blazor
             var result = base.ShouldRender();
             if (result)
             {
-                _recorder = (Proxy?.Interceptor as IProxyContext)?.BeginReadPropertyRecording();
+                _recorder = (Proxy?.Interceptors as IInterceptorContext)?.StartRecordingPropertyReadCalls();
             }
 
             return result;

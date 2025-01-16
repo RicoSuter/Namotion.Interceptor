@@ -17,7 +17,7 @@
 //{
 //    internal const string OpcVariableKey = "OpcVariable";
 
-//    private readonly IProxyContext _context;
+//    private readonly IInterceptorContext _context;
 //    private readonly TProxy _proxy;
 //    private readonly string _serverUrl;
 //    private readonly ILogger _logger;

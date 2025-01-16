@@ -4,24 +4,36 @@ using Namotion.Interceptor;
 
 namespace Namotion.Interception.Lifecycle.Handlers;
 
-public class LifecycleInterceptor : IWriteInterceptor, IProxyLifecycleHandler
+public class LifecycleInterceptor : IWriteInterceptor, ILifecycleHandler
 {
     private const string ReferenceCountKey = "Namotion.ReferenceCount";
  
-    private readonly IProxyLifecycleHandler[] _handlers;
+    private readonly ILifecycleHandler[] _handlers;
 
-    public LifecycleInterceptor(IEnumerable<IProxyLifecycleHandler> handlers)
+    public LifecycleInterceptor(IEnumerable<ILifecycleHandler> handlers)
     {
         _handlers = handlers.ToArray();
     }
 
+    public void AttachTo(IInterceptorSubject subject)
+    {
+        var registryContext = new LifecycleContext(default, null, subject, 1);
+        AddChild(registryContext);
+    }
+
+    public void DetachFrom(IInterceptorSubject subject)
+    {
+        var registryContext = new LifecycleContext(default, null, subject, 1);
+        RemoveChild(registryContext);
+    }
+
     // TODO: does it make sense that the two methods are not "the same"?
 
-    public void OnProxyAttached(ProxyLifecycleContext context)
+    public void AddChild(LifecycleContext context)
     {
         var touchedProxies = new HashSet<IInterceptorSubject>();
         var proxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-        FindProxiesInProperties(context.Proxy, touchedProxies, proxyProperties);
+        FindProxiesInProperties(context.Subject, touchedProxies, proxyProperties);
         
         foreach (var child in proxyProperties)
         {
@@ -30,7 +42,7 @@ public class LifecycleInterceptor : IWriteInterceptor, IProxyLifecycleHandler
     }
 
     // TODO: What should we do here?
-    public void OnProxyDetached(ProxyLifecycleContext context)
+    public void RemoveChild(LifecycleContext context)
     {
         //foreach (var child in FindProxiesInProperties(context.Interceptable, new HashSet<IInterceptorCollection>()))
         //{
@@ -76,13 +88,13 @@ public class LifecycleInterceptor : IWriteInterceptor, IProxyLifecycleHandler
     private void AttachProxy(PropertyReference property, IInterceptorSubject subject, object? index)
     {
         var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
-        var registryContext = new ProxyLifecycleContext(property, index, subject, count ?? 1);
+        var registryContext = new LifecycleContext(property, index, subject, count ?? 1);
 
         foreach (var handler in _handlers)
         {
             if (handler != this)
             {
-                handler.OnProxyAttached(registryContext);
+                handler.AddChild(registryContext);
             }
         }
     }
@@ -90,13 +102,13 @@ public class LifecycleInterceptor : IWriteInterceptor, IProxyLifecycleHandler
     private void DetachProxy(PropertyReference property, IInterceptorSubject subject, object? index)
     {
         var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
-        var registryContext = new ProxyLifecycleContext(property, index, subject, count ?? 1);
+        var registryContext = new LifecycleContext(property, index, subject, count ?? 1);
        
         foreach (var handler in _handlers)
         {
             if (handler != this)
             {
-                handler.OnProxyDetached(registryContext);
+                handler.RemoveChild(registryContext);
             }
         }
     }

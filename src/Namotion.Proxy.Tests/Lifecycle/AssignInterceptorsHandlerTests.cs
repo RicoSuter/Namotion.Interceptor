@@ -2,13 +2,13 @@
 
 namespace Namotion.Proxy.Tests.Lifecycle;
 
-public class InterceptorCollectionAssignmentHandlerTests
+public class AssignInterceptorsHandlerTests
 {
     [Fact]
     public void WhenPropertyIsAssigned_ThenContextIsSet()
     {
         // Arrange
-        var context = ProxyContext
+        var context = InterceptorContext
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .Build();
@@ -18,14 +18,14 @@ public class InterceptorCollectionAssignmentHandlerTests
         person.Mother = new Person { FirstName = "Susi" };
 
         // Assert
-        Assert.Equal(context, ((IInterceptorSubject)person.Mother).Interceptor);
+        Assert.Equal(context.Interceptors, ((IInterceptorSubject)person.Mother).Interceptors?.Interceptors);
     }
 
     [Fact]
     public void WhenPropertyWithDeepStructureIsAssigned_ThenChildrenAlsoHaveContext()
     {
         // Arrange
-        var context = ProxyContext
+        var context = InterceptorContext
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .Build();
@@ -49,16 +49,16 @@ public class InterceptorCollectionAssignmentHandlerTests
         };
 
         // Assert
-        Assert.Equal(context, ((IInterceptorSubject)person).Interceptor);
-        Assert.Equal(context, ((IInterceptorSubject)mother).Interceptor);
-        Assert.Equal(context, ((IInterceptorSubject)grandmother).Interceptor);
+        Assert.Equal(context, ((IInterceptorSubject)person).Interceptors);
+        Assert.Equal(context, ((IInterceptorSubject)mother).Interceptors);
+        Assert.Equal(context, ((IInterceptorSubject)grandmother).Interceptors);
     }
 
     [Fact]
     public void WhenPropertyWithDeepProxiesIsRemoved_ThenAllContextsAreNull()
     {
         // Arrange
-        var context = ProxyContext
+        var context = InterceptorContext
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .Build();
@@ -84,16 +84,16 @@ public class InterceptorCollectionAssignmentHandlerTests
         person.Mother = null;
 
         // Assert
-        Assert.Equal(context, ((IInterceptorSubject)person).Interceptor);
-        Assert.Null(((IInterceptorSubject)mother).Interceptor);
-        Assert.Null(((IInterceptorSubject)grandmother).Interceptor);
+        Assert.Equal(context, ((IInterceptorSubject)person).Interceptors);
+        Assert.Null(((IInterceptorSubject)mother).Interceptors);
+        Assert.Null(((IInterceptorSubject)grandmother).Interceptors);
     }
 
     [Fact]
     public void WhenArrayIsAssigned_ThenAllChildrenAreAttached()
     {
         // Arrange
-        var context = ProxyContext
+        var context = InterceptorContext
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .Build();
@@ -112,16 +112,16 @@ public class InterceptorCollectionAssignmentHandlerTests
         };
 
         // Assert
-        Assert.Equal(context, ((IInterceptorSubject)person).Interceptor);
-        Assert.Equal(context, ((IInterceptorSubject)child1).Interceptor);
-        Assert.Equal(context, ((IInterceptorSubject)child2).Interceptor);
+        Assert.Equal(context.Interceptors, ((IInterceptorSubject)person).Interceptors?.Interceptors);
+        Assert.Equal(context.Interceptors, ((IInterceptorSubject)child1).Interceptors?.Interceptors);
+        Assert.Equal(context.Interceptors, ((IInterceptorSubject)child2).Interceptors?.Interceptors);
     }
 
     [Fact]
     public void WhenUsingCircularDependencies_ThenProxiesAreAttached()
     {
         // Arrange
-        var context = ProxyContext
+        var context = InterceptorContext
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .Build();
@@ -136,8 +136,8 @@ public class InterceptorCollectionAssignmentHandlerTests
         child3.Mother = child1;
 
         // Assert
-        Assert.Equal(context, ((IInterceptorSubject)child1).Interceptor);
-        Assert.Equal(context, ((IInterceptorSubject)child2).Interceptor);
-        Assert.Equal(context, ((IInterceptorSubject)child3).Interceptor);
+        Assert.Equal(context.Interceptors, ((IInterceptorSubject)child1).Interceptors?.Interceptors);
+        Assert.Equal(context.Interceptors, ((IInterceptorSubject)child2).Interceptors?.Interceptors);
+        Assert.Equal(context.Interceptors, ((IInterceptorSubject)child3).Interceptors?.Interceptors);
     }
 }
