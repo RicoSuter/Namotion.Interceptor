@@ -2,7 +2,7 @@
 
 namespace Namotion.Proxy.Tests.Lifecycle;
 
-public class AssignInterceptorsHandlerTests
+public class InterceptorInheritanceHandlerTests
 {
     [Fact]
     public void WhenPropertyIsAssigned_ThenContextIsSet()
@@ -10,7 +10,7 @@ public class AssignInterceptorsHandlerTests
         // Arrange
         var context = InterceptorProvider
             .CreateBuilder()
-            .WithAutomaticContextAssignment()
+            .WithInterceptorInheritance()
             .Build();
 
         // Act
@@ -27,7 +27,7 @@ public class AssignInterceptorsHandlerTests
         // Arrange
         var context = InterceptorProvider
             .CreateBuilder()
-            .WithAutomaticContextAssignment()
+            .WithInterceptorInheritance()
             .Build();
 
         // Act
@@ -38,7 +38,7 @@ public class AssignInterceptorsHandlerTests
 
         var mother = new Person
         {
-            FirstName = "Susi",
+            FirstName = "Mother",
             Mother = grandmother
         };
 
@@ -60,7 +60,7 @@ public class AssignInterceptorsHandlerTests
         // Arrange
         var context = InterceptorProvider
             .CreateBuilder()
-            .WithAutomaticContextAssignment()
+            .WithInterceptorInheritance()
             .Build();
 
         // Act
@@ -71,7 +71,7 @@ public class AssignInterceptorsHandlerTests
 
         var mother = new Person
         {
-            FirstName = "Susi",
+            FirstName = "Mother",
             Mother = grandmother
         };
 
@@ -85,8 +85,8 @@ public class AssignInterceptorsHandlerTests
 
         // Assert
         Assert.Equal(context.Interceptors, ((IInterceptorSubject)person).Interceptors.Interceptors);
-        Assert.Null(((IInterceptorSubject)mother).Interceptors);
-        Assert.Null(((IInterceptorSubject)grandmother).Interceptors);
+        Assert.Empty(((IInterceptorSubject)mother).Interceptors.Interceptors);
+        Assert.Empty(((IInterceptorSubject)grandmother).Interceptors.Interceptors);
     }
 
     [Fact]
@@ -95,7 +95,7 @@ public class AssignInterceptorsHandlerTests
         // Arrange
         var context = InterceptorProvider
             .CreateBuilder()
-            .WithAutomaticContextAssignment()
+            .WithInterceptorInheritance()
             .Build();
 
         // Act
@@ -123,7 +123,7 @@ public class AssignInterceptorsHandlerTests
         // Arrange
         var context = InterceptorProvider
             .CreateBuilder()
-            .WithAutomaticContextAssignment()
+            .WithInterceptorInheritance()
             .Build();
 
         // Act

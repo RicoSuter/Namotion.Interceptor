@@ -41,15 +41,16 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleHandler
         }
     }
 
-    // TODO: What should we do here?
     public void RemoveChild(LifecycleContext context)
     {
-        //foreach (var child in FindProxiesInProperties(context.Interceptable, new HashSet<IInterceptorCollection>()))
-        //{
-        //    DetachProxy(context.Context, child.Item1, child.Item2, child.Item3);
-        //}
-
-        //DetachProxy(context.Context, context.Property, context., child.Item3);
+        var touchedProxies = new HashSet<IInterceptorSubject>();
+        var proxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
+        FindProxiesInProperties(context.Subject, touchedProxies, proxyProperties);
+        
+        foreach (var child in proxyProperties)
+        {
+            DetachProxy(child.Item2, child.Item1, child.Item3);
+        }
     }
 
     public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
@@ -71,6 +72,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleHandler
             if (oldProxyProperties.Count != 0 || newProxyProperties.Count != 0)
             {
                 foreach (var d in oldProxyProperties
+                    .Reverse()
                     .Where(u => !newProxies.Contains(u.Item1)))
                 {
                     DetachProxy(d.Item2, d.Item1, d.Item3);

@@ -21,14 +21,14 @@ public class LifecycleInterceptorTests
 
         // Act
         var mother = new Person(context) { FirstName = "Mother" };
-        var child2 = new Person { FirstName = "Child1" };
-        var child3 = new Person { FirstName = "Child2" };
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
 
-        mother.Children = [child2, child3];
-        mother.Children = [child2];
+        mother.Children = [child1, child2];
+        mother.Children = [child1]; // should only detach child2
 
         // Assert
-        Assert.Equal(3, attaches.Count);
+        Assert.Equal(2, attaches.Count);
         Assert.Single(detaches);
     }
 
@@ -48,10 +48,10 @@ public class LifecycleInterceptorTests
 
         // Act
         var mother = new Person { FirstName = "Mother" };
-        var child2 = new Person { FirstName = "Child1" };
-        var child3 = new Person { FirstName = "Child2" };
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
 
-        mother.Children = [child2, child3];
+        mother.Children = [child1, child2];
         
         mother.AddInterceptors(context);
 
@@ -69,7 +69,7 @@ public class LifecycleInterceptorTests
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
         var context = InterceptorProvider
             .CreateBuilder()
-            .WithAutomaticContextAssignment()
+            .WithInterceptorInheritance()
             .WithProxyLifecycle()
             .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
@@ -79,13 +79,14 @@ public class LifecycleInterceptorTests
         var mother2 = new Person { FirstName = "Mother2" };
         var mother3 = new Person { FirstName = "Mother3" };
 
+        // Act & Assert
         mother1.Mother = mother2;
+        Assert.Single(attaches);
+
         mother2.Mother = mother3;
+        Assert.Equal(2, attaches.Count);
 
         mother1.Mother = null;
-
-        // Assert
-        Assert.Equal(3, attaches.Count);
         Assert.Equal(2, detaches.Count);
     }
 
@@ -99,7 +100,7 @@ public class LifecycleInterceptorTests
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
         var context = InterceptorProvider
             .CreateBuilder()
-            .WithAutomaticContextAssignment()
+            .WithInterceptorInheritance()
             .WithProxyLifecycle()
             .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
@@ -154,7 +155,7 @@ public class LifecycleInterceptorTests
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
         var context = InterceptorProvider
             .CreateBuilder()
-            .WithAutomaticContextAssignment()
+            .WithInterceptorInheritance()
             .WithProxyLifecycle()
             .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();

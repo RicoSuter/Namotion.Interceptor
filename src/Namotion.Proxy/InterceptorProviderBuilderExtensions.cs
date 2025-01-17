@@ -14,7 +14,7 @@ public static class InterceptorProviderBuilderExtensions
     {
         return builder
             .WithEqualityCheck()
-            .WithAutomaticContextAssignment()
+            .WithInterceptorInheritance()
             .WithDerivedPropertyChangeDetection();
     }
 
@@ -80,10 +80,10 @@ public static class InterceptorProviderBuilderExtensions
     /// </summary>
     /// <param name="builder">The builder.</param>
     /// <returns>The builder.</returns>
-    public static IInterceptorProviderBuilder WithAutomaticContextAssignment(this IInterceptorProviderBuilder builder)
+    public static IInterceptorProviderBuilder WithInterceptorInheritance(this IInterceptorProviderBuilder builder)
     {
         return builder
-            .TryAddSingleton<ILifecycleHandler, AssignInterceptorsHandler>(_ => new AssignInterceptorsHandler())
+            .TryAddSingleton<ILifecycleHandler, InterceptorInheritanceHandler>(_ => new InterceptorInheritanceHandler())
             .WithProxyLifecycle();
     }
 
@@ -108,7 +108,7 @@ public static class InterceptorProviderBuilderExtensions
         return builder
             .TryAddSingleton<IProxyRegistry, ProxyRegistry>(_ => new ProxyRegistry())
             .TryAddSingleton<ILifecycleHandler, ProxyRegistry>(sp => (ProxyRegistry)sp.GetRequiredService<IProxyRegistry>())
-            .WithAutomaticContextAssignment();
+            .WithInterceptorInheritance();
     }
 
     /// <summary>

@@ -1,4 +1,6 @@
-﻿namespace Namotion.Interceptor;
+﻿using System.Collections.Concurrent;
+
+namespace Namotion.Interceptor;
 
 public readonly struct InterceptorCollection : IInterceptorCollection
 {
@@ -18,10 +20,16 @@ public readonly struct InterceptorCollection : IInterceptorCollection
     public void AddInterceptor(IInterceptor interceptor)
     {
         if (interceptor is IReadInterceptor readInterceptor)
+        {
             _readInterceptors.Add(readInterceptor);
+            _getters.Clear();
+        }
 
         if (interceptor is IWriteInterceptor writeInterceptor)
+        {
             _writeInterceptors.Add(writeInterceptor);
+            _setters.Clear();
+        }
 
         interceptor.AttachTo(_subject);
     }
@@ -29,52 +37,69 @@ public readonly struct InterceptorCollection : IInterceptorCollection
     public void RemoveInterceptor(IInterceptor interceptor)
     {
         if (interceptor is IReadInterceptor readInterceptor)
+        {
             _readInterceptors.Remove(readInterceptor);
+            _getters.Clear();
+        }
 
         if (interceptor is IWriteInterceptor writeInterceptor)
+        {
             _writeInterceptors.Remove(writeInterceptor);
+            _setters.Clear();
+        }
 
         interceptor.DetachFrom(_subject);
     }
 
+    private static readonly ConcurrentDictionary<Func<object?>, Func<ReadPropertyInterception, object?>> _getters = new();
+    private static readonly ConcurrentDictionary<Action<object?>, Func<WritePropertyInterception, object?>> _setters = new();
+    
     public object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue)
     {
-        // TODO: Improve performance by caching here
-
-        var returnReadValue = new Func<ReadPropertyInterception, object?>(_ => readValue());
-
-        foreach (var handler in _readInterceptors)
-        {
-            var previousReadValue = returnReadValue;
-            returnReadValue = context => 
-                handler.ReadProperty(context, ctx => previousReadValue(ctx));
-        }
-
-        var context = new ReadPropertyInterception(new PropertyReference(subject, propertyName));
-        return returnReadValue.Invoke(context);
+        var readInterceptors = _readInterceptors;
+        var interception = new ReadPropertyInterception(new PropertyReference(subject, propertyName));
+        return _getters
+            .GetOrAdd(readValue, _ =>
+            {
+                var returnReadValue = new Func<ReadPropertyInterception, object?>(_ => readValue());
+    
+                foreach (var handler in readInterceptors)
+                {
+                    var previousReadValue = returnReadValue;
+                    returnReadValue = context =>
+                        handler.ReadProperty(context, ctx => previousReadValue(ctx));
+                }
+    
+                return returnReadValue;
+            })
+            .Invoke(interception);
     }
-
+    
     public void SetProperty(IInterceptorSubject subject, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
     {
-        // TODO: Improve performance by caching here
-        
-        var returnWriteValue = new Func<WritePropertyInterception, object?>(value =>
-        {
-            writeValue(value.NewValue);
-            return value;
-        });
-
-        foreach (var handler in _writeInterceptors)
-        {
-            var previousWriteValue = returnWriteValue;
-            returnWriteValue = (context) =>
+        var writeInterceptors = _writeInterceptors;
+        var interception = new WritePropertyInterception(new PropertyReference(subject, propertyName), readValue(), newValue);
+        _setters
+            .GetOrAdd(writeValue, _ =>
             {
-                return handler.WriteProperty(context,
-                    innerContext => previousWriteValue(innerContext));
-            };
-        }
-
-        var context = new WritePropertyInterception(new PropertyReference(subject, propertyName), readValue(), newValue);
-        returnWriteValue(context);
+                var returnWriteValue = new Func<WritePropertyInterception, object?>(value =>
+                {
+                    writeValue(value.NewValue);
+                    return value;
+                });
+    
+                foreach (var handler in writeInterceptors)
+                {
+                    var previousWriteValue = returnWriteValue;
+                    returnWriteValue = (context) =>
+                    {
+                        return handler.WriteProperty(context,
+                            innerContext => previousWriteValue(innerContext));
+                    };
+                }
+    
+                return returnWriteValue;
+            })
+            .Invoke(interception);
     }
 }

@@ -3,11 +3,11 @@ using Namotion.Interceptor;
 
 namespace Namotion.Interception.Lifecycle.Handlers;
 
-public class AssignInterceptorsHandler : ILifecycleHandler
+public class InterceptorInheritanceHandler : ILifecycleHandler
 {
     public void AddChild(LifecycleContext context)
     {
-        if (context is { ReferenceCount: 1, Property.Subject.Interceptors: not null })
+        if (context.ReferenceCount == 1)
         {
             context.Subject.AddInterceptors(context.Property.Subject.Interceptors);
         }
@@ -15,9 +15,6 @@ public class AssignInterceptorsHandler : ILifecycleHandler
 
     public void RemoveChild(LifecycleContext context)
     {
-        if (context is { ReferenceCount: 0, Property.Subject.Interceptors: not null })
-        {
-            context.Subject.RemoveInterceptors(context.Property.Subject.Interceptors);
-        }
+        context.Subject.RemoveInterceptors(context.Property.Subject.Interceptors);
     }
 }
