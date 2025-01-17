@@ -1,5 +1,4 @@
 ﻿using System.Collections;
-using System.Collections.Concurrent;
 using Namotion.Interception.Lifecycle.Abstractions;
 using Namotion.Interceptor;
 
@@ -7,10 +6,12 @@ namespace Namotion.Interception.Lifecycle.Handlers;
 
 public class LifecycleInterceptor : IWriteInterceptor
 {
+    // TODO(perf): Profile and improve this class, high potential to improve
+    
     private const string ReferenceCountKey = "Namotion.ReferenceCount";
  
     private readonly ILifecycleHandler[] _handlers;
-    private readonly HashSet<IInterceptorSubject> _attachedSubjects = [];
+    private readonly HashSet<IInterceptorSubject> _attachedSubjects = []; // TODO: Use in locks only
 
     public LifecycleInterceptor(IEnumerable<ILifecycleHandler> handlers)
     {
@@ -136,10 +137,8 @@ public class LifecycleInterceptor : IWriteInterceptor
         else if (value is IInterceptorSubject proxy)
         {
             result.Add((proxy, property, index));
-
-            if (!touchedProxies.Contains(proxy))
+            if (touchedProxies.Add(proxy))
             {
-                touchedProxies.Add(proxy);
                 FindProxiesInProperties(proxy, touchedProxies, result);
             }
         }
