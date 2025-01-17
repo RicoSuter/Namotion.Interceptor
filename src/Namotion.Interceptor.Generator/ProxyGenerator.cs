@@ -135,7 +135,7 @@ namespace {namespaceName}
                     {
                         generatedCode +=
     $@"
-        public {baseClassName}(IInterceptorCollection interceptors) : this()
+        public {baseClassName}(IInterceptorProvider interceptors) : this()
         {{
             ((IInterceptorSubject)this).AddInterceptors(interceptors);
         }}
@@ -233,9 +233,6 @@ namespace {namespaceName}
 
     static string? GetFullTypeName(ITypeSymbol typeSymbol)
     {
-        if (typeSymbol == null)
-            return null;
-
         if (typeSymbol is INamedTypeSymbol namedTypeSymbol && namedTypeSymbol.IsGenericType)
         {
             var genericArguments = string.Join(", ", namedTypeSymbol.TypeArguments.Select(GetFullTypeName));

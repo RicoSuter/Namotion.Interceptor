@@ -3,8 +3,8 @@ using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Proxy.Sources;
 using Namotion.Proxy;
-using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.OpcUa.Server;
+using Namotion.Proxy.Registry.Abstractions;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -37,28 +37,24 @@ public static class OpcUaProxyExtensions
             .AddSingleton(sp =>
             {
                 var proxy = resolveProxy(sp);
-                var context = proxy.Interceptors as IInterceptorContext ?? 
-                    throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
-
-                var sourcePathProvider = new AttributeBasedSourcePathProvider(
-                    sourceName, context, pathPrefix);
-
+                var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, pathPrefix);
                 return new OpcUaServerTrackableSource<TProxy>(
                     proxy,
                     sourcePathProvider,
                     sp.GetRequiredService<ILogger<OpcUaServerTrackableSource<TProxy>>>(),
-                    rootName);
+                    rootName,
+                    sp.GetRequiredService<IProxyRegistry>());
             })
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaServerTrackableSource<TProxy>>())
             .AddSingleton<IHostedService>(sp =>
             {
                 var proxy = resolveProxy(sp);
-                var context = proxy.Interceptors as IInterceptorContext ??
+                var context = proxy.Interceptors as IInterceptorProvider ??
                     throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
                 return new ProxySourceBackgroundService<TProxy>(
                     sp.GetRequiredService<OpcUaServerTrackableSource<TProxy>>(),
-                    context,
+                    sp,
                     sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TProxy>>>());
             });
     }

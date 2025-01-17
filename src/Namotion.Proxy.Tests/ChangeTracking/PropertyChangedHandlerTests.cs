@@ -1,5 +1,4 @@
 ﻿using Namotion.Interception.Lifecycle.Abstractions;
-using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.Tests.ChangeTracking;
 
@@ -10,7 +9,7 @@ public class PropertyChangedHandlerTests
     {
         // Arrange
         var changes = new List<PropertyChangedContext>();
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithPropertyChangedObservable()
             .Build();

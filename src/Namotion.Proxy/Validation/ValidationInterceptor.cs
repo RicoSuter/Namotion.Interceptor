@@ -1,6 +1,4 @@
-﻿using Namotion.Proxy.Abstractions;
-
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.Reactive.Linq;
 using Namotion.Interceptor;
 
@@ -15,7 +13,7 @@ public class ValidationInterceptor : IWriteInterceptor
         _propertyValidators = propertyValidators.ToArray();
     }
 
-    public void WriteProperty(WritePropertyInterception context, Action<WritePropertyInterception> next)
+    public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
     {
         var errors = _propertyValidators
             .SelectMany(v => v.Validate(context.Property, context.NewValue))
@@ -26,6 +24,6 @@ public class ValidationInterceptor : IWriteInterceptor
             throw new ValidationException(string.Join("\n", errors.Select(e => e.ErrorMessage)));
         }
 
-        next(context);
+        return next(context);
     }
 }

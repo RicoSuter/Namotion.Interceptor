@@ -1,6 +1,5 @@
 ﻿using Namotion.Interception.Lifecycle.Abstractions;
 using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Sources.Abstractions;
 
 namespace Namotion.Proxy.Sources;
@@ -54,7 +53,7 @@ public static class SourceExtensions
         return property.TryGetPropertyData($"{SourcePropertyNameKey}{sourceName}", out var value) ? value as string : null;
     }
 
-    public static string? TryGetAttributeBasedSourcePath(this PropertyReference property, string sourceName, IInterceptorContext context)
+    public static string? TryGetAttributeBasedSourcePath(this PropertyReference property, string sourceName)
     {
         return property.TryGetPropertyData($"{SourcePathKey}{sourceName}", out var value) ? value as string : null;
     }

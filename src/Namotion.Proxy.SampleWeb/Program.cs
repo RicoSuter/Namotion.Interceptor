@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Namotion.Interception.Lifecycle.Attributes;
 using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Registry.Abstractions;
@@ -68,7 +67,7 @@ namespace Namotion.Proxy.SampleWeb
             _unit = unit;
         }
 
-        public void InitializeProperty(RegisteredProxyProperty property, object? index, IInterceptorContext context)
+        public void InitializeProperty(RegisteredProxyProperty property, object? index)
         {
             property.AddAttribute("Unit", typeof(string), () => _unit, null);
         }
@@ -80,7 +79,7 @@ namespace Namotion.Proxy.SampleWeb
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var context = InterceptorContext
+            var context = InterceptorProvider
                 .CreateBuilder()
                 .WithRegistry()
                 .WithFullPropertyTracking()
@@ -132,7 +131,7 @@ namespace Namotion.Proxy.SampleWeb
         [Route("/api/car")]
         public class ProxyController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IInterceptorSubject
         {
-            public ProxyController(TProxy proxy) : base(proxy)
+            public ProxyController(TProxy proxy, IProxyRegistry registry) : base(proxy, registry)
             {
             }
         }

@@ -6,21 +6,21 @@ public readonly record struct PropertyReference(IInterceptorSubject Subject, str
 
     public void SetPropertyData(string key, object? value)
     {
-        Subject.Data[$"{key}:{Name}"] = value;
+        Subject.Data[$"{Name}:{key}"] = value;
     }
 
-    public readonly bool TryGetPropertyData(string key, out object? value)
+    public bool TryGetPropertyData(string key, out object? value)
     {
-        return Subject.Data.TryGetValue($"{key}:{Name}", out value);
+        return Subject.Data.TryGetValue($"{Name}:{key}", out value);
     }
 
-    public readonly object? GetPropertyData(string key)
+    public object? GetPropertyData(string key)
     {
-        return Subject.Data[$"{key}:{Name}"];
+        return Subject.Data[$"{Name}:{key}"];
     }
 
-    public readonly T GetOrAddPropertyData<T>(string key, Func<T> valueFactory)
+    public T GetOrAddPropertyData<T>(string key, Func<T> valueFactory)
     {
-        return (T)Subject.Data.GetOrAdd($"{key}:{Name}", _ => valueFactory())!;
+        return (T)Subject.Data.GetOrAdd($"{Name}:{key}", _ => valueFactory())!;
     }
 }

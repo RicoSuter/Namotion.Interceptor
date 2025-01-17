@@ -30,8 +30,8 @@ public readonly struct InterceptorCollection : IInterceptorCollection
     {
         if (interceptor is IReadInterceptor readInterceptor)
             _readInterceptors.Remove(readInterceptor);
-        
-        if (interceptor is IWriteInterceptor writeInterceptor) 
+
+        if (interceptor is IWriteInterceptor writeInterceptor)
             _writeInterceptors.Remove(writeInterceptor);
 
         interceptor.DetachFrom(_subject);
@@ -45,29 +45,33 @@ public readonly struct InterceptorCollection : IInterceptorCollection
         {
             var previousReadValue = readValue;
             var contextCopy = context;
-            readValue = () =>
-            {
-                return handler.ReadProperty(contextCopy, _ => previousReadValue());
-            };
+            readValue = () => { return handler.ReadProperty(contextCopy, _ => previousReadValue()); };
         }
-        
+
         return readValue.Invoke();
     }
 
     public void SetProperty(IInterceptorSubject subject, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
     {
-        var context = new WritePropertyInterception(new PropertyReference(subject, propertyName), readValue(), null, IsDerived: false);
+        var context = new WritePropertyInterception(new PropertyReference(subject, propertyName), readValue(), null);
+
+        var returnWriteValue = new Func<object?, object?>(o =>
+        {
+            writeValue(o);
+            return o;
+        });
 
         foreach (var handler in _writeInterceptors)
         {
-            var previousWriteValue = writeValue;
+            var previousWriteValue = returnWriteValue;
             var contextCopy = context;
-            writeValue = (value) =>
+            returnWriteValue = (value) =>
             {
-                handler.WriteProperty(contextCopy with { NewValue = value }, ctx => previousWriteValue(ctx.NewValue));
+                return handler.WriteProperty(contextCopy with { NewValue = value },
+                    ctx => previousWriteValue(ctx.NewValue));
             };
         }
 
-        writeValue(newValue);
+        returnWriteValue(newValue);
     }
 }

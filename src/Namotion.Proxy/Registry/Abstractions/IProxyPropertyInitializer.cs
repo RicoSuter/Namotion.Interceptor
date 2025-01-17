@@ -1,8 +1,6 @@
-﻿using Namotion.Proxy.Abstractions;
-
-namespace Namotion.Proxy.Registry.Abstractions;
+﻿namespace Namotion.Proxy.Registry.Abstractions;
 
 public interface IProxyPropertyInitializer
 {
-    void InitializeProperty(RegisteredProxyProperty property, object? index, IInterceptorContext context);
+    void InitializeProperty(RegisteredProxyProperty property, object? index);
 }

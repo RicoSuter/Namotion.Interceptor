@@ -3,8 +3,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Proxy;
-using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Mqtt;
+using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Sources;
 
 // ReSharper disable once CheckNamespace
@@ -19,26 +19,18 @@ public static class MqttServerTrackableContextSourceExtensions
         return serviceCollection
             .AddSingleton(sp =>
             {
-                var context = sp.GetRequiredService<TProxy>().Interceptors as IInterceptorContext ??
-                    throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
-
-                var sourcePathProvider = new AttributeBasedSourcePathProvider(
-                    sourceName, context, pathPrefix);
-
+                var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, pathPrefix);
                 return new MqttServerTrackableSource<TProxy>(
-                    context,
+                    sp,
                     sourcePathProvider,
                     sp.GetRequiredService<ILogger<MqttServerTrackableSource<TProxy>>>());
             })
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<MqttServerTrackableSource<TProxy>>())
             .AddSingleton<IHostedService>(sp =>
             {
-                var context = sp.GetRequiredService<TProxy>().Interceptors as IInterceptorContext ??
-                    throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
-
                 return new ProxySourceBackgroundService<TProxy>(
                     sp.GetRequiredService<MqttServerTrackableSource<TProxy>>(),
-                    context,
+                    sp,
                     sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TProxy>>>());
             });
     }

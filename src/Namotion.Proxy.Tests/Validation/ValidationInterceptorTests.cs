@@ -8,7 +8,7 @@ public class ValidationInterceptorTests
     public void ShouldValidateProperty()
     {
         // Arrange
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithPropertyValidation()
             .WithDataAnnotationValidation()

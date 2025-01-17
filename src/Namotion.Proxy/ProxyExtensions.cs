@@ -1,5 +1,4 @@
 ﻿using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Registry.Abstractions;
 
@@ -23,10 +22,8 @@ public static class ProxyExtensions
         return subject.Data.TryGetValue(key, out value);
     }
 
-    public static string GetJsonPath(this PropertyReference property)
+    public static string GetJsonPath(this PropertyReference property, IProxyRegistry? registry)
     {
-        var context = property.Subject.Interceptors as IInterceptorContext;
-        var registry = context?.GetRequiredService<IProxyRegistry>();
         if (registry is not null)
         {
             // TODO: avoid endless recursion
@@ -45,7 +42,7 @@ public static class ProxyExtensions
                 {
                     return GetJsonPath(new PropertyReference(
                         parent.Property.Subject,
-                        attribute.PropertyName)) +
+                        attribute.PropertyName), registry) +
                         "@" + attribute.AttributeName;
                 }
 
@@ -76,7 +73,7 @@ public static class ProxyExtensions
                 {
                     return GetJsonPath(new PropertyReference(
                         parent.Property.Subject,
-                        attribute.PropertyName)) +
+                        attribute.PropertyName), registry) +
                         "@" + attribute.AttributeName;
                 }
 
@@ -92,7 +89,7 @@ public static class ProxyExtensions
         }
     }
 
-    public static JsonObject ToJsonObject(this IInterceptorSubject subject)
+    public static JsonObject ToJsonObject(this IInterceptorSubject subject, IProxyRegistry? registry)
     {
         var obj = new JsonObject();
         foreach (var property in subject
@@ -103,14 +100,14 @@ public static class ProxyExtensions
             var value = property.Value.GetValue?.Invoke(subject);
             if (value is IInterceptorSubject childProxy)
             {
-                obj[propertyName] = childProxy.ToJsonObject();
+                obj[propertyName] = childProxy.ToJsonObject(registry);
             }
             else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
             {
                 var children = new JsonArray();
                 foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
                 {
-                    children.Add(arrayProxyItem.ToJsonObject());
+                    children.Add(arrayProxyItem.ToJsonObject(registry));
                 }
                 obj[propertyName] = children;
             }
@@ -119,10 +116,6 @@ public static class ProxyExtensions
                 obj[propertyName] = JsonValue.Create(value);
             }
         }
-
-        var context = subject.Interceptors as IInterceptorContext;
-        var registry = context?.GetRequiredService<IProxyRegistry>()
-            ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
 
         if (registry?.KnownProxies.TryGetValue(subject, out var metadata) == true)
         {
@@ -135,14 +128,14 @@ public static class ProxyExtensions
                 var value = property.Value.GetValue();
                 if (value is IInterceptorSubject childProxy)
                 {
-                    obj[propertyName] = childProxy.ToJsonObject();
+                    obj[propertyName] = childProxy.ToJsonObject(registry);
                 }
                 else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
                 {
                     var children = new JsonArray();
                     foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
                     {
-                        children.Add(arrayProxyItem.ToJsonObject());
+                        children.Add(arrayProxyItem.ToJsonObject(registry));
                     }
                     obj[propertyName] = children;
                 }

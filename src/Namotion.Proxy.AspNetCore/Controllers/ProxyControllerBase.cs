@@ -1,15 +1,11 @@
-﻿using System;
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Validation;
@@ -22,17 +18,17 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     private readonly TProxy _proxy;
     private readonly IProxyRegistry _registry;
 
-    protected ProxyControllerBase(TProxy proxy)
+    protected ProxyControllerBase(TProxy proxy, IProxyRegistry registry)
     {
         _proxy = proxy;
-        _registry = (proxy.Interceptors as IInterceptorContext)?.GetRequiredService<IProxyRegistry>() ?? throw new ArgumentException($"The proxy context is null or registry not available.");
+        _registry = registry;
     }
 
     [HttpGet]
     public ActionResult<TProxy> GetVariables()
     {
         // TODO: correctly generate OpenAPI schema
-        return Ok(_proxy.ToJsonObject());
+        return Ok(_proxy.ToJsonObject(_registry));
     }
 
     [HttpPost]

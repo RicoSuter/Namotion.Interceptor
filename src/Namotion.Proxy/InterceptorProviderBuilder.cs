@@ -1,16 +1,15 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy;
 
-public class InterceptorContextBuilder : IInterceptorContextBuilder
+public class InterceptorProviderBuilder : IInterceptorProviderBuilder
 {
     private readonly ServiceCollection _serviceCollection = [];
 
     public IServiceCollection ServiceCollection => _serviceCollection;
 
-    public InterceptorContextBuilder TryAddSingleton<TService, TImplementation>(Func<IInterceptorCollection, IServiceProvider, TImplementation> handler) 
+    public InterceptorProviderBuilder TryAddSingleton<TService, TImplementation>(Func<IServiceProvider, TImplementation> handler) 
         where TService : class
         where TImplementation : class, TService
     {
@@ -23,13 +22,12 @@ public class InterceptorContextBuilder : IInterceptorContextBuilder
         
         _serviceCollection.AddSingleton<TService, TImplementation>(sp => 
             handler(
-                sp.GetRequiredService<IInterceptorContext>(),
                 sp.GetRequiredService<IServiceProvider>()));
       
         return this; 
     }
     
-    public InterceptorContextBuilder TryAddInterceptor<TService>(Func<IInterceptorCollection, IServiceProvider, TService> handler)
+    public InterceptorProviderBuilder TryAddInterceptor<TService>(Func<IServiceProvider, TService> handler)
         where TService : class, IInterceptor
     {
         if (_serviceCollection.Any(p => p.ServiceType == typeof(TService)))
@@ -38,7 +36,6 @@ public class InterceptorContextBuilder : IInterceptorContextBuilder
         }
         
         _serviceCollection.AddSingleton(sp => handler(
-            sp.GetRequiredService<IInterceptorContext>(),
             sp.GetRequiredService<IServiceProvider>()));
 
         if (typeof(TService).IsAssignableTo(typeof(IWriteInterceptor)))
@@ -59,8 +56,8 @@ public class InterceptorContextBuilder : IInterceptorContextBuilder
         return this;
     }
 
-    public IInterceptorContext Build()
+    public InterceptorProvider Build()
     {
-        return new InterceptorContext(_serviceCollection);
+        return new InterceptorProvider(_serviceCollection);
     }
 }

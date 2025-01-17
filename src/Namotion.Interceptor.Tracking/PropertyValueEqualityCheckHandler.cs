@@ -4,11 +4,13 @@ namespace Namotion.Interception.Lifecycle;
 
 public class PropertyValueEqualityCheckHandler : IWriteInterceptor
 {
-    public void WriteProperty(WritePropertyInterception context, Action<WritePropertyInterception> next)
+    public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
     {
         if (!Equals(context.CurrentValue, context.NewValue))
         {
-            next(context);
+            return next(context);
         }
+
+        return context.NewValue;
     }
 }

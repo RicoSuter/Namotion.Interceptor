@@ -8,7 +8,7 @@ public class AssignInterceptorsHandlerTests
     public void WhenPropertyIsAssigned_ThenContextIsSet()
     {
         // Arrange
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .Build();
@@ -25,7 +25,7 @@ public class AssignInterceptorsHandlerTests
     public void WhenPropertyWithDeepStructureIsAssigned_ThenChildrenAlsoHaveContext()
     {
         // Arrange
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .Build();
@@ -49,16 +49,16 @@ public class AssignInterceptorsHandlerTests
         };
 
         // Assert
-        Assert.Equal(context, ((IInterceptorSubject)person).Interceptors);
-        Assert.Equal(context, ((IInterceptorSubject)mother).Interceptors);
-        Assert.Equal(context, ((IInterceptorSubject)grandmother).Interceptors);
+        Assert.Equal(context.Interceptors, ((IInterceptorSubject)person).Interceptors.Interceptors);
+        Assert.Equal(context.Interceptors, ((IInterceptorSubject)mother).Interceptors.Interceptors);
+        Assert.Equal(context.Interceptors, ((IInterceptorSubject)grandmother).Interceptors.Interceptors);
     }
 
     [Fact]
     public void WhenPropertyWithDeepProxiesIsRemoved_ThenAllContextsAreNull()
     {
         // Arrange
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .Build();
@@ -84,7 +84,7 @@ public class AssignInterceptorsHandlerTests
         person.Mother = null;
 
         // Assert
-        Assert.Equal(context, ((IInterceptorSubject)person).Interceptors);
+        Assert.Equal(context.Interceptors, ((IInterceptorSubject)person).Interceptors.Interceptors);
         Assert.Null(((IInterceptorSubject)mother).Interceptors);
         Assert.Null(((IInterceptorSubject)grandmother).Interceptors);
     }
@@ -93,7 +93,7 @@ public class AssignInterceptorsHandlerTests
     public void WhenArrayIsAssigned_ThenAllChildrenAreAttached()
     {
         // Arrange
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .Build();
@@ -121,7 +121,7 @@ public class AssignInterceptorsHandlerTests
     public void WhenUsingCircularDependencies_ThenProxiesAreAttached()
     {
         // Arrange
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .Build();

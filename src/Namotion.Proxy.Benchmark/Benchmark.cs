@@ -1,6 +1,5 @@
 ﻿using System.Linq;
 using BenchmarkDotNet.Attributes;
-using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.Benchmark;
 
@@ -10,7 +9,7 @@ public class Benchmark
 #pragma warning disable CS8618
 
     private Car _object;
-    private IInterceptorContext? _context;
+    private InterceptorProvider? _context;
 
 #pragma warning restore CS8618
 
@@ -30,7 +29,7 @@ public class Benchmark
                 break;
             
             case "interceptable":
-                _context = InterceptorContext
+                _context = InterceptorProvider
                     .CreateBuilder()
                     .WithFullPropertyTracking()
                     .WithRegistry()

@@ -4,7 +4,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interception.Lifecycle;
 using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Sources.Abstractions;
 
@@ -13,7 +12,7 @@ namespace Namotion.Proxy.Sources;
 public class ProxySourceBackgroundService<TProxy> : BackgroundService
     where TProxy : IInterceptorSubject
 {
-    private readonly IInterceptorContext _context;
+    private readonly IServiceProvider _provider;
     private readonly IProxySource _source;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
@@ -23,13 +22,13 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
 
     public ProxySourceBackgroundService(
         IProxySource source,
-        IInterceptorContext context,
+        IServiceProvider provider,
         ILogger logger,
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null)
     {
         _source = source;
-        _context = context;
+        _provider = provider;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
@@ -43,7 +42,7 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
             {
                 // TODO: Currently newly added properties/trackable are not automatically tracked/subscribed to
 
-                var propertiesWithSetter = _context
+                var propertiesWithSetter = _provider
                     .GetRequiredService<IProxyRegistry>()
                     .KnownProxies
                     .SelectMany(v => v.Value.Properties
@@ -80,7 +79,7 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
                     _initializedProperties = null;
                 }
                 
-                await foreach (var changes in _context
+                await foreach (var changes in _provider
                    .GetPropertyChangedObservable()
                    .Where(change => !change.IsChangingFromSource(_source) && _source.TryGetSourcePath(change.Property) != null)
                    .BufferChanges(_bufferTime)

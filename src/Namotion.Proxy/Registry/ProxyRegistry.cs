@@ -1,5 +1,4 @@
-﻿using Namotion.Proxy.Abstractions;
-using Namotion.Proxy.Registry.Abstractions;
+﻿using Namotion.Proxy.Registry.Abstractions;
 using System.Collections.Immutable;
 using Namotion.Interception.Lifecycle.Abstractions;
 using Namotion.Interceptor;
@@ -10,13 +9,7 @@ namespace Namotion.Proxy.Registry;
 
 internal class ProxyRegistry : IProxyRegistry, ILifecycleHandler
 {
-    private readonly IInterceptorContext _context;
     private readonly Dictionary<IInterceptorSubject, RegisteredProxy> _knownProxies = new();
-
-    public ProxyRegistry(IInterceptorContext context)
-    {
-        _context = context;
-    }
     
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredProxy> KnownProxies
     {
@@ -61,7 +54,7 @@ internal class ProxyRegistry : IProxyRegistry, ILifecycleHandler
             {
                 foreach (var attribute in property.Value.Attributes.OfType<IProxyPropertyInitializer>())
                 {
-                    attribute.InitializeProperty(property.Value, context.Index, _context);
+                    attribute.InitializeProperty(property.Value, context.Index);
                 }
             }
         }

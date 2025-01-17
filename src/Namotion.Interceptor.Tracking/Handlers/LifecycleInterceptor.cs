@@ -52,10 +52,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleHandler
         //DetachProxy(context.Context, context.Property, context., child.Item3);
     }
 
-    public void WriteProperty(WritePropertyInterception context, Action<WritePropertyInterception> next)
+    public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
     {
         var currentValue = context.CurrentValue;
-        next(context);
+        var result = next(context);
         var newValue = context.NewValue;
 
         if (!Equals(currentValue, newValue))
@@ -83,6 +83,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleHandler
                 }
             }
         }
+
+        return result;
     }
 
     private void AttachProxy(PropertyReference property, IInterceptorSubject subject, object? index)

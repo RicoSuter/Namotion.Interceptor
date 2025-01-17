@@ -1,6 +1,4 @@
-﻿using Namotion.Proxy.Abstractions;
-
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using Namotion.Interceptor;
 
 namespace Namotion.Proxy.Validation;

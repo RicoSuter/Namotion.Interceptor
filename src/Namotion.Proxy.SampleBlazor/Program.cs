@@ -9,7 +9,7 @@ namespace Namotion.Proxy.SampleBlazor
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var context = InterceptorContext
+            var context = InterceptorProvider
                 .CreateBuilder()
                 .WithFullPropertyTracking()
                 .WithReadPropertyRecorder()
