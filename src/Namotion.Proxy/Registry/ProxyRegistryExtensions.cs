@@ -1,6 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Attributes;
 using Namotion.Proxy.Registry.Abstractions;
 
@@ -36,7 +35,7 @@ public static class ProxyRegistryExtensions
     {
         // TODO: Also support non-registry scenario
 
-        var context = property.Subject.Interceptors as IInterceptorContext;
+        var context = property.Subject.Interceptors as IServiceProvider;
         var registry = context?.GetRequiredService<IProxyRegistry>() 
                        ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
         
@@ -52,7 +51,7 @@ public static class ProxyRegistryExtensions
     {
         // TODO: Also support non-registry scenario
 
-        var context = property.Subject.Interceptors as IInterceptorContext;
+        var context = property.Subject.Interceptors as IServiceProvider;
         var registry = context?.GetRequiredService<IProxyRegistry>()
                        ?? throw new InvalidOperationException($"The {nameof(IProxyRegistry)} is missing.");
 

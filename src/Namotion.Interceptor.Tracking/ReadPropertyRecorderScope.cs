@@ -4,10 +4,10 @@ namespace Namotion.Interception.Lifecycle;
 
 public class ReadPropertyRecorderScope : IDisposable
 {
-    private readonly IInterceptorCollection _context;
+    private readonly IInterceptorProvider _context;
     private readonly HashSet<PropertyReference> _properties;
 
-    public ReadPropertyRecorderScope(IInterceptorCollection context, HashSet<PropertyReference> properties)
+    public ReadPropertyRecorderScope(IInterceptorProvider context, HashSet<PropertyReference> properties)
     {
         _context = context;
         _properties = properties;

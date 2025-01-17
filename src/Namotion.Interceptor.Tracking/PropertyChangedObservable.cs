@@ -6,25 +6,20 @@ namespace Namotion.Interception.Lifecycle;
 
 public class PropertyChangedObservable : IObservable<PropertyChangedContext>, IWriteInterceptor
 {
-    private readonly IInterceptorCollection _context;
     private readonly Subject<PropertyChangedContext> _subject = new();
-
-    public PropertyChangedObservable(IInterceptorCollection context)
-    {
-        _context = context;
-    }
     
-    public void WriteProperty(WritePropertyInterception context, Action<WritePropertyInterception> next)
+    public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
     {
         var currentValue = context.CurrentValue;
         var newValue = context.NewValue;
 
-        next(context); 
+        var result = next(context); 
         
         // TODO: Should retrieve actual new value
 
-        var changedContext = new PropertyChangedContext(context.Property, currentValue, newValue, _context);
+        var changedContext = new PropertyChangedContext(context.Property, currentValue, newValue);
         _subject.OnNext(changedContext);
+        return result;
     }
 
     public IDisposable Subscribe(IObserver<PropertyChangedContext> observer)

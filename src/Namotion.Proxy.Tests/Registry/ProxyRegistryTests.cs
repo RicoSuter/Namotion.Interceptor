@@ -1,5 +1,4 @@
-﻿using Namotion.Proxy.Abstractions;
-using Namotion.Proxy.Registry;
+﻿using Namotion.Proxy.Registry;
 using Namotion.Proxy.Registry.Abstractions;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
@@ -18,14 +17,14 @@ public class ProxyRegistryTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorContext
+        var provider = InterceptorProvider
             .CreateBuilder()
             .WithRegistry()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>((_, _) => handler)
+            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
-        var person = new Person(context)
+        var person = new Person(provider)
         {
             FirstName = "Child",
             Mother = new Person
@@ -42,7 +41,7 @@ public class ProxyRegistryTests
         Assert.Equal(3, attaches.Count);
         Assert.Empty(detaches);
 
-        var registry = context.GetRequiredService<IProxyRegistry>();
+        var registry = provider.GetRequiredService<IProxyRegistry>();
         Assert.Equal(3, registry.KnownProxies.Count());
     }
 
@@ -54,10 +53,10 @@ public class ProxyRegistryTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithRegistry()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>((_, _) => handler)
+            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -91,10 +90,10 @@ public class ProxyRegistryTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithRegistry()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>((_, _) => handler)
+            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -125,7 +124,7 @@ public class ProxyRegistryTests
     public void WhenAddingTransitiveProxies_ThenAllAreAvailable()
     {
         // Arrange
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithRegistry()
             .Build();
@@ -161,7 +160,7 @@ public class ProxyRegistryTests
     public void WhenRemovingMiddleElement_ThenChildrensAreAlsoRemoved()
     {
         // Arrange
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithRegistry()
             .Build();
@@ -199,7 +198,7 @@ public class ProxyRegistryTests
     public async Task WhenConvertingToJson_ThenGraphIsPreserved()
     {
         // Arrange
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithRegistry()
             .Build();
@@ -219,6 +218,7 @@ public class ProxyRegistryTests
         };
 
         // Assert
-        await Verify(person.ToJsonObject().ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true }));
+        await Verify(person.ToJsonObject(context.GetRequiredService<IProxyRegistry>())
+            .ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true }));
     }
 }

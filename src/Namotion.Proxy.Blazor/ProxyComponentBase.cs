@@ -2,7 +2,6 @@
 using Namotion.Interception.Lifecycle;
 using Namotion.Interception.Lifecycle.Abstractions;
 using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.Blazor
 {
@@ -36,7 +35,7 @@ namespace Namotion.Proxy.Blazor
             var result = base.ShouldRender();
             if (result)
             {
-                _recorder = (Proxy?.Interceptors as IInterceptorContext)?.StartRecordingPropertyReadCalls();
+                _recorder = (Proxy?.Interceptors as IInterceptorProvider)?.StartRecordingPropertyReadCalls();
             }
 
             return result;

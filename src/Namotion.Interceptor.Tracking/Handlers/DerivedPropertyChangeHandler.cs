@@ -5,16 +5,9 @@ namespace Namotion.Interception.Lifecycle.Handlers;
 
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, ILifecycleHandler
 {
-    private readonly IInterceptorCollection _interceptorCollection;
-
     [ThreadStatic]
     private static Stack<HashSet<PropertyReference>>? _currentTouchedProperties;
     
-    public DerivedPropertyChangeHandler(IInterceptorCollection interceptorCollection)
-    {
-        _interceptorCollection = interceptorCollection;
-    }
-
     public void AddChild(LifecycleContext context)
     {
         foreach (var property in context
@@ -43,13 +36,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         return result;
     }
 
-    public void WriteProperty(WritePropertyInterception context, Action<WritePropertyInterception> next)
+    public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
     {
-        next.Invoke(context);
+        var result = next.Invoke(context);
 
         var usedByProperties = context.Property.GetUsedByProperties();
         if (usedByProperties.Count == 0) 
-            return;
+            return result;
         
         lock (usedByProperties)
         {
@@ -70,9 +63,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                 usedByProperty.SetLastKnownValue(newValue);
                 
-                _interceptorCollection.SetProperty(usedByProperty.Subject, usedByProperty.Name, newValue, () => oldValue, delegate {});
+                usedByProperty.Subject.Interceptors.SetProperty(usedByProperty.Subject, usedByProperty.Name, newValue, () => oldValue, delegate {});
             }
         }
+
+        return result;
     }
 
     private static void TryStartRecordTouchedProperties()

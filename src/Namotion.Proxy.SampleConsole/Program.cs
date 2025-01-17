@@ -1,6 +1,5 @@
 ﻿using Namotion.Interception.Lifecycle.Abstractions;
 using Namotion.Interception.Lifecycle.Attributes;
-using Namotion.Proxy.Abstractions;
 
 namespace Namotion.Proxy.SampleConsole
 {
@@ -8,9 +7,9 @@ namespace Namotion.Proxy.SampleConsole
     {
         static void Main(string[] args)
         {
-            var context = InterceptorContext
+            var context = InterceptorProvider
                 .CreateBuilder()
-                .TryAddSingleton<ILifecycleHandler, LogPropertyChangesHandler>((_, _) => new LogPropertyChangesHandler())
+                .TryAddSingleton<ILifecycleHandler, LogPropertyChangesHandler>(_ => new LogPropertyChangesHandler())
                 .WithFullPropertyTracking()
                 .Build();
 

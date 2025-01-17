@@ -2,7 +2,6 @@
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.OpcUa.Annotations;
 
@@ -30,7 +29,8 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         OpcUaServerTrackableSource<TProxy> source,
         IServerInternal server,
         ApplicationConfiguration configuration,
-        string? rootName) :
+        string? rootName,
+        IProxyRegistry registry) :
         base(server, configuration, new[] 
         {
             "https://foobar/",
@@ -44,8 +44,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         _proxy = proxy;
         _source = source;
         _rootName = rootName;
-
-        _registry = (proxy.Interceptors as IInterceptorContext)?.GetRequiredService<IProxyRegistry>() ?? throw new ArgumentException($"Registry could not be found.");
+        _registry = registry;
     }
 
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)

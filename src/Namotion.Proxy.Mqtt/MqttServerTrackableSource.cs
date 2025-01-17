@@ -12,7 +12,6 @@ using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Server;
 using Namotion.Interceptor;
-using Namotion.Proxy.Abstractions;
 using Namotion.Proxy.Registry;
 using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Sources.Abstractions;
@@ -22,7 +21,7 @@ namespace Namotion.Proxy.Mqtt
     public class MqttServerTrackableSource<TProxy> : BackgroundService, IProxySource
         where TProxy : IInterceptorSubject
     {
-        private readonly IInterceptorContext _context;
+        private readonly IServiceProvider _provider;
         private readonly ISourcePathProvider _sourcePathProvider;
         private readonly ILogger _logger;
 
@@ -41,11 +40,11 @@ namespace Namotion.Proxy.Mqtt
 
         // TODO: Inject IInterceptorContext<TProxy> so that multiple contexts are supported.
         public MqttServerTrackableSource(
-            IInterceptorContext context,
+            IServiceProvider provider,
             ISourcePathProvider sourcePathProvider,
             ILogger<MqttServerTrackableSource<TProxy>> logger)
         {
-            _context = context;
+            _provider = provider;
             _sourcePathProvider = sourcePathProvider;
             _logger = logger;
         }
@@ -136,7 +135,7 @@ namespace Namotion.Proxy.Mqtt
             Task.Run(async () =>
             {
                 await Task.Delay(1000);
-                foreach (var property in _context
+                foreach (var property in _provider
                     .GetRequiredService<IProxyRegistry>()
                     .GetProperties()
                     .Where(p => p.HasGetter))
@@ -168,7 +167,7 @@ namespace Namotion.Proxy.Mqtt
             try
             {
                 var sourcePath = args.ApplicationMessage.Topic.Replace('/', '.');
-                var property = _context
+                var property = _provider
                     .GetRequiredService<IProxyRegistry>()
                     .GetProperties()
                     .SingleOrDefault(p => _sourcePathProvider.TryGetSourcePath(p.Property) == sourcePath);

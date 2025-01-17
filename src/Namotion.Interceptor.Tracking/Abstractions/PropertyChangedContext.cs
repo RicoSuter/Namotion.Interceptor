@@ -5,7 +5,6 @@ namespace Namotion.Interception.Lifecycle.Abstractions;
 public record struct PropertyChangedContext(
     PropertyReference Property,
     object? OldValue,
-    object? NewValue,
-    IInterceptorCollection Context)
+    object? NewValue)
 {
 }

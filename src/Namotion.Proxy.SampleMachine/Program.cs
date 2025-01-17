@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Namotion.Interceptor;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.OpcUa.Annotations;
+using Namotion.Proxy.Registry.Abstractions;
 using NSwag.Annotations;
 
 namespace Namotion.Proxy.SampleMachine
@@ -119,7 +120,7 @@ namespace Namotion.Proxy.SampleMachine
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var context = InterceptorContext
+            var context = InterceptorProvider
                 .CreateBuilder()
                 .WithRegistry()
                 .WithFullPropertyTracking()
@@ -198,7 +199,7 @@ namespace Namotion.Proxy.SampleMachine
         [Route("/api/root")]
         public class ProxyController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IInterceptorSubject
         {
-            public ProxyController(TProxy proxy) : base(proxy)
+            public ProxyController(TProxy proxy, IProxyRegistry registry) : base(proxy, registry)
             {
             }
         }

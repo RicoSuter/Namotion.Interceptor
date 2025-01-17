@@ -13,10 +13,10 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithProxyLifecycle()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>((_, _) => handler)
+            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -40,10 +40,10 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithProxyLifecycle()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>((_, _) => handler)
+            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -67,11 +67,11 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .WithProxyLifecycle()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>((_, _) => handler)
+            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -97,11 +97,11 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .WithProxyLifecycle()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>((_, _) => handler)
+            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -126,10 +126,10 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithProxyLifecycle()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>((_, _) => handler)
+            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act
@@ -152,11 +152,11 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorContext
+        var context = InterceptorProvider
             .CreateBuilder()
             .WithAutomaticContextAssignment()
             .WithProxyLifecycle()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>((_, _) => handler)
+            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
             .Build();
 
         // Act

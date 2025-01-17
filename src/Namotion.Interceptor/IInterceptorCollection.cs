@@ -1,9 +1,7 @@
 namespace Namotion.Interceptor;
 
-public interface IInterceptorCollection
+public interface IInterceptorCollection : IInterceptorProvider
 {
-    IEnumerable<IInterceptor> Interceptors { get; }
-    
     void AddInterceptor(IInterceptor interceptor);
 
     void RemoveInterceptor(IInterceptor interceptor);

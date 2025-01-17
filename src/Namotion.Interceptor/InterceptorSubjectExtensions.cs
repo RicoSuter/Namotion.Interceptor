@@ -2,7 +2,7 @@ namespace Namotion.Interceptor;
 
 public static class InterceptorSubjectExtensions
 {
-    public static void AddInterceptors(this IInterceptorSubject subject, IInterceptorCollection addedInterceptors)
+    public static void AddInterceptors(this IInterceptorSubject subject, IInterceptorProvider addedInterceptors)
     {
         foreach (var interceptor in addedInterceptors.Interceptors)
         {
@@ -10,7 +10,7 @@ public static class InterceptorSubjectExtensions
         }
     }
     
-    public static void RemoveInterceptors(this IInterceptorSubject subject, IInterceptorCollection removedInterceptors)
+    public static void RemoveInterceptors(this IInterceptorSubject subject, IInterceptorProvider removedInterceptors)
     {
         foreach (var interceptor in removedInterceptors.Interceptors)
         {
