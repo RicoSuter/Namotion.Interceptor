@@ -28,7 +28,7 @@ public class LifecycleInterceptorTests
         mother.Children = [child1]; // should only detach child2
 
         // Assert
-        Assert.Equal(2, attaches.Count);
+        Assert.Equal(3, attaches.Count);
         Assert.Single(detaches);
     }
 
@@ -81,10 +81,10 @@ public class LifecycleInterceptorTests
 
         // Act & Assert
         mother1.Mother = mother2;
-        Assert.Single(attaches);
+        Assert.Equal(2, attaches.Count);
 
         mother2.Mother = mother3;
-        Assert.Equal(2, attaches.Count);
+        Assert.Equal(3, attaches.Count);
 
         mother1.Mother = null;
         Assert.Equal(2, detaches.Count);
@@ -120,7 +120,7 @@ public class LifecycleInterceptorTests
     }
 
     [Fact]
-    public void WhenCallingSetContextWithNull_ThenArrayItemsAreNotDetached()
+    public void WhenRemovingInterceptors_ThenAllItemsAreDetached()
     {
         // Arrange
         var attaches = new List<LifecycleContext>();
@@ -135,18 +135,18 @@ public class LifecycleInterceptorTests
 
         // Act
         var mother = new Person(context) { FirstName = "Mother" };
-        var child2 = new Person { FirstName = "Child1" };
-        var child3 = new Person { FirstName = "Child2" };
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
 
-        mother.Children = [child2, child3];
+        mother.Children = [child1, child2];
         mother.RemoveInterceptors(context);
 
         // Assert
-        Assert.Single(detaches);
+        Assert.Equal(3, detaches.Count);
     }
 
     [Fact]
-    public void WhenCallingSetContextWithNull_ThenChildrenAreNotDetached()
+    public void WhenRemovingInterceptors_ThenAllChildrenAreDetached()
     {
         // Arrange
         var attaches = new List<LifecycleContext>();
@@ -171,6 +171,6 @@ public class LifecycleInterceptorTests
         mother1.RemoveInterceptors(context);
 
         // Assert
-        Assert.Single(detaches);
+        Assert.Equal(3, detaches.Count);
     }
 }

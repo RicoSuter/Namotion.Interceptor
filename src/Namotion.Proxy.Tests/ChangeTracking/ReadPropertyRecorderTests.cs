@@ -1,4 +1,5 @@
-﻿using Namotion.Interception.Lifecycle;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interception.Lifecycle;
 
 namespace Namotion.Proxy.Tests.ChangeTracking;
 
@@ -17,10 +18,10 @@ public class ReadPropertyRecorderTests
         // Act
         var person = new Person(context);
 
-        var recorder = context.StartRecordingPropertyReadCalls();
+        var recorder = context.GetRequiredService<ReadPropertyRecorder>().StartRecordingPropertyReadCalls();
         using (recorder)
         {
-            var firstName = person.FirstName;
+             var firstName = person.FirstName;
         }
 
         var lastName = person.LastName;

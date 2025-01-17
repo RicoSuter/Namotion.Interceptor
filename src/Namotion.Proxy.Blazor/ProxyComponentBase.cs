@@ -10,6 +10,7 @@ namespace Namotion.Proxy.Blazor
     {
         private IDisposable? _subscription;
         private ReadPropertyRecorderScope? _recorder;
+        
         public PropertyReference[]? _properties;
 
         [Inject]
@@ -17,6 +18,9 @@ namespace Namotion.Proxy.Blazor
 
         [Inject]
         public TProxy? Proxy { get; set; }
+        
+        [Inject]
+        public ReadPropertyRecorder? Recorder { get; set; }
 
         protected override void OnInitialized()
         {
@@ -35,7 +39,7 @@ namespace Namotion.Proxy.Blazor
             var result = base.ShouldRender();
             if (result)
             {
-                _recorder = (Proxy?.Interceptors as IInterceptorProvider)?.StartRecordingPropertyReadCalls();
+                _recorder = Recorder?.StartRecordingPropertyReadCalls();
             }
 
             return result;

@@ -5,16 +5,19 @@ namespace Namotion.Interception.Lifecycle.Handlers;
 
 public class InterceptorInheritanceHandler : ILifecycleHandler
 {
-    public void AddChild(LifecycleContext context)
+    public void Attach(LifecycleContext context)
     {
-        if (context.ReferenceCount == 1)
+        if (context.ReferenceCount == 1 && context.Property is not null)
         {
-            context.Subject.AddInterceptors(context.Property.Subject.Interceptors);
+            context.Subject.AddInterceptors(context.Property.Value.Subject.Interceptors);
         }
     }
 
-    public void RemoveChild(LifecycleContext context)
+    public void Detach(LifecycleContext context)
     {
-        context.Subject.RemoveInterceptors(context.Property.Subject.Interceptors);
+        if (context.Property is not null)
+        {
+            context.Subject.RemoveInterceptors(context.Property.Value.Subject.Interceptors);
+        }
     }
 }

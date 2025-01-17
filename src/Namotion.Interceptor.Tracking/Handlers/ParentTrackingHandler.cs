@@ -1,22 +1,26 @@
-﻿using Namotion.Interception.Lifecycle.Abstractions;
+﻿using Namotion.Interceptor;
 
 namespace Namotion.Interception.Lifecycle.Handlers;
 
-public class ParentTrackingHandler : ILifecycleHandler
+public class ParentTrackingHandler : IWriteInterceptor
 {
-    public void AddChild(LifecycleContext context)
+    public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
     {
-        if (context.Property != default)
+        // TODO: Handle list and dictionary
+        // TODO: Only remove parent when no other property references it
+        
+        if (context.CurrentValue is IInterceptorSubject removedSubject)
         {
-            context.Subject.AddParent(context.Property, context.Index);
+            removedSubject.RemoveParent(context.Property, null);
         }
-    }
 
-    public void RemoveChild(LifecycleContext context)
-    {
-        if (context.Property != default)
+        var result = next(context);
+        
+        if (context.NewValue is IInterceptorSubject addedSubject)
         {
-            context.Subject.RemoveParent(context.Property, context.Index);
+            addedSubject.AddParent(context.Property, null);
         }
+        
+        return result;
     }
 }

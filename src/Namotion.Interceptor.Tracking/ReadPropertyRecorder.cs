@@ -4,7 +4,7 @@ namespace Namotion.Interception.Lifecycle;
 
 public class ReadPropertyRecorder : IReadInterceptor
 {
-    internal static AsyncLocal<IDictionary<IInterceptorProvider, List<HashSet<PropertyReference>>>> Scopes { get; } = new();
+    internal static AsyncLocal<IDictionary<ReadPropertyRecorder, List<HashSet<PropertyReference>>>> Scopes { get; } = new();
     
     public object? ReadProperty(ReadPropertyInterception context, Func<ReadPropertyInterception, object?> next)
     {
@@ -13,7 +13,7 @@ public class ReadPropertyRecorder : IReadInterceptor
             lock (typeof(ReadPropertyRecorder))
             {
                 if (Scopes.Value is not null &&
-                    Scopes.Value.TryGetValue(context.Property.Subject.Interceptors, out var scopes))
+                    Scopes.Value.TryGetValue(this, out var scopes))
                 {
                     foreach (var scope in scopes)
                     {

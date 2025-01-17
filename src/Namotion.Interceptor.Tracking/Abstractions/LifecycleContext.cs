@@ -3,7 +3,7 @@
 namespace Namotion.Interception.Lifecycle.Abstractions;
 
 public record struct LifecycleContext(
-    PropertyReference Property,
+    PropertyReference? Property,
     object? Index,
     IInterceptorSubject Subject,
     int ReferenceCount)

@@ -15,12 +15,12 @@ namespace Namotion.Proxy.Tests
             _detaches = detaches;
         }
 
-        public void AddChild(LifecycleContext context)
+        public void Attach(LifecycleContext context)
         {
             _attaches.Add(context);
         }
 
-        public void RemoveChild(LifecycleContext context)
+        public void Detach(LifecycleContext context)
         {
             _detaches.Add(context);
         }
