@@ -39,6 +39,8 @@ public readonly struct InterceptorCollection : IInterceptorCollection
 
     public object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue)
     {
+        // TODO: Improve performance by caching here
+
         var context = new ReadPropertyInterception(new PropertyReference(subject, propertyName));
 
         foreach (var handler in _readInterceptors)
@@ -53,12 +55,14 @@ public readonly struct InterceptorCollection : IInterceptorCollection
 
     public void SetProperty(IInterceptorSubject subject, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
     {
+        // TODO: Improve performance by caching here
+        
         var context = new WritePropertyInterception(new PropertyReference(subject, propertyName), readValue(), null);
 
-        var returnWriteValue = new Func<object?, object?>(o =>
+        var returnWriteValue = new Func<object?, object?>(value =>
         {
-            writeValue(o);
-            return o;
+            writeValue(value);
+            return value;
         });
 
         foreach (var handler in _writeInterceptors)

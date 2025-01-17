@@ -11,13 +11,9 @@ public class PropertyChangedObservable : IObservable<PropertyChangedContext>, IW
     public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
     {
         var currentValue = context.CurrentValue;
-        var newValue = context.NewValue;
-
         var result = next(context); 
-        
-        // TODO: Should retrieve actual new value
 
-        var changedContext = new PropertyChangedContext(context.Property, currentValue, newValue);
+        var changedContext = new PropertyChangedContext(context.Property, currentValue, result);
         _subject.OnNext(changedContext);
         return result;
     }
