@@ -1,4 +1,5 @@
 ﻿using Namotion.Interception.Lifecycle.Attributes;
+using Namotion.Interceptor;
 
 namespace Namotion.Proxy.Tests
 {
