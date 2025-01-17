@@ -41,41 +41,40 @@ public readonly struct InterceptorCollection : IInterceptorCollection
     {
         // TODO: Improve performance by caching here
 
-        var context = new ReadPropertyInterception(new PropertyReference(subject, propertyName));
+        var returnReadValue = new Func<ReadPropertyInterception, object?>(_ => readValue());
 
         foreach (var handler in _readInterceptors)
         {
-            var previousReadValue = readValue;
-            var contextCopy = context;
-            readValue = () => { return handler.ReadProperty(contextCopy, _ => previousReadValue()); };
+            var previousReadValue = returnReadValue;
+            returnReadValue = context => 
+                handler.ReadProperty(context, ctx => previousReadValue(ctx));
         }
 
-        return readValue.Invoke();
+        var context = new ReadPropertyInterception(new PropertyReference(subject, propertyName));
+        return returnReadValue.Invoke(context);
     }
 
     public void SetProperty(IInterceptorSubject subject, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
     {
         // TODO: Improve performance by caching here
         
-        var context = new WritePropertyInterception(new PropertyReference(subject, propertyName), readValue(), null);
-
-        var returnWriteValue = new Func<object?, object?>(value =>
+        var returnWriteValue = new Func<WritePropertyInterception, object?>(value =>
         {
-            writeValue(value);
+            writeValue(value.NewValue);
             return value;
         });
 
         foreach (var handler in _writeInterceptors)
         {
             var previousWriteValue = returnWriteValue;
-            var contextCopy = context;
-            returnWriteValue = (value) =>
+            returnWriteValue = (context) =>
             {
-                return handler.WriteProperty(contextCopy with { NewValue = value },
-                    ctx => previousWriteValue(ctx.NewValue));
+                return handler.WriteProperty(context,
+                    innerContext => previousWriteValue(innerContext));
             };
         }
 
-        returnWriteValue(newValue);
+        var context = new WritePropertyInterception(new PropertyReference(subject, propertyName), readValue(), newValue);
+        returnWriteValue(context);
     }
 }
