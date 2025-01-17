@@ -1,4 +1,6 @@
-﻿namespace Namotion.Proxy.SampleBlazor.Models
+﻿using Namotion.Interceptor;
+
+namespace Namotion.Proxy.SampleBlazor.Models
 {
     [GenerateProxy]
     public partial class Game

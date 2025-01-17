@@ -1,3 +1,4 @@
+using Namotion.Interception.Lifecycle;
 using Namotion.Proxy.SampleBlazor.Components;
 using Namotion.Proxy.SampleBlazor.Models;
 
@@ -21,6 +22,7 @@ namespace Namotion.Proxy.SampleBlazor
                 .AddInteractiveServerComponents();
 
             builder.Services.AddSingleton(context.GetPropertyChangedObservable());          
+            builder.Services.AddSingleton(context.GetRequiredService<ReadPropertyRecorder>());          
             builder.Services.AddSingleton(new Game(context));
             builder.Services.AddScoped<Player>();
 

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Namotion.Interception.Lifecycle;
 using Namotion.Interception.Lifecycle.Attributes;
 using Namotion.Interceptor;
 using Namotion.Proxy.AspNetCore.Controllers;
@@ -91,6 +92,9 @@ namespace Namotion.Proxy.SampleWeb
 
             // trackable
             builder.Services.AddSingleton(car);
+            builder.Services.AddSingleton(context.GetPropertyChangedObservable());          
+            builder.Services.AddSingleton((PropertyChangedObservable)context.GetPropertyChangedObservable());          
+            builder.Services.AddSingleton(context.GetRequiredService<IProxyRegistry>());          
 
             // trackable api controllers
             builder.Services.AddProxyControllers<Car, ProxyController<Car>>();
