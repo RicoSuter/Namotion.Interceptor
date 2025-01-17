@@ -17,42 +17,50 @@ public readonly struct InterceptorCollection : IInterceptorCollection
         .OfType<IInterceptor>()
         .Union(_writeInterceptors);
 
-    public void AddInterceptor(IInterceptor interceptor)
+    public void AddInterceptors(params IEnumerable<IInterceptor> interceptors)
     {
-        if (interceptor is IReadInterceptor readInterceptor)
+        foreach (var interceptor in interceptors)
         {
-            _readInterceptors.Add(readInterceptor);
-            _getters.Clear();
+            if (interceptor is IReadInterceptor readInterceptor)
+            {
+                _readInterceptors.Add(readInterceptor);
+            }
+
+            if (interceptor is IWriteInterceptor writeInterceptor)
+            {
+                _writeInterceptors.Add(writeInterceptor);
+            }
+
+            interceptor.AttachTo(_subject);
         }
 
-        if (interceptor is IWriteInterceptor writeInterceptor)
-        {
-            _writeInterceptors.Add(writeInterceptor);
-            _setters.Clear();
-        }
-
-        interceptor.AttachTo(_subject);
+        _getters.Clear();
+        _setters.Clear();
     }
 
-    public void RemoveInterceptor(IInterceptor interceptor)
+    public void RemoveInterceptors(params IEnumerable<IInterceptor> interceptors)
     {
-        if (interceptor is IReadInterceptor readInterceptor)
+        foreach (var interceptor in interceptors)
         {
-            _readInterceptors.Remove(readInterceptor);
-            _getters.Clear();
+            if (interceptor is IReadInterceptor readInterceptor)
+            {
+                _readInterceptors.Remove(readInterceptor);
+            }
+
+            if (interceptor is IWriteInterceptor writeInterceptor)
+            {
+                _writeInterceptors.Remove(writeInterceptor);
+            }
+
+            interceptor.DetachFrom(_subject);
         }
 
-        if (interceptor is IWriteInterceptor writeInterceptor)
-        {
-            _writeInterceptors.Remove(writeInterceptor);
-            _setters.Clear();
-        }
-
-        interceptor.DetachFrom(_subject);
+        _getters.Clear();
+        _setters.Clear();
     }
 
-    private static readonly ConcurrentDictionary<Func<object?>, Func<ReadPropertyInterception, object?>> _getters = new();
-    private static readonly ConcurrentDictionary<Action<object?>, Func<WritePropertyInterception, object?>> _setters = new();
+    private readonly ConcurrentDictionary<Func<object?>, Func<ReadPropertyInterception, object?>> _getters = new();
+    private readonly ConcurrentDictionary<Action<object?>, Func<WritePropertyInterception, object?>> _setters = new();
     
     public object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue)
     {
