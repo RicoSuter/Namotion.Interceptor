@@ -22,12 +22,12 @@ public class LifecycleInterceptor : IWriteInterceptor
     {
         var touchedProxies = new HashSet<IInterceptorSubject>();
         var proxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-        FindProxiesInProperties(subject, touchedProxies, proxyProperties);
+        FindSubjectsInProperties(subject, proxyProperties, touchedProxies);
         
-        AttachTo(null, subject, null);
+        AttachTo(subject, null, null);
         foreach (var child in proxyProperties)
         {
-            AttachTo(child.Item2, child.Item1, child.Item3);
+            AttachTo(child.Item1, child.Item2, child.Item3);
         }
     }
 
@@ -35,16 +35,16 @@ public class LifecycleInterceptor : IWriteInterceptor
     {
         var touchedProxies = new HashSet<IInterceptorSubject>();
         var proxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-        FindProxiesInProperties(subject, touchedProxies, proxyProperties);
+        FindSubjectsInProperties(subject, proxyProperties, touchedProxies);
         
         foreach (var child in proxyProperties)
         {
-            DetachFrom(child.Item2, child.Item1, child.Item3);
+            DetachFrom(child.Item1, child.Item2, child.Item3);
         }
-        DetachFrom(null, subject, null);
+        DetachFrom(subject, null, null);
     }
 
-    private void AttachTo(PropertyReference? property, IInterceptorSubject subject, object? index)
+    private void AttachTo(IInterceptorSubject subject, PropertyReference? property, object? index)
     {
         if (_attachedSubjects.Add(subject))
         {
@@ -58,7 +58,7 @@ public class LifecycleInterceptor : IWriteInterceptor
         }
     }
 
-    private void DetachFrom(PropertyReference? property, IInterceptorSubject subject, object? index)
+    private void DetachFrom(IInterceptorSubject subject, PropertyReference? property, object? index)
     {
         if (_attachedSubjects.Remove(subject))
         {
@@ -82,11 +82,11 @@ public class LifecycleInterceptor : IWriteInterceptor
         {
             var oldProxies = new HashSet<IInterceptorSubject>();
             var oldProxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-            FindProxies(context.Property, currentValue, null, oldProxies, oldProxyProperties);
+            FindSubjects(context.Property, currentValue, null, oldProxies, oldProxyProperties);
 
             var newProxies = new HashSet<IInterceptorSubject>();
             var newProxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-            FindProxies(context.Property, newValue, null, newProxies, newProxyProperties);
+            FindSubjects(context.Property, newValue, null, newProxies, newProxyProperties);
 
             if (oldProxyProperties.Count != 0 || newProxyProperties.Count != 0)
             {
@@ -94,13 +94,13 @@ public class LifecycleInterceptor : IWriteInterceptor
                     .Reverse()
                     .Where(u => !newProxies.Contains(u.Item1)))
                 {
-                    DetachFrom(d.Item2, d.Item1, d.Item3);
+                    DetachFrom(d.Item1, d.Item2, d.Item3);
                 }
 
                 foreach (var d in newProxyProperties
                     .Where(u => !oldProxies.Contains(u.Item1)))
                 {
-                    AttachTo(d.Item2, d.Item1, d.Item3);
+                    AttachTo(d.Item1, d.Item2, d.Item3);
                 }
             }
         }
@@ -108,7 +108,7 @@ public class LifecycleInterceptor : IWriteInterceptor
         return result;
     }
 
-    private void FindProxies(
+    private void FindSubjects(
         PropertyReference property,
         object? value, object? index,
         HashSet<IInterceptorSubject> touchedProxies,
@@ -121,7 +121,7 @@ public class LifecycleInterceptor : IWriteInterceptor
                 var dictionaryValue = dictionary[key];
                 if (dictionaryValue is IInterceptorSubject proxy)
                 {
-                    FindProxies(property, proxy, key, touchedProxies, result);
+                    FindSubjects(property, proxy, key, touchedProxies, result);
                 }
             }
         }
@@ -130,7 +130,7 @@ public class LifecycleInterceptor : IWriteInterceptor
             var i = 0;
             foreach (var proxy in collection.OfType<IInterceptorSubject>())
             {
-                FindProxies(property, proxy, i, touchedProxies, result);
+                FindSubjects(property, proxy, i, touchedProxies, result);
                 i++;
             }
         }
@@ -139,21 +139,21 @@ public class LifecycleInterceptor : IWriteInterceptor
             result.Add((proxy, property, index));
             if (touchedProxies.Add(proxy))
             {
-                FindProxiesInProperties(proxy, touchedProxies, result);
+                FindSubjectsInProperties(proxy, result, touchedProxies);
             }
         }
     }
 
-    private void FindProxiesInProperties(IInterceptorSubject subject,
-        HashSet<IInterceptorSubject> touchedProxies,
-        HashSet<(IInterceptorSubject, PropertyReference, object?)> result)
+    private void FindSubjectsInProperties(IInterceptorSubject subject,
+        HashSet<(IInterceptorSubject, PropertyReference, object?)> collectedSubjects,
+        HashSet<IInterceptorSubject> touchedProxies)
     {
         foreach (var property in subject.Properties)
         {
             var childValue = property.Value.GetValue?.Invoke(subject);
             if (childValue is not null)
             {
-                FindProxies(new PropertyReference(subject, property.Key), childValue, null, touchedProxies, result);
+                FindSubjects(new PropertyReference(subject, property.Key), childValue, null, touchedProxies, collectedSubjects);
             }
         }
     }

@@ -15,6 +15,7 @@ public class PropertyChangedObservable : IObservable<PropertyChangedContext>, IW
 
         var changedContext = new PropertyChangedContext(context.Property, currentValue, result);
         _subject.OnNext(changedContext);
+     
         return result;
     }
 
