@@ -49,7 +49,7 @@ public class Benchmark
             .ToArray();
     }
 
-    [Benchmark]
+    //[Benchmark]
     public void IncrementDerivedAverage()
     {
         _object.Tires[0].Pressure += 5;

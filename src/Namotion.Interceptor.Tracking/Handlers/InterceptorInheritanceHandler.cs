@@ -9,7 +9,8 @@ public class InterceptorInheritanceHandler : ILifecycleHandler
     {
         if (context.ReferenceCount == 1 && context.Property is not null)
         {
-            context.Subject.AddInterceptors(context.Property.Value.Subject.Interceptors);
+            var parent = context.Property.Value.Subject;
+            context.Subject.Interceptors.AddInterceptors(parent.Interceptors.Interceptors);
         }
     }
 
@@ -17,7 +18,8 @@ public class InterceptorInheritanceHandler : ILifecycleHandler
     {
         if (context.Property is not null)
         {
-            context.Subject.RemoveInterceptors(context.Property.Value.Subject.Interceptors);
+            var parent = context.Property.Value.Subject;
+            context.Subject.Interceptors.RemoveInterceptors(parent.Interceptors.Interceptors);
         }
     }
 }

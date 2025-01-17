@@ -2,9 +2,9 @@ namespace Namotion.Interceptor;
 
 public interface IInterceptorCollection : IInterceptorProvider
 {
-    void AddInterceptor(IInterceptor interceptor);
+    void AddInterceptors(params IEnumerable<IInterceptor> interceptors);
 
-    void RemoveInterceptor(IInterceptor interceptor);
+    void RemoveInterceptors(params IEnumerable<IInterceptor> interceptors);
     
     object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue);
 
