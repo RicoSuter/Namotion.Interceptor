@@ -85,7 +85,7 @@ public readonly struct InterceptorCollection : IInterceptorCollection
                 var returnWriteValue = new Func<WritePropertyInterception, object?>(value =>
                 {
                     writeValue(value.NewValue);
-                    return value;
+                    return value.NewValue;
                 });
     
                 foreach (var handler in writeInterceptors)

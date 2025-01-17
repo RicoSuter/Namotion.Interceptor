@@ -2,9 +2,7 @@
 
 public interface ILifecycleHandler
 {
-    // TODO: Rename to AddChild/RemoveChild
-    
-    public void AddChild(LifecycleContext context);
+    public void Attach(LifecycleContext context);
 
-    public void RemoveChild(LifecycleContext context);
+    public void Detach(LifecycleContext context);
 }

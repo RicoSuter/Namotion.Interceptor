@@ -20,7 +20,7 @@ internal class ProxyRegistry : IProxyRegistry, ILifecycleHandler
         }
     }
 
-    public void AddChild(LifecycleContext context)
+    public void Attach(LifecycleContext context)
     {
         lock (_knownProxies)
         {
@@ -37,12 +37,12 @@ internal class ProxyRegistry : IProxyRegistry, ILifecycleHandler
                 _knownProxies[context.Subject] = metadata;
             }
 
-            if (context.Property != default)
+            if (context.Property is not null)
             {
-                metadata.AddParent(context.Property);
+                metadata.AddParent(context.Property.Value);
 
                 _knownProxies
-                    .TryGetProperty(context.Property)?
+                    .TryGetProperty(context.Property.Value)?
                     .AddChild(new ProxyPropertyChild
                     {
                         Proxy = context.Subject,
@@ -60,19 +60,19 @@ internal class ProxyRegistry : IProxyRegistry, ILifecycleHandler
         }
     }
 
-    public void RemoveChild(LifecycleContext context)
+    public void Detach(LifecycleContext context)
     {
         lock (_knownProxies)
         {
             if (context.ReferenceCount == 0)
             {
-                if (context.Property != default)
+                if (context.Property is not null)
                 {
                     var metadata = _knownProxies[context.Subject];
-                    metadata.RemoveParent(context.Property);
+                    metadata.RemoveParent(context.Property.Value);
 
                     _knownProxies
-                        .TryGetProperty(context.Property)?
+                        .TryGetProperty(context.Property.Value)?
                         .RemoveChild(new ProxyPropertyChild
                         {
                             Proxy = context.Subject,

@@ -28,8 +28,8 @@ public static class InterceptorProviderBuilderExtensions
     {
         return builder
             .TryAddInterceptor(_ => new DerivedPropertyChangeHandler())
-            .TryAddSingleton<ILifecycleHandler, DerivedPropertyChangeHandler>(sp => 
-                sp.GetRequiredService<DerivedPropertyChangeHandler>())
+            .TryAddSingleton<ILifecycleHandler, DerivedPropertyChangeHandler>(sp => sp.GetRequiredService<DerivedPropertyChangeHandler>())
+            .WithProxyLifecycle()
             .WithPropertyChangedObservable();
     }
 
@@ -119,7 +119,7 @@ public static class InterceptorProviderBuilderExtensions
     public static IInterceptorProviderBuilder WithParents(this IInterceptorProviderBuilder builder)
     {
         return builder
-            .TryAddSingleton<ILifecycleHandler, ParentTrackingHandler>(_ => new ParentTrackingHandler())
+            .TryAddInterceptor(_ => new ParentTrackingHandler())
             .WithProxyLifecycle();
     }
 }

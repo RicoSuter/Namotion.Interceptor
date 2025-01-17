@@ -35,8 +35,7 @@ public class InterceptorProviderBuilder : IInterceptorProviderBuilder
             return this;
         }
         
-        _serviceCollection.AddSingleton(sp => handler(
-            sp.GetRequiredService<IServiceProvider>()));
+        _serviceCollection.AddSingleton(sp => handler(sp.GetRequiredService<IServiceProvider>()));
 
         if (typeof(TService).IsAssignableTo(typeof(IWriteInterceptor)))
         {

@@ -1,14 +1,16 @@
 ﻿using System.Collections;
+using System.Collections.Concurrent;
 using Namotion.Interception.Lifecycle.Abstractions;
 using Namotion.Interceptor;
 
 namespace Namotion.Interception.Lifecycle.Handlers;
 
-public class LifecycleInterceptor : IWriteInterceptor, ILifecycleHandler
+public class LifecycleInterceptor : IWriteInterceptor
 {
     private const string ReferenceCountKey = "Namotion.ReferenceCount";
  
     private readonly ILifecycleHandler[] _handlers;
+    private readonly HashSet<IInterceptorSubject> _attachedSubjects = [];
 
     public LifecycleInterceptor(IEnumerable<ILifecycleHandler> handlers)
     {
@@ -17,39 +19,55 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleHandler
 
     public void AttachTo(IInterceptorSubject subject)
     {
-        var registryContext = new LifecycleContext(default, null, subject, 1);
-        AddChild(registryContext);
+        var touchedProxies = new HashSet<IInterceptorSubject>();
+        var proxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
+        FindProxiesInProperties(subject, touchedProxies, proxyProperties);
+        
+        AttachTo(null, subject, null);
+        foreach (var child in proxyProperties)
+        {
+            AttachTo(child.Item2, child.Item1, child.Item3);
+        }
     }
 
     public void DetachFrom(IInterceptorSubject subject)
     {
-        var registryContext = new LifecycleContext(default, null, subject, 1);
-        RemoveChild(registryContext);
-    }
-
-    // TODO: does it make sense that the two methods are not "the same"?
-
-    public void AddChild(LifecycleContext context)
-    {
         var touchedProxies = new HashSet<IInterceptorSubject>();
         var proxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-        FindProxiesInProperties(context.Subject, touchedProxies, proxyProperties);
+        FindProxiesInProperties(subject, touchedProxies, proxyProperties);
         
         foreach (var child in proxyProperties)
         {
-            AttachProxy(child.Item2, child.Item1, child.Item3);
+            DetachFrom(child.Item2, child.Item1, child.Item3);
+        }
+        DetachFrom(null, subject, null);
+    }
+
+    private void AttachTo(PropertyReference? property, IInterceptorSubject subject, object? index)
+    {
+        if (_attachedSubjects.Add(subject))
+        {
+            var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
+            var registryContext = new LifecycleContext(property, index, subject, count ?? 1);
+
+            foreach (var handler in _handlers)
+            {
+                handler.Attach(registryContext);
+            }
         }
     }
 
-    public void RemoveChild(LifecycleContext context)
+    private void DetachFrom(PropertyReference? property, IInterceptorSubject subject, object? index)
     {
-        var touchedProxies = new HashSet<IInterceptorSubject>();
-        var proxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-        FindProxiesInProperties(context.Subject, touchedProxies, proxyProperties);
-        
-        foreach (var child in proxyProperties)
+        if (_attachedSubjects.Remove(subject))
         {
-            DetachProxy(child.Item2, child.Item1, child.Item3);
+            var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
+            var registryContext = new LifecycleContext(property, index, subject, count ?? 1);
+       
+            foreach (var handler in _handlers)
+            {
+                handler.Detach(registryContext);
+            }
         }
     }
 
@@ -75,46 +93,18 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleHandler
                     .Reverse()
                     .Where(u => !newProxies.Contains(u.Item1)))
                 {
-                    DetachProxy(d.Item2, d.Item1, d.Item3);
+                    DetachFrom(d.Item2, d.Item1, d.Item3);
                 }
 
                 foreach (var d in newProxyProperties
                     .Where(u => !oldProxies.Contains(u.Item1)))
                 {
-                    AttachProxy(d.Item2, d.Item1, d.Item3);
+                    AttachTo(d.Item2, d.Item1, d.Item3);
                 }
             }
         }
 
         return result;
-    }
-
-    private void AttachProxy(PropertyReference property, IInterceptorSubject subject, object? index)
-    {
-        var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
-        var registryContext = new LifecycleContext(property, index, subject, count ?? 1);
-
-        foreach (var handler in _handlers)
-        {
-            if (handler != this)
-            {
-                handler.AddChild(registryContext);
-            }
-        }
-    }
-
-    private void DetachProxy(PropertyReference property, IInterceptorSubject subject, object? index)
-    {
-        var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
-        var registryContext = new LifecycleContext(property, index, subject, count ?? 1);
-       
-        foreach (var handler in _handlers)
-        {
-            if (handler != this)
-            {
-                handler.RemoveChild(registryContext);
-            }
-        }
     }
 
     private void FindProxies(

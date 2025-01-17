@@ -79,12 +79,12 @@ namespace Namotion.Proxy.SampleConsole
 
     public class LogPropertyChangesHandler : ILifecycleHandler
     {
-        public void AddChild(LifecycleContext context)
+        public void Attach(LifecycleContext context)
         {
             Console.WriteLine($"Attach proxy: {context.Subject}");
         }
 
-        public void RemoveChild(LifecycleContext context)
+        public void Detach(LifecycleContext context)
         {
             Console.WriteLine($"Detach proxy: {context.Subject}");
         }

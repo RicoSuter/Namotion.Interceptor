@@ -8,7 +8,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     [ThreadStatic]
     private static Stack<HashSet<PropertyReference>>? _currentTouchedProperties;
     
-    public void AddChild(LifecycleContext context)
+    public void Attach(LifecycleContext context)
     {
         foreach (var property in context
             .Subject.Properties.Where(p => p.Value.IsDerived()))
@@ -25,7 +25,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
     }
 
-    public void RemoveChild(LifecycleContext context)
+    public void Detach(LifecycleContext context)
     {
     }
 
