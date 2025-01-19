@@ -41,7 +41,7 @@ public class Benchmark
         }
     }
 
-    //[Benchmark]
+    [Benchmark]
     public void AddLotsOfPreviousCars()
     {
         _object.PreviousCars = Enumerable.Range(0, 10000)
@@ -49,7 +49,7 @@ public class Benchmark
             .ToArray();
     }
 
-    //[Benchmark]
+    [Benchmark]
     public void IncrementDerivedAverage()
     {
         _object.Tires[0].Pressure += 5;
