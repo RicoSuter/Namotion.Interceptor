@@ -1,15 +1,15 @@
 using Microsoft.AspNetCore.Mvc;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Abstractions;
 using Namotion.Interceptor.Validation;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.OpcUa.Annotations;
 using NSwag.Annotations;
 
-namespace Namotion.Proxy.SampleMachine
+namespace Namotion.Interceptor.SampleMachine
 {
     [GenerateProxy]
     public partial class Root
@@ -124,14 +124,14 @@ namespace Namotion.Proxy.SampleMachine
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var context = InterceptorCollection
+            var collection = InterceptorCollection
                 .Create()
                 .WithRegistry()
                 .WithFullPropertyTracking()
                 .WithProxyLifecycle()
                 .WithDataAnnotationValidation();
 
-            var root = new Root(context)
+            var root = new Root(collection)
             {
                 Machines = new Dictionary<string, Machine>
                 {
@@ -163,13 +163,15 @@ namespace Namotion.Proxy.SampleMachine
 
             // trackable
             builder.Services.AddSingleton(root);
+            builder.Services.AddSingleton(collection);
+            builder.Services.AddSingleton(collection.GetService<IObservable<PropertyChangedContext>>());
+            builder.Services.AddSingleton(collection.GetService<IProxyRegistry>());
 
             // trackable api controllers
             builder.Services.AddProxyControllers<Root, ProxyController<Root>>();
 
             // OPC UA server
             builder.Services.AddOpcUaServerProxySource<Root>("opc");
-
             //builder.Services.AddOpcUaClientProxySource<Root>("opc", "opc.tcp://localhost:4840");
 
             // trackable GraphQL

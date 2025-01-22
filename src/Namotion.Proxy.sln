@@ -33,7 +33,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.AspNetCore",
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.OpcUa", "Namotion.Proxy.OpcUa\Namotion.Proxy.OpcUa.csproj", "{2E84DAEE-9559-423E-862B-DA5E45901A24}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Proxy.SampleMachine", "Namotion.Proxy.SampleMachine\Namotion.Proxy.SampleMachine.csproj", "{C408A4B8-B69C-4304-8EB5-5B0E18001248}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.SampleMachine", "Namotion.Interceptor.SampleMachine\Namotion.Interceptor.SampleMachine.csproj", "{C408A4B8-B69C-4304-8EB5-5B0E18001248}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Build", "Build", "{FC7CA138-011C-4044-8E54-F1EA9DBC5247}"
 	ProjectSection(SolutionItems) = preProject
