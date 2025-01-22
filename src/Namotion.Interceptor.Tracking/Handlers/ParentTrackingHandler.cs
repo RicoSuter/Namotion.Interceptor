@@ -21,4 +21,12 @@ public class ParentTrackingHandler : IWriteInterceptor
         
         return result;
     }
+
+    public void AttachTo(IInterceptorSubject subject)
+    {
+    }
+
+    public void DetachFrom(IInterceptorSubject subject)
+    {
+    }
 }

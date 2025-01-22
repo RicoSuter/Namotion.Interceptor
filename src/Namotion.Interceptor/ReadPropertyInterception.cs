@@ -1,5 +1,11 @@
 ﻿namespace Namotion.Interceptor;
 
-public readonly record struct ReadPropertyInterception(PropertyReference Property)
+public readonly struct ReadPropertyInterception
 {
+    public PropertyReference Property { get; }
+
+    public ReadPropertyInterception(PropertyReference property)
+    {
+        Property = property;
+    }
 }

@@ -1,7 +1,17 @@
 ﻿namespace Namotion.Interceptor;
 
-public readonly record struct PropertyReference(IInterceptorSubject Subject, string Name)
+public readonly record struct PropertyReference
 {
+    public PropertyReference(IInterceptorSubject subject, string name)
+    {
+        Subject = subject;
+        Name = name;
+    }
+    
+    public IInterceptorSubject Subject { get; }
+    
+    public string Name { get; }
+    
     public SubjectPropertyMetadata Metadata => Subject.Properties[Name];
 
     public void SetPropertyData(string key, object? value)

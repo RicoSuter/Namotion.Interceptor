@@ -11,4 +11,12 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
 
         return context.NewValue;
     }
+    
+    public void AttachTo(IInterceptorSubject subject)
+    {
+    }
+
+    public void DetachFrom(IInterceptorSubject subject)
+    {
+    }
 }

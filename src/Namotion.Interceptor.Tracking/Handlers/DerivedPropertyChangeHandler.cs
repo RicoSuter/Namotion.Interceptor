@@ -108,4 +108,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             _currentTouchedProperties = null;
         }
     }
+    
+    public void AttachTo(IInterceptorSubject subject)
+    {
+    }
+
+    public void DetachFrom(IInterceptorSubject subject)
+    {
+    }
 }

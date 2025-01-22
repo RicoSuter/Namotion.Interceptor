@@ -2,7 +2,7 @@
 
 public interface IInterceptor
 {
-    public void AttachTo(IInterceptorSubject subject) { }
-    
-    public void DetachFrom(IInterceptorSubject subject) { }
+    void AttachTo(IInterceptorSubject subject);
+
+    void DetachFrom(IInterceptorSubject subject);
 }
