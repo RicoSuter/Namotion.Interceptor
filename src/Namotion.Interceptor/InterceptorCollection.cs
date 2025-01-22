@@ -31,10 +31,9 @@ public class InterceptorCollection : IInterceptorCollection
         return true;
     }
 
-    public bool AddService<TService>(TService service)
+    public void AddService<TService>(TService service)
     {
         _services.Add(service!);
-        return true;
     }
 
     public TInterface? TryGetService<TInterface>()

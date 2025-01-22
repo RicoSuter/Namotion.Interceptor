@@ -142,9 +142,9 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
         return _collection.TryAddService<TInterface, TService>(factory);
     }
 
-    public bool AddService<TService>(TService service)
+    public void AddService<TService>(TService service)
     {
-        return _collection.AddService(service);
+        _collection.AddService(service);
     }
 
     public TInterface? TryGetService<TInterface>()
