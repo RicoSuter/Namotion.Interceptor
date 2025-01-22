@@ -1,4 +1,5 @@
-﻿using Namotion.Interception.Lifecycle;
+﻿using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Proxy.Tests.Lifecycle;
 
@@ -8,10 +9,9 @@ public class ParentTrackingHandlerTests
     public void WhenProxyIsReferencedByTwoPropertiesOfTheSameProxy_ThenOnlyOneParentIsSet()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
-            .WithParents()
-            .Build();
+        var context = InterceptorCollection
+            .Create()
+            .WithParents();
 
         // Act
         var parent = new Person(context)
@@ -33,10 +33,9 @@ public class ParentTrackingHandlerTests
     public void WhenReferencesAreSetToNull_ThenParentIsEmpty()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
-            .WithParents()
-            .Build();
+        var context = InterceptorCollection
+            .Create()
+            .WithParents();
 
         // Act
         var parent = new Person(context)
@@ -61,10 +60,9 @@ public class ParentTrackingHandlerTests
     public void WhenProxyIsReferencedByTwoOtherProxies_ThenItHasTwoParents()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
-            .WithParents()
-            .Build();
+        var context = InterceptorCollection
+            .Create()
+            .WithParents();
 
         // Act
         var mother = new Person(context);

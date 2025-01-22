@@ -1,4 +1,7 @@
-﻿using Namotion.Interception.Lifecycle.Abstractions;
+﻿using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Abstractions;
+using Namotion.Interceptor.Validation;
 
 namespace Namotion.Proxy.Tests.ChangeTracking;
 
@@ -9,10 +12,9 @@ public class DerivedPropertyChangeHandlerTests
     {
         // Arrange
         var changes = new List<PropertyChangedContext>();
-        var context = InterceptorProvider
-            .CreateBuilder()
-            .WithDerivedPropertyChangeDetection()
-            .Build();
+        var context = InterceptorCollection
+            .Create()
+            .WithDerivedPropertyChangeDetection();
 
         context
             .GetPropertyChangedObservable()

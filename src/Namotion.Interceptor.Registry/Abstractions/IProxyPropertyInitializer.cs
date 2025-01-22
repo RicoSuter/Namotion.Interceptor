@@ -1,4 +1,4 @@
-﻿namespace Namotion.Proxy.Registry.Abstractions;
+﻿namespace Namotion.Interceptor.Registry.Abstractions;
 
 public interface IProxyPropertyInitializer
 {

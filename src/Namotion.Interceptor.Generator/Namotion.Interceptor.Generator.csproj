@@ -7,7 +7,6 @@
 		<IsRoslynComponent>true</IsRoslynComponent>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<Nullable>enable</Nullable>
-		<RootNamespace>Namotion.Proxy.Generator</RootNamespace>
 	</PropertyGroup>
 
 	<PropertyGroup>

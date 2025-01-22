@@ -9,7 +9,7 @@ using Opc.Ua.Configuration;
 
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
-using Namotion.Proxy.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Proxy.OpcUa.Server;
 

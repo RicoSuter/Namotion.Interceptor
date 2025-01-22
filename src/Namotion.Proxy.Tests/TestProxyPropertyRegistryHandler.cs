@@ -1,4 +1,4 @@
-﻿using Namotion.Interception.Lifecycle.Abstractions;
+﻿using Namotion.Interceptor.Tracking.Abstractions;
 
 namespace Namotion.Proxy.Tests
 {

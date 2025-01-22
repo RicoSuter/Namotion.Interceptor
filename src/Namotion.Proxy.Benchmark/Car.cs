@@ -1,5 +1,6 @@
 ﻿using System.Linq;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Proxy.Benchmark
 {

@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.9.34616.47
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy", "Namotion.Proxy\Namotion.Proxy.csproj", "{F3E4C3A0-3098-4DF8-BDBD-0B5757CAC470}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Validation", "Namotion.Interceptor.Validation\Namotion.Interceptor.Validation.csproj", "{F3E4C3A0-3098-4DF8-BDBD-0B5757CAC470}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Generator", "Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj", "{915675AD-EA51-448D-A83E-E2320921A03E}"
 EndProject
@@ -44,6 +44,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor", "Namotion.Interceptor\Namotion.Interceptor.csproj", "{B695F827-EA25-40AF-9169-5206F4A9FF32}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Tracking", "Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj", "{4DFBAC36-BB0D-4AAD-8AF7-DC129967B7D9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Registry", "Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj", "{EF3AB1CA-24EC-4D77-BB1C-8AC095A6F7DE}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -115,6 +117,10 @@ Global
 		{4DFBAC36-BB0D-4AAD-8AF7-DC129967B7D9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4DFBAC36-BB0D-4AAD-8AF7-DC129967B7D9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4DFBAC36-BB0D-4AAD-8AF7-DC129967B7D9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EF3AB1CA-24EC-4D77-BB1C-8AC095A6F7DE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EF3AB1CA-24EC-4D77-BB1C-8AC095A6F7DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EF3AB1CA-24EC-4D77-BB1C-8AC095A6F7DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EF3AB1CA-24EC-4D77-BB1C-8AC095A6F7DE}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

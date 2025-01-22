@@ -1,4 +1,5 @@
 ﻿using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Proxy.SampleBlazor.Models
 {

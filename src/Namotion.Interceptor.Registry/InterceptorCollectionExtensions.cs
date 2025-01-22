@@ -1,0 +1,25 @@
+﻿using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Abstractions;
+
+namespace Namotion.Interceptor.Registry;
+
+public static class InterceptorCollectionExtensions
+{
+    /// <summary>
+    /// Adds support for <see cref="ILifecycleHandler"/> handlers.
+    /// </summary>
+    /// <param name="builder">The builder.</param>
+    /// <returns>The builder.</returns>
+    public static IInterceptorCollection WithRegistry(this IInterceptorCollection builder)
+    {
+        builder
+            .TryAddService<IProxyRegistry, ProxyRegistry>(() => new ProxyRegistry());
+
+        builder
+            .TryAddService<ILifecycleHandler, ProxyRegistry>(() => (ProxyRegistry)builder.GetService<IProxyRegistry>());
+
+        return builder
+            .WithInterceptorInheritance();
+    }
+}

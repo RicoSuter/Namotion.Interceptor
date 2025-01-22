@@ -1,8 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Validation;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.OpcUa.Annotations;
-using Namotion.Proxy.Registry.Abstractions;
 using NSwag.Annotations;
 
 namespace Namotion.Proxy.SampleMachine
@@ -120,13 +124,12 @@ namespace Namotion.Proxy.SampleMachine
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var context = InterceptorProvider
-                .CreateBuilder()
+            var context = InterceptorCollection
+                .Create()
                 .WithRegistry()
                 .WithFullPropertyTracking()
                 .WithProxyLifecycle()
-                .WithDataAnnotationValidation()
-                .Build();
+                .WithDataAnnotationValidation();
 
             var root = new Root(context)
             {

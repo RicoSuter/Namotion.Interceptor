@@ -1,7 +1,7 @@
 ﻿using HotChocolate.Subscriptions;
 using Microsoft.Extensions.Hosting;
-using Namotion.Interception.Lifecycle.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking.Abstractions;
 
 namespace Namotion.Proxy.GraphQL
 {

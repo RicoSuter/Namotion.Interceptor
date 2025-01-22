@@ -1,7 +1,6 @@
-﻿using Namotion.Interceptor;
-using Namotion.Proxy.Attributes;
+﻿using Namotion.Interceptor.Registry.Attributes;
 
-namespace Namotion.Proxy.Registry.Abstractions;
+namespace Namotion.Interceptor.Registry.Abstractions;
 
 #pragma warning disable CS8618
 public record RegisteredProxyProperty(PropertyReference Property)

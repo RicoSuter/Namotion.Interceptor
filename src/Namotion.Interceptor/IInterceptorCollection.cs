@@ -1,12 +1,16 @@
 namespace Namotion.Interceptor;
 
-public interface IInterceptorCollection : IInterceptorProvider
+public interface IInterceptorCollection
 {
-    void AddInterceptors(params IEnumerable<IInterceptor> interceptors);
+    void AddInterceptorCollection(IInterceptorCollection interceptorCollection);
 
-    void RemoveInterceptors(params IEnumerable<IInterceptor> interceptors);
+    void RemoveInterceptorCollection(IInterceptorCollection interceptorCollection);
     
-    object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue);
+    bool TryAddService<TInterface, TService>(Func<TService> factory);
 
-    void SetProperty(IInterceptorSubject subject, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue);
+    bool AddService<TService>(TService service);
+
+    TInterface? TryGetService<TInterface>();
+
+    IEnumerable<TInterface> GetServices<TInterface>();
 }

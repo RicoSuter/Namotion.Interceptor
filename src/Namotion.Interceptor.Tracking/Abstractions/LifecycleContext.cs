@@ -1,6 +1,4 @@
-﻿using Namotion.Interceptor;
-
-namespace Namotion.Interception.Lifecycle.Abstractions;
+﻿namespace Namotion.Interceptor.Tracking.Abstractions;
 
 public record struct LifecycleContext(
     PropertyReference? Property,

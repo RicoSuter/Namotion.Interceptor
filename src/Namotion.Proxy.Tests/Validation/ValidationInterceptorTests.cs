@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Validation;
 
 namespace Namotion.Proxy.Tests.Validation;
 
@@ -8,11 +10,10 @@ public class ValidationInterceptorTests
     public void ShouldValidateProperty()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
+        var context = InterceptorCollection
+            .Create()
             .WithPropertyValidation()
-            .WithDataAnnotationValidation()
-            .Build();
+            .WithDataAnnotationValidation();
 
         // Act
         var person = new Person(context)

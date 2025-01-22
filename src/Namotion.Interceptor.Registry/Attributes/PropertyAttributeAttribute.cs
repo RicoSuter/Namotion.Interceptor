@@ -1,4 +1,4 @@
-﻿namespace Namotion.Proxy.Attributes;
+﻿namespace Namotion.Interceptor.Registry.Attributes;
 
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
 public class PropertyAttributeAttribute : Attribute

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interception.Lifecycle;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Proxy.Tests.ChangeTracking;
 
@@ -9,16 +10,15 @@ public class ReadPropertyRecorderTests
     public void WhenPropertyIsChanged_ThenItIsPartOfRecordedProperties()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
+        var context = InterceptorCollection
+            .Create()
             .WithPropertyChangedObservable()
-            .WithReadPropertyRecorder()
-            .Build();
+            .WithReadPropertyRecorder();
 
         // Act
         var person = new Person(context);
 
-        var recorder = context.GetRequiredService<ReadPropertyRecorder>().StartRecordingPropertyReadCalls();
+        var recorder = context.GetService<ReadPropertyRecorder>().StartRecordingPropertyReadCalls();
         using (recorder)
         {
              var firstName = person.FirstName;

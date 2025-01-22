@@ -12,7 +12,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <ProjectReference Include="..\Namotion.Proxy\Namotion.Proxy.csproj" />
+	  <ProjectReference Include="..\Namotion.Interceptor.Validation\Namotion.Interceptor.Validation.csproj" />
 	</ItemGroup>
 
 </Project>

@@ -1,4 +1,5 @@
 ﻿using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Proxy.Tests.Lifecycle;
 
@@ -8,27 +9,25 @@ public class InterceptorInheritanceHandlerTests
     public void WhenPropertyIsAssigned_ThenContextIsSet()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
-            .WithInterceptorInheritance()
-            .Build();
+        var collection = InterceptorCollection
+            .Create()
+            .WithInterceptorInheritance();
 
         // Act
-        var person = new Person(context);
+        var person = new Person(collection);
         person.Mother = new Person { FirstName = "Susi" };
 
         // Assert
-        Assert.Equal(context.Interceptors, ((IInterceptorSubject)person.Mother).Interceptors?.Interceptors);
+        Assert.Equal(collection.GetServices<IInterceptor>(), ((IInterceptorSubject)person.Mother).Interceptors?.GetServices<IInterceptor>());
     }
 
     [Fact]
     public void WhenPropertyWithDeepStructureIsAssigned_ThenChildrenAlsoHaveContext()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
-            .WithInterceptorInheritance()
-            .Build();
+        var collection = InterceptorCollection
+            .Create()
+            .WithInterceptorInheritance();
 
         // Act
         var grandmother = new Person
@@ -42,26 +41,25 @@ public class InterceptorInheritanceHandlerTests
             Mother = grandmother
         };
 
-        var person = new Person(context)
+        var person = new Person(collection)
         {
             FirstName = "Child",
             Mother = mother
         };
 
         // Assert
-        Assert.Equal(context.Interceptors, ((IInterceptorSubject)person).Interceptors.Interceptors);
-        Assert.Equal(context.Interceptors, ((IInterceptorSubject)mother).Interceptors.Interceptors);
-        Assert.Equal(context.Interceptors, ((IInterceptorSubject)grandmother).Interceptors.Interceptors);
+        Assert.Equal(collection.GetServices<IInterceptor>(), ((IInterceptorSubject)person).Interceptors?.GetServices<IInterceptor>());
+        Assert.Equal(collection.GetServices<IInterceptor>(), ((IInterceptorSubject)mother).Interceptors?.GetServices<IInterceptor>());
+        Assert.Equal(collection.GetServices<IInterceptor>(), ((IInterceptorSubject)grandmother).Interceptors?.GetServices<IInterceptor>());
     }
 
     [Fact]
     public void WhenPropertyWithDeepProxiesIsRemoved_ThenAllContextsAreNull()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
-            .WithInterceptorInheritance()
-            .Build();
+        var context = InterceptorCollection
+            .Create()
+            .WithInterceptorInheritance();
 
         // Act
         var grandmother = new Person
@@ -84,19 +82,18 @@ public class InterceptorInheritanceHandlerTests
         person.Mother = null;
 
         // Assert
-        Assert.Equal(context.Interceptors, ((IInterceptorSubject)person).Interceptors.Interceptors);
-        Assert.Empty(((IInterceptorSubject)mother).Interceptors.Interceptors);
-        Assert.Empty(((IInterceptorSubject)grandmother).Interceptors.Interceptors);
+        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)person).Interceptors?.GetServices<IInterceptor>());
+        Assert.Empty(((IInterceptorSubject)mother).Interceptors.GetServices<IInterceptor>());
+        Assert.Empty(((IInterceptorSubject)grandmother).Interceptors.GetServices<IInterceptor>());
     }
 
     [Fact]
     public void WhenArrayIsAssigned_ThenAllChildrenAreAttached()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
-            .WithInterceptorInheritance()
-            .Build();
+        var context = InterceptorCollection
+            .Create()
+            .WithInterceptorInheritance();
 
         // Act
         var child1 = new Person { FirstName = "Child1" };
@@ -112,19 +109,18 @@ public class InterceptorInheritanceHandlerTests
         };
 
         // Assert
-        Assert.Equal(context.Interceptors, ((IInterceptorSubject)person).Interceptors?.Interceptors);
-        Assert.Equal(context.Interceptors, ((IInterceptorSubject)child1).Interceptors?.Interceptors);
-        Assert.Equal(context.Interceptors, ((IInterceptorSubject)child2).Interceptors?.Interceptors);
+        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)person).Interceptors?.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)child1).Interceptors?.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)child2).Interceptors?.GetServices<IInterceptor>());
     }
 
     [Fact]
     public void WhenUsingCircularDependencies_ThenProxiesAreAttached()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
-            .WithInterceptorInheritance()
-            .Build();
+        var context = InterceptorCollection
+            .Create()
+            .WithInterceptorInheritance();
 
         // Act
         var child1 = new Person(context) { FirstName = "Child1" };
@@ -136,8 +132,8 @@ public class InterceptorInheritanceHandlerTests
         child3.Mother = child1;
 
         // Assert
-        Assert.Equal(context.Interceptors, ((IInterceptorSubject)child1).Interceptors?.Interceptors);
-        Assert.Equal(context.Interceptors, ((IInterceptorSubject)child2).Interceptors?.Interceptors);
-        Assert.Equal(context.Interceptors, ((IInterceptorSubject)child3).Interceptors?.Interceptors);
+        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)child1).Interceptors?.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)child2).Interceptors?.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)child3).Interceptors?.GetServices<IInterceptor>());
     }
 }

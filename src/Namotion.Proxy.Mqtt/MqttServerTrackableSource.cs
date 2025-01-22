@@ -12,8 +12,8 @@ using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Server;
 using Namotion.Interceptor;
-using Namotion.Proxy.Registry;
-using Namotion.Proxy.Registry.Abstractions;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Proxy.Sources.Abstractions;
 
 namespace Namotion.Proxy.Mqtt

@@ -1,6 +1,4 @@
-﻿using Namotion.Interceptor;
-
-namespace Namotion.Interception.Lifecycle.Handlers;
+﻿namespace Namotion.Interceptor.Tracking.Handlers;
 
 public class ParentTrackingHandler : IWriteInterceptor
 {

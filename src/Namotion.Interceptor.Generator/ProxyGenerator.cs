@@ -1,12 +1,12 @@
-﻿using Microsoft.CodeAnalysis;
+﻿using System;
+using System.Linq;
+using System.Text;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
-using System;
-using System.Linq;
-using System.Text;
 
-namespace Namotion.Proxy.Generator;
+namespace Namotion.Interceptor.Generator;
 
 [Generator]
 public class ProxyGenerator : IIncrementalGenerator
@@ -20,7 +20,6 @@ public class ProxyGenerator : IIncrementalGenerator
                 {
                     var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
                     var model = ctx.SemanticModel;
-                    var classSymbol = model.GetDeclaredSymbol(classDeclaration, ct);
                     return new
                     {
                         Model = model,
@@ -80,13 +79,13 @@ namespace {namespaceName}
 {{
     public partial class {baseClassName} : IInterceptorSubject
     {{
-        private IInterceptorCollection? _interceptors;
+        private IInterceptorExecutor? _interceptors;
         private ConcurrentDictionary<string, object?> _data = new ConcurrentDictionary<string, object?>();
 
         [JsonIgnore]
-        IInterceptorCollection IInterceptorSubject.Interceptors
+        IInterceptorExecutor IInterceptorSubject.Interceptors
         {{
-            get => _interceptors = _interceptors ?? new InterceptorCollection(this);
+            get => _interceptors = _interceptors ?? new InterceptorExecutor(this);
         }}
 
         [JsonIgnore]
@@ -135,9 +134,9 @@ namespace {namespaceName}
                     {
                         generatedCode +=
     $@"
-        public {baseClassName}(IInterceptorProvider interceptors) : this()
+        public {baseClassName}(IInterceptorCollection interceptors) : this()
         {{
-            ((IInterceptorSubject)this).AddInterceptors(interceptors);
+            ((IInterceptorSubject)this).Interceptors.AddInterceptorCollection(interceptors);
         }}
 ";
                     }

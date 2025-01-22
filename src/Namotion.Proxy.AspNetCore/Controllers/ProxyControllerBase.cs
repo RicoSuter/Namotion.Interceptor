@@ -6,9 +6,10 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Namotion.Interceptor;
-using Namotion.Proxy.Attributes;
-using Namotion.Proxy.Registry.Abstractions;
-using Namotion.Proxy.Validation;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Validation;
 
 namespace Namotion.Proxy.AspNetCore.Controllers;
 

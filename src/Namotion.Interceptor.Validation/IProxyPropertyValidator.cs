@@ -1,7 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
-using Namotion.Interceptor;
 
-namespace Namotion.Proxy.Validation;
+namespace Namotion.Interceptor.Validation;
 
 public interface IProxyPropertyValidator
 {

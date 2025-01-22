@@ -1,5 +1,8 @@
 ﻿using System.Linq;
 using BenchmarkDotNet.Attributes;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Proxy.Benchmark;
 
@@ -9,7 +12,7 @@ public class Benchmark
 #pragma warning disable CS8618
 
     private Car _object;
-    private InterceptorProvider? _context;
+    private IInterceptorCollection? _context;
 
 #pragma warning restore CS8618
 
@@ -29,11 +32,10 @@ public class Benchmark
                 break;
             
             case "interceptable":
-                _context = InterceptorProvider
-                    .CreateBuilder()
+                _context = InterceptorCollection
+                    .Create()
                     .WithFullPropertyTracking()
-                    .WithRegistry()
-                    .Build();
+                    .WithRegistry();
 
                 _object = new Car(_context);
                 AddLotsOfPreviousCars();

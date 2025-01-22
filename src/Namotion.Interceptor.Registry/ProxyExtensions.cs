@@ -1,14 +1,11 @@
-﻿using Namotion.Interceptor;
-using Namotion.Proxy.Attributes;
-using Namotion.Proxy.Registry.Abstractions;
-
-using System.Collections;
-using System.Text.Json.Nodes;
+﻿using System.Collections;
 using System.Text.Json;
-using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interception.Lifecycle;
+using System.Text.Json.Nodes;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Tracking;
 
-namespace Namotion.Proxy;
+namespace Namotion.Interceptor.Registry;
 
 public static class ProxyExtensions
 {

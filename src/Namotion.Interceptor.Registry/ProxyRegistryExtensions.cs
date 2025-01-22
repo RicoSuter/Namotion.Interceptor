@@ -1,9 +1,8 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor;
-using Namotion.Proxy.Attributes;
-using Namotion.Proxy.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
 
-namespace Namotion.Proxy.Registry;
+namespace Namotion.Interceptor.Registry;
 
 public static class ProxyRegistryExtensions
 {
