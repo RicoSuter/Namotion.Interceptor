@@ -1,8 +1,6 @@
-﻿using Namotion.Interceptor;
-using Namotion.Interceptor.Attributes;
-using Namotion.Proxy;
+﻿using Namotion.Interceptor.Attributes;
 
-namespace Namotion.Proxy.Benchmark
+namespace Namotion.Interceptor.Benchmark
 {
     [GenerateProxy]
     public partial class Tire

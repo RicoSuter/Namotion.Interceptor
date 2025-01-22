@@ -1,10 +1,9 @@
 ﻿using System.Linq;
 using BenchmarkDotNet.Attributes;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 
-namespace Namotion.Proxy.Benchmark;
+namespace Namotion.Interceptor.Benchmark;
 
 [MemoryDiagnoser]
 public class Benchmark

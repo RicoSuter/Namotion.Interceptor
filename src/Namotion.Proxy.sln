@@ -9,7 +9,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Genera
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.Tests", "Namotion.Proxy.Tests\Namotion.Proxy.Tests.csproj", "{D1B75837-F404-400F-9178-105FD59E9A34}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.Benchmark", "Namotion.Proxy.Benchmark\Namotion.Proxy.Benchmark.csproj", "{070D9963-D572-4B31-AE9D-32A45C9F1DAE}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Benchmark", "Namotion.Interceptor.Benchmark\Namotion.Interceptor.Benchmark.csproj", "{070D9963-D572-4B31-AE9D-32A45C9F1DAE}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.SampleBlazor", "Namotion.Proxy.SampleBlazor\Namotion.Proxy.SampleBlazor.csproj", "{28F1F16B-9E8F-4FDB-9AD2-1A5FD450266D}"
 EndProject
