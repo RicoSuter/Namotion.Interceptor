@@ -11,7 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Namotion.Proxy.Blazor\Namotion.Proxy.Blazor.csproj" />
+    <ProjectReference Include="..\Namotion.Interceptor.Blazor\Namotion.Interceptor.Blazor.csproj" />
     <ProjectReference Include="..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\Namotion.Interceptor.Validation\Namotion.Interceptor.Validation.csproj" />
   </ItemGroup>

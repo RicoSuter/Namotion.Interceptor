@@ -1,7 +1,6 @@
-﻿using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Abstractions;
+﻿using Namotion.Interceptor.Tracking.Abstractions;
 
-namespace Namotion.Interceptor.Validation;
+namespace Namotion.Interceptor.Tracking;
 
 public static class ObservableServiceProviderExtensions
 {

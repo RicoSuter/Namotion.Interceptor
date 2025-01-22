@@ -15,7 +15,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.SampleBlazor
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Samples", "Samples", "{587FA680-0051-4CA2-8BA2-E72997940EF0}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.Blazor", "Namotion.Proxy.Blazor\Namotion.Proxy.Blazor.csproj", "{3E57D6F1-0E5F-4E2F-A914-58DDEBA0837A}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Blazor", "Namotion.Interceptor.Blazor\Namotion.Interceptor.Blazor.csproj", "{3E57D6F1-0E5F-4E2F-A914-58DDEBA0837A}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.SampleConsole", "Namotion.Proxy.SampleConsole\Namotion.Proxy.SampleConsole.csproj", "{499EBD8C-9968-47C9-88AB-219C5424AA0F}"
 EndProject
@@ -134,6 +134,7 @@ Global
 		{0B70091F-8AD5-405B-B257-4E87AF497406} = {D977E1EA-C167-4BEB-B7C5-4214DDD470D3}
 		{C408A4B8-B69C-4304-8EB5-5B0E18001248} = {587FA680-0051-4CA2-8BA2-E72997940EF0}
 		{2E84DAEE-9559-423E-862B-DA5E45901A24} = {D977E1EA-C167-4BEB-B7C5-4214DDD470D3}
+		{070D9963-D572-4B31-AE9D-32A45C9F1DAE} = {587FA680-0051-4CA2-8BA2-E72997940EF0}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {D7E90F8C-B0AE-4ACF-9226-306D8EA3D35B}
