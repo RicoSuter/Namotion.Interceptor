@@ -164,7 +164,7 @@ namespace Namotion.Interceptor.SampleMachine
             // trackable
             builder.Services.AddSingleton(root);
             builder.Services.AddSingleton(collection);
-            builder.Services.AddSingleton(collection.GetService<IObservable<PropertyChangedContext>>());
+            builder.Services.AddSingleton(collection.GetPropertyChangedObservable());
             builder.Services.AddSingleton(collection.GetService<IProxyRegistry>());
 
             // trackable api controllers
