@@ -1,11 +1,9 @@
-﻿using Namotion.Interceptor;
-using Namotion.Interceptor.Attributes;
+﻿using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Abstractions;
 using Namotion.Interceptor.Tracking.Attributes;
-using Namotion.Interceptor.Validation;
 
-namespace Namotion.Proxy.SampleConsole
+namespace Namotion.Interceptor.SampleConsole
 {
     internal class Program
     {
