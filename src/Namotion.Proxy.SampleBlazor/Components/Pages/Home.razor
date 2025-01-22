@@ -1,12 +1,11 @@
 ﻿@page "/"
 @rendermode InteractiveServer
-@using Namotion.Proxy.Blazor
 @using Namotion.Proxy.SampleBlazor.Models;
 
 @inject Game Game
 @inject Player Player
 
-@inherits ProxyComponentBase<Game>
+@inherits Namotion.Interceptor.Blazor.ProxyComponentBase<Game>
 
 <PageTitle>The Game</PageTitle>
 

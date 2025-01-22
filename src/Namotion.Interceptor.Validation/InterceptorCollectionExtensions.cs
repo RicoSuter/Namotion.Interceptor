@@ -14,7 +14,7 @@ public static class InterceptorCollectionExtensions
     }
 
     /// <summary>
-    /// Adds support for data annotations on the interceptable properties and <see cref="WithPropertyValidation"/>.
+    /// Adds support for data annotations on the subject's properties and <see cref="WithPropertyValidation"/>.
     /// </summary>
     /// <param name="builder">The builder.</param>
     /// <returns>The builder.</returns>
