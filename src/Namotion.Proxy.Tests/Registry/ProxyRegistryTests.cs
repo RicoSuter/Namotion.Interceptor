@@ -1,9 +1,8 @@
-﻿using Namotion.Proxy.Registry;
-using Namotion.Proxy.Registry.Abstractions;
-using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
-using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interception.Lifecycle.Abstractions;
+﻿using System.Text.Json;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Abstractions;
 
 namespace Namotion.Proxy.Tests.Registry;
 
@@ -17,14 +16,13 @@ public class ProxyRegistryTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var provider = InterceptorProvider
-            .CreateBuilder()
+        var collection = InterceptorCollection
+            .Create()
             .WithRegistry()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
-            .Build();
+            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
 
         // Act
-        var person = new Person(provider)
+        var person = new Person(collection)
         {
             FirstName = "Child",
             Mother = new Person
@@ -41,7 +39,7 @@ public class ProxyRegistryTests
         Assert.Equal(3, attaches.Count);
         Assert.Empty(detaches);
 
-        var registry = provider.GetRequiredService<IProxyRegistry>();
+        var registry = collection.GetService<IProxyRegistry>();
         Assert.Equal(3, registry.KnownProxies.Count());
     }
 
@@ -53,14 +51,13 @@ public class ProxyRegistryTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorProvider
-            .CreateBuilder()
+        var collection = InterceptorCollection
+            .Create()
             .WithRegistry()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
-            .Build();
+            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
 
         // Act
-        var person = new Person(context)
+        var person = new Person(collection)
         {
             FirstName = "Child"
         };
@@ -78,7 +75,7 @@ public class ProxyRegistryTests
         Assert.Equal(3, attaches.Count);
         Assert.Empty(detaches);
 
-        var registry = context.GetRequiredService<IProxyRegistry>();
+        var registry = collection.GetService<IProxyRegistry>();
         Assert.Equal(3, registry.KnownProxies.Count());
     }
 
@@ -90,14 +87,13 @@ public class ProxyRegistryTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorProvider
-            .CreateBuilder()
+        var collection = InterceptorCollection
+            .Create()
             .WithRegistry()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
-            .Build();
+            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
 
         // Act
-        var person = new Person(context)
+        var person = new Person(collection)
         {
             FirstName = "Child",
             Mother = new Person
@@ -116,7 +112,7 @@ public class ProxyRegistryTests
         Assert.Equal(3, attaches.Count);
         Assert.Equal(2, detaches.Count);
 
-        var registry = context.GetRequiredService<IProxyRegistry>();
+        var registry = collection.GetService<IProxyRegistry>();
         Assert.Single(registry.KnownProxies);
     }
 
@@ -124,12 +120,11 @@ public class ProxyRegistryTests
     public void WhenAddingTransitiveProxies_ThenAllAreAvailable()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
-            .WithRegistry()
-            .Build();
+        var collection = InterceptorCollection
+            .Create()
+            .WithRegistry();
 
-        var registry = context.GetRequiredService<IProxyRegistry>();
+        var registry = collection.GetService<IProxyRegistry>();
 
         // Act
         var grandmother = new Person
@@ -143,7 +138,7 @@ public class ProxyRegistryTests
             Mother = grandmother
         };
 
-        var person = new Person(context)
+        var person = new Person(collection)
         {
             FirstName = "Child",
             Mother = mother
@@ -160,12 +155,11 @@ public class ProxyRegistryTests
     public void WhenRemovingMiddleElement_ThenChildrensAreAlsoRemoved()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
-            .WithRegistry()
-            .Build();
+        var collection = InterceptorCollection
+            .Create()
+            .WithRegistry();
 
-        var registry = context.GetRequiredService<IProxyRegistry>();
+        var registry = collection.GetService<IProxyRegistry>();
 
         // Act
         var grandmother = new Person
@@ -179,7 +173,7 @@ public class ProxyRegistryTests
             Mother = grandmother
         };
 
-        var person = new Person(context)
+        var person = new Person(collection)
         {
             FirstName = "Child",
             Mother = mother
@@ -198,13 +192,12 @@ public class ProxyRegistryTests
     public async Task WhenConvertingToJson_ThenGraphIsPreserved()
     {
         // Arrange
-        var context = InterceptorProvider
-            .CreateBuilder()
-            .WithRegistry()
-            .Build();
+        var collection = InterceptorCollection
+            .Create()
+            .WithRegistry();
 
         // Act
-        var person = new Person(context)
+        var person = new Person(collection)
         {
             FirstName = "Child",
             Mother = new Person
@@ -218,7 +211,7 @@ public class ProxyRegistryTests
         };
 
         // Assert
-        await Verify(person.ToJsonObject(context.GetRequiredService<IProxyRegistry>())
+        await Verify(person.ToJsonObject(collection.GetService<IProxyRegistry>())
             .ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true }));
     }
 }

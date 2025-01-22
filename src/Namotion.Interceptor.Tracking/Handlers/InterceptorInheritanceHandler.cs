@@ -1,7 +1,6 @@
-﻿using Namotion.Interception.Lifecycle.Abstractions;
-using Namotion.Interceptor;
+﻿using Namotion.Interceptor.Tracking.Abstractions;
 
-namespace Namotion.Interception.Lifecycle.Handlers;
+namespace Namotion.Interceptor.Tracking.Handlers;
 
 public class InterceptorInheritanceHandler : ILifecycleHandler
 {
@@ -10,7 +9,7 @@ public class InterceptorInheritanceHandler : ILifecycleHandler
         if (context.ReferenceCount == 1 && context.Property is not null)
         {
             var parent = context.Property.Value.Subject;
-            context.Subject.Interceptors.AddInterceptors(parent.Interceptors.Interceptors);
+            context.Subject.Interceptors.AddInterceptorCollection(parent.Interceptors);
         }
     }
 
@@ -19,7 +18,7 @@ public class InterceptorInheritanceHandler : ILifecycleHandler
         if (context.Property is not null)
         {
             var parent = context.Property.Value.Subject;
-            context.Subject.Interceptors.RemoveInterceptors(parent.Interceptors.Interceptors);
+            context.Subject.Interceptors.RemoveInterceptorCollection(parent.Interceptors);
         }
     }
 }

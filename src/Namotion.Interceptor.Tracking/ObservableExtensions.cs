@@ -1,7 +1,7 @@
 ﻿using System.Reactive.Linq;
-using Namotion.Interception.Lifecycle.Abstractions;
+using Namotion.Interceptor.Tracking.Abstractions;
 
-namespace Namotion.Interception.Lifecycle;
+namespace Namotion.Interceptor.Tracking;
 
 public static class ObservableExtensions
 {

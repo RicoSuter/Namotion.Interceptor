@@ -1,5 +1,6 @@
-﻿using Namotion.Interception.Lifecycle.Abstractions;
-using Namotion.Interceptor;
+﻿using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Abstractions;
 
 namespace Namotion.Proxy.Tests.Lifecycle;
 
@@ -13,14 +14,13 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorProvider
-            .CreateBuilder()
+        var collection = InterceptorCollection
+            .Create()
             .WithProxyLifecycle()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
-            .Build();
+            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
 
         // Act
-        var mother = new Person(context) { FirstName = "Mother" };
+        var mother = new Person(collection) { FirstName = "Mother" };
         var child1 = new Person { FirstName = "Child1" };
         var child2 = new Person { FirstName = "Child2" };
 
@@ -40,11 +40,10 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorProvider
-            .CreateBuilder()
+        var collection = InterceptorCollection
+            .Create()
             .WithProxyLifecycle()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
-            .Build();
+            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
 
         // Act
         var mother = new Person { FirstName = "Mother" };
@@ -53,7 +52,7 @@ public class LifecycleInterceptorTests
 
         mother.Children = [child1, child2];
         
-        mother.AddInterceptors(context);
+        ((IInterceptorSubject)mother).Interceptors.AddInterceptorCollection(collection);
 
         // Assert
         Assert.Equal(3, attaches.Count);
@@ -67,15 +66,14 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorProvider
-            .CreateBuilder()
+        var collection = InterceptorCollection
+            .Create()
             .WithInterceptorInheritance()
             .WithProxyLifecycle()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
-            .Build();
+            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
 
         // Act
-        var mother1 = new Person(context) { FirstName = "Mother1" };
+        var mother1 = new Person(collection) { FirstName = "Mother1" };
         var mother2 = new Person { FirstName = "Mother2" };
         var mother3 = new Person { FirstName = "Mother3" };
 
@@ -98,12 +96,11 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorProvider
-            .CreateBuilder()
+        var collection = InterceptorCollection
+            .Create()
             .WithInterceptorInheritance()
             .WithProxyLifecycle()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
-            .Build();
+            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
 
         // Act
         var mother1 = new Person { FirstName = "Mother1" };
@@ -113,7 +110,7 @@ public class LifecycleInterceptorTests
         mother1.Mother = mother2;
         mother2.Mother = mother3;
 
-        mother1.AddInterceptors(context);
+        ((IInterceptorSubject)mother1).Interceptors.AddInterceptorCollection(collection);
 
         // Assert
         Assert.Equal(3, attaches.Count);
@@ -127,19 +124,18 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorProvider
-            .CreateBuilder()
+        var collection = InterceptorCollection
+            .Create()
             .WithProxyLifecycle()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
-            .Build();
+            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
 
         // Act
-        var mother = new Person(context) { FirstName = "Mother" };
+        var mother = new Person(collection) { FirstName = "Mother" };
         var child1 = new Person { FirstName = "Child1" };
         var child2 = new Person { FirstName = "Child2" };
 
         mother.Children = [child1, child2];
-        mother.RemoveInterceptors(context);
+        ((IInterceptorSubject)mother).Interceptors.RemoveInterceptorCollection(collection);
 
         // Assert
         Assert.Equal(3, detaches.Count);
@@ -153,22 +149,21 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var context = InterceptorProvider
-            .CreateBuilder()
+        var collection = InterceptorCollection
+            .Create()
             .WithInterceptorInheritance()
             .WithProxyLifecycle()
-            .TryAddSingleton<ILifecycleHandler, TestProxyPropertyRegistryHandler>(_ => handler)
-            .Build();
+            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
 
         // Act
-        var mother1 = new Person(context) { FirstName = "Mother1" };
+        var mother1 = new Person(collection) { FirstName = "Mother1" };
         var mother2 = new Person { FirstName = "Mother2" };
         var mother3 = new Person { FirstName = "Mother3" };
 
         mother1.Mother = mother2;
         mother2.Mother = mother3;
 
-        mother1.RemoveInterceptors(context);
+        ((IInterceptorSubject)mother1).Interceptors.RemoveInterceptorCollection(collection);
 
         // Assert
         Assert.Equal(3, detaches.Count);

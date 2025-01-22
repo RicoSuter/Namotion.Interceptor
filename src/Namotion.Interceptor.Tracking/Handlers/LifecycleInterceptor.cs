@@ -1,8 +1,7 @@
 ﻿using System.Collections;
-using Namotion.Interception.Lifecycle.Abstractions;
-using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking.Abstractions;
 
-namespace Namotion.Interception.Lifecycle.Handlers;
+namespace Namotion.Interceptor.Tracking.Handlers;
 
 public class LifecycleInterceptor : IWriteInterceptor
 {

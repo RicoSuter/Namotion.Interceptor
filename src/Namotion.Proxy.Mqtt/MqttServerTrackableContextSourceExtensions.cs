@@ -1,10 +1,7 @@
-﻿using System;
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Proxy;
 using Namotion.Proxy.Mqtt;
-using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Sources;
 
 // ReSharper disable once CheckNamespace
@@ -30,7 +27,7 @@ public static class MqttServerTrackableContextSourceExtensions
             {
                 return new ProxySourceBackgroundService<TProxy>(
                     sp.GetRequiredService<MqttServerTrackableSource<TProxy>>(),
-                    sp,
+                    sp.GetRequiredService<IInterceptorCollection>(),
                     sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TProxy>>>());
             });
     }

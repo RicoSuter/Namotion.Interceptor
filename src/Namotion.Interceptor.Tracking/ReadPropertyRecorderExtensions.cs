@@ -1,6 +1,4 @@
-﻿using Namotion.Interceptor;
-
-namespace Namotion.Interception.Lifecycle;
+﻿namespace Namotion.Interceptor.Tracking;
 
 public static class ReadPropertyRecorderExtensions
 {

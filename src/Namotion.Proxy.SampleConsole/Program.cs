@@ -1,6 +1,9 @@
-﻿using Namotion.Interception.Lifecycle.Abstractions;
-using Namotion.Interception.Lifecycle.Attributes;
-using Namotion.Interceptor;
+﻿using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Abstractions;
+using Namotion.Interceptor.Tracking.Attributes;
+using Namotion.Interceptor.Validation;
 
 namespace Namotion.Proxy.SampleConsole
 {
@@ -8,13 +11,12 @@ namespace Namotion.Proxy.SampleConsole
     {
         static void Main(string[] args)
         {
-            var context = InterceptorProvider
-                .CreateBuilder()
-                .TryAddSingleton<ILifecycleHandler, LogPropertyChangesHandler>(_ => new LogPropertyChangesHandler())
-                .WithFullPropertyTracking()
-                .Build();
+            var collection = InterceptorCollection
+                .Create()
+                .WithService<ILifecycleHandler, LogPropertyChangesHandler>(() => new LogPropertyChangesHandler())
+                .WithFullPropertyTracking();
 
-            context
+            collection
                 .GetPropertyChangedObservable()
                 .Subscribe((change) => 
                     Console.WriteLine($"Property {change.Property.Name} changed from {change.OldValue} to {change.NewValue}."));
@@ -23,7 +25,7 @@ namespace Namotion.Proxy.SampleConsole
             var child2 = new Person { FirstName = "Child2" };
             var child3 = new Person { FirstName = "Child3" };
 
-            var person = new Person(context)
+            var person = new Person(collection)
             {
                 FirstName = "Rico",
                 LastName = "Suter",

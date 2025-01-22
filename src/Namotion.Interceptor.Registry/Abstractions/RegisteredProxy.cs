@@ -1,7 +1,6 @@
 ﻿using System.Text.Json.Serialization;
-using Namotion.Interceptor;
 
-namespace Namotion.Proxy.Registry.Abstractions;
+namespace Namotion.Interceptor.Registry.Abstractions;
 
 public record RegisteredProxy
 {

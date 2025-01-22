@@ -1,4 +1,6 @@
-using Namotion.Interception.Lifecycle;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Validation;
 using Namotion.Proxy.SampleBlazor.Components;
 using Namotion.Proxy.SampleBlazor.Models;
 
@@ -10,20 +12,19 @@ namespace Namotion.Proxy.SampleBlazor
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var context = InterceptorProvider
-                .CreateBuilder()
+            var collection = InterceptorCollection
+                .Create()
                 .WithFullPropertyTracking()
-                .WithReadPropertyRecorder()
-                .Build();
+                .WithReadPropertyRecorder();
 
             // Add services to the container.
             builder.Services
                 .AddRazorComponents()
                 .AddInteractiveServerComponents();
 
-            builder.Services.AddSingleton(context.GetPropertyChangedObservable());          
-            builder.Services.AddSingleton(context.GetRequiredService<ReadPropertyRecorder>());          
-            builder.Services.AddSingleton(new Game(context));
+            builder.Services.AddSingleton(collection.GetPropertyChangedObservable());          
+            builder.Services.AddSingleton(collection.GetService<ReadPropertyRecorder>());          
+            builder.Services.AddSingleton(new Game(collection));
             builder.Services.AddScoped<Player>();
 
             var app = builder.Build();

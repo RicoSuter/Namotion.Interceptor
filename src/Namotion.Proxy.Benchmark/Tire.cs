@@ -1,4 +1,5 @@
 ﻿using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Proxy;
 
 namespace Namotion.Proxy.Benchmark

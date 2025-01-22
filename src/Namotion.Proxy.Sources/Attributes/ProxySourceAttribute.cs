@@ -1,5 +1,5 @@
 ﻿using Namotion.Interceptor;
-using Namotion.Proxy.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Proxy.Sources.Attributes;
 

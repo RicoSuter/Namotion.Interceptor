@@ -1,5 +1,6 @@
-﻿using Namotion.Interception.Lifecycle.Attributes;
-using Namotion.Interceptor;
+﻿using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Attributes;
 
 namespace Namotion.Proxy.Tests
 {

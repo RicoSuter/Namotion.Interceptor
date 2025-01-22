@@ -1,9 +1,8 @@
-﻿using Namotion.Proxy.Registry.Abstractions;
-using System.Collections.Immutable;
-using Namotion.Interception.Lifecycle.Abstractions;
-using Namotion.Interceptor;
+﻿using System.Collections.Immutable;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Abstractions;
 
-namespace Namotion.Proxy.Registry;
+namespace Namotion.Interceptor.Registry;
 
 // TODO: Add lots of tests!
 

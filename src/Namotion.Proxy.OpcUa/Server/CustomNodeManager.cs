@@ -1,8 +1,6 @@
-﻿using System.Reactive.Linq;
-using System.Reflection;
-using Microsoft.Extensions.DependencyInjection;
+﻿using System.Reflection;
 using Namotion.Interceptor;
-using Namotion.Proxy.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Proxy.OpcUa.Annotations;
 
 using Opc.Ua.Server;

@@ -1,8 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
-using System.Reactive.Linq;
-using Namotion.Interceptor;
 
-namespace Namotion.Proxy.Validation;
+namespace Namotion.Interceptor.Validation;
 
 public class ValidationInterceptor : IWriteInterceptor
 {

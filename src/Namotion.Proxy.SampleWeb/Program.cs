@@ -1,10 +1,13 @@
 using Microsoft.AspNetCore.Mvc;
-using Namotion.Interception.Lifecycle;
-using Namotion.Interception.Lifecycle.Attributes;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Attributes;
+using Namotion.Interceptor.Validation;
 using Namotion.Proxy.AspNetCore.Controllers;
-using Namotion.Proxy.Attributes;
-using Namotion.Proxy.Registry.Abstractions;
 using Namotion.Proxy.Sources.Attributes;
 using NSwag.Annotations;
 
@@ -80,21 +83,20 @@ namespace Namotion.Proxy.SampleWeb
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var context = InterceptorProvider
-                .CreateBuilder()
+            var collection = InterceptorCollection
+                .Create()
                 .WithRegistry()
                 .WithFullPropertyTracking()
                 .WithProxyLifecycle()
-                .WithDataAnnotationValidation()
-                .Build();
+                .WithDataAnnotationValidation();
 
-            var car = new Car(context);
+            var car = new Car(collection);
 
             // trackable
             builder.Services.AddSingleton(car);
-            builder.Services.AddSingleton(context.GetPropertyChangedObservable());          
-            builder.Services.AddSingleton((PropertyChangedObservable)context.GetPropertyChangedObservable());          
-            builder.Services.AddSingleton(context.GetRequiredService<IProxyRegistry>());          
+            builder.Services.AddSingleton(collection.GetPropertyChangedObservable());          
+            builder.Services.AddSingleton((PropertyChangedObservable)collection.GetPropertyChangedObservable());          
+            builder.Services.AddSingleton(collection.GetService<IProxyRegistry>());          
 
             // trackable api controllers
             builder.Services.AddProxyControllers<Car, ProxyController<Car>>();

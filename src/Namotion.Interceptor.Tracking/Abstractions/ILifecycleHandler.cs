@@ -1,4 +1,4 @@
-﻿namespace Namotion.Interception.Lifecycle.Abstractions;
+﻿namespace Namotion.Interceptor.Tracking.Abstractions;
 
 public interface ILifecycleHandler
 {
