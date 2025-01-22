@@ -22,4 +22,12 @@ public class PropertyChangedObservable : IObservable<PropertyChangedContext>, IW
     {
         return _subject.Subscribe(observer);
     }
+    
+    public void AttachTo(IInterceptorSubject subject)
+    {
+    }
+
+    public void DetachFrom(IInterceptorSubject subject)
+    {
+    }
 }
