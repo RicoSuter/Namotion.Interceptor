@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -11,7 +10,7 @@ using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.Sources.Attributes;
 using NSwag.Annotations;
 
-namespace Namotion.Proxy.SampleWeb
+namespace Namotion.Interceptor.SampleWeb
 {
     [GenerateProxy]
     public partial class Car
@@ -94,9 +93,9 @@ namespace Namotion.Proxy.SampleWeb
 
             // trackable
             builder.Services.AddSingleton(car);
-            builder.Services.AddSingleton(collection.GetPropertyChangedObservable());          
-            builder.Services.AddSingleton((PropertyChangedObservable)collection.GetPropertyChangedObservable());          
-            builder.Services.AddSingleton(collection.GetService<IProxyRegistry>());          
+            builder.Services.AddSingleton(collection);
+            builder.Services.AddSingleton(collection.GetPropertyChangedObservable());
+            builder.Services.AddSingleton(collection.GetService<IProxyRegistry>());
 
             // trackable api controllers
             builder.Services.AddProxyControllers<Car, ProxyController<Car>>();

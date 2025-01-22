@@ -21,7 +21,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Sample
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.Sources", "Namotion.Proxy.Sources\Namotion.Proxy.Sources.csproj", "{B0BD7C00-43AC-41A4-B33E-3D4404C13397}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.SampleWeb", "Namotion.Proxy.SampleWeb\Namotion.Proxy.SampleWeb.csproj", "{E6F9EB15-FA03-4330-9ED6-B82287EE7926}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.SampleWeb", "Namotion.Interceptor.SampleWeb\Namotion.Interceptor.SampleWeb.csproj", "{E6F9EB15-FA03-4330-9ED6-B82287EE7926}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Sources", "Sources", "{D977E1EA-C167-4BEB-B7C5-4214DDD470D3}"
 EndProject
