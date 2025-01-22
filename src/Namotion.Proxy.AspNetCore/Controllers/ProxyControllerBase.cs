@@ -35,7 +35,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     [HttpPost]
     public ActionResult UpdateVariables(
         [FromBody] Dictionary<string, JsonElement> updates,
-        [FromServices] IEnumerable<IProxyPropertyValidator> propertyValidators)
+        [FromServices] IEnumerable<IPropertyValidator> propertyValidators)
     {
         try
         {

@@ -4,16 +4,17 @@ namespace Namotion.Interceptor.Validation;
 
 public class ValidationInterceptor : IWriteInterceptor
 {
-    private readonly IProxyPropertyValidator[] _propertyValidators;
+    private readonly IInterceptorCollection _collection;
 
-    public ValidationInterceptor(IEnumerable<IProxyPropertyValidator> propertyValidators)
+    public ValidationInterceptor(IInterceptorCollection collection)
     {
-        _propertyValidators = propertyValidators.ToArray();
+        _collection = collection;
     }
 
     public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
     {
-        var errors = _propertyValidators
+        var errors = _collection
+            .GetServices<IPropertyValidator>()
             .SelectMany(v => v.Validate(context.Property, context.NewValue))
             .ToArray();
 

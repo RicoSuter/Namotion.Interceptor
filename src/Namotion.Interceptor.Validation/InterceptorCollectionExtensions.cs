@@ -3,14 +3,14 @@
 public static class InterceptorCollectionExtensions
 {
     /// <summary>
-    /// Registers support for <see cref="IProxyPropertyValidator"/> handlers.
+    /// Registers support for <see cref="IPropertyValidator"/> handlers.
     /// </summary>
-    /// <param name="builder">The builder.</param>
-    /// <returns>The builder.</returns>
-    public static IInterceptorCollection WithPropertyValidation(this IInterceptorCollection builder)
+    /// <param name="collection">The collection.</param>
+    /// <returns>The collection.</returns>
+    public static IInterceptorCollection WithPropertyValidation(this IInterceptorCollection collection)
     {
-        return builder
-            .WithInterceptor(() => new ValidationInterceptor(builder.GetServices<IProxyPropertyValidator>()));
+        return collection
+            .WithInterceptor(() => new ValidationInterceptor(collection));
     }
 
     /// <summary>
@@ -22,7 +22,7 @@ public static class InterceptorCollectionExtensions
     {
         builder
             .WithPropertyValidation()
-            .TryAddService<IProxyPropertyValidator, DataAnnotationsValidator>(() => new DataAnnotationsValidator());
+            .TryAddService<IPropertyValidator, DataAnnotationsValidator>(() => new DataAnnotationsValidator());
 
         return builder;
     }

@@ -13,73 +13,73 @@ public static class InterceptorCollectionExtensions
             .WithDerivedPropertyChangeDetection();
     }
 
-    public static IInterceptorCollection WithEqualityCheck(this IInterceptorCollection builder)
+    public static IInterceptorCollection WithEqualityCheck(this IInterceptorCollection collection)
     {
-        return builder
+        return collection
             .WithInterceptor(() => new PropertyValueEqualityCheckHandler());
     }
 
-    public static IInterceptorCollection WithDerivedPropertyChangeDetection(this IInterceptorCollection builder)
+    public static IInterceptorCollection WithDerivedPropertyChangeDetection(this IInterceptorCollection collection)
     {
-        builder
+        collection
             .WithInterceptor(() => new DerivedPropertyChangeHandler())
-            .TryAddService<ILifecycleHandler, DerivedPropertyChangeHandler>(builder.GetService<DerivedPropertyChangeHandler>);
+            .TryAddService<ILifecycleHandler, DerivedPropertyChangeHandler>(collection.GetService<DerivedPropertyChangeHandler>);
 
-        return builder
+        return collection
             .WithProxyLifecycle()
             .WithPropertyChangedObservable();
     }
 
-    public static IInterceptorCollection WithReadPropertyRecorder(this IInterceptorCollection builder)
+    public static IInterceptorCollection WithReadPropertyRecorder(this IInterceptorCollection collection)
     {
-        return builder
+        return collection
             .WithInterceptor(() => new ReadPropertyRecorder());
     }
 
     /// <summary>
     /// Registers the property changed observable which can be retrieved using interceptable.GetPropertyChangedObservable().
     /// </summary>
-    /// <param name="builder">The builder.</param>
-    /// <returns>The builder.</returns>
-    public static IInterceptorCollection WithPropertyChangedObservable(this IInterceptorCollection builder)
+    /// <param name="collection">The collection.</param>
+    /// <returns>The collection.</returns>
+    public static IInterceptorCollection WithPropertyChangedObservable(this IInterceptorCollection collection)
     {
-        return builder
+        return collection
             .WithInterceptor(() => new PropertyChangedObservable());
     }
 
     /// <summary>
     /// Adds automatic context assignment and <see cref="WithProxyLifecycle"/>.
     /// </summary>
-    /// <param name="builder">The builder.</param>
-    /// <returns>The builder.</returns>
-    public static IInterceptorCollection WithInterceptorInheritance(this IInterceptorCollection builder)
+    /// <param name="collection">The collection.</param>
+    /// <returns>The collection.</returns>
+    public static IInterceptorCollection WithInterceptorInheritance(this IInterceptorCollection collection)
     {
-        builder
+        collection
             .TryAddService<ILifecycleHandler, InterceptorInheritanceHandler>(() => new InterceptorInheritanceHandler());
 
-        return builder
+        return collection
             .WithProxyLifecycle();
     }
 
     /// <summary>
     /// Adds support for <see cref="ILifecycleHandler"/> handlers.
     /// </summary>
-    /// <param name="builder">The builder.</param>
-    /// <returns>The builder.</returns>
-    public static IInterceptorCollection WithProxyLifecycle(this IInterceptorCollection builder)
+    /// <param name="collection">The collection.</param>
+    /// <returns>The collection.</returns>
+    public static IInterceptorCollection WithProxyLifecycle(this IInterceptorCollection collection)
     {
-        return builder
-            .WithInterceptor(() => new LifecycleInterceptor(builder.GetServices<ILifecycleHandler>()));
+        return collection
+            .WithInterceptor(() => new LifecycleInterceptor(collection));
     }
     
     /// <summary>
     /// Automatically assigns the parents to the interceptable data.
     /// </summary>
-    /// <param name="builder">The builder.</param>
-    /// <returns>The builder.</returns>
-    public static IInterceptorCollection WithParents(this IInterceptorCollection builder)
+    /// <param name="collection">The collection.</param>
+    /// <returns>The collection.</returns>
+    public static IInterceptorCollection WithParents(this IInterceptorCollection collection)
     {
-        return builder
+        return collection
             .WithInterceptor(() => new ParentTrackingHandler())
             .WithProxyLifecycle();
     }
