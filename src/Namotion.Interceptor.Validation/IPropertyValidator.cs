@@ -2,7 +2,7 @@
 
 namespace Namotion.Interceptor.Validation;
 
-public interface IProxyPropertyValidator
+public interface IPropertyValidator
 {
     IEnumerable<ValidationResult> Validate(PropertyReference property, object? value);
 }
