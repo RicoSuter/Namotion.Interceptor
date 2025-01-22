@@ -17,7 +17,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Samples", "Samples", "{587F
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Blazor", "Namotion.Interceptor.Blazor\Namotion.Interceptor.Blazor.csproj", "{3E57D6F1-0E5F-4E2F-A914-58DDEBA0837A}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.SampleConsole", "Namotion.Proxy.SampleConsole\Namotion.Proxy.SampleConsole.csproj", "{499EBD8C-9968-47C9-88AB-219C5424AA0F}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.SampleConsole", "Namotion.Interceptor.SampleConsole\Namotion.Interceptor.SampleConsole.csproj", "{499EBD8C-9968-47C9-88AB-219C5424AA0F}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.Sources", "Namotion.Proxy.Sources\Namotion.Proxy.Sources.csproj", "{B0BD7C00-43AC-41A4-B33E-3D4404C13397}"
 EndProject
