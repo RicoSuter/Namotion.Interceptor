@@ -1,7 +1,6 @@
-﻿using Namotion.Interceptor;
-using Namotion.Interceptor.Attributes;
+﻿using Namotion.Interceptor.Attributes;
 
-namespace Namotion.Proxy.SampleBlazor.Models
+namespace Namotion.Interceptor.SampleBlazor.Models
 {
     [GenerateProxy]
     public partial class Player : IDisposable

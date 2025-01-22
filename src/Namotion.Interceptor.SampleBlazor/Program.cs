@@ -1,10 +1,8 @@
-using Namotion.Interceptor;
+using Namotion.Interceptor.SampleBlazor.Components;
+using Namotion.Interceptor.SampleBlazor.Models;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Validation;
-using Namotion.Proxy.SampleBlazor.Components;
-using Namotion.Proxy.SampleBlazor.Models;
 
-namespace Namotion.Proxy.SampleBlazor
+namespace Namotion.Interceptor.SampleBlazor
 {
     public class Program
     {
