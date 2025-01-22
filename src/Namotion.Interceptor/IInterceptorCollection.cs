@@ -8,7 +8,7 @@ public interface IInterceptorCollection
     
     bool TryAddService<TInterface, TService>(Func<TService> factory);
 
-    bool AddService<TService>(TService service);
+    void AddService<TService>(TService service);
 
     TInterface? TryGetService<TInterface>();
 
