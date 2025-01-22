@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
-namespace Namotion.Proxy.Benchmark;
+namespace Namotion.Interceptor.Benchmark;
 
 public static class Program
 {
