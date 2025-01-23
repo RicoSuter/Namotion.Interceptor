@@ -1,9 +1,7 @@
-﻿using Namotion.Interceptor;
-using Namotion.Interceptor.Tracking;
+﻿using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Abstractions;
-using Namotion.Interceptor.Validation;
 
-namespace Namotion.Proxy.Tests.ChangeTracking;
+namespace Namotion.Interceptor.Tests.ChangeTracking;
 
 public class DerivedPropertyChangeHandlerTests
 {

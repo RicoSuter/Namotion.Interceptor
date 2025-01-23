@@ -4,8 +4,8 @@ using Namotion.Interceptor.Tracking.Abstractions;
 
 namespace Namotion.Interceptor.Blazor;
 
-public class ProxyComponentBase<TProxy> : ComponentBase, IDisposable
-    where TProxy : IInterceptorSubject
+public class ProxyComponentBase<TSubject> : ComponentBase, IDisposable
+    where TSubject : IInterceptorSubject
 {
     private IDisposable? _subscription;
     private ReadPropertyRecorderScope? _recorder;
@@ -16,7 +16,7 @@ public class ProxyComponentBase<TProxy> : ComponentBase, IDisposable
     public IObservable<PropertyChangedContext>? ProxyPropertyChanges { get; set; }
 
     [Inject]
-    public TProxy? Proxy { get; set; }
+    public TSubject? Subject { get; set; }
         
     [Inject]
     public ReadPropertyRecorder? Recorder { get; set; }

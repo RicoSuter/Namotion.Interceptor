@@ -1,4 +1,4 @@
-﻿namespace Namotion.Proxy.Tests
+﻿namespace Namotion.Interceptor.Tests
 {
     public partial class VerifyChecksTests
     {

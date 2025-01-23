@@ -1,8 +1,7 @@
 using System.ComponentModel.DataAnnotations;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Validation;
 
-namespace Namotion.Proxy.Tests.Validation;
+namespace Namotion.Interceptor.Tests.Validation;
 
 public class ValidationInterceptorTests
 {

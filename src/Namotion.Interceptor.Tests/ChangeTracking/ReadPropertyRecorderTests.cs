@@ -1,8 +1,6 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor;
-using Namotion.Interceptor.Tracking;
+﻿using Namotion.Interceptor.Tracking;
 
-namespace Namotion.Proxy.Tests.ChangeTracking;
+namespace Namotion.Interceptor.Tests.ChangeTracking;
 
 public class ReadPropertyRecorderTests
 {
