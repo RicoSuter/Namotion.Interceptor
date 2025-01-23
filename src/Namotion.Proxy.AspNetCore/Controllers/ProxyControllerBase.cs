@@ -19,10 +19,10 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     private readonly TProxy _proxy;
     private readonly IProxyRegistry _registry;
 
-    protected ProxyControllerBase(TProxy proxy, IProxyRegistry registry)
+    protected ProxyControllerBase(TProxy proxy)
     {
         _proxy = proxy;
-        _registry = registry;
+        _registry = proxy.Interceptors.GetService<IProxyRegistry>();
     }
 
     [HttpGet]

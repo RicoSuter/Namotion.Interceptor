@@ -7,7 +7,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Valida
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Generator", "Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj", "{915675AD-EA51-448D-A83E-E2320921A03E}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Proxy.Tests", "Namotion.Proxy.Tests\Namotion.Proxy.Tests.csproj", "{D1B75837-F404-400F-9178-105FD59E9A34}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Tests", "Namotion.Interceptor.Tests\Namotion.Interceptor.Tests.csproj", "{D1B75837-F404-400F-9178-105FD59E9A34}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Benchmark", "Namotion.Interceptor.Benchmark\Namotion.Interceptor.Benchmark.csproj", "{070D9963-D572-4B31-AE9D-32A45C9F1DAE}"
 EndProject
@@ -46,6 +46,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Tracking", "Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj", "{4DFBAC36-BB0D-4AAD-8AF7-DC129967B7D9}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Registry", "Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj", "{EF3AB1CA-24EC-4D77-BB1C-8AC095A6F7DE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Tracking.Tests", "Namotion.Interceptor.Tracking.Tests\Namotion.Interceptor.Tracking.Tests.csproj", "{FB518BC5-5797-41A3-A085-7FE76EE5A7F6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -121,6 +123,10 @@ Global
 		{EF3AB1CA-24EC-4D77-BB1C-8AC095A6F7DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EF3AB1CA-24EC-4D77-BB1C-8AC095A6F7DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EF3AB1CA-24EC-4D77-BB1C-8AC095A6F7DE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FB518BC5-5797-41A3-A085-7FE76EE5A7F6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FB518BC5-5797-41A3-A085-7FE76EE5A7F6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FB518BC5-5797-41A3-A085-7FE76EE5A7F6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FB518BC5-5797-41A3-A085-7FE76EE5A7F6}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -1,7 +1,6 @@
-﻿using Namotion.Interceptor;
-using Namotion.Interceptor.Tracking;
+﻿using Namotion.Interceptor.Tracking.Tests.Models;
 
-namespace Namotion.Proxy.Tests.Lifecycle;
+namespace Namotion.Interceptor.Tracking.Tests;
 
 public class ParentTrackingHandlerTests
 {

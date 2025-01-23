@@ -136,7 +136,7 @@ namespace Namotion.Interceptor.SampleWeb
         [Route("/api/car")]
         public class ProxyController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IInterceptorSubject
         {
-            public ProxyController(TProxy proxy, IProxyRegistry registry) : base(proxy, registry)
+            public ProxyController(TProxy proxy) : base(proxy)
             {
             }
         }

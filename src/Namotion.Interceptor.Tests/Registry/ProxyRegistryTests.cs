@@ -2,6 +2,7 @@
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tests;
 using Namotion.Interceptor.Tracking.Abstractions;
 
 namespace Namotion.Proxy.Tests.Registry;
@@ -22,13 +23,13 @@ public class ProxyRegistryTests
             .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
 
         // Act
-        var person = new Person(collection)
+        var person = new Interceptor.Tests.Person(collection)
         {
             FirstName = "Child",
-            Mother = new Person
+            Mother = new Interceptor.Tests.Person
             {
                 FirstName = "Mother",
-                Mother = new Person
+                Mother = new Interceptor.Tests.Person
                 {
                     FirstName = "Grandmother"
                 }
@@ -57,15 +58,15 @@ public class ProxyRegistryTests
             .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
 
         // Act
-        var person = new Person(collection)
+        var person = new Interceptor.Tests.Person(collection)
         {
             FirstName = "Child"
         };
 
-        person.Mother = new Person
+        person.Mother = new Interceptor.Tests.Person
         {
             FirstName = "Mother",
-            Mother = new Person
+            Mother = new Interceptor.Tests.Person
             {
                 FirstName = "Grandmother"
             }
@@ -93,13 +94,13 @@ public class ProxyRegistryTests
             .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
 
         // Act
-        var person = new Person(collection)
+        var person = new Interceptor.Tests.Person(collection)
         {
             FirstName = "Child",
-            Mother = new Person
+            Mother = new Interceptor.Tests.Person
             {
                 FirstName = "Mother",
-                Mother = new Person
+                Mother = new Interceptor.Tests.Person
                 {
                     FirstName = "Grandmother"
                 }
@@ -127,18 +128,18 @@ public class ProxyRegistryTests
         var registry = collection.GetService<IProxyRegistry>();
 
         // Act
-        var grandmother = new Person
+        var grandmother = new Interceptor.Tests.Person
         {
             FirstName = "Grandmother"
         };
 
-        var mother = new Person
+        var mother = new Interceptor.Tests.Person
         {
             FirstName = "Mother",
             Mother = grandmother
         };
 
-        var person = new Person(collection)
+        var person = new Interceptor.Tests.Person(collection)
         {
             FirstName = "Child",
             Mother = mother
@@ -162,18 +163,18 @@ public class ProxyRegistryTests
         var registry = collection.GetService<IProxyRegistry>();
 
         // Act
-        var grandmother = new Person
+        var grandmother = new Interceptor.Tests.Person
         {
             FirstName = "Grandmother"
         };
 
-        var mother = new Person
+        var mother = new Interceptor.Tests.Person
         {
             FirstName = "Mother",
             Mother = grandmother
         };
 
-        var person = new Person(collection)
+        var person = new Interceptor.Tests.Person(collection)
         {
             FirstName = "Child",
             Mother = mother
@@ -197,13 +198,13 @@ public class ProxyRegistryTests
             .WithRegistry();
 
         // Act
-        var person = new Person(collection)
+        var person = new Interceptor.Tests.Person(collection)
         {
             FirstName = "Child",
-            Mother = new Person
+            Mother = new Interceptor.Tests.Person
             {
                 FirstName = "Mother",
-                Mother = new Person
+                Mother = new Interceptor.Tests.Person
                 {
                     FirstName = "Grandmother"
                 }

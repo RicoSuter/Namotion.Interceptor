@@ -1,9 +1,8 @@
 ﻿using System.ComponentModel.DataAnnotations;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Attributes;
 
-namespace Namotion.Proxy.Tests
+namespace Namotion.Interceptor.Tests
 {
     [GenerateProxy]
     public partial class Person
