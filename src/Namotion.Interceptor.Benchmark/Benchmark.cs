@@ -31,7 +31,7 @@ public class Benchmark
                 break;
             
             case "interceptable":
-                _context = InterceptorCollection
+                _context = HierarchicalInterceptorCollection
                     .Create()
                     .WithFullPropertyTracking()
                     .WithRegistry();

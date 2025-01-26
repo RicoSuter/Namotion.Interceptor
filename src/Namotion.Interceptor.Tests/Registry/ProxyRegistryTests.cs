@@ -2,10 +2,12 @@
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tests;
 using Namotion.Interceptor.Tracking.Abstractions;
+using Person = Namotion.Interceptor.Tests.Models.Person;
 
-namespace Namotion.Proxy.Tests.Registry;
+namespace Namotion.Interceptor.Tests.Registry;
 
 public class ProxyRegistryTests
 {
@@ -17,19 +19,19 @@ public class ProxyRegistryTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithRegistry()
-            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
+            .WithService(() => handler);
 
         // Act
-        var person = new Interceptor.Tests.Person(collection)
+        var person = new Person(collection)
         {
             FirstName = "Child",
-            Mother = new Interceptor.Tests.Person
+            Mother = new Person
             {
                 FirstName = "Mother",
-                Mother = new Interceptor.Tests.Person
+                Mother = new Person
                 {
                     FirstName = "Grandmother"
                 }
@@ -52,21 +54,21 @@ public class ProxyRegistryTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithRegistry()
-            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
+            .WithService(() => handler);
 
         // Act
-        var person = new Interceptor.Tests.Person(collection)
+        var person = new Person(collection)
         {
             FirstName = "Child"
         };
 
-        person.Mother = new Interceptor.Tests.Person
+        person.Mother = new Person
         {
             FirstName = "Mother",
-            Mother = new Interceptor.Tests.Person
+            Mother = new Person
             {
                 FirstName = "Grandmother"
             }
@@ -88,19 +90,19 @@ public class ProxyRegistryTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithRegistry()
-            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
+            .WithService(() => handler);
 
         // Act
-        var person = new Interceptor.Tests.Person(collection)
+        var person = new Person(collection)
         {
             FirstName = "Child",
-            Mother = new Interceptor.Tests.Person
+            Mother = new Person
             {
                 FirstName = "Mother",
-                Mother = new Interceptor.Tests.Person
+                Mother = new Person
                 {
                     FirstName = "Grandmother"
                 }
@@ -121,25 +123,25 @@ public class ProxyRegistryTests
     public void WhenAddingTransitiveProxies_ThenAllAreAvailable()
     {
         // Arrange
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithRegistry();
 
         var registry = collection.GetService<IProxyRegistry>();
 
         // Act
-        var grandmother = new Interceptor.Tests.Person
+        var grandmother = new Person
         {
             FirstName = "Grandmother"
         };
 
-        var mother = new Interceptor.Tests.Person
+        var mother = new Person
         {
             FirstName = "Mother",
             Mother = grandmother
         };
 
-        var person = new Interceptor.Tests.Person(collection)
+        var person = new Person(collection)
         {
             FirstName = "Child",
             Mother = mother
@@ -156,25 +158,25 @@ public class ProxyRegistryTests
     public void WhenRemovingMiddleElement_ThenChildrensAreAlsoRemoved()
     {
         // Arrange
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithRegistry();
 
         var registry = collection.GetService<IProxyRegistry>();
 
         // Act
-        var grandmother = new Interceptor.Tests.Person
+        var grandmother = new Person
         {
             FirstName = "Grandmother"
         };
 
-        var mother = new Interceptor.Tests.Person
+        var mother = new Person
         {
             FirstName = "Mother",
             Mother = grandmother
         };
 
-        var person = new Interceptor.Tests.Person(collection)
+        var person = new Person(collection)
         {
             FirstName = "Child",
             Mother = mother
@@ -193,18 +195,18 @@ public class ProxyRegistryTests
     public async Task WhenConvertingToJson_ThenGraphIsPreserved()
     {
         // Arrange
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithRegistry();
 
         // Act
-        var person = new Interceptor.Tests.Person(collection)
+        var person = new Person(collection)
         {
             FirstName = "Child",
-            Mother = new Interceptor.Tests.Person
+            Mother = new Person
             {
                 FirstName = "Mother",
-                Mother = new Interceptor.Tests.Person
+                Mother = new Person
                 {
                     FirstName = "Grandmother"
                 }

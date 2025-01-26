@@ -1,6 +1,6 @@
-﻿using Namotion.Interceptor.Tracking;
+﻿using Namotion.Interceptor.Tracking.Tests.Models;
 
-namespace Namotion.Interceptor.Tests.ChangeTracking;
+namespace Namotion.Interceptor.Tracking.Tests.ChangeTracking;
 
 public class ReadPropertyRecorderTests
 {
@@ -8,7 +8,7 @@ public class ReadPropertyRecorderTests
     public void WhenPropertyIsChanged_ThenItIsPartOfRecordedProperties()
     {
         // Arrange
-        var context = InterceptorCollection
+        var context = HierarchicalInterceptorCollection
             .Create()
             .WithPropertyChangedObservable()
             .WithReadPropertyRecorder();

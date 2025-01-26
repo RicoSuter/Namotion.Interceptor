@@ -14,10 +14,7 @@ public static class InterceptorCollectionExtensions
     public static IInterceptorCollection WithRegistry(this IInterceptorCollection builder)
     {
         builder
-            .TryAddService<IProxyRegistry, ProxyRegistry>(() => new ProxyRegistry());
-
-        builder
-            .TryAddService<ILifecycleHandler, ProxyRegistry>(() => (ProxyRegistry)builder.GetService<IProxyRegistry>());
+            .TryAddService(() => new ProxyRegistry(), _ => true);
 
         return builder
             .WithInterceptorInheritance();

@@ -1,7 +1,7 @@
-﻿using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Abstractions;
+﻿using Namotion.Interceptor.Tracking.Abstractions;
+using Namotion.Interceptor.Tracking.Tests.Models;
 
-namespace Namotion.Interceptor.Tests.ChangeTracking;
+namespace Namotion.Interceptor.Tracking.Tests.ChangeTracking;
 
 public class DerivedPropertyChangeHandlerTests
 {
@@ -10,7 +10,7 @@ public class DerivedPropertyChangeHandlerTests
     {
         // Arrange
         var changes = new List<PropertyChangedContext>();
-        var context = InterceptorCollection
+        var context = HierarchicalInterceptorCollection
             .Create()
             .WithDerivedPropertyChangeDetection();
 

@@ -23,7 +23,7 @@ public static class InterceptorCollectionExtensions
     {
         collection
             .WithInterceptor(() => new DerivedPropertyChangeHandler())
-            .TryAddService<ILifecycleHandler, DerivedPropertyChangeHandler>(collection.GetService<DerivedPropertyChangeHandler>);
+            .TryAddService(collection.GetService<DerivedPropertyChangeHandler>, _ => true);
 
         return collection
             .WithProxyLifecycle()
@@ -55,7 +55,7 @@ public static class InterceptorCollectionExtensions
     public static IInterceptorCollection WithInterceptorInheritance(this IInterceptorCollection collection)
     {
         collection
-            .TryAddService<ILifecycleHandler, InterceptorInheritanceHandler>(() => new InterceptorInheritanceHandler());
+            .TryAddService(() => new InterceptorInheritanceHandler(), _ => true);
 
         return collection
             .WithProxyLifecycle();

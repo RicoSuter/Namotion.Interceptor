@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.SampleBlazor
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var collection = InterceptorCollection
+            var collection = HierarchicalInterceptorCollection
                 .Create()
                 .WithFullPropertyTracking()
                 .WithReadPropertyRecorder();

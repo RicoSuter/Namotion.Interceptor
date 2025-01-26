@@ -1,6 +1,6 @@
 ﻿using Namotion.Interceptor.Tracking.Abstractions;
 
-namespace Namotion.Interceptor.Tests
+namespace Namotion.Interceptor.Testing
 {
     public class TestProxyPropertyRegistryHandler : ILifecycleHandler
     {

@@ -1,13 +1,13 @@
 ﻿namespace Namotion.Interceptor;
 
-public class InterceptorCollection : IInterceptorCollection
+public class HierarchicalInterceptorCollection : IInterceptorCollection
 {
     private readonly List<IInterceptorCollection> _interceptorCollections = [];
     private readonly List<object> _services = [];
 
-    public static InterceptorCollection Create()
+    public static HierarchicalInterceptorCollection Create()
     {
-        return new InterceptorCollection();
+        return new HierarchicalInterceptorCollection();
     }
     
     public void AddInterceptorCollection(IInterceptorCollection interceptorCollection)
@@ -20,9 +20,9 @@ public class InterceptorCollection : IInterceptorCollection
         _interceptorCollections.Remove(interceptorCollection);
     }
 
-    public bool TryAddService<TInterface, TService>(Func<TService> factory)
+    public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
     {
-        if (_services.Any(s => s is TService))
+        if (GetServices<TService>().Any(exists))
         {
             return false;
         }

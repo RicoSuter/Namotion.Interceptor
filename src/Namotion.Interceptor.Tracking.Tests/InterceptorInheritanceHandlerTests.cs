@@ -1,4 +1,6 @@
-﻿using Namotion.Interceptor.Tracking.Tests.Models;
+﻿using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking.Handlers;
+using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests;
 
@@ -8,23 +10,23 @@ public class InterceptorInheritanceHandlerTests
     public void WhenPropertyIsAssigned_ThenContextIsSet()
     {
         // Arrange
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithInterceptorInheritance();
 
         // Act
         var person = new Person(collection);
-        person.Mother = new Person { FirstName = "Susi" };
+        person.Mother = new Person { FirstName = "Mother" };
 
         // Assert
-        Assert.Equal(collection.GetServices<IInterceptor>(), ((IInterceptorSubject)person.Mother).Interceptors?.GetServices<IInterceptor>());
+        Assert.Equal(collection.GetServices<IInterceptor>(), person.Mother.GetServices<IInterceptor>());
     }
 
     [Fact]
     public void WhenPropertyWithDeepStructureIsAssigned_ThenChildrenAlsoHaveContext()
     {
         // Arrange
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithInterceptorInheritance();
 
@@ -47,16 +49,16 @@ public class InterceptorInheritanceHandlerTests
         };
 
         // Assert
-        Assert.Equal(collection.GetServices<IInterceptor>(), ((IInterceptorSubject)person).Interceptors?.GetServices<IInterceptor>());
-        Assert.Equal(collection.GetServices<IInterceptor>(), ((IInterceptorSubject)mother).Interceptors?.GetServices<IInterceptor>());
-        Assert.Equal(collection.GetServices<IInterceptor>(), ((IInterceptorSubject)grandmother).Interceptors?.GetServices<IInterceptor>());
+        Assert.Equal(collection.GetServices<IInterceptor>(), person.GetServices<IInterceptor>());
+        Assert.Equal(collection.GetServices<IInterceptor>(), mother.GetServices<IInterceptor>());
+        Assert.Equal(collection.GetServices<IInterceptor>(), grandmother.GetServices<IInterceptor>());
     }
 
     [Fact]
     public void WhenPropertyWithDeepProxiesIsRemoved_ThenAllContextsAreNull()
     {
         // Arrange
-        var context = InterceptorCollection
+        var context = HierarchicalInterceptorCollection
             .Create()
             .WithInterceptorInheritance();
 
@@ -81,16 +83,16 @@ public class InterceptorInheritanceHandlerTests
         person.Mother = null;
 
         // Assert
-        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)person).Interceptors?.GetServices<IInterceptor>());
-        Assert.Empty(((IInterceptorSubject)mother).Interceptors.GetServices<IInterceptor>());
-        Assert.Empty(((IInterceptorSubject)grandmother).Interceptors.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), person.GetServices<IInterceptor>());
+        Assert.Empty(mother.GetServices<IInterceptor>());
+        Assert.Empty(grandmother.GetServices<IInterceptor>());
     }
 
     [Fact]
     public void WhenArrayIsAssigned_ThenAllChildrenAreAttached()
     {
         // Arrange
-        var context = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithInterceptorInheritance();
 
@@ -98,7 +100,7 @@ public class InterceptorInheritanceHandlerTests
         var child1 = new Person { FirstName = "Child1" };
         var child2 = new Person { FirstName = "Child2" };
 
-        var person = new Person(context)
+        var person = new Person(collection)
         {
             FirstName = "Mother",
             Children = [
@@ -108,21 +110,21 @@ public class InterceptorInheritanceHandlerTests
         };
 
         // Assert
-        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)person).Interceptors?.GetServices<IInterceptor>());
-        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)child1).Interceptors?.GetServices<IInterceptor>());
-        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)child2).Interceptors?.GetServices<IInterceptor>());
+        Assert.Equal(collection.GetServices<IInterceptor>(), person.GetServices<IInterceptor>());
+        Assert.Equal(collection.GetServices<IInterceptor>(), child1.GetServices<IInterceptor>());
+        Assert.Equal(collection.GetServices<IInterceptor>(), child2.GetServices<IInterceptor>());
     }
 
     [Fact]
     public void WhenUsingCircularDependencies_ThenProxiesAreAttached()
     {
         // Arrange
-        var context = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithInterceptorInheritance();
 
         // Act
-        var child1 = new Person(context) { FirstName = "Child1" };
+        var child1 = new Person(collection) { FirstName = "Child1" };
         var child2 = new Person { FirstName = "Child2" };
         var child3 = new Person { FirstName = "Child2" };
 
@@ -131,8 +133,50 @@ public class InterceptorInheritanceHandlerTests
         child3.Mother = child1;
 
         // Assert
-        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)child1).Interceptors?.GetServices<IInterceptor>());
-        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)child2).Interceptors?.GetServices<IInterceptor>());
-        Assert.Equal(context.GetServices<IInterceptor>(), ((IInterceptorSubject)child3).Interceptors?.GetServices<IInterceptor>());
+        Assert.Equal(collection.GetServices<IInterceptor>(), child1.GetServices<IInterceptor>());
+        Assert.Equal(collection.GetServices<IInterceptor>(), child2.GetServices<IInterceptor>());
+        Assert.Equal(collection.GetServices<IInterceptor>(), child3.GetServices<IInterceptor>());
+    }
+    
+    [Fact]
+    public void Foo()
+    {
+        // Arrange
+        var service1 = 1;
+        var service2 = 2;
+        
+        var collection = HierarchicalInterceptorCollection
+            .Create()
+            .WithService(() => service1, x => x == 1)
+            .WithInterceptorInheritance();
+
+        // Act
+        var person = new Person(collection)
+        {
+            Mother = new Person
+            {
+                FirstName = "Mother",
+                Mother = new Person
+                {
+                    FirstName = "Grandmother"
+                }
+            }
+        };
+
+        ((IInterceptorSubject)person.Mother).Interceptors
+            .WithService(() => service2, x => x == 2)
+            .WithInterceptorInheritance();
+
+        // Assert
+        Assert.Contains(1, person.GetServices<int>());
+        Assert.DoesNotContain(2, person.GetServices<int>());
+        Assert.Single(person.GetServices<InterceptorInheritanceHandler>());
+
+        Assert.Contains(1, person.Mother.GetServices<int>());
+        Assert.Contains(2, person.Mother.GetServices<int>());
+
+        Assert.Contains(1, person.Mother.Mother.GetServices<int>());
+        Assert.Contains(2, person.Mother.Mother.GetServices<int>());
+        Assert.Single(person.Mother.Mother.GetServices<InterceptorInheritanceHandler>());
     }
 }

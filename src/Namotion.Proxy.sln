@@ -49,6 +49,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Regist
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Tracking.Tests", "Namotion.Interceptor.Tracking.Tests\Namotion.Interceptor.Tracking.Tests.csproj", "{FB518BC5-5797-41A3-A085-7FE76EE5A7F6}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Testing", "Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj", "{F38D7945-2896-48F7-84B5-491A983D4FE1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -127,6 +129,10 @@ Global
 		{FB518BC5-5797-41A3-A085-7FE76EE5A7F6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FB518BC5-5797-41A3-A085-7FE76EE5A7F6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{FB518BC5-5797-41A3-A085-7FE76EE5A7F6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F38D7945-2896-48F7-84B5-491A983D4FE1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F38D7945-2896-48F7-84B5-491A983D4FE1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F38D7945-2896-48F7-84B5-491A983D4FE1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F38D7945-2896-48F7-84B5-491A983D4FE1}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
