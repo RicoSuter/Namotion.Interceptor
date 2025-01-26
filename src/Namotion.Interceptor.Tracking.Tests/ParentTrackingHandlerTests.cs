@@ -5,20 +5,20 @@ namespace Namotion.Interceptor.Tracking.Tests;
 public class ParentTrackingHandlerTests
 {
     [Fact]
-    public void WhenProxyIsReferencedByTwoPropertiesOfTheSameProxy_ThenOnlyOneParentIsSet()
+    public void WhenReferencedByTwoPropertiesOfTheSameParent_ThenTwoReferencesAreSet()
     {
         // Arrange
-        var context = HierarchicalInterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithParents();
 
         // Act
-        var parent = new Person(context)
+        var parent = new Person(collection)
         {
             FirstName = "Parent"
         };
 
-        var person = new Person(context);
+        var person = new Person(collection);
         person.FirstName = "Child";
         person.Mother = parent;
         person.Father = parent;
@@ -32,17 +32,17 @@ public class ParentTrackingHandlerTests
     public void WhenReferencesAreSetToNull_ThenParentIsEmpty()
     {
         // Arrange
-        var context = HierarchicalInterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithParents();
 
         // Act
-        var parent = new Person(context)
+        var parent = new Person(collection)
         {
             FirstName = "Parent"
         };
 
-        var person = new Person(context);
+        var person = new Person(collection);
         person.FirstName = "Child";
         person.Mother = parent;
         person.Father = parent;
@@ -56,24 +56,24 @@ public class ParentTrackingHandlerTests
     }
 
     [Fact]
-    public void WhenProxyIsReferencedByTwoOtherProxies_ThenItHasTwoParents()
+    public void WhenReferencedByTwoOtherSubjects_ThenItHasTwoParents()
     {
         // Arrange
-        var context = HierarchicalInterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithParents();
 
         // Act
-        var mother = new Person(context);
+        var mother = new Person(collection);
         mother.FirstName = "Mother";
 
-        var child1 = new Person(context)
+        var child1 = new Person(collection)
         {
             FirstName = "Child1",
             Mother = mother
         };
 
-        var child2 = new Person(context)
+        var child2 = new Person(collection)
         {
             FirstName = "Child2",
             Mother = mother

@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tests;
 using Namotion.Interceptor.Tracking.Abstractions;
 using Person = Namotion.Interceptor.Tests.Models.Person;
 
-namespace Namotion.Interceptor.Tests.Registry;
+namespace Namotion.Interceptor.Registry.Tests;
 
 public class ProxyRegistryTests
 {
