@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
-using Namotion.Interceptor.Validation;
+using Namotion.Interceptor.Validation.Tests.Models;
 
-namespace Namotion.Interceptor.Tests.Validation;
+namespace Namotion.Interceptor.Validation.Tests;
 
 public class ValidationInterceptorTests
 {
@@ -15,7 +15,7 @@ public class ValidationInterceptorTests
             .WithDataAnnotationValidation();
 
         // Act
-        var person = new Models.Person(context)
+        var person = new Person(context)
         {
             FirstName = "Rico" // allowed
         };
