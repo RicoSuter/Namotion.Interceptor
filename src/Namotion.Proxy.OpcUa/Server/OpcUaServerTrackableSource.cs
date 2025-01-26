@@ -48,7 +48,8 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
         while (!stoppingToken.IsCancellationRequested)
         {
             using var stream = typeof(OpcUaProxyExtensions).Assembly
-                .GetManifestResourceStream("Namotion.Proxy.OpcUa.MyOpcUaServer.Config.xml");
+                .GetManifestResourceStream("Namotion.Proxy.OpcUa.MyOpcUaServer.Config.xml") ??
+                throw new InvalidOperationException("Config.xml not found.");
 
             var application = new ApplicationInstance
             {
