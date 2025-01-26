@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Tracking.Tests;
 public class LifecycleInterceptorTests
 {
     [Fact]
-    public void WhenAssigningArray_ThenAllProxiesAreAttached()
+    public void WhenAssigningArray_ThenAllSubjectsAreAttached()
     {
         // Arrange
         var attaches = new List<LifecycleContext>();
@@ -33,7 +33,7 @@ public class LifecycleInterceptorTests
     }
 
     [Fact]
-    public void WhenCallingSetContext_ThenArrayItemsAreAttached()
+    public void WhenAddingInterceptorCollection_ThenArrayItemsAndParentAreAttached()
     {
         // Arrange
         var attaches = new List<LifecycleContext>();
@@ -59,7 +59,7 @@ public class LifecycleInterceptorTests
     }
 
     [Fact]
-    public void WhenAssigningProxy_ThenAllProxyIsAttached()
+    public void WhenAssigningSubject_ThenAllSubjectsAreAttached()
     {
         // Arrange
         var attaches = new List<LifecycleContext>();
@@ -89,7 +89,7 @@ public class LifecycleInterceptorTests
     }
 
     [Fact]
-    public void WhenCallingSetContext_ThenAllChildrenAreAlsoAttached()
+    public void WhenAddingInterceptorCollection_ThenAllChildrenAreAlsoAttached()
     {
         // Arrange
         var attaches = new List<LifecycleContext>();
@@ -117,7 +117,7 @@ public class LifecycleInterceptorTests
     }
 
     [Fact]
-    public void WhenRemovingInterceptors_ThenAllItemsAreDetached()
+    public void WhenRemovingInterceptors_ThenAllArrayChildrenAreDetached()
     {
         // Arrange
         var attaches = new List<LifecycleContext>();
@@ -162,7 +162,6 @@ public class LifecycleInterceptorTests
 
         mother1.Mother = mother2;
         mother2.Mother = mother3;
-
         ((IInterceptorSubject)mother1).Interceptors.RemoveInterceptorCollection(collection);
 
         // Assert

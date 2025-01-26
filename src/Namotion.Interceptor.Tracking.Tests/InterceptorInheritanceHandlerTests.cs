@@ -139,7 +139,7 @@ public class InterceptorInheritanceHandlerTests
     }
     
     [Fact]
-    public void Foo()
+    public void WhenAddingInterceptorToChild_ThenServiceFallbackAndScopeWorks()
     {
         // Arrange
         var service1 = 1;
