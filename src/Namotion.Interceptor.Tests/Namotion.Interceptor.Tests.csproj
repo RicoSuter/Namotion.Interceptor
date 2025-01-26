@@ -30,8 +30,4 @@
     <ProjectReference Include="..\Namotion.Interceptor.Validation\Namotion.Interceptor.Validation.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Registry\" />
-  </ItemGroup>
-
 </Project>
