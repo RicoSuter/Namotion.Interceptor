@@ -22,7 +22,7 @@ public static class InterceptorCollectionExtensions
     {
         builder
             .WithPropertyValidation()
-            .TryAddService<IPropertyValidator, DataAnnotationsValidator>(() => new DataAnnotationsValidator());
+            .TryAddService(() => new DataAnnotationsValidator(), _ => true);
 
         return builder;
     }

@@ -2,7 +2,7 @@
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Attributes;
 
-namespace Namotion.Interceptor.Tests
+namespace Namotion.Interceptor.Tests.Models
 {
     [GenerateProxy]
     public partial class Person

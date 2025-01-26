@@ -21,4 +21,9 @@ public class InterceptorInheritanceHandler : ILifecycleHandler
             context.Subject.Interceptors.RemoveInterceptorCollection(parent.Interceptors);
         }
     }
+
+    public override bool Equals(object? obj)
+    {
+        return true;
+    }
 }

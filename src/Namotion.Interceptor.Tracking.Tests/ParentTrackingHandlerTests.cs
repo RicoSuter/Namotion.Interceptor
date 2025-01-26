@@ -8,7 +8,7 @@ public class ParentTrackingHandlerTests
     public void WhenProxyIsReferencedByTwoPropertiesOfTheSameProxy_ThenOnlyOneParentIsSet()
     {
         // Arrange
-        var context = InterceptorCollection
+        var context = HierarchicalInterceptorCollection
             .Create()
             .WithParents();
 
@@ -32,7 +32,7 @@ public class ParentTrackingHandlerTests
     public void WhenReferencesAreSetToNull_ThenParentIsEmpty()
     {
         // Arrange
-        var context = InterceptorCollection
+        var context = HierarchicalInterceptorCollection
             .Create()
             .WithParents();
 
@@ -59,7 +59,7 @@ public class ParentTrackingHandlerTests
     public void WhenProxyIsReferencedByTwoOtherProxies_ThenItHasTwoParents()
     {
         // Arrange
-        var context = InterceptorCollection
+        var context = HierarchicalInterceptorCollection
             .Create()
             .WithParents();
 

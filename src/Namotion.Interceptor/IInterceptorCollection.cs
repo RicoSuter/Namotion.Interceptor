@@ -6,7 +6,7 @@ public interface IInterceptorCollection
 
     void RemoveInterceptorCollection(IInterceptorCollection interceptorCollection);
     
-    bool TryAddService<TInterface, TService>(Func<TService> factory);
+    bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists);
 
     void AddService<TService>(TService service);
 

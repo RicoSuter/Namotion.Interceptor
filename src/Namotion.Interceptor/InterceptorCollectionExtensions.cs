@@ -5,13 +5,20 @@ public static class InterceptorCollectionExtensions
     public static IInterceptorCollection WithInterceptor<TService>(this IInterceptorCollection collection, Func<TService> factory)
         where TService : IInterceptor
     {
-        collection.TryAddService<IInterceptor, TService>(factory);
+        collection.TryAddService(factory, _ => true);
         return collection;
     }
     
-    public static IInterceptorCollection WithService<TInterface, TService>(this IInterceptorCollection collection, Func<TService> factory)
+    public static IInterceptorCollection WithService<TService>(this IInterceptorCollection collection, Func<TService> factory)
     {
-        collection.TryAddService<TInterface, TService>(factory);
+        collection.TryAddService(factory, _ => true);
+        return collection;
+    }
+    
+    public static IInterceptorCollection WithService<TService>(this IInterceptorCollection collection, 
+        Func<TService> factory, Func<TService, bool> exists)
+    {
+        collection.TryAddService(factory, exists);
         return collection;
     }
     

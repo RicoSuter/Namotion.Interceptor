@@ -7,7 +7,7 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
     private readonly List<IReadInterceptor> _readInterceptors = [];
     private readonly List<IWriteInterceptor> _writeInterceptors = [];
     
-    private readonly InterceptorCollection _collection = new();
+    private readonly HierarchicalInterceptorCollection _collection = new();
 
     public InterceptorExecutor(IInterceptorSubject subject)
     {
@@ -137,9 +137,9 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
         _collection.RemoveInterceptorCollection(interceptorCollection);
     }
 
-    public bool TryAddService<TInterface, TService>(Func<TService> factory)
+    public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
     {
-        return _collection.TryAddService<TInterface, TService>(factory);
+        return _collection.TryAddService(factory, exists);
     }
 
     public void AddService<TService>(TService service)

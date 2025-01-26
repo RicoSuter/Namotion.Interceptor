@@ -1,5 +1,5 @@
-﻿using Namotion.Interceptor.Tracking.Abstractions;
-using Namotion.Interceptor.Tracking.Tests.Mocks;
+﻿using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking.Abstractions;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests;
@@ -14,10 +14,10 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithProxyLifecycle()
-            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
+            .WithService(() => handler);
 
         // Act
         var mother = new Person(collection) { FirstName = "Mother" };
@@ -40,10 +40,10 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithProxyLifecycle()
-            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
+            .WithService(() => handler);
 
         // Act
         var mother = new Person { FirstName = "Mother" };
@@ -66,11 +66,11 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithInterceptorInheritance()
             .WithProxyLifecycle()
-            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
+            .WithService(() => handler);
 
         // Act
         var mother1 = new Person(collection) { FirstName = "Mother1" };
@@ -96,11 +96,11 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithInterceptorInheritance()
             .WithProxyLifecycle()
-            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
+            .WithService(() => handler);
 
         // Act
         var mother1 = new Person { FirstName = "Mother1" };
@@ -124,10 +124,10 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithProxyLifecycle()
-            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
+            .WithService(() => handler);
 
         // Act
         var mother = new Person(collection) { FirstName = "Mother" };
@@ -149,11 +149,11 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = HierarchicalInterceptorCollection
             .Create()
             .WithInterceptorInheritance()
             .WithProxyLifecycle()
-            .WithService<ILifecycleHandler, TestProxyPropertyRegistryHandler>(() => handler);
+            .WithService(() => handler);
 
         // Act
         var mother1 = new Person(collection) { FirstName = "Mother1" };

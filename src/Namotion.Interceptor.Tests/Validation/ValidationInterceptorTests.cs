@@ -9,13 +9,13 @@ public class ValidationInterceptorTests
     public void ShouldValidateProperty()
     {
         // Arrange
-        var context = InterceptorCollection
+        var context = HierarchicalInterceptorCollection
             .Create()
             .WithPropertyValidation()
             .WithDataAnnotationValidation();
 
         // Act
-        var person = new Person(context)
+        var person = new Models.Person(context)
         {
             FirstName = "Rico" // allowed
         };

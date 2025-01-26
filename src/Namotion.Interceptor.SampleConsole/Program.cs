@@ -9,9 +9,9 @@ namespace Namotion.Interceptor.SampleConsole
     {
         static void Main(string[] args)
         {
-            var collection = InterceptorCollection
+            var collection = HierarchicalInterceptorCollection
                 .Create()
-                .WithService<ILifecycleHandler, LogPropertyChangesHandler>(() => new LogPropertyChangesHandler())
+                .WithService(() => new LogPropertyChangesHandler())
                 .WithFullPropertyTracking();
 
             collection
