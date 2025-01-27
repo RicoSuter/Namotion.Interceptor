@@ -10,7 +10,7 @@ public class InterceptorInheritanceHandlerTests
     public void WhenPropertyIsAssigned_ThenContextIsSet()
     {
         // Arrange
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithInterceptorInheritance();
 
@@ -26,7 +26,7 @@ public class InterceptorInheritanceHandlerTests
     public void WhenPropertyWithDeepStructureIsAssigned_ThenChildrenAlsoHaveContext()
     {
         // Arrange
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithInterceptorInheritance();
 
@@ -58,7 +58,7 @@ public class InterceptorInheritanceHandlerTests
     public void WhenPropertyWithDeepProxiesIsRemoved_ThenAllContextsAreNull()
     {
         // Arrange
-        var context = HierarchicalInterceptorCollection
+        var context = InterceptorCollection
             .Create()
             .WithInterceptorInheritance();
 
@@ -92,7 +92,7 @@ public class InterceptorInheritanceHandlerTests
     public void WhenArrayIsAssigned_ThenAllChildrenAreAttached()
     {
         // Arrange
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithInterceptorInheritance();
 
@@ -119,7 +119,7 @@ public class InterceptorInheritanceHandlerTests
     public void WhenUsingCircularDependencies_ThenProxiesAreAttached()
     {
         // Arrange
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithInterceptorInheritance();
 
@@ -145,7 +145,7 @@ public class InterceptorInheritanceHandlerTests
         var service1 = 1;
         var service2 = 2;
         
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithService(() => service1, x => x == 1)
             .WithInterceptorInheritance();

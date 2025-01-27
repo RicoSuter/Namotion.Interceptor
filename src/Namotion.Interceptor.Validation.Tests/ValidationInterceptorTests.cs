@@ -9,7 +9,7 @@ public class ValidationInterceptorTests
     public void ShouldValidateProperty()
     {
         // Arrange
-        var context = HierarchicalInterceptorCollection
+        var context = InterceptorCollection
             .Create()
             .WithPropertyValidation()
             .WithDataAnnotationValidation();

@@ -124,7 +124,7 @@ namespace Namotion.Interceptor.SampleMachine
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var collection = HierarchicalInterceptorCollection
+            var collection = InterceptorCollection
                 .Create()
                 .WithRegistry()
                 .WithFullPropertyTracking()

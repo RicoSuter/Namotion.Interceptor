@@ -8,7 +8,7 @@ public class ReadPropertyRecorderTests
     public void WhenPropertyIsChanged_ThenItIsPartOfRecordedProperties()
     {
         // Arrange
-        var context = HierarchicalInterceptorCollection
+        var context = InterceptorCollection
             .Create()
             .WithPropertyChangedObservable()
             .WithReadPropertyRecorder();
