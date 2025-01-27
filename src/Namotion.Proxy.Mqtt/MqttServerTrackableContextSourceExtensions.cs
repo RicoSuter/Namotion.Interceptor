@@ -18,7 +18,7 @@ public static class MqttServerTrackableContextSourceExtensions
             {
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, pathPrefix);
                 return new MqttServerTrackableSource<TProxy>(
-                    sp,
+                    sp.GetRequiredService<TProxy>(),
                     sourcePathProvider,
                     sp.GetRequiredService<ILogger<MqttServerTrackableSource<TProxy>>>());
             })

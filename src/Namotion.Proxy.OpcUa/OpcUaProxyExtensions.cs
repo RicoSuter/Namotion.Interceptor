@@ -1,9 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Proxy.Sources;
-using Namotion.Proxy;
 using Namotion.Proxy.OpcUa.Server;
 
 // ReSharper disable once CheckNamespace
@@ -48,12 +46,9 @@ public static class OpcUaProxyExtensions
             .AddSingleton<IHostedService>(sp =>
             {
                 var proxy = resolveProxy(sp);
-                var context = proxy.Interceptors as IInterceptorCollection ??
-                    throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
-
                 return new ProxySourceBackgroundService<TProxy>(
                     sp.GetRequiredService<OpcUaServerTrackableSource<TProxy>>(),
-                    sp.GetRequiredService<IInterceptorCollection>(),
+                    proxy.Interceptors,
                     sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TProxy>>>());
             });
     }

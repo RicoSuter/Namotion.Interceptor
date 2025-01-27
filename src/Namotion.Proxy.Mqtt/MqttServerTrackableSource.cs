@@ -6,7 +6,6 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
@@ -21,7 +20,7 @@ namespace Namotion.Proxy.Mqtt
     public class MqttServerTrackableSource<TProxy> : BackgroundService, IProxySource
         where TProxy : IInterceptorSubject
     {
-        private readonly IServiceProvider _provider;
+        private readonly TProxy _proxy;
         private readonly ISourcePathProvider _sourcePathProvider;
         private readonly ILogger _logger;
 
@@ -40,11 +39,11 @@ namespace Namotion.Proxy.Mqtt
 
         // TODO: Inject IInterceptorContext<TProxy> so that multiple contexts are supported.
         public MqttServerTrackableSource(
-            IServiceProvider provider,
+            TProxy proxy,
             ISourcePathProvider sourcePathProvider,
             ILogger<MqttServerTrackableSource<TProxy>> logger)
         {
-            _provider = provider;
+            _proxy = proxy;
             _sourcePathProvider = sourcePathProvider;
             _logger = logger;
         }
@@ -119,7 +118,7 @@ namespace Namotion.Proxy.Mqtt
                             ContentType = "application/json",
                             PayloadSegment = new ArraySegment<byte>(
                                Encoding.UTF8.GetBytes(JsonSerializer.Serialize(property.Value)))
-                        }));
+                        }), cancellationToken);
             }
         }
 
@@ -135,8 +134,9 @@ namespace Namotion.Proxy.Mqtt
             Task.Run(async () =>
             {
                 await Task.Delay(1000);
-                foreach (var property in _provider
-                    .GetRequiredService<IProxyRegistry>()
+                foreach (var property in _proxy
+                    .Interceptors
+                    .GetService<IProxyRegistry>()
                     .GetProperties()
                     .Where(p => p.HasGetter))
                 {
@@ -167,8 +167,9 @@ namespace Namotion.Proxy.Mqtt
             try
             {
                 var sourcePath = args.ApplicationMessage.Topic.Replace('/', '.');
-                var property = _provider
-                    .GetRequiredService<IProxyRegistry>()
+                var property = _proxy
+                    .Interceptors
+                    .GetService<IProxyRegistry>()
                     .GetProperties()
                     .SingleOrDefault(p => _sourcePathProvider.TryGetSourcePath(p.Property) == sourcePath);
 
