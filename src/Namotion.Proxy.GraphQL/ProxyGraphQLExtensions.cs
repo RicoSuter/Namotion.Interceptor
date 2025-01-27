@@ -10,7 +10,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class ProxyGraphQLExtensions
 {
-    public static void AddTrackedGraphQL<TProxy>(this IRequestExecutorBuilder builder)
+    public static void AddGraphQLProxy<TProxy>(this IRequestExecutorBuilder builder)
         where TProxy : IInterceptorSubject
     {
         builder

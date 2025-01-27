@@ -9,6 +9,7 @@ using Opc.Ua.Configuration;
 
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Proxy.OpcUa.Server;
@@ -21,7 +22,6 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
     private readonly TProxy _proxy;
     private readonly ILogger _logger;
     private readonly string? _rootName;
-    private readonly IProxyRegistry _registry;
 
     private ProxyOpcUaServer<TProxy>? _server;
     private Action<ProxyPropertyPathReference>? _propertyUpdateAction;
@@ -32,19 +32,19 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
         TProxy proxy,
         ISourcePathProvider sourcePathProvider,
         ILogger<OpcUaServerTrackableSource<TProxy>> logger,
-        string? rootName,
-        IProxyRegistry registry)
+        string? rootName)
     {
         _proxy = proxy;
         _logger = logger;
         _rootName = rootName;
-        _registry = registry;
 
         SourcePathProvider = sourcePathProvider;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _proxy.Interceptors.WithRegistry();
+        
         while (!stoppingToken.IsCancellationRequested)
         {
             using var stream = typeof(OpcUaProxyExtensions).Assembly
@@ -61,7 +61,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
 
             try
             {
-                _server = new ProxyOpcUaServer<TProxy>(_proxy, this, _rootName, _registry);
+                _server = new ProxyOpcUaServer<TProxy>(_proxy, this, _rootName, _proxy.Interceptors.GetService<IProxyRegistry>());
 
                 await application.CheckApplicationInstanceCertificate(true, CertificateFactory.DefaultKeySize);
                 await application.Start(_server);
