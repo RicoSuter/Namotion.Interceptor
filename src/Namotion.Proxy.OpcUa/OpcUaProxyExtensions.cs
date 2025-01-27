@@ -11,21 +11,21 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class OpcUaProxyExtensions
 {
-    public static IServiceCollection AddOpcUaServerProxySource<TProxy>(
+    public static IServiceCollection AddOpcUaServerProxy<TProxy>(
         this IServiceCollection serviceCollection,
         string sourceName,
         string? pathPrefix = null,
         string? rootName = null)
         where TProxy : IInterceptorSubject
     {
-        return serviceCollection.AddOpcUaServerProxySource(
+        return serviceCollection.AddOpcUaServerProxy(
             sourceName,
             sp => sp.GetRequiredService<TProxy>(),
             pathPrefix,
             rootName);
     }
 
-    public static IServiceCollection AddOpcUaServerProxySource<TProxy>(
+    public static IServiceCollection AddOpcUaServerProxy<TProxy>(
         this IServiceCollection serviceCollection,
         string sourceName,
         Func<IServiceProvider, TProxy> resolveProxy,
@@ -42,8 +42,7 @@ public static class OpcUaProxyExtensions
                     proxy,
                     sourcePathProvider,
                     sp.GetRequiredService<ILogger<OpcUaServerTrackableSource<TProxy>>>(),
-                    rootName,
-                    sp.GetRequiredService<IProxyRegistry>());
+                    rootName);
             })
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaServerTrackableSource<TProxy>>())
             .AddSingleton<IHostedService>(sp =>

@@ -94,14 +94,12 @@ namespace Namotion.Interceptor.SampleWeb
             // trackable
             builder.Services.AddSingleton(car);
             builder.Services.AddSingleton(collection);
-            builder.Services.AddSingleton(collection.GetPropertyChangedObservable());
-            builder.Services.AddSingleton(collection.GetService<IProxyRegistry>());
 
             // trackable api controllers
             builder.Services.AddProxyControllers<Car, ProxyController<Car>>();
 
             // trackable UPC UA
-            builder.Services.AddOpcUaServerProxySource<Car>("opc", rootName: "Root");
+            builder.Services.AddOpcUaServerProxy<Car>("opc", rootName: "Root");
 
             // trackable mqtt
             builder.Services.AddMqttServerProxySource<Car>("mqtt");
@@ -110,7 +108,7 @@ namespace Namotion.Interceptor.SampleWeb
             builder.Services
                 .AddGraphQLServer()
                 .AddInMemorySubscriptions()
-                .AddTrackedGraphQL<Car>();
+                .AddGraphQLProxy<Car>();
 
             // other asp services
             builder.Services.AddOpenApiDocument();

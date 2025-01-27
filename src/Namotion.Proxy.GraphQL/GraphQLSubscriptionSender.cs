@@ -1,6 +1,7 @@
 ﻿using HotChocolate.Subscriptions;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Abstractions;
 
 namespace Namotion.Proxy.GraphQL
@@ -10,18 +11,18 @@ namespace Namotion.Proxy.GraphQL
     {
         private readonly TProxy _proxy;
         private readonly ITopicEventSender _sender;
-        private readonly IObservable<PropertyChangedContext> _changedObservable;
 
-        public GraphQLSubscriptionSender(TProxy proxy, ITopicEventSender sender, IObservable<PropertyChangedContext> changedObservable)
+        public GraphQLSubscriptionSender(TProxy proxy, ITopicEventSender sender)
         {
             _proxy = proxy;
             _sender = sender;
-            _changedObservable = changedObservable;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await foreach (var changes in _changedObservable
+            await foreach (var changes in _proxy
+                .Interceptors
+                .GetPropertyChangedObservable()
                 .ToAsyncEnumerable()
                 .WithCancellation(stoppingToken))
             {

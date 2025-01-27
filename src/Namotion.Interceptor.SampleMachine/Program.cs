@@ -163,22 +163,20 @@ namespace Namotion.Interceptor.SampleMachine
 
             // trackable
             builder.Services.AddSingleton(root);
-            builder.Services.AddSingleton(collection);
-            builder.Services.AddSingleton(collection.GetPropertyChangedObservable());
-            builder.Services.AddSingleton(collection.GetService<IProxyRegistry>());
+            // builder.Services.AddSingleton(collection);
 
             // trackable api controllers
             builder.Services.AddProxyControllers<Root, ProxyController<Root>>();
 
             // OPC UA server
-            builder.Services.AddOpcUaServerProxySource<Root>("opc");
+            builder.Services.AddOpcUaServerProxy<Root>("opc");
             //builder.Services.AddOpcUaClientProxySource<Root>("opc", "opc.tcp://localhost:4840");
 
             // trackable GraphQL
             builder.Services
                 .AddGraphQLServer()
                 .AddInMemorySubscriptions()
-                .AddTrackedGraphQL<Root>();
+                .AddGraphQLProxy<Root>();
 
             // other asp services
             builder.Services.AddOpenApiDocument();
