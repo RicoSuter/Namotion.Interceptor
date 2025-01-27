@@ -19,7 +19,7 @@ public class ProxyRegistryTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithRegistry()
             .WithService(() => handler);
@@ -54,7 +54,7 @@ public class ProxyRegistryTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithRegistry()
             .WithService(() => handler);
@@ -90,7 +90,7 @@ public class ProxyRegistryTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithRegistry()
             .WithService(() => handler);
@@ -123,7 +123,7 @@ public class ProxyRegistryTests
     public void WhenAddingTransitiveProxies_ThenAllAreAvailable()
     {
         // Arrange
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithRegistry();
 
@@ -158,7 +158,7 @@ public class ProxyRegistryTests
     public void WhenRemovingMiddleElement_ThenChildrensAreAlsoRemoved()
     {
         // Arrange
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithRegistry();
 
@@ -195,7 +195,7 @@ public class ProxyRegistryTests
     public async Task WhenConvertingToJson_ThenGraphIsPreserved()
     {
         // Arrange
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithRegistry();
 

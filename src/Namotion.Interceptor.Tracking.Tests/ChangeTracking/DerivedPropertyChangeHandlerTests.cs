@@ -10,7 +10,7 @@ public class DerivedPropertyChangeHandlerTests
     {
         // Arrange
         var changes = new List<PropertyChangedContext>();
-        var context = HierarchicalInterceptorCollection
+        var context = InterceptorCollection
             .Create()
             .WithDerivedPropertyChangeDetection();
 

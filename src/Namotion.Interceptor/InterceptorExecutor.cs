@@ -7,7 +7,7 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
     private readonly List<IReadInterceptor> _readInterceptors = [];
     private readonly List<IWriteInterceptor> _writeInterceptors = [];
     
-    private readonly HierarchicalInterceptorCollection _collection = new();
+    private readonly InterceptorCollection _collection = new();
 
     public InterceptorExecutor(IInterceptorSubject subject)
     {

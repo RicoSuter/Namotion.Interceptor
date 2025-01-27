@@ -8,7 +8,7 @@ public class ParentTrackingHandlerTests
     public void WhenReferencedByTwoPropertiesOfTheSameParent_ThenTwoReferencesAreSet()
     {
         // Arrange
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithParents();
 
@@ -32,7 +32,7 @@ public class ParentTrackingHandlerTests
     public void WhenReferencesAreSetToNull_ThenParentIsEmpty()
     {
         // Arrange
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithParents();
 
@@ -59,7 +59,7 @@ public class ParentTrackingHandlerTests
     public void WhenReferencedByTwoOtherSubjects_ThenItHasTwoParents()
     {
         // Arrange
-        var collection = HierarchicalInterceptorCollection
+        var collection = InterceptorCollection
             .Create()
             .WithParents();
 

@@ -1,13 +1,13 @@
 ﻿namespace Namotion.Interceptor;
 
-public class HierarchicalInterceptorCollection : IInterceptorCollection
+public class InterceptorCollection : IInterceptorCollection
 {
     private readonly List<IInterceptorCollection> _interceptorCollections = [];
     private readonly List<object> _services = [];
 
-    public static HierarchicalInterceptorCollection Create()
+    public static InterceptorCollection Create()
     {
-        return new HierarchicalInterceptorCollection();
+        return new InterceptorCollection();
     }
     
     public void AddInterceptorCollection(IInterceptorCollection interceptorCollection)
