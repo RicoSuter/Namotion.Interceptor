@@ -163,7 +163,6 @@ namespace Namotion.Interceptor.SampleMachine
 
             // trackable
             builder.Services.AddSingleton(root);
-            // builder.Services.AddSingleton(collection);
 
             // trackable api controllers
             builder.Services.AddProxyControllers<Root, ProxyController<Root>>();
