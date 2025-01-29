@@ -145,7 +145,7 @@ namespace Namotion.Interceptor.SampleMachine
                             Monitoring = new Dictionary<string, ProcessValueType>
                             {
                                 {
-                                    "MyProcess", 
+                                    "MyProcess",
                                     new ProcessValueType
                                     {
                                         SignalTag = "MySignal",
