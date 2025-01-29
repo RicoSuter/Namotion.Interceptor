@@ -62,15 +62,14 @@ public class ProxyRegistryTests
         // Act
         var person = new Person(collection)
         {
-            FirstName = "Child"
-        };
-
-        person.Mother = new Person
-        {
-            FirstName = "Mother",
+            FirstName = "Child",
             Mother = new Person
             {
-                FirstName = "Grandmother"
+                FirstName = "Mother",
+                Mother = new Person
+                {
+                    FirstName = "Grandmother"
+                }
             }
         };
 
