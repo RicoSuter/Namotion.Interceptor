@@ -13,7 +13,7 @@ public class LifecycleInterceptorTests
         var attaches = new List<LifecycleContext>();
         var detaches = new List<LifecycleContext>();
 
-        var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorCollection
             .Create()
             .WithProxyLifecycle()
@@ -39,7 +39,7 @@ public class LifecycleInterceptorTests
         var attaches = new List<LifecycleContext>();
         var detaches = new List<LifecycleContext>();
 
-        var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorCollection
             .Create()
             .WithProxyLifecycle()
@@ -65,7 +65,7 @@ public class LifecycleInterceptorTests
         var attaches = new List<LifecycleContext>();
         var detaches = new List<LifecycleContext>();
 
-        var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorCollection
             .Create()
             .WithInterceptorInheritance()
@@ -95,7 +95,7 @@ public class LifecycleInterceptorTests
         var attaches = new List<LifecycleContext>();
         var detaches = new List<LifecycleContext>();
 
-        var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorCollection
             .Create()
             .WithInterceptorInheritance()
@@ -123,7 +123,7 @@ public class LifecycleInterceptorTests
         var attaches = new List<LifecycleContext>();
         var detaches = new List<LifecycleContext>();
 
-        var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorCollection
             .Create()
             .WithProxyLifecycle()
@@ -148,7 +148,7 @@ public class LifecycleInterceptorTests
         var attaches = new List<LifecycleContext>();
         var detaches = new List<LifecycleContext>();
 
-        var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorCollection
             .Create()
             .WithInterceptorInheritance()

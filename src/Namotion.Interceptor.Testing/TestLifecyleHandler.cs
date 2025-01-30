@@ -2,12 +2,12 @@
 
 namespace Namotion.Interceptor.Testing
 {
-    public class TestProxyPropertyRegistryHandler : ILifecycleHandler
+    public class TestLifecyleHandler : ILifecycleHandler
     {
         private readonly List<LifecycleContext> _attaches;
         private readonly List<LifecycleContext> _detaches;
 
-        public TestProxyPropertyRegistryHandler(
+        public TestLifecyleHandler(
             List<LifecycleContext> attaches,
             List<LifecycleContext> detaches)
         {

@@ -15,7 +15,7 @@ public class ProxyRegistryTests
         var attaches = new List<LifecycleContext>();
         var detaches = new List<LifecycleContext>();
 
-        var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorCollection
             .Create()
             .WithRegistry()
@@ -50,7 +50,7 @@ public class ProxyRegistryTests
         var attaches = new List<LifecycleContext>();
         var detaches = new List<LifecycleContext>();
 
-        var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorCollection
             .Create()
             .WithRegistry()
@@ -85,7 +85,7 @@ public class ProxyRegistryTests
         var attaches = new List<LifecycleContext>();
         var detaches = new List<LifecycleContext>();
 
-        var handler = new TestProxyPropertyRegistryHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorCollection
             .Create()
             .WithRegistry()
