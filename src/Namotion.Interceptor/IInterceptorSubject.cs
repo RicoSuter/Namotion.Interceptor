@@ -7,7 +7,7 @@ public interface IInterceptorSubject
     /// <summary>
     /// Gets the interceptor collection.
     /// </summary>
-    IInterceptorCollection Interceptors { get; }
+    IInterceptorSubjectContext Interceptors { get; } // TODO: Rename to Context
 
     /// <summary>
     /// Gets the additional data of this proxy.

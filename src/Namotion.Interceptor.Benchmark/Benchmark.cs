@@ -11,7 +11,7 @@ public class Benchmark
 #pragma warning disable CS8618
 
     private Car _object;
-    private IInterceptorCollection? _context;
+    private IInterceptorSubjectContext? _context;
 
 #pragma warning restore CS8618
 
@@ -31,7 +31,7 @@ public class Benchmark
                 break;
             
             case "interceptable":
-                _context = InterceptorCollection
+                _context = InterceptorSubjectContext
                     .Create()
                     .WithFullPropertyTracking()
                     .WithRegistry();

@@ -78,13 +78,13 @@ namespace {namespaceName}
 {{
     public partial class {baseClassName} : IInterceptorSubject
     {{
-        private IInterceptorExecutor? _interceptors;
+        private IInterceptorExecutor? _context;
         private ConcurrentDictionary<string, object?> _data = new ConcurrentDictionary<string, object?>();
 
         [JsonIgnore]
-        IInterceptorCollection IInterceptorSubject.Interceptors
+        IInterceptorSubjectContext IInterceptorSubject.Interceptors
         {{
-            get => _interceptors = _interceptors ?? new InterceptorExecutor(this);
+            get => _context = _context ?? new InterceptorExecutor(this);
         }}
 
         [JsonIgnore]
@@ -133,9 +133,9 @@ namespace {namespaceName}
                     {
                         generatedCode +=
     $@"
-        public {baseClassName}(IInterceptorCollection interceptors) : this()
+        public {baseClassName}(IInterceptorSubjectContext context) : this()
         {{
-            ((IInterceptorSubject)this).Interceptors.AddFallbackCollection(interceptors);
+            ((IInterceptorSubject)this).Interceptors.AddFallbackContext(context);
         }}
 ";
                     }
@@ -187,18 +187,18 @@ namespace {namespaceName}
     $@"
         private T GetProperty<T>(string propertyName, Func<object?> readValue)
         {{
-            return _interceptors is not null ? (T?)_interceptors.GetProperty(this, propertyName, readValue)! : (T?)readValue()!;
+            return _context is not null ? (T?)_context.GetProperty(this, propertyName, readValue)! : (T?)readValue()!;
         }}
 
         private void SetProperty<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)
         {{
-            if (_interceptors is null)
+            if (_context is null)
             {{
                 setValue(newValue);
             }}
             else
             {{
-                _interceptors.SetProperty(this, propertyName, newValue, readValue, setValue);
+                _context.SetProperty(this, propertyName, newValue, readValue, setValue);
             }}
         }}
     }}

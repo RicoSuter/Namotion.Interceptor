@@ -122,14 +122,14 @@ namespace Namotion.Interceptor.SampleMachine
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var collection = InterceptorCollection
+            var context = InterceptorSubjectContext
                 .Create()
                 .WithRegistry()
                 .WithFullPropertyTracking()
                 .WithProxyLifecycle()
                 .WithDataAnnotationValidation();
 
-            var root = new Root(collection)
+            var root = new Root(context)
             {
                 Machines = new Dictionary<string, Machine>
                 {

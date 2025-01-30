@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.SampleConsole
     {
         static void Main(string[] args)
         {
-            var collection = InterceptorCollection
+            var collection = InterceptorSubjectContext
                 .Create()
                 .WithService(() => new LogPropertyChangesHandler())
                 .WithFullPropertyTracking();

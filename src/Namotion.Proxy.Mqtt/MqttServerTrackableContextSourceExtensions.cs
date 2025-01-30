@@ -27,7 +27,7 @@ public static class MqttServerTrackableContextSourceExtensions
             {
                 return new ProxySourceBackgroundService<TProxy>(
                     sp.GetRequiredService<MqttServerTrackableSource<TProxy>>(),
-                    sp.GetRequiredService<IInterceptorCollection>(),
+                    sp.GetRequiredService<IInterceptorSubjectContext>(),
                     sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TProxy>>>());
             });
     }

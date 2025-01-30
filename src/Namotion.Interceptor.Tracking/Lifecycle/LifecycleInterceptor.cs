@@ -6,15 +6,15 @@ public class LifecycleInterceptor : IWriteInterceptor
 {
     // TODO(perf): Profile and improve this class, high potential to improve
 
-    private readonly IInterceptorCollection _collection;
+    private readonly IInterceptorSubjectContext _context;
     
     private const string ReferenceCountKey = "Namotion.ReferenceCount";
  
     private readonly HashSet<IInterceptorSubject> _attachedSubjects = []; // TODO: Use in locks only
 
-    public LifecycleInterceptor(IInterceptorCollection collection)
+    public LifecycleInterceptor(IInterceptorSubjectContext context)
     {
-        _collection = collection;
+        _context = context;
     }
 
     public void AttachTo(IInterceptorSubject subject)
@@ -50,7 +50,7 @@ public class LifecycleInterceptor : IWriteInterceptor
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
             var registryContext = new LifecycleContext(property, index, subject, count ?? 1);
 
-            foreach (var handler in _collection.GetServices<ILifecycleHandler>())
+            foreach (var handler in _context.GetServices<ILifecycleHandler>())
             {
                 handler.Attach(registryContext);
             }
@@ -64,7 +64,7 @@ public class LifecycleInterceptor : IWriteInterceptor
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
             var registryContext = new LifecycleContext(property, index, subject, count ?? 1);
        
-            foreach (var handler in _collection.GetServices<ILifecycleHandler>())
+            foreach (var handler in _context.GetServices<ILifecycleHandler>())
             {
                 handler.Detach(registryContext);
             }

@@ -8,14 +8,14 @@ public static class InterceptorCollectionExtensions
     /// <summary>
     /// Adds support for <see cref="ILifecycleHandler"/> handlers.
     /// </summary>
-    /// <param name="builder">The builder.</param>
-    /// <returns>The builder.</returns>
-    public static IInterceptorCollection WithRegistry(this IInterceptorCollection builder)
+    /// <param name="context">The context.</param>
+    /// <returns>The context.</returns>
+    public static IInterceptorSubjectContext WithRegistry(this IInterceptorSubjectContext context)
     {
-        builder
+        context
             .TryAddService(() => new ProxyRegistry(), _ => true);
 
-        return builder
+        return context
             .WithInterceptorInheritance();
     }
 }

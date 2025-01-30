@@ -82,18 +82,18 @@ namespace Namotion.Interceptor.SampleWeb
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var collection = InterceptorCollection
+            var context = InterceptorSubjectContext
                 .Create()
                 .WithRegistry()
                 .WithFullPropertyTracking()
                 .WithProxyLifecycle()
                 .WithDataAnnotationValidation();
 
-            var car = new Car(collection);
+            var car = new Car(context);
 
             // trackable
             builder.Services.AddSingleton(car);
-            builder.Services.AddSingleton(collection);
+            builder.Services.AddSingleton(context);
 
             // trackable api controllers
             builder.Services.AddProxyControllers<Car, ProxyController<Car>>();
