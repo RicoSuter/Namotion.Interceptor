@@ -1,10 +1,10 @@
 **The library is currently in development and the APIs might change.**
 
-# Namotion.Proxy for .NET
+# Namotion.Interceptor for .NET
 
-Namotion.Proxy is a .NET library designed to simplify the creation of trackable object models by automatically generating property interceptors. All you need to do is annotate your model classes with a few simple attributes; they remain regular POCOs otherwise. The library uses source generation to handle the interception logic for you.
+Namotion.Interceptor is a .NET library designed to simplify the creation of trackable object models by automatically generating property interceptors. All you need to do is annotate your model classes with a few simple attributes; they remain regular POCOs otherwise. The library uses source generation to handle the interception logic for you.
 
-In addition to property tracking, Namotion.Proxy offers advanced features such as automatic change detection (including derived properties), reactive source mapping (e.g., for GraphQL subscriptions or MQTT publishing), and other powerful capabilities that integrate seamlessly into your workflow.
+In addition to property tracking, Namotion.Interceptor offers advanced features such as automatic change detection (including derived properties), reactive source mapping (e.g., for GraphQL subscriptions or MQTT publishing), and other powerful capabilities that integrate seamlessly into your workflow.
 
 Feature map:
 
@@ -27,15 +27,14 @@ public partial class Person
 }
 ```
 
-With this implemented you can now create a proxy context and start tracking changes of these persons:
+With this implemented you can now create a interceptor collection and start tracking changes of these persons:
 
 ```csharp
-var context = ProxyContext
-    .CreateBuilder()
-    .WithFullPropertyTracking()
-    .Build();
+var collection = InterceptorCollection
+    .Create()
+    .WithFullPropertyTracking();
 
-context
+collection
     .GetPropertyChangedObservable()
     .Subscribe(change =>
     {
@@ -44,7 +43,7 @@ context
             $"from '{change.OldValue}' to '{change.NewValue}'.");
     });
 
-var person = new Person(context)
+var person = new Person(collection)
 {
     FirstName = "John",
 // Property 'FirstName' changed from '' to 'John'.
@@ -64,7 +63,7 @@ person.LastName = "Smith";
 // Property 'FullName' changed from 'Jane Doe' to 'Jane Smith'.
 ```
 
-## Proxy attach and detach tacking sample
+## Subject attach and detach tracking sample
 
 Implement a class with properties which reference other proxied objects:
 

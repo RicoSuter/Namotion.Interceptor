@@ -44,7 +44,7 @@ public class InterceptorCollectionTests
         var collection1 = new InterceptorCollection();
         var collection2 = new InterceptorCollection();
         
-        collection2.AddInterceptorCollection(collection1);
+        collection2.AddFallbackCollection(collection1);
 
         // Act
         collection1.AddService(1);
