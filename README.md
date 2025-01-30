@@ -94,7 +94,7 @@ The context now automatically tracks the attachment and detachment of referenced
 var context = ProxyContext
     .CreateBuilder()
     .AddHandler(new LogPropertyChangesHandler())
-    .WithFullPropertyTracking() // this will track property changes and proxy attaches/detaches
+    .WithFullPropertyTracking() // this will track property changes and subject attaches/detaches
     .Build();
 
 var child1 = new Person { Name = "Child1" };
@@ -102,15 +102,15 @@ var child2 = new Person { Name = "Child2" };
 var child3 = new Person { Name = "Child3" };
 
 var person = new Person(context)
-// Attach proxy: Person: n/a
+// Attach: Person: n/a
 
 person.Children = 
 [
     child1,
     child2
 ];
-// Attach proxy: Person: Child1
-// Attach proxy: Person: Child2
+// Attach: Person: Child1
+// Attach: Person: Child2
 
 person.Children = 
 [
@@ -118,23 +118,23 @@ person.Children =
     child2,
     child3
 ];
-// Attach proxy: Person: Child3
+// Attach: Person: Child3
 
 person.Children = [];
-// Detach proxy: Person: Child1
-// Detach proxy: Person: Child2
-// Detach proxy: Person: Child3
+// Detach: Person: Child1
+// Detach: Person: Child2
+// Detach: Person: Child3
 
-public class LogPropertyChangesHandler : IProxyLifecycleHandler
+public class LogPropertyChangesHandler : ILifecycleHandler
 {
-    public void OnProxyAttached(ProxyLifecycleContext context)
+    public void Attach(LifecycleContext context)
     {
-        Console.WriteLine($"Attach proxy: {context.Proxy}");
+        Console.WriteLine($"Attach: {context.Subject}");
     }
 
-    public void OnProxyDetached(ProxyLifecycleContext context)
+    public void Detach(LifecycleContext context)
     {
-        Console.WriteLine($"Detach proxy: {context.Proxy}");
+        Console.WriteLine($"Detach: {context.Subject}");
     }
 }
 ```

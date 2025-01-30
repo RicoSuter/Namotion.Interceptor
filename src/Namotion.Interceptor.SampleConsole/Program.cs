@@ -82,12 +82,12 @@ namespace Namotion.Interceptor.SampleConsole
     {
         public void Attach(LifecycleContext context)
         {
-            Console.WriteLine($"Attach proxy: {context.Subject}");
+            Console.WriteLine($"Attach: {context.Subject}");
         }
 
         public void Detach(LifecycleContext context)
         {
-            Console.WriteLine($"Detach proxy: {context.Subject}");
+            Console.WriteLine($"Detach: {context.Subject}");
         }
     }
 }
