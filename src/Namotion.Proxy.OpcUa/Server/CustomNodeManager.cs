@@ -1,6 +1,6 @@
-﻿using System.Reactive.Linq;
-using System.Reflection;
-using Namotion.Proxy.Registry.Abstractions;
+﻿using System.Reflection;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Proxy.OpcUa.Annotations;
 
 using Opc.Ua.Server;
@@ -10,7 +10,7 @@ using Opc.Ua.Export;
 namespace Namotion.Proxy.OpcUa.Server;
 
 internal class CustomNodeManager<TProxy> : CustomNodeManager2
-    where TProxy : IProxy
+    where TProxy : IInterceptorSubject
 {
     private const string PathDelimiter = ".";
 
@@ -27,7 +27,8 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         OpcUaServerTrackableSource<TProxy> source,
         IServerInternal server,
         ApplicationConfiguration configuration,
-        string? rootName) :
+        string? rootName,
+        IProxyRegistry registry) :
         base(server, configuration, new[] 
         {
             "https://foobar/",
@@ -41,8 +42,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         _proxy = proxy;
         _source = source;
         _rootName = rootName;
-
-        _registry = proxy.Context?.GetHandler<IProxyRegistry>() ?? throw new ArgumentException($"Registry could not be found.");
+        _registry = registry;
     }
 
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)
@@ -199,12 +199,12 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
 
     private void CreateChildObject(
         QualifiedName browseName,
-        IProxy proxy, 
+        IInterceptorSubject subject, 
         string path, 
         NodeId parentNodeId, 
         NodeId? referenceTypeId)
     {
-        var registeredProxy = _registry.KnownProxies[proxy];
+        var registeredProxy = _registry.KnownProxies[subject];
         if (_proxies.TryGetValue(registeredProxy, out var objectNode))
         {
             var parentNode = FindNodeInAddressSpace(parentNodeId);
@@ -213,7 +213,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         else
         {
             var nodeId = new NodeId(path, NamespaceIndex);
-            var typeDefinitionId = GetTypeDefinitionId(proxy);
+            var typeDefinitionId = GetTypeDefinitionId(subject);
 
             var node = CreateFolder(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
             CreateObjectNode(node.NodeId, registeredProxy, path + PathDelimiter);
@@ -251,9 +251,9 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
         return GetTypeDefinitionId(typeDefinitionAttribute);
     }
 
-    private NodeId? GetTypeDefinitionId(IProxy proxy)
+    private NodeId? GetTypeDefinitionId(IInterceptorSubject subject)
     {
-        var typeDefinitionAttribute = proxy.GetType().GetCustomAttribute<OpcUaTypeDefinitionAttribute>();
+        var typeDefinitionAttribute = subject.GetType().GetCustomAttribute<OpcUaTypeDefinitionAttribute>();
         return GetTypeDefinitionId(typeDefinitionAttribute);
     }
 

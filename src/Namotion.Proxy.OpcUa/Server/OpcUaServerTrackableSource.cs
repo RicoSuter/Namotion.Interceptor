@@ -1,18 +1,18 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-
-using System.Reactive.Linq;
-
 using Namotion.Proxy.Sources.Abstractions;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Proxy.OpcUa.Server;
 
 internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
-    where TProxy : IProxy
+    where TProxy : IInterceptorSubject
 {
     internal const string OpcVariableKey = "OpcVariable";
 
@@ -40,10 +40,13 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _proxy.Context.WithRegistry();
+        
         while (!stoppingToken.IsCancellationRequested)
         {
             using var stream = typeof(OpcUaProxyExtensions).Assembly
-                .GetManifestResourceStream("Namotion.Proxy.OpcUa.MyOpcUaServer.Config.xml");
+                .GetManifestResourceStream("Namotion.Proxy.OpcUa.MyOpcUaServer.Config.xml") ??
+                throw new InvalidOperationException("Config.xml not found.");
 
             var application = new ApplicationInstance
             {
@@ -55,7 +58,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
 
             try
             {
-                _server = new ProxyOpcUaServer<TProxy>(_proxy, this, _rootName);
+                _server = new ProxyOpcUaServer<TProxy>(_proxy, this, _rootName, _proxy.Context.GetService<IProxyRegistry>());
 
                 await application.CheckApplicationInstanceCertificate(true, CertificateFactory.DefaultKeySize);
                 await application.Start(_server);
@@ -79,7 +82,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
         }
     }
 
-    internal void UpdateProperty(ProxyPropertyReference property, string sourcePath, object? value)
+    internal void UpdateProperty(PropertyReference property, string sourcePath, object? value)
     {
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type); // TODO: improve conversion here
         _propertyUpdateAction?.Invoke(new ProxyPropertyPathReference(property, sourcePath, convertedValue));
@@ -123,7 +126,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
         return Task.CompletedTask;
     }
 
-    public string? TryGetSourcePath(ProxyPropertyReference property)
+    public string? TryGetSourcePath(PropertyReference property)
     {
         return SourcePathProvider.TryGetSourcePath(property);
     }

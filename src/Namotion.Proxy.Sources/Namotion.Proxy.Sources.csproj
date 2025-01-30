@@ -14,7 +14,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Namotion.Proxy\Namotion.Proxy.csproj" />
+		<ProjectReference Include="..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
 	</ItemGroup>
 
 </Project>

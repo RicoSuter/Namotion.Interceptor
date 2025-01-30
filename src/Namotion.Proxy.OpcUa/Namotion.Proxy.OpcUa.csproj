@@ -23,7 +23,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.Proxy.Sources\Namotion.Proxy.Sources.csproj" />
-    <ProjectReference Include="..\Namotion.Proxy\Namotion.Proxy.csproj" />
   </ItemGroup>
 
 </Project>

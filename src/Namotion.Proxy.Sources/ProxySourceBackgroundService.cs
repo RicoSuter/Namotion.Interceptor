@@ -1,17 +1,18 @@
 ﻿using System.Reactive.Linq;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Namotion.Proxy.ChangeTracking;
-using Namotion.Proxy.Registry.Abstractions;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking;
 using Namotion.Proxy.Sources.Abstractions;
 
 namespace Namotion.Proxy.Sources;
 
 public class ProxySourceBackgroundService<TProxy> : BackgroundService
-    where TProxy : IProxy
+    where TProxy : IInterceptorSubject
 {
-    private readonly IProxyContext _context;
     private readonly IProxySource _source;
+    private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
@@ -20,7 +21,7 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
 
     public ProxySourceBackgroundService(
         IProxySource source,
-        IProxyContext context,
+        IInterceptorSubjectContext context,
         ILogger logger,
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null)
@@ -41,13 +42,13 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
                 // TODO: Currently newly added properties/trackable are not automatically tracked/subscribed to
 
                 var propertiesWithSetter = _context
-                    .GetHandler<IProxyRegistry>()
+                    .GetService<IProxyRegistry>()
                     .KnownProxies
                     .SelectMany(v => v.Value.Properties
                         .Where(p => p.Value.HasSetter)
                         .Select(p =>
                         {
-                            var reference = new ProxyPropertyReference(v.Key, p.Key);
+                            var reference = new PropertyReference(v.Key, p.Key);
                             return new ProxyPropertyPathReference(reference,
                                 _source.TryGetSourcePath(reference) ?? string.Empty,
                                 p.Value.HasGetter ? p.Value.GetValue() : null);
@@ -112,7 +113,7 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to set value of property {PropertyName} of type {Type}.",
-                property.Property.Proxy.GetType().FullName, property.Property.Name);
+                property.Property.Subject.GetType().FullName, property.Property.Name);
         }
     }
 

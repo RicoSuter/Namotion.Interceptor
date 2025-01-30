@@ -10,16 +10,17 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Server;
-using Namotion.Proxy.Registry;
-using Namotion.Proxy.Registry.Abstractions;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Proxy.Sources.Abstractions;
 
 namespace Namotion.Proxy.Mqtt
 {
     public class MqttServerTrackableSource<TProxy> : BackgroundService, IProxySource
-        where TProxy : IProxy
+        where TProxy : IInterceptorSubject
     {
-        private readonly IProxyContext _context;
+        private readonly TProxy _proxy;
         private readonly ISourcePathProvider _sourcePathProvider;
         private readonly ILogger _logger;
 
@@ -28,7 +29,7 @@ namespace Namotion.Proxy.Mqtt
 
         private Action<ProxyPropertyPathReference>? _propertyUpdateAction;
         
-        private readonly ConcurrentDictionary<ProxyPropertyReference, object?> _state = new();
+        private readonly ConcurrentDictionary<PropertyReference, object?> _state = new();
 
         public int Port { get; set; } = 1883;
 
@@ -36,13 +37,13 @@ namespace Namotion.Proxy.Mqtt
 
         public int? NumberOfClients => _numberOfClients;
 
-        // TODO: Inject IProxyContext<TProxy> so that multiple contexts are supported.
+        // TODO: Inject IInterceptorContext<TProxy> so that multiple contexts are supported.
         public MqttServerTrackableSource(
-            IProxyContext context,
+            TProxy proxy,
             ISourcePathProvider sourcePathProvider,
             ILogger<MqttServerTrackableSource<TProxy>> logger)
         {
-            _context = context;
+            _proxy = proxy;
             _sourcePathProvider = sourcePathProvider;
             _logger = logger;
         }
@@ -117,11 +118,11 @@ namespace Namotion.Proxy.Mqtt
                             ContentType = "application/json",
                             PayloadSegment = new ArraySegment<byte>(
                                Encoding.UTF8.GetBytes(JsonSerializer.Serialize(property.Value)))
-                        }));
+                        }), cancellationToken);
             }
         }
 
-        public string? TryGetSourcePath(ProxyPropertyReference property)
+        public string? TryGetSourcePath(PropertyReference property)
         {
             return _sourcePathProvider.TryGetSourcePath(property);
         }
@@ -133,9 +134,10 @@ namespace Namotion.Proxy.Mqtt
             Task.Run(async () =>
             {
                 await Task.Delay(1000);
-                foreach (var property in _context
-                    .GetHandler<IProxyRegistry>()
-                    .GetProperties()
+                foreach (var property in _proxy
+                    .Context
+                    .GetService<IProxyRegistry>()
+                    .GetProperties() // TODO: Only properties of proxy and children
                     .Where(p => p.HasGetter))
                 {
                     await PublishPropertyValueAsync(property.GetValue(), property.Property);
@@ -145,7 +147,7 @@ namespace Namotion.Proxy.Mqtt
             return Task.CompletedTask;
         }
 
-        private async Task PublishPropertyValueAsync(object? value, ProxyPropertyReference property)
+        private async Task PublishPropertyValueAsync(object? value, PropertyReference property)
         {
             var sourcePath = _sourcePathProvider.TryGetSourcePath(property);
             if (sourcePath != null)
@@ -165,9 +167,10 @@ namespace Namotion.Proxy.Mqtt
             try
             {
                 var sourcePath = args.ApplicationMessage.Topic.Replace('/', '.');
-                var property = _context
-                    .GetHandler<IProxyRegistry>()
-                    .GetProperties()
+                var property = _proxy
+                    .Context
+                    .GetService<IProxyRegistry>()
+                    .GetProperties()  // TODO: Only properties of proxy and children
                     .SingleOrDefault(p => _sourcePathProvider.TryGetSourcePath(p.Property) == sourcePath);
 
                 if (property != default)
