@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj" />
     <ProjectReference Include="..\Namotion.Interceptor.Validation\Namotion.Interceptor.Validation.csproj" />
   </ItemGroup>
 
