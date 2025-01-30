@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Validation.Tests.Models
 {
     // test different property types
 
-    [GenerateProxy]
+    [InterceptorSubject]
     public partial class Address
     {
         // required property (tracked)

@@ -14,6 +14,26 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
         _subject = subject;
     }
 
+    public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
+    {
+        return _context.TryAddService(factory, exists);
+    }
+
+    public void AddService<TService>(TService service)
+    {
+        _context.AddService(service);
+    }
+
+    public TInterface? TryGetService<TInterface>()
+    {
+        return _context.TryGetService<TInterface>();
+    }
+
+    public IEnumerable<TInterface> GetServices<TInterface>()
+    {
+        return _context.GetServices<TInterface>();
+    }
+    
     // private readonly ConcurrentDictionary<Func<object?>, Func<ReadPropertyInterception, object?>> _getters = new();
     // private readonly ConcurrentDictionary<Action<object?>, Func<WritePropertyInterception, object?>> _setters = new();
     
@@ -135,25 +155,5 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
         }
         
         _context.RemoveFallbackContext(context);
-    }
-
-    public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
-    {
-        return _context.TryAddService(factory, exists);
-    }
-
-    public void AddService<TService>(TService service)
-    {
-        _context.AddService(service);
-    }
-
-    public TInterface? TryGetService<TInterface>()
-    {
-        return _context.TryGetService<TInterface>();
-    }
-
-    public IEnumerable<TInterface> GetServices<TInterface>()
-    {
-        return _context.GetServices<TInterface>();
     }
 }

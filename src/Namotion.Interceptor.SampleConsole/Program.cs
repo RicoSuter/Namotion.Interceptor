@@ -51,7 +51,7 @@ namespace Namotion.Interceptor.SampleConsole
         }
     }
 
-    [GenerateProxy]
+    [InterceptorSubject]
     public partial class Person
     {
         public partial string FirstName { get; set; }

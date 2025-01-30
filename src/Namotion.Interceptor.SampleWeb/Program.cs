@@ -12,7 +12,7 @@ using NSwag.Annotations;
 
 namespace Namotion.Interceptor.SampleWeb
 {
-    [GenerateProxy]
+    [InterceptorSubject]
     public partial class Car
     {
         [ProxySource("mqtt", "name")]
@@ -39,7 +39,7 @@ namespace Namotion.Interceptor.SampleWeb
         }
     }
 
-    [GenerateProxy]
+    [InterceptorSubject]
     public partial class Tire
     {
         [ProxySource("mqtt", "pressure")]

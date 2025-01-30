@@ -2,7 +2,7 @@
 
 namespace Namotion.Interceptor.SampleBlazor.Models
 {
-    [GenerateProxy]
+    [InterceptorSubject]
     public partial class Game
     {
         public partial Player[] Players { get; protected set; }
