@@ -2,7 +2,6 @@
 
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
-using Namotion.Proxy;
 using Namotion.Proxy.GraphQL;
 
 // ReSharper disable once CheckNamespace

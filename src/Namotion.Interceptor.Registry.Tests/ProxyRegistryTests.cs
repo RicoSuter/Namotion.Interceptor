@@ -1,9 +1,6 @@
 ﻿using System.Text.Json;
-using Namotion.Interceptor;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
-using Namotion.Interceptor.Tests;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Person = Namotion.Interceptor.Tests.Models.Person;
 

@@ -1,5 +1,4 @@
 ﻿using Namotion.Interceptor;
-using Namotion.Proxy;
 using Namotion.Proxy.AspNetCore.Controllers;
 
 // ReSharper disable once CheckNamespace

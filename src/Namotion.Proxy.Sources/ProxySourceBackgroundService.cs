@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Validation;
 using Namotion.Proxy.Sources.Abstractions;
 
 namespace Namotion.Proxy.Sources;

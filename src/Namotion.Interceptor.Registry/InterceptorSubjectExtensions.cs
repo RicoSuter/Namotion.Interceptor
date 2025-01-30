@@ -3,12 +3,11 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Registry;
 
-public static class ProxyExtensions
+public static class InterceptorSubjectExtensions
 {
     public static void SetData(this IInterceptorSubject subject, string key, object? value)
     {
