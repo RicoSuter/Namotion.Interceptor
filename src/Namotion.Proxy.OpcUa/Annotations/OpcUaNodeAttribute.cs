@@ -1,6 +1,4 @@
-﻿using Namotion.Proxy.Sources.Abstractions;
-using Namotion.Proxy.Sources.Attributes;
-using System.IO;
+﻿using Namotion.Proxy.Sources.Attributes;
 
 namespace Namotion.Proxy.OpcUa.Annotations;
 

@@ -1,8 +1,5 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-
-using System.Reactive.Linq;
-
 using Namotion.Proxy.Sources.Abstractions;
 using Opc.Ua;
 using Opc.Ua.Configuration;
