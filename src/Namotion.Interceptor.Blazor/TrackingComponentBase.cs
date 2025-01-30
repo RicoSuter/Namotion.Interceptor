@@ -4,7 +4,7 @@ using Namotion.Interceptor.Tracking.Recorder;
 
 namespace Namotion.Interceptor.Blazor;
 
-public class ProxyComponentBase<TSubject> : ComponentBase, IDisposable
+public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
     where TSubject : IInterceptorSubject
 {
     private IDisposable? _subscription;
