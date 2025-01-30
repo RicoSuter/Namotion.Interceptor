@@ -15,7 +15,6 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
-		<ProjectReference Include="..\Namotion.Interceptor.Validation\Namotion.Interceptor.Validation.csproj" />
 	</ItemGroup>
 
 </Project>
