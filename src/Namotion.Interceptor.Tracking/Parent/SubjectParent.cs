@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Tracking;
+namespace Namotion.Interceptor.Tracking.Parent;
 
 public record struct SubjectParent(
     PropertyReference Property,

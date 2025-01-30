@@ -1,6 +1,6 @@
-using Namotion.Interceptor.Tracking.Attributes;
+using Namotion.Interceptor.Tracking.Change.Attributes;
 
-namespace Namotion.Interceptor.Tracking;
+namespace Namotion.Interceptor.Tracking.Change;
 
 public static class SubjectPropertyMetadataExtensions
 {

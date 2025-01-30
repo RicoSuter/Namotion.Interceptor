@@ -1,4 +1,4 @@
-﻿namespace Namotion.Interceptor.Tracking;
+﻿namespace Namotion.Interceptor.Tracking.Recorder;
 
 public class ReadPropertyRecorderScope : IDisposable
 {

@@ -1,4 +1,4 @@
-﻿namespace Namotion.Interceptor.Tracking.Handlers;
+﻿namespace Namotion.Interceptor.Tracking.Parent;
 
 public class ParentTrackingHandler : IWriteInterceptor
 {

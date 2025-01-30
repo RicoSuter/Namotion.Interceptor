@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Tracking.Attributes;
+using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Change.Attributes;
 
 namespace Namotion.Interceptor.Tests.Models
 {

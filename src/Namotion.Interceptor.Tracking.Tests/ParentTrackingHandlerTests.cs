@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Tracking.Tests.Models;
+﻿using Namotion.Interceptor.Tracking.Parent;
+using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests;
 
