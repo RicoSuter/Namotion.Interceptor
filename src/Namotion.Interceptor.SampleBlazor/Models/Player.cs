@@ -2,7 +2,7 @@
 
 namespace Namotion.Interceptor.SampleBlazor.Models
 {
-    [GenerateProxy]
+    [InterceptorSubject]
     public partial class Player : IDisposable
     {
         private readonly Game _game;

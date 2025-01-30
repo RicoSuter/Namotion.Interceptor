@@ -9,7 +9,7 @@ using NSwag.Annotations;
 
 namespace Namotion.Interceptor.SampleMachine
 {
-    [GenerateProxy]
+    [InterceptorSubject]
     public partial class Root
     {
         [OpcUaNode("Machines", "http://opcfoundation.org/UA/Machinery/")]
@@ -23,7 +23,7 @@ namespace Namotion.Interceptor.SampleMachine
         }
     }
 
-    [GenerateProxy]
+    [InterceptorSubject]
     [OpcUaTypeDefinition("BaseObjectType")]
     public partial class Machine
     {
@@ -48,7 +48,7 @@ namespace Namotion.Interceptor.SampleMachine
         }
     }
 
-    [GenerateProxy]
+    [InterceptorSubject]
     [OpcUaTypeDefinition("ProcessValueType", "http://opcfoundation.org/UA/Machinery/ProcessValues/")]
     public partial class ProcessValueType
     {
@@ -64,7 +64,7 @@ namespace Namotion.Interceptor.SampleMachine
         }
     }
 
-    [GenerateProxy]
+    [InterceptorSubject]
     [OpcUaTypeDefinition("AnalogSignalVariableType", "http://opcfoundation.org/UA/PADIM/")]
     public partial class AnalogSignalVariable
     {
@@ -85,7 +85,7 @@ namespace Namotion.Interceptor.SampleMachine
         }
     }
 
-    [GenerateProxy]
+    [InterceptorSubject]
     [OpcUaTypeDefinition("FolderType")]
     public partial class MachineryBuildingBlocks
     {
@@ -99,7 +99,7 @@ namespace Namotion.Interceptor.SampleMachine
         }
     }
 
-    [GenerateProxy]
+    [InterceptorSubject]
     [OpcUaTypeDefinition("MachineIdentificationType", "http://opcfoundation.org/UA/Machinery/")]
     public partial class Identification
     {

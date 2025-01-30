@@ -2,7 +2,7 @@
 
 namespace Namotion.Interceptor.Benchmark
 {
-    [GenerateProxy]
+    [InterceptorSubject]
     public partial class Tire
     {
         public Tire()

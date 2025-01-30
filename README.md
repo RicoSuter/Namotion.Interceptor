@@ -15,7 +15,7 @@ Feature map:
 First you can define a proxied class:
 
 ```csharp
-[GenerateProxy]
+[InterceptorSubject]
 public partial class Person
 {
     public partial string FirstName { get; set; }
@@ -68,7 +68,7 @@ person.LastName = "Smith";
 Implement a class with properties which reference other proxied objects:
 
 ```csharp
-[GenerateProxy]
+[InterceptorSubject]
 public partial class Person
 {
     public partial string Name { get; set; }

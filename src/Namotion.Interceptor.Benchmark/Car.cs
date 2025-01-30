@@ -3,7 +3,7 @@ using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Interceptor.Benchmark
 {
-    [GenerateProxy]
+    [InterceptorSubject]
     public partial class Car
     {
         public Car()

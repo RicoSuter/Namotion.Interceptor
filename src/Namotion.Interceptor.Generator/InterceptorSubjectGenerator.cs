@@ -15,7 +15,10 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
     {
         var classWithAttributeProvider = context.SyntaxProvider
             .CreateSyntaxProvider(
-                predicate: (node, _) => node is ClassDeclarationSyntax cds && cds.AttributeLists.Count > 0 && cds.AttributeLists.Any(a => a.ToString() == "[GenerateProxy]"),
+                predicate: (node, _) => node is ClassDeclarationSyntax cds && 
+                                        cds.AttributeLists.Count > 0 && 
+                                        cds.AttributeLists.Any(a => a.ToString() == "[InterceptorSubject]"), 
+                                        // TODO: Use actual symbol
                 transform: (ctx, ct) =>
                 {
                     var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
@@ -32,7 +35,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                                 Property = p,
                                 Type = model.GetTypeInfo(p.Type, ct),
                                 IsPartial = p.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)),
-                                IsDerived = p.AttributeLists.Any(a => a.ToString() == "[Derived]"),
+                                IsDerived = p.AttributeLists.Any(a => a.ToString() == "[Derived]"), // TODO: Use actual symbol
                                 IsRequired = p.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword)),
                                 HasGetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
                                             p.ExpressionBody.IsKind(SyntaxKind.ArrowExpressionClause),

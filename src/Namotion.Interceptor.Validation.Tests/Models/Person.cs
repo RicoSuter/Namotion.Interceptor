@@ -4,7 +4,7 @@ using Namotion.Interceptor.Tracking.Change.Attributes;
 
 namespace Namotion.Interceptor.Validation.Tests.Models
 {
-    [GenerateProxy]
+    [InterceptorSubject]
     public partial class Person
     {
         public Person()
