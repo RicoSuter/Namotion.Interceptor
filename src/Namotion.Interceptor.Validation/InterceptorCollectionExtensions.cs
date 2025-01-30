@@ -10,7 +10,7 @@ public static class InterceptorCollectionExtensions
     public static IInterceptorCollection WithPropertyValidation(this IInterceptorCollection collection)
     {
         return collection
-            .WithInterceptor(() => new ValidationInterceptor(collection));
+            .WithInterceptor(() => new ValidationInterceptor());
     }
 
     /// <summary>
