@@ -1,7 +1,5 @@
 ﻿namespace Namotion.Interceptor;
 
-// TODO: Rename to ServiceContext : IServiceContext?
-// or InterceptorSubjectContext : IInterceptorSubjectContext?
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
     private readonly List<IInterceptorSubjectContext> _interceptorCollections = [];
