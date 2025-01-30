@@ -137,7 +137,7 @@ namespace Namotion.Proxy.Mqtt
                 foreach (var property in _proxy
                     .Context
                     .GetService<IProxyRegistry>()
-                    .GetProperties()
+                    .GetProperties() // TODO: Only properties of proxy and children
                     .Where(p => p.HasGetter))
                 {
                     await PublishPropertyValueAsync(property.GetValue(), property.Property);
@@ -170,7 +170,7 @@ namespace Namotion.Proxy.Mqtt
                 var property = _proxy
                     .Context
                     .GetService<IProxyRegistry>()
-                    .GetProperties()
+                    .GetProperties()  // TODO: Only properties of proxy and children
                     .SingleOrDefault(p => _sourcePathProvider.TryGetSourcePath(p.Property) == sourcePath);
 
                 if (property != default)
