@@ -27,14 +27,14 @@ public partial class Person
 }
 ```
 
-With this implemented you can now create a interceptor collection and start tracking changes of these persons:
+With this implemented you can now create a context and start tracking changes of these persons:
 
 ```csharp
-var context = InterceptorCollection
+var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking();
 
-collection
+context
     .GetPropertyChangedObservable()
     .Subscribe(change =>
     {
@@ -43,7 +43,7 @@ collection
             $"from '{change.OldValue}' to '{change.NewValue}'.");
     });
 
-var person = new Person(collection)
+var person = new Person(context)
 {
     FirstName = "John",
 // Property 'FirstName' changed from '' to 'John'.
