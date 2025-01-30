@@ -10,12 +10,12 @@ public class InterceptorCollection : IInterceptorCollection
         return new InterceptorCollection();
     }
     
-    public void AddInterceptorCollection(IInterceptorCollection interceptorCollection)
+    public void AddFallbackCollection(IInterceptorCollection interceptorCollection)
     {
         _interceptorCollections.Add(interceptorCollection);
     }
 
-    public void RemoveInterceptorCollection(IInterceptorCollection interceptorCollection)
+    public void RemoveFallbackCollection(IInterceptorCollection interceptorCollection)
     {
         _interceptorCollections.Remove(interceptorCollection);
     }

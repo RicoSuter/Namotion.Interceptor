@@ -2,9 +2,9 @@ namespace Namotion.Interceptor;
 
 public interface IInterceptorCollection
 {
-    void AddInterceptorCollection(IInterceptorCollection interceptorCollection);
+    void AddFallbackCollection(IInterceptorCollection interceptorCollection);
 
-    void RemoveInterceptorCollection(IInterceptorCollection interceptorCollection);
+    void RemoveFallbackCollection(IInterceptorCollection interceptorCollection);
     
     bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists);
 

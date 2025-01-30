@@ -97,9 +97,9 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
         //     .Invoke(interception);
     }
 
-    public void AddInterceptorCollection(IInterceptorCollection interceptorCollection)
+    public void AddFallbackCollection(IInterceptorCollection interceptorCollection)
     {
-        _collection.AddInterceptorCollection(interceptorCollection);
+        _collection.AddFallbackCollection(interceptorCollection);
         
         foreach (var interceptor in interceptorCollection.GetServices<IInterceptor>())
         {
@@ -117,7 +117,7 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
         }
     }
 
-    public void RemoveInterceptorCollection(IInterceptorCollection interceptorCollection)
+    public void RemoveFallbackCollection(IInterceptorCollection interceptorCollection)
     {
         foreach (var interceptor in interceptorCollection.GetServices<IInterceptor>())
         {
@@ -134,7 +134,7 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
             interceptor.DetachFrom(_subject);
         }
         
-        _collection.RemoveInterceptorCollection(interceptorCollection);
+        _collection.RemoveFallbackCollection(interceptorCollection);
     }
 
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)

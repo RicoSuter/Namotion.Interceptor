@@ -135,7 +135,7 @@ namespace {namespaceName}
     $@"
         public {baseClassName}(IInterceptorCollection interceptors) : this()
         {{
-            ((IInterceptorSubject)this).Interceptors.AddInterceptorCollection(interceptors);
+            ((IInterceptorSubject)this).Interceptors.AddFallbackCollection(interceptors);
         }}
 ";
                     }
