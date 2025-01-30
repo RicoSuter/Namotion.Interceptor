@@ -1,4 +1,4 @@
-﻿//namespace Namotion.Proxy.Sources;
+﻿//namespace Namotion.Interceptable.Sources;
 
 //public class CompositeTrackableContextSource : ITrackableSource
 //{
@@ -82,7 +82,7 @@
 //        }
 //    }
 
-//    public string? TryGetSourcePath(ProxyPropertyReference property)
+//    public string? TryGetSourcePath(PropertyReference property)
 //    {
 //        var source = _sources.First(s => property.Path.StartsWith(s.Key + Separator));
 //        return source.Value.TryGetSourcePath(property);

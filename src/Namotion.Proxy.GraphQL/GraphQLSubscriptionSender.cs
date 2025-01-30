@@ -1,27 +1,26 @@
 ﻿using HotChocolate.Subscriptions;
 using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Proxy.GraphQL
 {
     public class GraphQLSubscriptionSender<TProxy> : BackgroundService
-        where TProxy : IProxy
+        where TProxy : IInterceptorSubject
     {
         private readonly TProxy _proxy;
-        private readonly IProxyContext _context;
         private readonly ITopicEventSender _sender;
 
         public GraphQLSubscriptionSender(TProxy proxy, ITopicEventSender sender)
         {
-            _context = proxy.Context  ??
-                throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
-
             _proxy = proxy;
             _sender = sender;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await foreach (var changes in _context
+            await foreach (var changes in _proxy
+                .Context
                 .GetPropertyChangedObservable()
                 .ToAsyncEnumerable()
                 .WithCancellation(stoppingToken))

@@ -3,21 +3,21 @@
 
 //using System.Reactive.Linq;
 
-//using Namotion.Proxy.Sources.Abstractions;
+//using Namotion.Interceptable.Sources.Abstractions;
 //using Opc.Ua;
 //using Opc.Ua.Configuration;
 
 //using Microsoft.Extensions.DependencyInjection;
 //using Opc.Ua.Server;
 
-//namespace Namotion.Proxy.OpcUa.Server;
+//namespace Namotion.Interceptable.OpcUa.Server;
 
 //internal class OpcUaClientTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
-//    where TProxy : IProxy
+//    where TProxy : IInterceptorCollection
 //{
 //    internal const string OpcVariableKey = "OpcVariable";
 
-//    private readonly IProxyContext _context;
+//    private readonly IInterceptorContext _context;
 //    private readonly TProxy _proxy;
 //    private readonly string _serverUrl;
 //    private readonly ILogger _logger;
@@ -26,16 +26,16 @@
 //    internal ISourcePathProvider SourcePathProvider { get; }
 
 //    public OpcUaClientTrackableSource(
-//        TProxy proxy,
+//        TProxy interceptable,
 //        string serverUrl,
 //        ISourcePathProvider sourcePathProvider,
 //        ILogger<OpcUaClientTrackableSource<TProxy>> logger,
 //        string? rootName)
 //    {
-//        _context = proxy.Context ??
+//        _context = interceptable.Context ??
 //            throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
-//        _proxy = proxy;
+//        _proxy = interceptable;
 //        _serverUrl = serverUrl;
 //        _logger = logger;
 //        _rootName = rootName;
@@ -48,7 +48,7 @@
 //        while (!stoppingToken.IsCancellationRequested)
 //        {
 //            using var stream = typeof(OpcUaProxyExtensions).Assembly
-//                .GetManifestResourceStream("Namotion.Proxy.OpcUa.MyOpcUaServer.Config.xml");
+//                .GetManifestResourceStream("Namotion.Interceptable.OpcUa.MyOpcUaServer.Config.xml");
 
 //            var application = new ApplicationInstance
 //            {
@@ -169,7 +169,7 @@
 //        return Task.CompletedTask;
 //    }
 
-//    public string? TryGetSourcePath(ProxyPropertyReference property)
+//    public string? TryGetSourcePath(PropertyReference property)
 //    {
 //        return SourcePathProvider.TryGetSourcePath(property);
 //    }

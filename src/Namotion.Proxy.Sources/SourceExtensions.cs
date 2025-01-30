@@ -1,4 +1,5 @@
-﻿using Namotion.Proxy.Abstractions;
+﻿using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Proxy.Sources.Abstractions;
 
 namespace Namotion.Proxy.Sources;
@@ -11,7 +12,7 @@ public static class SourceExtensions
 
     private const string IsChangingFromSourceKey = "Namotion.IsChangingFromSource";
 
-    public static void SetValueFromSource(this ProxyPropertyReference property, IProxySource source, object? valueFromSource)
+    public static void SetValueFromSource(this PropertyReference property, IProxySource source, object? valueFromSource)
     {
         var contexts = property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<IProxySource>())!;
         lock (contexts)
@@ -23,10 +24,10 @@ public static class SourceExtensions
         {
             var newValue = valueFromSource;
 
-            var currentValue = property.Metadata.GetValue?.Invoke(property.Proxy);
+            var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
             if (!Equals(currentValue, newValue))
             {
-                property.Metadata.SetValue?.Invoke(property.Proxy, newValue);
+                property.Metadata.SetValue?.Invoke(property.Subject, newValue);
             }
         }
         finally
@@ -38,7 +39,7 @@ public static class SourceExtensions
         }
     }
 
-    public static bool IsChangingFromSource(this ProxyPropertyChanged change, IProxySource source)
+    public static bool IsChangingFromSource(this PropertyChangedContext change, IProxySource source)
     {
         var contexts = change.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<IProxySource>())!;
         lock (contexts)
@@ -47,32 +48,32 @@ public static class SourceExtensions
         }
     }
 
-    public static string? TryGetAttributeBasedSourcePropertyName(this ProxyPropertyReference property, string sourceName)
+    public static string? TryGetAttributeBasedSourcePropertyName(this PropertyReference property, string sourceName)
     {
         return property.TryGetPropertyData($"{SourcePropertyNameKey}{sourceName}", out var value) ? value as string : null;
     }
 
-    public static string? TryGetAttributeBasedSourcePath(this ProxyPropertyReference property, string sourceName, IProxyContext context)
+    public static string? TryGetAttributeBasedSourcePath(this PropertyReference property, string sourceName)
     {
         return property.TryGetPropertyData($"{SourcePathKey}{sourceName}", out var value) ? value as string : null;
     }
 
-    public static string? TryGetAttributeBasedSourcePathPrefix(this ProxyPropertyReference property, string sourceName)
+    public static string? TryGetAttributeBasedSourcePathPrefix(this PropertyReference property, string sourceName)
     {
         return property.TryGetPropertyData($"{SourcePathPrefixKey}{sourceName}", out var value) ? value as string : null;
     }
 
-    public static void SetAttributeBasedSourceProperty(this ProxyPropertyReference property, string sourceName, string sourceProperty)
+    public static void SetAttributeBasedSourceProperty(this PropertyReference property, string sourceName, string sourceProperty)
     {
         property.SetPropertyData($"{SourcePropertyNameKey}{sourceName}", sourceProperty);
     }
 
-    public static void SetAttributeBasedSourcePathPrefix(this ProxyPropertyReference property, string sourceName, string sourcePath)
+    public static void SetAttributeBasedSourcePathPrefix(this PropertyReference property, string sourceName, string sourcePath)
     {
         property.SetPropertyData($"{SourcePathPrefixKey}{sourceName}", sourcePath);
     }
 
-    public static void SetAttributeBasedSourcePath(this ProxyPropertyReference property, string sourceName, string sourcePath)
+    public static void SetAttributeBasedSourcePath(this PropertyReference property, string sourceName, string sourcePath)
     {
         property.SetPropertyData($"{SourcePathKey}{sourceName}", sourcePath);
     }

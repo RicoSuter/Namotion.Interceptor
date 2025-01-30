@@ -1,8 +1,10 @@
-﻿namespace Namotion.Proxy.Sources.Abstractions;
+﻿using Namotion.Interceptor;
+
+namespace Namotion.Proxy.Sources.Abstractions;
 
 public interface IProxySource
 {
-    string? TryGetSourcePath(ProxyPropertyReference property);
+    string? TryGetSourcePath(PropertyReference property);
 
     Task<IDisposable?> InitializeAsync(IEnumerable<ProxyPropertyPathReference> properties, Action<ProxyPropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken);
 
@@ -12,4 +14,4 @@ public interface IProxySource
     Task WriteAsync(IEnumerable<ProxyPropertyPathReference> propertyChanges, CancellationToken cancellationToken);
 }
 
-public record struct ProxyPropertyPathReference(ProxyPropertyReference Property, string Path, object? Value);
+public record struct ProxyPropertyPathReference(PropertyReference Property, string Path, object? Value);

@@ -1,8 +1,7 @@
 ﻿using HotChocolate.Execution.Configuration;
 
 using Microsoft.Extensions.Hosting;
-
-using Namotion.Proxy;
+using Namotion.Interceptor;
 using Namotion.Proxy.GraphQL;
 
 // ReSharper disable once CheckNamespace
@@ -10,8 +9,8 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class ProxyGraphQLExtensions
 {
-    public static void AddTrackedGraphQL<TProxy>(this IRequestExecutorBuilder builder)
-        where TProxy : IProxy
+    public static void AddGraphQLProxy<TProxy>(this IRequestExecutorBuilder builder)
+        where TProxy : IInterceptorSubject
     {
         builder
             .Services
