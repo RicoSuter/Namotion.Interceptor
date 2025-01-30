@@ -30,7 +30,7 @@ public partial class Person
 With this implemented you can now create a interceptor collection and start tracking changes of these persons:
 
 ```csharp
-var collection = InterceptorCollection
+var context = InterceptorCollection
     .Create()
     .WithFullPropertyTracking();
 
