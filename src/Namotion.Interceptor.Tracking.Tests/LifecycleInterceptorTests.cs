@@ -14,7 +14,7 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = InterceptorSubjectContext
             .Create()
             .WithProxyLifecycle()
             .WithService(() => handler);
@@ -40,7 +40,7 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = InterceptorSubjectContext
             .Create()
             .WithProxyLifecycle()
             .WithService(() => handler);
@@ -52,7 +52,7 @@ public class LifecycleInterceptorTests
 
         mother.Children = [child1, child2];
         
-        ((IInterceptorSubject)mother).Interceptors.AddFallbackCollection(collection);
+        ((IInterceptorSubject)mother).Interceptors.AddFallbackContext(collection);
 
         // Assert
         Assert.Equal(3, attaches.Count);
@@ -66,7 +66,7 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = InterceptorSubjectContext
             .Create()
             .WithInterceptorInheritance()
             .WithProxyLifecycle()
@@ -96,7 +96,7 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = InterceptorSubjectContext
             .Create()
             .WithInterceptorInheritance()
             .WithProxyLifecycle()
@@ -110,7 +110,7 @@ public class LifecycleInterceptorTests
         mother1.Mother = mother2;
         mother2.Mother = mother3;
 
-        ((IInterceptorSubject)mother1).Interceptors.AddFallbackCollection(collection);
+        ((IInterceptorSubject)mother1).Interceptors.AddFallbackContext(collection);
 
         // Assert
         Assert.Equal(3, attaches.Count);
@@ -124,7 +124,7 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = InterceptorSubjectContext
             .Create()
             .WithProxyLifecycle()
             .WithService(() => handler);
@@ -135,7 +135,7 @@ public class LifecycleInterceptorTests
         var child2 = new Person { FirstName = "Child2" };
 
         mother.Children = [child1, child2];
-        ((IInterceptorSubject)mother).Interceptors.RemoveFallbackCollection(collection);
+        ((IInterceptorSubject)mother).Interceptors.RemoveFallbackContext(collection);
 
         // Assert
         Assert.Equal(3, detaches.Count);
@@ -149,7 +149,7 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
-        var collection = InterceptorCollection
+        var collection = InterceptorSubjectContext
             .Create()
             .WithInterceptorInheritance()
             .WithProxyLifecycle()
@@ -162,7 +162,7 @@ public class LifecycleInterceptorTests
 
         mother1.Mother = mother2;
         mother2.Mother = mother3;
-        ((IInterceptorSubject)mother1).Interceptors.RemoveFallbackCollection(collection);
+        ((IInterceptorSubject)mother1).Interceptors.RemoveFallbackContext(collection);
 
         // Assert
         Assert.Equal(3, detaches.Count);

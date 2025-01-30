@@ -2,28 +2,28 @@
 
 public static class InterceptorCollectionExtensions
 {
-    public static IInterceptorCollection WithInterceptor<TService>(this IInterceptorCollection collection, Func<TService> factory)
+    public static IInterceptorSubjectContext WithInterceptor<TService>(this IInterceptorSubjectContext context, Func<TService> factory)
         where TService : IInterceptor
     {
-        collection.TryAddService(factory, _ => true);
-        return collection;
+        context.TryAddService(factory, _ => true);
+        return context;
     }
     
-    public static IInterceptorCollection WithService<TService>(this IInterceptorCollection collection, Func<TService> factory)
+    public static IInterceptorSubjectContext WithService<TService>(this IInterceptorSubjectContext context, Func<TService> factory)
     {
-        collection.TryAddService(factory, _ => true);
-        return collection;
+        context.TryAddService(factory, _ => true);
+        return context;
     }
     
-    public static IInterceptorCollection WithService<TService>(this IInterceptorCollection collection, 
+    public static IInterceptorSubjectContext WithService<TService>(this IInterceptorSubjectContext context, 
         Func<TService> factory, Func<TService, bool> exists)
     {
-        collection.TryAddService(factory, exists);
-        return collection;
+        context.TryAddService(factory, exists);
+        return context;
     }
     
-    public static TService GetService<TService>(this IInterceptorCollection collection)
+    public static TService GetService<TService>(this IInterceptorSubjectContext context)
     {
-        return collection.TryGetService<TService>() ?? throw new InvalidOperationException("Service not found.");
+        return context.TryGetService<TService>() ?? throw new InvalidOperationException("Service not found.");
     }
 }

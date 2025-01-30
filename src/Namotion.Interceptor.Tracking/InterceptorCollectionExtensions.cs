@@ -7,86 +7,86 @@ namespace Namotion.Interceptor.Tracking;
 
 public static class InterceptorCollectionExtensions
 {
-    public static IObservable<PropertyChangedContext> GetPropertyChangedObservable(this IInterceptorCollection collection)
+    public static IObservable<PropertyChangedContext> GetPropertyChangedObservable(this IInterceptorSubjectContext context)
     {
-        return collection.GetService<PropertyChangedObservable>();
+        return context.GetService<PropertyChangedObservable>();
     }
     
-    public static IInterceptorCollection WithFullPropertyTracking(this IInterceptorCollection collection)
+    public static IInterceptorSubjectContext WithFullPropertyTracking(this IInterceptorSubjectContext context)
     {
-        return collection
+        return context
             .WithEqualityCheck()
             .WithInterceptorInheritance()
             .WithDerivedPropertyChangeDetection();
     }
 
-    public static IInterceptorCollection WithEqualityCheck(this IInterceptorCollection collection)
+    public static IInterceptorSubjectContext WithEqualityCheck(this IInterceptorSubjectContext context)
     {
-        return collection
+        return context
             .WithInterceptor(() => new PropertyValueEqualityCheckHandler());
     }
 
-    public static IInterceptorCollection WithDerivedPropertyChangeDetection(this IInterceptorCollection collection)
+    public static IInterceptorSubjectContext WithDerivedPropertyChangeDetection(this IInterceptorSubjectContext context)
     {
-        collection
+        context
             .WithInterceptor(() => new DerivedPropertyChangeHandler())
-            .TryAddService(collection.GetService<DerivedPropertyChangeHandler>, _ => true);
+            .TryAddService(context.GetService<DerivedPropertyChangeHandler>, _ => true);
 
-        return collection
+        return context
             .WithProxyLifecycle()
             .WithPropertyChangedObservable();
     }
 
-    public static IInterceptorCollection WithReadPropertyRecorder(this IInterceptorCollection collection)
+    public static IInterceptorSubjectContext WithReadPropertyRecorder(this IInterceptorSubjectContext context)
     {
-        return collection
+        return context
             .WithInterceptor(() => new ReadPropertyRecorder());
     }
 
     /// <summary>
     /// Registers the property changed observable which can be retrieved using interceptable.GetPropertyChangedObservable().
     /// </summary>
-    /// <param name="collection">The collection.</param>
+    /// <param name="context">The collection.</param>
     /// <returns>The collection.</returns>
-    public static IInterceptorCollection WithPropertyChangedObservable(this IInterceptorCollection collection)
+    public static IInterceptorSubjectContext WithPropertyChangedObservable(this IInterceptorSubjectContext context)
     {
-        return collection
+        return context
             .WithInterceptor(() => new PropertyChangedObservable());
     }
 
     /// <summary>
     /// Adds automatic context assignment and <see cref="WithProxyLifecycle"/>.
     /// </summary>
-    /// <param name="collection">The collection.</param>
+    /// <param name="context">The collection.</param>
     /// <returns>The collection.</returns>
-    public static IInterceptorCollection WithInterceptorInheritance(this IInterceptorCollection collection)
+    public static IInterceptorSubjectContext WithInterceptorInheritance(this IInterceptorSubjectContext context)
     {
-        collection
+        context
             .TryAddService(() => new InterceptorInheritanceHandler(), _ => true);
 
-        return collection
+        return context
             .WithProxyLifecycle();
     }
 
     /// <summary>
     /// Adds support for <see cref="ILifecycleHandler"/> handlers.
     /// </summary>
-    /// <param name="collection">The collection.</param>
+    /// <param name="context">The collection.</param>
     /// <returns>The collection.</returns>
-    public static IInterceptorCollection WithProxyLifecycle(this IInterceptorCollection collection)
+    public static IInterceptorSubjectContext WithProxyLifecycle(this IInterceptorSubjectContext context)
     {
-        return collection
-            .WithInterceptor(() => new LifecycleInterceptor(collection));
+        return context
+            .WithInterceptor(() => new LifecycleInterceptor(context));
     }
     
     /// <summary>
     /// Automatically assigns the parents to the interceptable data.
     /// </summary>
-    /// <param name="collection">The collection.</param>
+    /// <param name="context">The collection.</param>
     /// <returns>The collection.</returns>
-    public static IInterceptorCollection WithParents(this IInterceptorCollection collection)
+    public static IInterceptorSubjectContext WithParents(this IInterceptorSubjectContext context)
     {
-        return collection
+        return context
             .WithInterceptor(() => new ParentTrackingHandler())
             .WithProxyLifecycle();
     }

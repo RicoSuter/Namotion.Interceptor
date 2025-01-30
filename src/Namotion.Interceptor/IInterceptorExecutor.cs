@@ -1,6 +1,6 @@
 namespace Namotion.Interceptor;
 
-public interface IInterceptorExecutor : IInterceptorCollection
+public interface IInterceptorExecutor : IInterceptorSubjectContext
 {
     object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue);
 

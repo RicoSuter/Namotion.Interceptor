@@ -7,7 +7,7 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
     private readonly List<IReadInterceptor> _readInterceptors = [];
     private readonly List<IWriteInterceptor> _writeInterceptors = [];
     
-    private readonly InterceptorCollection _collection = new();
+    private readonly InterceptorSubjectContext _context = new();
 
     public InterceptorExecutor(IInterceptorSubject subject)
     {
@@ -97,11 +97,11 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
         //     .Invoke(interception);
     }
 
-    public void AddFallbackCollection(IInterceptorCollection interceptorCollection)
+    public void AddFallbackContext(IInterceptorSubjectContext context)
     {
-        _collection.AddFallbackCollection(interceptorCollection);
+        _context.AddFallbackContext(context);
         
-        foreach (var interceptor in interceptorCollection.GetServices<IInterceptor>())
+        foreach (var interceptor in context.GetServices<IInterceptor>())
         {
             if (interceptor is IReadInterceptor readInterceptor)
             {
@@ -117,9 +117,9 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
         }
     }
 
-    public void RemoveFallbackCollection(IInterceptorCollection interceptorCollection)
+    public void RemoveFallbackContext(IInterceptorSubjectContext context)
     {
-        foreach (var interceptor in interceptorCollection.GetServices<IInterceptor>())
+        foreach (var interceptor in context.GetServices<IInterceptor>())
         {
             if (interceptor is IReadInterceptor readInterceptor)
             {
@@ -134,26 +134,26 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
             interceptor.DetachFrom(_subject);
         }
         
-        _collection.RemoveFallbackCollection(interceptorCollection);
+        _context.RemoveFallbackContext(context);
     }
 
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
     {
-        return _collection.TryAddService(factory, exists);
+        return _context.TryAddService(factory, exists);
     }
 
     public void AddService<TService>(TService service)
     {
-        _collection.AddService(service);
+        _context.AddService(service);
     }
 
     public TInterface? TryGetService<TInterface>()
     {
-        return _collection.TryGetService<TInterface>();
+        return _context.TryGetService<TInterface>();
     }
 
     public IEnumerable<TInterface> GetServices<TInterface>()
     {
-        return _collection.GetServices<TInterface>();
+        return _context.GetServices<TInterface>();
     }
 }

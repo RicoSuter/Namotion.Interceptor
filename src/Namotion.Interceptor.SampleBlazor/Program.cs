@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.SampleBlazor
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var collection = InterceptorCollection
+            var context = InterceptorSubjectContext
                 .Create()
                 .WithFullPropertyTracking()
                 .WithReadPropertyRecorder();
@@ -21,9 +21,9 @@ namespace Namotion.Interceptor.SampleBlazor
                 .AddRazorComponents()
                 .AddInteractiveServerComponents();
 
-            builder.Services.AddSingleton(collection.GetPropertyChangedObservable());          
-            builder.Services.AddSingleton(collection.GetService<ReadPropertyRecorder>());          
-            builder.Services.AddSingleton(new Game(collection));
+            builder.Services.AddSingleton(context.GetPropertyChangedObservable());          
+            builder.Services.AddSingleton(context.GetService<ReadPropertyRecorder>());          
+            builder.Services.AddSingleton(new Game(context));
             builder.Services.AddScoped<Player>();
 
             var app = builder.Build();

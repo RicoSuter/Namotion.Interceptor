@@ -9,7 +9,7 @@ public class ParentTrackingHandlerTests
     public void WhenReferencedByTwoPropertiesOfTheSameParent_ThenTwoReferencesAreSet()
     {
         // Arrange
-        var collection = InterceptorCollection
+        var collection = InterceptorSubjectContext
             .Create()
             .WithParents();
 
@@ -33,7 +33,7 @@ public class ParentTrackingHandlerTests
     public void WhenReferencesAreSetToNull_ThenParentIsEmpty()
     {
         // Arrange
-        var collection = InterceptorCollection
+        var collection = InterceptorSubjectContext
             .Create()
             .WithParents();
 
@@ -60,7 +60,7 @@ public class ParentTrackingHandlerTests
     public void WhenReferencedByTwoOtherSubjects_ThenItHasTwoParents()
     {
         // Arrange
-        var collection = InterceptorCollection
+        var collection = InterceptorSubjectContext
             .Create()
             .WithParents();
 

@@ -5,11 +5,11 @@ public static class InterceptorCollectionExtensions
     /// <summary>
     /// Registers support for <see cref="IPropertyValidator"/> handlers.
     /// </summary>
-    /// <param name="collection">The collection.</param>
+    /// <param name="context">The collection.</param>
     /// <returns>The collection.</returns>
-    public static IInterceptorCollection WithPropertyValidation(this IInterceptorCollection collection)
+    public static IInterceptorSubjectContext WithPropertyValidation(this IInterceptorSubjectContext context)
     {
-        return collection
+        return context
             .WithInterceptor(() => new ValidationInterceptor());
     }
 
@@ -18,7 +18,7 @@ public static class InterceptorCollectionExtensions
     /// </summary>
     /// <param name="builder">The builder.</param>
     /// <returns>The builder.</returns>
-    public static IInterceptorCollection WithDataAnnotationValidation(this IInterceptorCollection builder)
+    public static IInterceptorSubjectContext WithDataAnnotationValidation(this IInterceptorSubjectContext builder)
     {
         builder
             .WithPropertyValidation()
