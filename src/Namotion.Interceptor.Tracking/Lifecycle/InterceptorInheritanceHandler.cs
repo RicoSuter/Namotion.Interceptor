@@ -7,7 +7,7 @@ public class InterceptorInheritanceHandler : ILifecycleHandler
         if (context.ReferenceCount == 1 && context.Property is not null)
         {
             var parent = context.Property.Value.Subject;
-            context.Subject.Interceptors.AddFallbackContext(parent.Interceptors);
+            context.Subject.Context.AddFallbackContext(parent.Context);
         }
     }
 
@@ -16,7 +16,7 @@ public class InterceptorInheritanceHandler : ILifecycleHandler
         if (context.Property is not null)
         {
             var parent = context.Property.Value.Subject;
-            context.Subject.Interceptors.RemoveFallbackContext(parent.Interceptors);
+            context.Subject.Context.RemoveFallbackContext(parent.Context);
         }
     }
 

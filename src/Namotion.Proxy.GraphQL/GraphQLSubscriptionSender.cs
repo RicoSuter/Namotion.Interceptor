@@ -20,7 +20,7 @@ namespace Namotion.Proxy.GraphQL
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             await foreach (var changes in _proxy
-                .Interceptors
+                .Context
                 .GetPropertyChangedObservable()
                 .ToAsyncEnumerable()
                 .WithCancellation(stoppingToken))

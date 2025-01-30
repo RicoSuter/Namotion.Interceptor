@@ -48,7 +48,7 @@ public static class OpcUaProxyExtensions
                 var proxy = resolveProxy(sp);
                 return new ProxySourceBackgroundService<TProxy>(
                     sp.GetRequiredService<OpcUaServerTrackableSource<TProxy>>(),
-                    proxy.Interceptors,
+                    proxy.Context,
                     sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TProxy>>>());
             });
     }

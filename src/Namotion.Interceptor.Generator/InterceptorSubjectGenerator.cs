@@ -82,7 +82,7 @@ namespace {namespaceName}
         private ConcurrentDictionary<string, object?> _data = new ConcurrentDictionary<string, object?>();
 
         [JsonIgnore]
-        IInterceptorSubjectContext IInterceptorSubject.Interceptors
+        IInterceptorSubjectContext IInterceptorSubject.Context
         {{
             get => _context = _context ?? new InterceptorExecutor(this);
         }}
@@ -135,7 +135,7 @@ namespace {namespaceName}
     $@"
         public {baseClassName}(IInterceptorSubjectContext context) : this()
         {{
-            ((IInterceptorSubject)this).Interceptors.AddFallbackContext(context);
+            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
         }}
 ";
                     }

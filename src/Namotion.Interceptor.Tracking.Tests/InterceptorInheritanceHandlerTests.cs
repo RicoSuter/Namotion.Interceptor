@@ -163,7 +163,7 @@ public class InterceptorInheritanceHandlerTests
             }
         };
 
-        ((IInterceptorSubject)person.Mother).Interceptors
+        ((IInterceptorSubject)person.Mother).Context
             .WithService(() => service2, x => x == 2)
             .WithInterceptorInheritance();
 

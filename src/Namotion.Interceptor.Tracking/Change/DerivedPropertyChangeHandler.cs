@@ -62,7 +62,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                 usedByProperty.SetLastKnownValue(newValue);
 
-                var executor = usedByProperty.Subject.Interceptors as IInterceptorExecutor;
+                var executor = usedByProperty.Subject.Context as IInterceptorExecutor;
                 executor?.SetProperty(usedByProperty.Subject, usedByProperty.Name, newValue, () => oldValue, delegate {});
             }
         }
