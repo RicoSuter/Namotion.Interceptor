@@ -82,7 +82,7 @@ namespace {namespaceName}
         private ConcurrentDictionary<string, object?> _data = new ConcurrentDictionary<string, object?>();
 
         [JsonIgnore]
-        IInterceptorExecutor IInterceptorSubject.Interceptors
+        IInterceptorCollection IInterceptorSubject.Interceptors
         {{
             get => _interceptors = _interceptors ?? new InterceptorExecutor(this);
         }}

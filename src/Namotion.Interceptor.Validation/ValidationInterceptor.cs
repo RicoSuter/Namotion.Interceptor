@@ -4,16 +4,11 @@ namespace Namotion.Interceptor.Validation;
 
 public class ValidationInterceptor : IWriteInterceptor
 {
-    private readonly IInterceptorCollection _collection;
-
-    public ValidationInterceptor(IInterceptorCollection collection)
-    {
-        _collection = collection;
-    }
-
     public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
     {
-        var errors = _collection
+        var errors = context.Property
+            .Subject
+            .Interceptors
             .GetServices<IPropertyValidator>()
             .SelectMany(v => v.Validate(context.Property, context.NewValue))
             .ToArray();
