@@ -9,7 +9,7 @@ using Microsoft.CodeAnalysis.Text;
 namespace Namotion.Interceptor.Generator;
 
 [Generator]
-public class ProxyGenerator : IIncrementalGenerator
+public class InterceptorSubjectGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
