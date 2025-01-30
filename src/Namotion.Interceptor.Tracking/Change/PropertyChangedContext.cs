@@ -1,4 +1,4 @@
-﻿namespace Namotion.Interceptor.Tracking.Abstractions;
+﻿namespace Namotion.Interceptor.Tracking.Change;
 
 public record struct PropertyChangedContext(
     PropertyReference Property,

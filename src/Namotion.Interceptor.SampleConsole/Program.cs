@@ -1,7 +1,8 @@
 ﻿using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Abstractions;
-using Namotion.Interceptor.Tracking.Attributes;
+using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Change.Attributes;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.SampleConsole
 {

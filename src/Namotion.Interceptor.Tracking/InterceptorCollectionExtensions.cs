@@ -1,10 +1,17 @@
-﻿using Namotion.Interceptor.Tracking.Abstractions;
-using Namotion.Interceptor.Tracking.Handlers;
+﻿using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Parent;
+using Namotion.Interceptor.Tracking.Recorder;
 
 namespace Namotion.Interceptor.Tracking;
 
 public static class InterceptorCollectionExtensions
 {
+    public static IObservable<PropertyChangedContext> GetPropertyChangedObservable(this IInterceptorCollection collection)
+    {
+        return collection.GetService<PropertyChangedObservable>();
+    }
+    
     public static IInterceptorCollection WithFullPropertyTracking(this IInterceptorCollection collection)
     {
         return collection

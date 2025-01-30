@@ -1,7 +1,6 @@
 ﻿using System.Reactive.Subjects;
-using Namotion.Interceptor.Tracking.Abstractions;
 
-namespace Namotion.Interceptor.Tracking;
+namespace Namotion.Interceptor.Tracking.Change;
 
 public class PropertyChangedObservable : IObservable<PropertyChangedContext>, IWriteInterceptor
 {

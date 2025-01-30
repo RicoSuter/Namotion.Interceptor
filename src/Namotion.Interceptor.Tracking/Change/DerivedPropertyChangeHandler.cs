@@ -1,6 +1,6 @@
-﻿using Namotion.Interceptor.Tracking.Abstractions;
+﻿using Namotion.Interceptor.Tracking.Lifecycle;
 
-namespace Namotion.Interceptor.Tracking.Handlers;
+namespace Namotion.Interceptor.Tracking.Change;
 
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, ILifecycleHandler
 {

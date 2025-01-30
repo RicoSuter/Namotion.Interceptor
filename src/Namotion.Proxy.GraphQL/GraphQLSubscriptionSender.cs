@@ -2,7 +2,6 @@
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Abstractions;
 
 namespace Namotion.Proxy.GraphQL
 {

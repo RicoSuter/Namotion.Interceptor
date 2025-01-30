@@ -3,7 +3,6 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Abstractions;
 using Namotion.Interceptor.Validation;
 using Namotion.Proxy.AspNetCore.Controllers;
 using Namotion.Proxy.OpcUa.Annotations;

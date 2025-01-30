@@ -1,6 +1,4 @@
-﻿using Namotion.Interceptor.Tracking.Abstractions;
-
-namespace Namotion.Interceptor.Tracking.Handlers;
+﻿namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public class InterceptorInheritanceHandler : ILifecycleHandler
 {

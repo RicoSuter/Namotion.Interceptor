@@ -1,5 +1,5 @@
 ﻿using Namotion.Interceptor.Testing;
-using Namotion.Interceptor.Tracking.Handlers;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests;

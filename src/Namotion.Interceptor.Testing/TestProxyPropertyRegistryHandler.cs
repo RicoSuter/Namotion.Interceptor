@@ -1,4 +1,4 @@
-﻿using Namotion.Interceptor.Tracking.Abstractions;
+﻿using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Testing
 {

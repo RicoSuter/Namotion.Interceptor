@@ -1,10 +1,10 @@
-﻿namespace Namotion.Interceptor.Tracking;
+﻿namespace Namotion.Interceptor.Tracking.Change;
 
 public static class DerivedPropertyChangeHandlerExtensions
 {
-    private const string UsedByPropertiesKey = "Namotion.Interceptable.UsedByProperties";
-    private const string RequiredPropertiesKey = "Namotion.Interceptable.RequiredProperties";
-    private const string LastKnownValueKey = "Namotion.Interceptable.LastKnownValue";
+    private const string UsedByPropertiesKey = "Namotion.Interceptor.UsedByProperties";
+    private const string RequiredPropertiesKey = "Namotion.Interceptor.RequiredProperties";
+    private const string LastKnownValueKey = "Namotion.Interceptor.LastKnownValue";
 
     public static HashSet<PropertyReference> GetUsedByProperties(this PropertyReference property)
     {

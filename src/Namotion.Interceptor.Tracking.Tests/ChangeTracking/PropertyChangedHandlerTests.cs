@@ -1,4 +1,4 @@
-﻿using Namotion.Interceptor.Tracking.Abstractions;
+﻿using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.ChangeTracking;
