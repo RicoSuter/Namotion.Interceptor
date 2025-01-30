@@ -40,7 +40,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _proxy.Interceptors.WithRegistry();
+        _proxy.Context.WithRegistry();
         
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -58,7 +58,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
 
             try
             {
-                _server = new ProxyOpcUaServer<TProxy>(_proxy, this, _rootName, _proxy.Interceptors.GetService<IProxyRegistry>());
+                _server = new ProxyOpcUaServer<TProxy>(_proxy, this, _rootName, _proxy.Context.GetService<IProxyRegistry>());
 
                 await application.CheckApplicationInstanceCertificate(true, CertificateFactory.DefaultKeySize);
                 await application.Start(_server);

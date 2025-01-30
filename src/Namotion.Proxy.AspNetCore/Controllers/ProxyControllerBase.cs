@@ -22,7 +22,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     protected ProxyControllerBase(TProxy proxy)
     {
         _proxy = proxy;
-        _registry = proxy.Interceptors.GetService<IProxyRegistry>();
+        _registry = proxy.Context.GetService<IProxyRegistry>();
     }
 
     [HttpGet]

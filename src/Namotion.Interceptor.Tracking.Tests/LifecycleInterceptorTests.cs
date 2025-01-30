@@ -52,7 +52,7 @@ public class LifecycleInterceptorTests
 
         mother.Children = [child1, child2];
         
-        ((IInterceptorSubject)mother).Interceptors.AddFallbackContext(collection);
+        ((IInterceptorSubject)mother).Context.AddFallbackContext(collection);
 
         // Assert
         Assert.Equal(3, attaches.Count);
@@ -110,7 +110,7 @@ public class LifecycleInterceptorTests
         mother1.Mother = mother2;
         mother2.Mother = mother3;
 
-        ((IInterceptorSubject)mother1).Interceptors.AddFallbackContext(collection);
+        ((IInterceptorSubject)mother1).Context.AddFallbackContext(collection);
 
         // Assert
         Assert.Equal(3, attaches.Count);
@@ -135,7 +135,7 @@ public class LifecycleInterceptorTests
         var child2 = new Person { FirstName = "Child2" };
 
         mother.Children = [child1, child2];
-        ((IInterceptorSubject)mother).Interceptors.RemoveFallbackContext(collection);
+        ((IInterceptorSubject)mother).Context.RemoveFallbackContext(collection);
 
         // Assert
         Assert.Equal(3, detaches.Count);
@@ -162,7 +162,7 @@ public class LifecycleInterceptorTests
 
         mother1.Mother = mother2;
         mother2.Mother = mother3;
-        ((IInterceptorSubject)mother1).Interceptors.RemoveFallbackContext(collection);
+        ((IInterceptorSubject)mother1).Context.RemoveFallbackContext(collection);
 
         // Assert
         Assert.Equal(3, detaches.Count);

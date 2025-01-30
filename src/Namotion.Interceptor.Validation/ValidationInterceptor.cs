@@ -8,7 +8,7 @@ public class ValidationInterceptor : IWriteInterceptor
     {
         var errors = context.Property
             .Subject
-            .Interceptors
+            .Context
             .GetServices<IPropertyValidator>()
             .SelectMany(v => v.Validate(context.Property, context.NewValue))
             .ToArray();
