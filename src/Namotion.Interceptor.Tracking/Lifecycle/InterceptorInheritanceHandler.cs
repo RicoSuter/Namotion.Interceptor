@@ -22,6 +22,6 @@ public class InterceptorInheritanceHandler : ILifecycleHandler
 
     public override bool Equals(object? obj)
     {
-        return true;
+        return obj is InterceptorInheritanceHandler;
     }
 }

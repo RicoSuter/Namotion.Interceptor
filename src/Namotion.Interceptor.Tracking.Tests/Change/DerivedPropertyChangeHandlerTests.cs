@@ -1,7 +1,7 @@
 ﻿using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
-namespace Namotion.Interceptor.Tracking.Tests.ChangeTracking;
+namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 public class DerivedPropertyChangeHandlerTests
 {
@@ -39,5 +39,28 @@ public class DerivedPropertyChangeHandlerTests
         Assert.Contains(changes, c =>
             c.Property.Name == nameof(Person.FullNameWithPrefix) &&
             c.NewValue?.ToString() == "Mr. Rico Suter");
+    }
+
+    [Fact]
+    public void WhenTrackingDerivedPropertiesUsingPropertiesFromOtherSubjectsAndInheritance_ThenChangesAreTracked()
+    {
+        // Arrange
+        var changes = new List<PropertyChangedContext>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithInterceptorInheritance()
+            .WithDerivedPropertyChangeDetection();
+        
+        // Act
+        var car = new Car(context);
+        
+        context
+            .GetPropertyChangedObservable()
+            .Subscribe(changes.Add);
+        
+        car.Tires[0].Pressure = 2.0m;       
+        
+        // Assert
+        Assert.Contains(changes, c => c.Property.Name == "AveragePressure");
     }
 }
