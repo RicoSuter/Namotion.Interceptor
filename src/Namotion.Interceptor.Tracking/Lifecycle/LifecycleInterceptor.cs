@@ -23,11 +23,11 @@ public class LifecycleInterceptor : IWriteInterceptor
         var proxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
         FindSubjectsInProperties(subject, proxyProperties, touchedProxies);
         
-        AttachTo(subject, null, null);
-        foreach (var child in proxyProperties)
+        foreach (var child in proxyProperties.Reverse())
         {
             AttachTo(child.Item1, child.Item2, child.Item3);
         }
+        AttachTo(subject, null, null);
     }
 
     public void DetachFrom(IInterceptorSubject subject)
@@ -36,11 +36,11 @@ public class LifecycleInterceptor : IWriteInterceptor
         var proxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
         FindSubjectsInProperties(subject, proxyProperties, touchedProxies);
         
-        foreach (var child in proxyProperties)
+        DetachFrom(subject, null, null);
+        foreach (var child in proxyProperties.Reverse())
         {
             DetachFrom(child.Item1, child.Item2, child.Item3);
         }
-        DetachFrom(subject, null, null);
     }
 
     private void AttachTo(IInterceptorSubject subject, PropertyReference? property, object? index)

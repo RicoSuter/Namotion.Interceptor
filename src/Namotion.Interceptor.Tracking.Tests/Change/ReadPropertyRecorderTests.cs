@@ -1,7 +1,7 @@
 ﻿using Namotion.Interceptor.Tracking.Recorder;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
-namespace Namotion.Interceptor.Tracking.Tests.ChangeTracking;
+namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 public class ReadPropertyRecorderTests
 {
