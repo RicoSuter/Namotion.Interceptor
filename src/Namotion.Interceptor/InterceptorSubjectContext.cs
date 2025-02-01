@@ -2,7 +2,7 @@
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
-    private readonly List<IInterceptorSubjectContext> _interceptorCollections = [];
+    private readonly List<IInterceptorSubjectContext> _contexts = [];
     private readonly List<object> _services = []; // TODO: Do we need locking here?
 
     public static InterceptorSubjectContext Create()
@@ -12,12 +12,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     
     public void AddFallbackContext(IInterceptorSubjectContext context)
     {
-        _interceptorCollections.Add(context);
+        _contexts.Add(context);
     }
 
     public void RemoveFallbackContext(IInterceptorSubjectContext context)
     {
-        _interceptorCollections.Remove(context);
+        _contexts.Remove(context);
     }
 
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
@@ -45,7 +45,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     {
         return _services
             .OfType<TInterface>()
-            .Concat(_interceptorCollections.SelectMany(c => c.GetServices<TInterface>()))
+            .Concat(_contexts.SelectMany(c => c.GetServices<TInterface>()))
             .Distinct();
     }
 }
