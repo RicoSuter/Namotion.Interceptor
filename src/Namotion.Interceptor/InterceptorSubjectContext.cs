@@ -61,7 +61,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         lock (_services)
         {
             _contexts.Add(context);
-            _lastChange = DateTimeOffset.UtcNow.AddSeconds(-1);
+            _lastChange = DateTimeOffset.UtcNow.AddSeconds(1);
         }
     }
 
@@ -70,7 +70,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         lock (_services)
         {
             _contexts.Remove(context);
-            _lastChange = DateTimeOffset.UtcNow.AddSeconds(-1);
+            _lastChange = DateTimeOffset.UtcNow.AddSeconds(1);
         }
     }
 
@@ -90,7 +90,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         lock (_services)
         {
             _services.Add(service!);
-            _lastChange = DateTimeOffset.UtcNow.AddSeconds(-1);
+            _lastChange = DateTimeOffset.UtcNow.AddSeconds(1);
         }
     }
 
