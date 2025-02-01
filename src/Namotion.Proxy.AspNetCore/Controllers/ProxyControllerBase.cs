@@ -13,23 +13,23 @@ using Namotion.Interceptor.Validation;
 
 namespace Namotion.Proxy.AspNetCore.Controllers;
 
-public abstract class ProxyControllerBase<TProxy> : ControllerBase
-    where TProxy : IInterceptorSubject
+public abstract class ProxyControllerBase<TSubject> : ControllerBase
+    where TSubject : IInterceptorSubject
 {
-    private readonly TProxy _proxy;
+    private readonly TSubject _subject;
     private readonly IProxyRegistry _registry;
 
-    protected ProxyControllerBase(TProxy proxy)
+    protected ProxyControllerBase(TSubject subject)
     {
-        _proxy = proxy;
-        _registry = proxy.Context.GetService<IProxyRegistry>();
+        _subject = subject;
+        _registry = subject.Context.GetService<IProxyRegistry>();
     }
 
     [HttpGet]
-    public ActionResult<TProxy> GetVariables()
+    public ActionResult<TSubject> GetVariables()
     {
         // TODO: correctly generate OpenAPI schema
-        return Ok(_proxy.ToJsonObject(_registry));
+        return Ok(_subject.ToJsonObject(_registry));
     }
 
     [HttpPost]
@@ -42,7 +42,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
             var resolvedUpdates = updates
                 .Select(t =>
                 {
-                    var (proxy, property) = _proxy.FindPropertyFromJsonPath(t.Key);
+                    var (proxy, property) = _subject.FindPropertyFromJsonPath(t.Key);
                     return new
                     {
                         t.Key,
@@ -122,7 +122,7 @@ public abstract class ProxyControllerBase<TProxy> : ControllerBase
     [HttpGet("properties")]
     public ActionResult<ProxyDescription> GetProperties()
     {
-        return Ok(CreateProxyDescription(_proxy, _registry));
+        return Ok(CreateProxyDescription(_subject, _registry));
     }
 
     private static ProxyDescription CreateProxyDescription(IInterceptorSubject subject, IProxyRegistry registry)

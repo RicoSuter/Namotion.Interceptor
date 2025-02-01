@@ -4,8 +4,8 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
 {
     private readonly IInterceptorSubject _subject;
     
-    private readonly List<IReadInterceptor> _readInterceptors = [];
-    private readonly List<IWriteInterceptor> _writeInterceptors = [];
+    // private readonly List<IReadInterceptor> _readInterceptors = [];
+    // private readonly List<IWriteInterceptor> _writeInterceptors = [];
     
     private readonly InterceptorSubjectContext _context = new();
 
@@ -39,7 +39,7 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
     
     public object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue)
     {
-        var readInterceptors = _readInterceptors;
+        var readInterceptors = subject.Context.GetServices<IReadInterceptor>();
         var interception = new ReadPropertyInterception(new PropertyReference(subject, propertyName));
         
         var returnReadValue = new Func<ReadPropertyInterception, object?>(_ => readValue());
@@ -72,7 +72,7 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
     
     public void SetProperty(IInterceptorSubject subject, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
     {
-        var writeInterceptors = _writeInterceptors;
+        var writeInterceptors = subject.Context.GetServices<IWriteInterceptor>();
         var interception = new WritePropertyInterception(new PropertyReference(subject, propertyName), readValue(), newValue);
 
         var returnWriteValue = new Func<WritePropertyInterception, object?>(value =>
@@ -123,15 +123,15 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
         
         foreach (var interceptor in context.GetServices<IInterceptor>())
         {
-            if (interceptor is IReadInterceptor readInterceptor)
-            {
-                _readInterceptors.Add(readInterceptor);
-            }
-    
-            if (interceptor is IWriteInterceptor writeInterceptor)
-            {
-                _writeInterceptors.Add(writeInterceptor);
-            }
+            // if (interceptor is IReadInterceptor readInterceptor)
+            // {
+            //     _readInterceptors.Add(readInterceptor);
+            // }
+            //
+            // if (interceptor is IWriteInterceptor writeInterceptor)
+            // {
+            //     _writeInterceptors.Add(writeInterceptor);
+            // }
             
             interceptor.AttachTo(_subject);
         }
@@ -141,15 +141,15 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
     {
         foreach (var interceptor in context.GetServices<IInterceptor>())
         {
-            if (interceptor is IReadInterceptor readInterceptor)
-            {
-                _readInterceptors.Remove(readInterceptor);
-            }
-    
-            if (interceptor is IWriteInterceptor writeInterceptor)
-            {
-                _writeInterceptors.Remove(writeInterceptor);
-            }
+            // if (interceptor is IReadInterceptor readInterceptor)
+            // {
+            //     _readInterceptors.Remove(readInterceptor);
+            // }
+            //
+            // if (interceptor is IWriteInterceptor writeInterceptor)
+            // {
+            //     _writeInterceptors.Remove(writeInterceptor);
+            // }
     
             interceptor.DetachFrom(_subject);
         }
