@@ -96,7 +96,7 @@ namespace Namotion.Interceptor.SampleWeb
             builder.Services.AddSingleton(context);
 
             // trackable api controllers
-            builder.Services.AddProxyControllers<Car, ProxyController<Car>>();
+            builder.Services.AddSubjectController<Car, SubjectController<Car>>();
 
             // trackable UPC UA
             builder.Services.AddOpcUaServerProxy<Car>("opc", rootName: "Root");
@@ -108,7 +108,7 @@ namespace Namotion.Interceptor.SampleWeb
             builder.Services
                 .AddGraphQLServer()
                 .AddInMemorySubscriptions()
-                .AddGraphQLProxy<Car>();
+                .AddSubjectGraphQL<Car>();
 
             // other asp services
             builder.Services.AddOpenApiDocument();
@@ -132,9 +132,9 @@ namespace Namotion.Interceptor.SampleWeb
 
         [OpenApiTag("Car")]
         [Route("/api/car")]
-        public class ProxyController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IInterceptorSubject
+        public class SubjectController<TProxy> : SubjectControllerBase<TProxy> where TProxy : IInterceptorSubject
         {
-            public ProxyController(TProxy subject) : base(subject)
+            public SubjectController(TProxy subject) : base(subject)
             {
             }
         }

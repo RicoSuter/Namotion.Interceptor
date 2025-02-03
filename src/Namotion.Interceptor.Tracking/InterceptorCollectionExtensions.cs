@@ -17,7 +17,8 @@ public static class InterceptorCollectionExtensions
         return context
             .WithEqualityCheck()
             .WithContextInheritance()
-            .WithDerivedPropertyChangeDetection();
+            .WithDerivedPropertyChangeDetection()
+            .WithPropertyChangedObservable();
     }
 
     public static IInterceptorSubjectContext WithEqualityCheck(this IInterceptorSubjectContext context)
@@ -33,8 +34,7 @@ public static class InterceptorCollectionExtensions
             .TryAddService(context.GetService<DerivedPropertyChangeHandler>, _ => true);
 
         return context
-            .WithLifecycle()
-            .WithPropertyChangedObservable();
+            .WithLifecycle();
     }
 
     public static IInterceptorSubjectContext WithReadPropertyRecorder(this IInterceptorSubjectContext context)

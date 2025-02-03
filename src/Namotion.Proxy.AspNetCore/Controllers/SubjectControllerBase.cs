@@ -13,12 +13,12 @@ using Namotion.Interceptor.Validation;
 
 namespace Namotion.Proxy.AspNetCore.Controllers;
 
-public abstract class ProxyControllerBase<TSubject> : ControllerBase
+public abstract class SubjectControllerBase<TSubject> : ControllerBase
     where TSubject : IInterceptorSubject
 {
     private readonly TSubject _subject;
 
-    protected ProxyControllerBase(TSubject subject)
+    protected SubjectControllerBase(TSubject subject)
     {
         _subject = subject;
     }
