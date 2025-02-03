@@ -1,10 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
+using Namotion.Interceptor.AspNetCore.Controllers;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.OpcUa.Annotations;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
-using Namotion.Proxy.AspNetCore.Controllers;
-using Namotion.Proxy.OpcUa.Annotations;
 using NSwag.Annotations;
 
 namespace Namotion.Interceptor.SampleMachine
@@ -126,7 +126,7 @@ namespace Namotion.Interceptor.SampleMachine
                 .Create()
                 .WithRegistry()
                 .WithFullPropertyTracking()
-                .WithProxyLifecycle()
+                .WithLifecycle()
                 .WithDataAnnotationValidation();
 
             var root = new Root(context)
@@ -163,17 +163,17 @@ namespace Namotion.Interceptor.SampleMachine
             builder.Services.AddSingleton(root);
 
             // trackable api controllers
-            builder.Services.AddProxyControllers<Root, ProxyController<Root>>();
+            builder.Services.AddSubjectController<Root, SubjectController<Root>>();
 
             // OPC UA server
-            builder.Services.AddOpcUaServerProxy<Root>("opc");
+            builder.Services.AddOpcUaSubjectServer<Root>("opc");
             //builder.Services.AddOpcUaClientProxySource<Root>("opc", "opc.tcp://localhost:4840");
 
             // trackable GraphQL
             builder.Services
                 .AddGraphQLServer()
                 .AddInMemorySubscriptions()
-                .AddGraphQLProxy<Root>();
+                .AddSubjectGraphQL<Root>();
 
             // other asp services
             builder.Services.AddOpenApiDocument();
@@ -197,9 +197,9 @@ namespace Namotion.Interceptor.SampleMachine
 
         [OpenApiTag("Root")]
         [Route("/api/root")]
-        public class ProxyController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IInterceptorSubject
+        public class SubjectController<TProxy> : SubjectControllerBase<TProxy> where TProxy : IInterceptorSubject
         {
-            public ProxyController(TProxy subject) : base(subject)
+            public SubjectController(TProxy subject) : base(subject)
             {
             }
         }

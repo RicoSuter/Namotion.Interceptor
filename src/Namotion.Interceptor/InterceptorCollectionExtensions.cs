@@ -8,20 +8,20 @@ public static class InterceptorCollectionExtensions
         context.TryAddService(factory, _ => true);
         return context;
     }
-    
+
     public static IInterceptorSubjectContext WithService<TService>(this IInterceptorSubjectContext context, Func<TService> factory)
     {
         context.TryAddService(factory, _ => true);
         return context;
     }
-    
-    public static IInterceptorSubjectContext WithService<TService>(this IInterceptorSubjectContext context, 
+
+    public static IInterceptorSubjectContext WithService<TService>(this IInterceptorSubjectContext context,
         Func<TService> factory, Func<TService, bool> exists)
     {
         context.TryAddService(factory, exists);
         return context;
     }
-    
+
     public static TService GetService<TService>(this IInterceptorSubjectContext context)
     {
         return context.TryGetService<TService>() ?? throw new InvalidOperationException("Service not found.");
