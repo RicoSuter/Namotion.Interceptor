@@ -17,19 +17,17 @@ public abstract class ProxyControllerBase<TSubject> : ControllerBase
     where TSubject : IInterceptorSubject
 {
     private readonly TSubject _subject;
-    private readonly ISubjectRegistry _registry;
 
     protected ProxyControllerBase(TSubject subject)
     {
         _subject = subject;
-        _registry = subject.Context.GetService<ISubjectRegistry>();
     }
 
     [HttpGet]
     public ActionResult<TSubject> GetVariables()
     {
         // TODO: correctly generate OpenAPI schema
-        return Ok(_subject.ToJsonObject(_registry));
+        return Ok(_subject.ToJsonObject());
     }
 
     [HttpPost]
@@ -122,7 +120,7 @@ public abstract class ProxyControllerBase<TSubject> : ControllerBase
     [HttpGet("properties")]
     public ActionResult<ProxyDescription> GetProperties()
     {
-        return Ok(CreateProxyDescription(_subject, _registry));
+        return Ok(CreateProxyDescription(_subject, _subject.Context.GetService<ISubjectRegistry>()));
     }
 
     private static ProxyDescription CreateProxyDescription(IInterceptorSubject subject, ISubjectRegistry registry)

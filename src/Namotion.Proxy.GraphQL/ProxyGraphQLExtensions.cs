@@ -9,15 +9,15 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class ProxyGraphQLExtensions
 {
-    public static void AddGraphQLProxy<TProxy>(this IRequestExecutorBuilder builder)
-        where TProxy : IInterceptorSubject
+    public static void AddGraphQLProxy<TSubject>(this IRequestExecutorBuilder builder)
+        where TSubject : IInterceptorSubject
     {
         builder
             .Services
-            .AddSingleton<IHostedService, GraphQLSubscriptionSender<TProxy>>();
+            .AddSingleton<IHostedService, GraphQLSubscriptionSender<TSubject>>();
 
         builder
-            .AddQueryType<Query<TProxy>>()
-            .AddSubscriptionType<Subscription<TProxy>>();
+            .AddQueryType<Query<TSubject>>()
+            .AddSubscriptionType<Subscription<TSubject>>();
     }
 }

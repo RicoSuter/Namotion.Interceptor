@@ -86,8 +86,9 @@ public static class InterceptorSubjectExtensions
         }
     }
 
-    public static JsonObject ToJsonObject(this IInterceptorSubject subject, ISubjectRegistry? registry)
+    public static JsonObject ToJsonObject(this IInterceptorSubject subject)
     {
+        var registry = subject.Context.TryGetService<ISubjectRegistry>();
         var obj = new JsonObject();
         foreach (var property in subject
             .Properties
@@ -97,14 +98,14 @@ public static class InterceptorSubjectExtensions
             var value = property.Value.GetValue?.Invoke(subject);
             if (value is IInterceptorSubject childProxy)
             {
-                obj[propertyName] = childProxy.ToJsonObject(registry);
+                obj[propertyName] = childProxy.ToJsonObject();
             }
             else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
             {
                 var children = new JsonArray();
                 foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
                 {
-                    children.Add(arrayProxyItem.ToJsonObject(registry));
+                    children.Add(arrayProxyItem.ToJsonObject());
                 }
                 obj[propertyName] = children;
             }
@@ -125,14 +126,14 @@ public static class InterceptorSubjectExtensions
                 var value = property.Value.GetValue();
                 if (value is IInterceptorSubject childProxy)
                 {
-                    obj[propertyName] = childProxy.ToJsonObject(registry);
+                    obj[propertyName] = childProxy.ToJsonObject();
                 }
                 else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
                 {
                     var children = new JsonArray();
                     foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
                     {
-                        children.Add(arrayProxyItem.ToJsonObject(registry));
+                        children.Add(arrayProxyItem.ToJsonObject());
                     }
                     obj[propertyName] = children;
                 }
