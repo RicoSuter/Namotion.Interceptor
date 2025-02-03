@@ -1,18 +1,18 @@
 ﻿using System.Collections;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
-    private DateTimeOffset _lastChange = DateTimeOffset.MinValue;
-    
-    private DateTimeOffset _cacheResetTime = DateTimeOffset.MinValue;
     private readonly ConcurrentDictionary<Type, IEnumerable> _serviceCache = new();
-    
-    private readonly List<InterceptorSubjectContext> _contexts = [];
-    private readonly List<object> _services = [];
-    
+
+    private readonly HashSet<object> _services = [];
+
+    private readonly HashSet<InterceptorSubjectContext> _usedByContexts = [];
+    private readonly HashSet<InterceptorSubjectContext> _fallbackContexts = [];
+
     public static InterceptorSubjectContext Create()
     {
         return new InterceptorSubjectContext();
@@ -20,55 +20,50 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     public IEnumerable<TInterface> GetServices<TInterface>()
     {
-        if (HasChangedSince(_cacheResetTime))
-        {
-            _serviceCache.Clear();
-            _cacheResetTime = DateTimeOffset.UtcNow;
-        }
-        
         var services = _serviceCache.GetOrAdd(
-            typeof(TInterface), 
-            _ =>
+            typeof(TInterface), _ =>
             {
                 lock (_services)
-                {
-                    return _services
-                        .OfType<TInterface>()
-                        .Concat(_contexts.SelectMany(c => c.GetServices<TInterface>()))
-                        .Distinct()
-                        .ToArray();
-                }
+                    return GetServicesWithoutCache<TInterface>().ToArray();
             });
 
         return services.OfType<TInterface>();
     }
-    
+
     public virtual void AddFallbackContext(IInterceptorSubjectContext context)
     {
+        var contextImpl = (InterceptorSubjectContext)context;
         lock (_services)
         {
-            _contexts.Add((InterceptorSubjectContext)context);
-            _lastChange = DateTimeOffset.UtcNow.AddSeconds(1);
+            contextImpl._usedByContexts.Add(this);
+            _fallbackContexts.Add(contextImpl);
+            OnContextChanged();
         }
     }
 
     public virtual void RemoveFallbackContext(IInterceptorSubjectContext context)
     {
+        var contextImpl = (InterceptorSubjectContext)context;
         lock (_services)
         {
-            _contexts.Remove((InterceptorSubjectContext)context);
-            _lastChange = DateTimeOffset.UtcNow.AddSeconds(1);
+            _fallbackContexts.Remove(contextImpl);
+            contextImpl._usedByContexts.Remove(this);
+            OnContextChanged();
         }
     }
 
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
     {
-        if (GetServices<TService>().Any(exists))
+        lock (_services)
         {
-            return false;
+            if (GetServicesWithoutCache<TService>().Any(exists))
+            {
+                return false;
+            }
+
+            AddService(factory());
         }
 
-        AddService(factory());
         return true;
     }
 
@@ -77,33 +72,31 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         lock (_services)
         {
             _services.Add(service!);
-            _lastChange = DateTimeOffset.UtcNow.AddSeconds(1);
+            OnContextChanged();
         }
     }
 
     public TInterface? TryGetService<TInterface>()
     {
-        return GetServices<TInterface>().Single();
+        return GetServices<TInterface>().SingleOrDefault();
     }
-    
-    private bool HasChangedSince(DateTimeOffset time)
+
+    private IEnumerable<TInterface> GetServicesWithoutCache<TInterface>()
     {
-        lock (_services)
+        return _services
+            .OfType<TInterface>()
+            .Concat(_fallbackContexts.SelectMany(c => c.GetServices<TInterface>()))
+            .Distinct();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void OnContextChanged()
+    {
+        _serviceCache.Clear();
+
+        foreach (var parent in _usedByContexts)
         {
-            if (_lastChange > time)
-            {
-                return true;
-            }
-
-            foreach (var context in _contexts)
-            {
-                if (context.HasChangedSince(time))
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            parent.OnContextChanged();
         }
     }
 }
