@@ -16,8 +16,9 @@ public static class InterceptorCollectionExtensions
     {
         return context
             .WithEqualityCheck()
-            .WithInterceptorInheritance()
-            .WithDerivedPropertyChangeDetection();
+            .WithContextInheritance()
+            .WithDerivedPropertyChangeDetection()
+            .WithPropertyChangedObservable();
     }
 
     public static IInterceptorSubjectContext WithEqualityCheck(this IInterceptorSubjectContext context)
@@ -33,8 +34,7 @@ public static class InterceptorCollectionExtensions
             .TryAddService(context.GetService<DerivedPropertyChangeHandler>, _ => true);
 
         return context
-            .WithProxyLifecycle()
-            .WithPropertyChangedObservable();
+            .WithLifecycle();
     }
 
     public static IInterceptorSubjectContext WithReadPropertyRecorder(this IInterceptorSubjectContext context)
@@ -44,7 +44,7 @@ public static class InterceptorCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the property changed observable which can be retrieved using interceptable.GetPropertyChangedObservable().
+    /// Registers the property changed observable which can be retrieved using subject.GetPropertyChangedObservable().
     /// </summary>
     /// <param name="context">The collection.</param>
     /// <returns>The collection.</returns>
@@ -55,17 +55,17 @@ public static class InterceptorCollectionExtensions
     }
 
     /// <summary>
-    /// Adds automatic context assignment and <see cref="WithProxyLifecycle"/>.
+    /// Adds automatic context assignment and <see cref="WithLifecycle"/>.
     /// </summary>
     /// <param name="context">The collection.</param>
     /// <returns>The collection.</returns>
-    public static IInterceptorSubjectContext WithInterceptorInheritance(this IInterceptorSubjectContext context)
+    public static IInterceptorSubjectContext WithContextInheritance(this IInterceptorSubjectContext context)
     {
         context
-            .TryAddService(() => new InterceptorInheritanceHandler(), _ => true);
+            .TryAddService(() => new ContextInheritanceHandler(), _ => true);
 
         return context
-            .WithProxyLifecycle();
+            .WithLifecycle();
     }
 
     /// <summary>
@@ -73,7 +73,7 @@ public static class InterceptorCollectionExtensions
     /// </summary>
     /// <param name="context">The collection.</param>
     /// <returns>The collection.</returns>
-    public static IInterceptorSubjectContext WithProxyLifecycle(this IInterceptorSubjectContext context)
+    public static IInterceptorSubjectContext WithLifecycle(this IInterceptorSubjectContext context)
     {
         return context
             .WithInterceptor(() => new LifecycleInterceptor(context));
@@ -88,6 +88,6 @@ public static class InterceptorCollectionExtensions
     {
         return context
             .WithInterceptor(() => new ParentTrackingHandler())
-            .WithProxyLifecycle();
+            .WithLifecycle();
     }
 }

@@ -1,13 +1,13 @@
 using Microsoft.AspNetCore.Mvc;
+using Namotion.Interceptor.AspNetCore.Controllers;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Sources.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change.Attributes;
 using Namotion.Interceptor.Validation;
-using Namotion.Proxy.AspNetCore.Controllers;
-using Namotion.Proxy.Sources.Attributes;
 using NSwag.Annotations;
 
 namespace Namotion.Interceptor.SampleWeb
@@ -86,7 +86,7 @@ namespace Namotion.Interceptor.SampleWeb
                 .Create()
                 .WithRegistry()
                 .WithFullPropertyTracking()
-                .WithProxyLifecycle()
+                .WithLifecycle()
                 .WithDataAnnotationValidation();
 
             var car = new Car(context);
@@ -96,19 +96,19 @@ namespace Namotion.Interceptor.SampleWeb
             builder.Services.AddSingleton(context);
 
             // trackable api controllers
-            builder.Services.AddProxyControllers<Car, ProxyController<Car>>();
+            builder.Services.AddSubjectController<Car, SubjectController<Car>>();
 
             // trackable UPC UA
-            builder.Services.AddOpcUaServerProxy<Car>("opc", rootName: "Root");
+            builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
 
             // trackable mqtt
-            builder.Services.AddMqttServerProxySource<Car>("mqtt");
+            builder.Services.AddMqttSubjectServerSource<Car>("mqtt");
 
             // trackable GraphQL
             builder.Services
                 .AddGraphQLServer()
                 .AddInMemorySubscriptions()
-                .AddGraphQLProxy<Car>();
+                .AddSubjectGraphQL<Car>();
 
             // other asp services
             builder.Services.AddOpenApiDocument();
@@ -132,9 +132,9 @@ namespace Namotion.Interceptor.SampleWeb
 
         [OpenApiTag("Car")]
         [Route("/api/car")]
-        public class ProxyController<TProxy> : ProxyControllerBase<TProxy> where TProxy : IInterceptorSubject
+        public class SubjectController<TProxy> : SubjectControllerBase<TProxy> where TProxy : IInterceptorSubject
         {
-            public ProxyController(TProxy subject) : base(subject)
+            public SubjectController(TProxy subject) : base(subject)
             {
             }
         }

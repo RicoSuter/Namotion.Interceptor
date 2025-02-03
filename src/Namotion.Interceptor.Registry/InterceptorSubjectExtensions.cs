@@ -9,18 +9,9 @@ namespace Namotion.Interceptor.Registry;
 
 public static class InterceptorSubjectExtensions
 {
-    public static void SetData(this IInterceptorSubject subject, string key, object? value)
+    public static string GetJsonPath(this PropertyReference property)
     {
-        subject.Data[key] = value;
-    }
-
-    public static bool TryGetData(this IInterceptorSubject subject, string key, out object? value)
-    {
-        return subject.Data.TryGetValue(key, out value);
-    }
-
-    public static string GetJsonPath(this PropertyReference property, ISubjectRegistry? registry)
-    {
+        var registry = property.Subject.Context.TryGetService<ISubjectRegistry>();
         if (registry is not null)
         {
             // TODO: avoid endless recursion
@@ -39,7 +30,7 @@ public static class InterceptorSubjectExtensions
                 {
                     return GetJsonPath(new PropertyReference(
                         parent.Property.Subject,
-                        attribute.PropertyName), registry) +
+                        attribute.PropertyName)) +
                         "@" + attribute.AttributeName;
                 }
 
@@ -70,7 +61,7 @@ public static class InterceptorSubjectExtensions
                 {
                     return GetJsonPath(new PropertyReference(
                         parent.Property.Subject,
-                        attribute.PropertyName), registry) +
+                        attribute.PropertyName)) +
                         "@" + attribute.AttributeName;
                 }
 
@@ -86,8 +77,9 @@ public static class InterceptorSubjectExtensions
         }
     }
 
-    public static JsonObject ToJsonObject(this IInterceptorSubject subject, ISubjectRegistry? registry)
+    public static JsonObject ToJsonObject(this IInterceptorSubject subject)
     {
+        var registry = subject.Context.TryGetService<ISubjectRegistry>();
         var obj = new JsonObject();
         foreach (var property in subject
             .Properties
@@ -97,14 +89,14 @@ public static class InterceptorSubjectExtensions
             var value = property.Value.GetValue?.Invoke(subject);
             if (value is IInterceptorSubject childProxy)
             {
-                obj[propertyName] = childProxy.ToJsonObject(registry);
+                obj[propertyName] = childProxy.ToJsonObject();
             }
             else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
             {
                 var children = new JsonArray();
                 foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
                 {
-                    children.Add(arrayProxyItem.ToJsonObject(registry));
+                    children.Add(arrayProxyItem.ToJsonObject());
                 }
                 obj[propertyName] = children;
             }
@@ -125,14 +117,14 @@ public static class InterceptorSubjectExtensions
                 var value = property.Value.GetValue();
                 if (value is IInterceptorSubject childProxy)
                 {
-                    obj[propertyName] = childProxy.ToJsonObject(registry);
+                    obj[propertyName] = childProxy.ToJsonObject();
                 }
                 else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
                 {
                     var children = new JsonArray();
                     foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
                     {
-                        children.Add(arrayProxyItem.ToJsonObject(registry));
+                        children.Add(arrayProxyItem.ToJsonObject());
                     }
                     obj[propertyName] = children;
                 }
@@ -188,6 +180,8 @@ public static class InterceptorSubjectExtensions
 
     private static (IInterceptorSubject?, SubjectPropertyMetadata) FindPropertyFromJsonPath(this IInterceptorSubject subject, IEnumerable<string> segments)
     {
+        // TODO: Use span here?
+
         var nextSegment = segments.First();
         nextSegment = ConvertToUpperCamelCase(nextSegment);
 
