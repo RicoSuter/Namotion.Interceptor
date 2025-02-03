@@ -1,9 +1,9 @@
 ﻿namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public record struct LifecycleContext(
+    IInterceptorSubject Subject,
     PropertyReference? Property,
     object? Index,
-    IInterceptorSubject Subject,
     int ReferenceCount)
 {
 }
