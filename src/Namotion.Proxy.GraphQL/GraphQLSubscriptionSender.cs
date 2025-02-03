@@ -5,28 +5,28 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Proxy.GraphQL
 {
-    public class GraphQLSubscriptionSender<TProxy> : BackgroundService
-        where TProxy : IInterceptorSubject
+    public class GraphQLSubscriptionSender<TSubject> : BackgroundService
+        where TSubject : IInterceptorSubject
     {
-        private readonly TProxy _proxy;
+        private readonly TSubject _subject;
         private readonly ITopicEventSender _sender;
 
-        public GraphQLSubscriptionSender(TProxy proxy, ITopicEventSender sender)
+        public GraphQLSubscriptionSender(TSubject subject, ITopicEventSender sender)
         {
-            _proxy = proxy;
+            _subject = subject;
             _sender = sender;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await foreach (var changes in _proxy
+            await foreach (var changes in _subject
                 .Context
                 .GetPropertyChangedObservable()
                 .ToAsyncEnumerable()
                 .WithCancellation(stoppingToken))
             {
-                // TODO: Send only changed diff
-                await _sender.SendAsync(nameof(Subscription<TProxy>.Root), _proxy, stoppingToken);
+                // TODO: Send only changes
+                await _sender.SendAsync(nameof(Subscription<TSubject>.Root), _subject, stoppingToken);
             }
         }
     }

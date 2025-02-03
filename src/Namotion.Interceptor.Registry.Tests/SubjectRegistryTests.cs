@@ -210,7 +210,7 @@ public class SubjectRegistryTests
         };
 
         // Assert
-        await Verify(person.ToJsonObject(context.GetService<ISubjectRegistry>())
+        await Verify(person.ToJsonObject()
             .ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true }));
     }
 }
