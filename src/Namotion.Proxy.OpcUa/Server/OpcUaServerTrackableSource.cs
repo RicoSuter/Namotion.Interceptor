@@ -58,7 +58,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
 
             try
             {
-                _server = new ProxyOpcUaServer<TProxy>(_proxy, this, _rootName, _proxy.Context.GetService<IProxyRegistry>());
+                _server = new ProxyOpcUaServer<TProxy>(_proxy, this, _rootName, _proxy.Context.GetService<ISubjectRegistry>());
 
                 await application.CheckApplicationInstanceCertificate(true, CertificateFactory.DefaultKeySize);
                 await application.Start(_server);

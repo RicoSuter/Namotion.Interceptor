@@ -19,7 +19,7 @@ public static class InterceptorSubjectExtensions
         return subject.Data.TryGetValue(key, out value);
     }
 
-    public static string GetJsonPath(this PropertyReference property, IProxyRegistry? registry)
+    public static string GetJsonPath(this PropertyReference property, ISubjectRegistry? registry)
     {
         if (registry is not null)
         {
@@ -29,7 +29,7 @@ public static class InterceptorSubjectExtensions
             do
             {
                 var attribute = registry
-                    .KnownProxies[parent.Property.Subject]
+                    .KnownSubjects[parent.Property.Subject]
                     .Properties[parent.Property.Name]
                     .Attributes
                     .OfType<PropertyAttributeAttribute>()
@@ -86,7 +86,7 @@ public static class InterceptorSubjectExtensions
         }
     }
 
-    public static JsonObject ToJsonObject(this IInterceptorSubject subject, IProxyRegistry? registry)
+    public static JsonObject ToJsonObject(this IInterceptorSubject subject, ISubjectRegistry? registry)
     {
         var obj = new JsonObject();
         foreach (var property in subject
@@ -114,7 +114,7 @@ public static class InterceptorSubjectExtensions
             }
         }
 
-        if (registry?.KnownProxies.TryGetValue(subject, out var metadata) == true)
+        if (registry?.KnownSubjects.TryGetValue(subject, out var metadata) == true)
         {
             foreach (var property in metadata
                 .Properties
@@ -162,7 +162,7 @@ public static class InterceptorSubjectExtensions
         return JsonNamingPolicy.CamelCase.ConvertName(property.Name);
     }
 
-    public static string GetJsonPropertyName(this KeyValuePair<string, RegisteredProxyProperty> property)
+    public static string GetJsonPropertyName(this KeyValuePair<string, RegisteredSubjectProperty> property)
     {
         var attribute = property
             .Value

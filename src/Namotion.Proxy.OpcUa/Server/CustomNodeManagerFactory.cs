@@ -11,7 +11,7 @@ internal class CustomNodeManagerFactory<TProxy> : INodeManagerFactory
     private readonly TProxy _proxy;
     private readonly OpcUaServerTrackableSource<TProxy> _source;
     private readonly string? _rootName;
-    private readonly IProxyRegistry _registry;
+    private readonly ISubjectRegistry _registry;
 
     public StringCollection NamespacesUris => new StringCollection([
         "https://foobar/",
@@ -22,7 +22,7 @@ internal class CustomNodeManagerFactory<TProxy> : INodeManagerFactory
         "http://opcfoundation.org/UA/Machinery/ProcessValues"
     ]);
 
-    public CustomNodeManagerFactory(TProxy proxy, OpcUaServerTrackableSource<TProxy> source, string? rootName, IProxyRegistry registry)
+    public CustomNodeManagerFactory(TProxy proxy, OpcUaServerTrackableSource<TProxy> source, string? rootName, ISubjectRegistry registry)
     {
         _proxy = proxy;
         _source = source;

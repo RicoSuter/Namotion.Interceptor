@@ -2,11 +2,11 @@
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
-public record RegisteredProxy
+public record RegisteredSubject
 {
     private readonly object _lock = new();
 
-    private readonly Dictionary<string, RegisteredProxyProperty> _properties;
+    private readonly Dictionary<string, RegisteredSubjectProperty> _properties;
     private readonly HashSet<PropertyReference> _parents = new();
 
     [JsonIgnore]
@@ -21,7 +21,7 @@ public record RegisteredProxy
         }
     }
 
-    public IReadOnlyDictionary<string, RegisteredProxyProperty> Properties
+    public IReadOnlyDictionary<string, RegisteredSubjectProperty> Properties
     {
         get
         {
@@ -30,7 +30,7 @@ public record RegisteredProxy
         }
     }
 
-    internal RegisteredProxy(IInterceptorSubject subject, IEnumerable<RegisteredProxyProperty> properties)
+    internal RegisteredSubject(IInterceptorSubject subject, IEnumerable<RegisteredSubjectProperty> properties)
     {
         Subject = subject;
         _properties = properties
@@ -59,7 +59,7 @@ public record RegisteredProxy
     {
         lock (_lock)
         {
-            _properties!.Add(name, new CustomRegisteredProxyProperty(new PropertyReference(Subject, name), getValue, setValue)
+            _properties!.Add(name, new CustomRegisteredSubjectProperty(new PropertyReference(Subject, name), getValue, setValue)
             {
                 Parent = this,
                 Type = type,

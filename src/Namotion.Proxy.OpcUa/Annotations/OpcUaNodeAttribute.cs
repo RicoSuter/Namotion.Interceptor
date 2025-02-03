@@ -2,7 +2,7 @@
 
 namespace Namotion.Proxy.OpcUa.Annotations;
 
-public class OpcUaNodeAttribute : ProxySourcePathAttribute, IOpcUaBrowseNameProvider
+public class OpcUaNodeAttribute : SourcePathAttribute, IOpcUaBrowseNameProvider
 {
     public OpcUaNodeAttribute(string browseName, string browseNamespace, string? sourceName = null, string? path = null)
         : base(sourceName ?? "opc", path ?? browseName)
@@ -17,7 +17,7 @@ public class OpcUaNodeAttribute : ProxySourcePathAttribute, IOpcUaBrowseNameProv
 }
 
 
-public class OpcUaVariableAttribute : ProxySourceAttribute, IOpcUaBrowseNameProvider
+public class OpcUaVariableAttribute : SourceNameAttribute, IOpcUaBrowseNameProvider
 {
     public OpcUaVariableAttribute(string browseName, string browseNamespace, string? sourceName = null, string? path = null)
         : base(sourceName ?? "opc", path ?? browseName)
