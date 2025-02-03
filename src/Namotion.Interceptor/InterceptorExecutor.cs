@@ -1,38 +1,12 @@
 ﻿namespace Namotion.Interceptor;
 
-public readonly struct InterceptorExecutor : IInterceptorExecutor
+public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecutor
 {
     private readonly IInterceptorSubject _subject;
-    private readonly IInterceptorSubjectContext _context = new InterceptorSubjectContext();
 
     public InterceptorExecutor(IInterceptorSubject subject)
     {
         _subject = subject;
-    }
-
-    public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
-    {
-        return _context.TryAddService(factory, exists);
-    }
-
-    public bool HasChangedSince(DateTimeOffset time)
-    {
-        return _context.HasChangedSince(time);
-    }
-
-    public void AddService<TService>(TService service)
-    {
-        _context.AddService(service);
-    }
-
-    public TInterface? TryGetService<TInterface>()
-    {
-        return _context.TryGetService<TInterface>();
-    }
-
-    public IEnumerable<TInterface> GetServices<TInterface>()
-    {
-        return _context.GetServices<TInterface>();
     }
     
     public object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue)
@@ -76,9 +50,9 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
         returnWriteValue(interception);
     }
 
-    public void AddFallbackContext(IInterceptorSubjectContext context)
+    public override void AddFallbackContext(IInterceptorSubjectContext context)
     {
-        _context.AddFallbackContext(context);
+        base.AddFallbackContext(context);
         
         foreach (var interceptor in context.GetServices<IInterceptor>())
         {
@@ -86,13 +60,13 @@ public readonly struct InterceptorExecutor : IInterceptorExecutor
         }
     }
 
-    public void RemoveFallbackContext(IInterceptorSubjectContext context)
+    public override void RemoveFallbackContext(IInterceptorSubjectContext context)
     {
         foreach (var interceptor in context.GetServices<IInterceptor>())
         {
             interceptor.DetachFrom(_subject);
         }
         
-        _context.RemoveFallbackContext(context);
+        base.RemoveFallbackContext(context);
     }
 }

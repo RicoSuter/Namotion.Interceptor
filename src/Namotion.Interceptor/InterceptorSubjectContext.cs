@@ -10,25 +10,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private DateTimeOffset _cacheResetTime = DateTimeOffset.MinValue;
     private readonly ConcurrentDictionary<Type, IEnumerable> _serviceCache = new();
     
-    private readonly List<IInterceptorSubjectContext> _contexts = [];
+    private readonly List<InterceptorSubjectContext> _contexts = [];
     private readonly List<object> _services = [];
     
     public static InterceptorSubjectContext Create()
     {
         return new InterceptorSubjectContext();
-    }
-    
-    public bool HasChangedSince(DateTimeOffset time)
-    {
-        lock (_services)
-        {
-            if (_lastChange > time)
-            {
-                return true;
-            }
-
-            return _contexts.Any(c => c.HasChangedSince(time));
-        }
     }
 
     public IEnumerable<TInterface> GetServices<TInterface>()
@@ -56,20 +43,20 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return services.OfType<TInterface>();
     }
     
-    public void AddFallbackContext(IInterceptorSubjectContext context)
+    public virtual void AddFallbackContext(IInterceptorSubjectContext context)
     {
         lock (_services)
         {
-            _contexts.Add(context);
+            _contexts.Add((InterceptorSubjectContext)context);
             _lastChange = DateTimeOffset.UtcNow.AddSeconds(1);
         }
     }
 
-    public void RemoveFallbackContext(IInterceptorSubjectContext context)
+    public virtual void RemoveFallbackContext(IInterceptorSubjectContext context)
     {
         lock (_services)
         {
-            _contexts.Remove(context);
+            _contexts.Remove((InterceptorSubjectContext)context);
             _lastChange = DateTimeOffset.UtcNow.AddSeconds(1);
         }
     }
@@ -97,5 +84,26 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     public TInterface? TryGetService<TInterface>()
     {
         return GetServices<TInterface>().Single();
+    }
+    
+    private bool HasChangedSince(DateTimeOffset time)
+    {
+        lock (_services)
+        {
+            if (_lastChange > time)
+            {
+                return true;
+            }
+
+            foreach (var context in _contexts)
+            {
+                if (context.HasChangedSince(time))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 }
