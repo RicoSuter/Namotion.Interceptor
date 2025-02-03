@@ -48,7 +48,7 @@ public class DerivedPropertyChangeHandlerTests
         var changes = new List<PropertyChangedContext>();
         var context = InterceptorSubjectContext
             .Create()
-            .WithInterceptorInheritance()
+            .WithContextInheritance()
             .WithDerivedPropertyChangeDetection();
         
         // Act

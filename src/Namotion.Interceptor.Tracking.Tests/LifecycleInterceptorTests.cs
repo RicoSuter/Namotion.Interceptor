@@ -16,7 +16,7 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorSubjectContext
             .Create()
-            .WithProxyLifecycle()
+            .WithLifecycle()
             .WithService(() => handler);
 
         // Act
@@ -42,7 +42,7 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorSubjectContext
             .Create()
-            .WithProxyLifecycle()
+            .WithLifecycle()
             .WithService(() => handler);
 
         // Act
@@ -68,8 +68,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorSubjectContext
             .Create()
-            .WithInterceptorInheritance()
-            .WithProxyLifecycle()
+            .WithContextInheritance()
+            .WithLifecycle()
             .WithService(() => handler);
 
         // Act
@@ -98,8 +98,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorSubjectContext
             .Create()
-            .WithInterceptorInheritance()
-            .WithProxyLifecycle()
+            .WithContextInheritance()
+            .WithLifecycle()
             .WithService(() => handler);
 
         // Act
@@ -126,7 +126,7 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorSubjectContext
             .Create()
-            .WithProxyLifecycle()
+            .WithLifecycle()
             .WithService(() => handler);
 
         // Act
@@ -151,8 +151,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecyleHandler(attaches, detaches);
         var collection = InterceptorSubjectContext
             .Create()
-            .WithInterceptorInheritance()
-            .WithProxyLifecycle()
+            .WithContextInheritance()
+            .WithLifecycle()
             .WithService(() => handler);
 
         // Act

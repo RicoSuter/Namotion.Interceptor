@@ -86,7 +86,7 @@ namespace Namotion.Interceptor.SampleWeb
                 .Create()
                 .WithRegistry()
                 .WithFullPropertyTracking()
-                .WithProxyLifecycle()
+                .WithLifecycle()
                 .WithDataAnnotationValidation();
 
             var car = new Car(context);

@@ -1,6 +1,6 @@
 ﻿namespace Namotion.Interceptor.Tracking.Lifecycle;
 
-public class InterceptorInheritanceHandler : ILifecycleHandler
+public class ContextInheritanceHandler : ILifecycleHandler
 {
     public void Attach(LifecycleContext context)
     {
@@ -22,6 +22,6 @@ public class InterceptorInheritanceHandler : ILifecycleHandler
 
     public override bool Equals(object? obj)
     {
-        return obj is InterceptorInheritanceHandler;
+        return obj is ContextInheritanceHandler;
     }
 }
