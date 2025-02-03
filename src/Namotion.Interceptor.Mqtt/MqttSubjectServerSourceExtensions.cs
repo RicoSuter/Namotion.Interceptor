@@ -7,7 +7,7 @@ using Namotion.Interceptor.Sources;
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class MqttServerTrackableContextSourceExtensions
+public static class MqttSubjectServerSourceExtensions
 {
     public static IServiceCollection AddMqttSubjectServerSource<TProxy>(
         this IServiceCollection serviceCollection, string sourceName, string? pathPrefix = null)
@@ -17,16 +17,16 @@ public static class MqttServerTrackableContextSourceExtensions
             .AddSingleton(sp =>
             {
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, pathPrefix);
-                return new MqttServerTrackableSource<TProxy>(
+                return new MqttSubjectServerSource<TProxy>(
                     sp.GetRequiredService<TProxy>(),
                     sourcePathProvider,
-                    sp.GetRequiredService<ILogger<MqttServerTrackableSource<TProxy>>>());
+                    sp.GetRequiredService<ILogger<MqttSubjectServerSource<TProxy>>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredService<MqttServerTrackableSource<TProxy>>())
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredService<MqttSubjectServerSource<TProxy>>())
             .AddSingleton<IHostedService>(sp =>
             {
                 return new SubjectSourceBackgroundService<TProxy>(
-                    sp.GetRequiredService<MqttServerTrackableSource<TProxy>>(),
+                    sp.GetRequiredService<MqttSubjectServerSource<TProxy>>(),
                     sp.GetRequiredService<IInterceptorSubjectContext>(),
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService<TProxy>>>());
             });
