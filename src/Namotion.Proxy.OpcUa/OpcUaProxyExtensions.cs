@@ -23,33 +23,33 @@ public static class OpcUaProxyExtensions
             rootName);
     }
 
-    public static IServiceCollection AddOpcUaServerProxy<TProxy>(
+    public static IServiceCollection AddOpcUaServerProxy<TSubject>(
         this IServiceCollection serviceCollection,
         string sourceName,
-        Func<IServiceProvider, TProxy> resolveProxy,
+        Func<IServiceProvider, TSubject> subjectSelector,
         string? pathPrefix = null,
         string? rootName = null)
-        where TProxy : IInterceptorSubject
+        where TSubject : IInterceptorSubject
     {
         return serviceCollection
             .AddSingleton(sp =>
             {
-                var proxy = resolveProxy(sp);
+                var proxy = subjectSelector(sp);
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, pathPrefix);
-                return new OpcUaServerTrackableSource<TProxy>(
+                return new OpcUaServerTrackableSource<TSubject>(
                     proxy,
                     sourcePathProvider,
-                    sp.GetRequiredService<ILogger<OpcUaServerTrackableSource<TProxy>>>(),
+                    sp.GetRequiredService<ILogger<OpcUaServerTrackableSource<TSubject>>>(),
                     rootName);
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaServerTrackableSource<TProxy>>())
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaServerTrackableSource<TSubject>>())
             .AddSingleton<IHostedService>(sp =>
             {
-                var proxy = resolveProxy(sp);
-                return new ProxySourceBackgroundService<TProxy>(
-                    sp.GetRequiredService<OpcUaServerTrackableSource<TProxy>>(),
+                var proxy = subjectSelector(sp);
+                return new ProxySourceBackgroundService<TSubject>(
+                    sp.GetRequiredService<OpcUaServerTrackableSource<TSubject>>(),
                     proxy.Context,
-                    sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TProxy>>>());
+                    sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TSubject>>>());
             });
     }
 
