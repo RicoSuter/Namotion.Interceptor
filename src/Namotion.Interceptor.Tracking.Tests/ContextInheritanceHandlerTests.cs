@@ -4,7 +4,7 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests;
 
-public class InterceptorInheritanceHandlerTests
+public class ContextInheritanceHandlerTests
 {
     [Fact]
     public void WhenPropertyIsAssigned_ThenContextIsSet()
@@ -12,7 +12,7 @@ public class InterceptorInheritanceHandlerTests
         // Arrange
         var collection = InterceptorSubjectContext
             .Create()
-            .WithInterceptorInheritance();
+            .WithContextInheritance();
 
         // Act
         var person = new Person(collection);
@@ -28,7 +28,7 @@ public class InterceptorInheritanceHandlerTests
         // Arrange
         var collection = InterceptorSubjectContext
             .Create()
-            .WithInterceptorInheritance();
+            .WithContextInheritance();
 
         // Act
         var grandmother = new Person
@@ -60,7 +60,7 @@ public class InterceptorInheritanceHandlerTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithInterceptorInheritance();
+            .WithContextInheritance();
 
         // Act
         var grandmother = new Person
@@ -94,7 +94,7 @@ public class InterceptorInheritanceHandlerTests
         // Arrange
         var collection = InterceptorSubjectContext
             .Create()
-            .WithInterceptorInheritance();
+            .WithContextInheritance();
 
         // Act
         var child1 = new Person { FirstName = "Child1" };
@@ -121,7 +121,7 @@ public class InterceptorInheritanceHandlerTests
         // Arrange
         var collection = InterceptorSubjectContext
             .Create()
-            .WithInterceptorInheritance();
+            .WithContextInheritance();
 
         // Act
         var child1 = new Person(collection) { FirstName = "Child1" };
@@ -148,7 +148,7 @@ public class InterceptorInheritanceHandlerTests
         var collection = InterceptorSubjectContext
             .Create()
             .WithService(() => service1, x => x == 1)
-            .WithInterceptorInheritance();
+            .WithContextInheritance();
 
         // Act
         var person = new Person(collection)
@@ -165,18 +165,18 @@ public class InterceptorInheritanceHandlerTests
 
         ((IInterceptorSubject)person.Mother).Context
             .WithService(() => service2, x => x == 2)
-            .WithInterceptorInheritance();
+            .WithContextInheritance();
 
         // Assert
         Assert.Contains(1, person.GetServices<int>());
         Assert.DoesNotContain(2, person.GetServices<int>());
-        Assert.Single(person.GetServices<InterceptorInheritanceHandler>());
+        Assert.Single(person.GetServices<ContextInheritanceHandler>());
 
         Assert.Contains(1, person.Mother.GetServices<int>());
         Assert.Contains(2, person.Mother.GetServices<int>());
 
         Assert.Contains(1, person.Mother.Mother.GetServices<int>());
         Assert.Contains(2, person.Mother.Mother.GetServices<int>());
-        Assert.Single(person.Mother.Mother.GetServices<InterceptorInheritanceHandler>());
+        Assert.Single(person.Mother.Mother.GetServices<ContextInheritanceHandler>());
     }
 }

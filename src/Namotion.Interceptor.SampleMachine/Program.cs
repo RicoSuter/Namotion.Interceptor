@@ -126,7 +126,7 @@ namespace Namotion.Interceptor.SampleMachine
                 .Create()
                 .WithRegistry()
                 .WithFullPropertyTracking()
-                .WithProxyLifecycle()
+                .WithLifecycle()
                 .WithDataAnnotationValidation();
 
             var root = new Root(context)

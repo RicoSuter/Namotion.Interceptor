@@ -16,6 +16,6 @@ public static class InterceptorCollectionExtensions
             .TryAddService(() => new SubjectRegistry(), _ => true);
 
         return context
-            .WithInterceptorInheritance();
+            .WithContextInheritance();
     }
 }
