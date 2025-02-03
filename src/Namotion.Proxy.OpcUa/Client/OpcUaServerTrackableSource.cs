@@ -139,8 +139,8 @@
 //    public Task<IEnumerable<PropertyPathReference>> ReadAsync(IEnumerable<PropertyPathReference> properties, CancellationToken cancellationToken)
 //    {
 //        return Task.FromResult<IEnumerable<PropertyPathReference>>(properties
-//            .Where(p => p.Property.TryGetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, out var _))
-//            .Select(property => (property, node: property.Property.GetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey) as BaseDataVariableState))
+//            .Where(p => p.Property.TryGetPropertyData(OpcUaServerSubjectSource<TProxy>.OpcVariableKey, out var _))
+//            .Select(property => (property, node: property.Property.GetPropertyData(OpcUaServerSubjectSource<TProxy>.OpcVariableKey) as BaseDataVariableState))
 //            .Where(p => p.node is not null)
 //            .Select(p => new PropertyPathReference(p.property.Property, p.property.Path,
 //                p.property.Property.Metadata.Type == typeof(decimal) ? Convert.ToDecimal(p.node!.Value) : p.node!.Value))
@@ -150,9 +150,9 @@
 //    public Task WriteAsync(IEnumerable<PropertyPathReference> propertyChanges, CancellationToken cancellationToken)
 //    {
 //        //foreach (var property in propertyChanges
-//        //    .Where(p => p.Property.TryGetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, out var _)))
+//        //    .Where(p => p.Property.TryGetPropertyData(OpcUaServerSubjectSource<TProxy>.OpcVariableKey, out var _)))
 //        //{
-//        //    var node = property.Property.GetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey) as BaseDataVariableState;
+//        //    var node = property.Property.GetPropertyData(OpcUaServerSubjectSource<TProxy>.OpcVariableKey) as BaseDataVariableState;
 //        //    if (node is not null)
 //        //    {
 //        //        var actualValue = property.Value;

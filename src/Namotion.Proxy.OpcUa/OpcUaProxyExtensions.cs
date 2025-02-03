@@ -36,18 +36,18 @@ public static class OpcUaProxyExtensions
             {
                 var proxy = subjectSelector(sp);
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, pathPrefix);
-                return new OpcUaServerTrackableSource<TSubject>(
+                return new OpcUaServerSubjectSource<TSubject>(
                     proxy,
                     sourcePathProvider,
-                    sp.GetRequiredService<ILogger<OpcUaServerTrackableSource<TSubject>>>(),
+                    sp.GetRequiredService<ILogger<OpcUaServerSubjectSource<TSubject>>>(),
                     rootName);
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaServerTrackableSource<TSubject>>())
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaServerSubjectSource<TSubject>>())
             .AddSingleton<IHostedService>(sp =>
             {
                 var proxy = subjectSelector(sp);
                 return new SubjectSourceBackgroundService<TSubject>(
-                    sp.GetRequiredService<OpcUaServerTrackableSource<TSubject>>(),
+                    sp.GetRequiredService<OpcUaServerSubjectSource<TSubject>>(),
                     proxy.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService<TSubject>>>());
             });

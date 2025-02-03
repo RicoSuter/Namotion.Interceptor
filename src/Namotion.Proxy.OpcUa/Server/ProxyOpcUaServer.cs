@@ -7,7 +7,7 @@ namespace Namotion.Proxy.OpcUa.Server;
 internal class ProxyOpcUaServer<TProxy> : StandardServer
     where TProxy : IInterceptorSubject
 {
-    public ProxyOpcUaServer(TProxy proxy, OpcUaServerTrackableSource<TProxy> source, string? rootName, ISubjectRegistry registry)
+    public ProxyOpcUaServer(TProxy proxy, OpcUaServerSubjectSource<TProxy> source, string? rootName, ISubjectRegistry registry)
     {
         AddNodeManager(new CustomNodeManagerFactory<TProxy>(proxy, source, rootName, registry));
     }
