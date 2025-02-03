@@ -99,7 +99,7 @@ namespace Namotion.Interceptor.SampleWeb
             builder.Services.AddSubjectController<Car, SubjectController<Car>>();
 
             // trackable UPC UA
-            builder.Services.AddOpcUaServerProxy<Car>("opc", rootName: "Root");
+            builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
 
             // trackable mqtt
             builder.Services.AddMqttServerProxySource<Car>("mqtt");

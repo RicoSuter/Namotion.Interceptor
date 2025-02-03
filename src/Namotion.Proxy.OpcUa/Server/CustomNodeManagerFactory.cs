@@ -5,13 +5,12 @@ using Opc.Ua;
 
 namespace Namotion.Proxy.OpcUa.Server;
 
-internal class CustomNodeManagerFactory<TProxy> : INodeManagerFactory
-    where TProxy : IInterceptorSubject
+internal class CustomNodeManagerFactory<TSubject> : INodeManagerFactory
+    where TSubject : IInterceptorSubject
 {
-    private readonly TProxy _proxy;
-    private readonly OpcUaServerSubjectSource<TProxy> _source;
+    private readonly TSubject _subject;
+    private readonly OpcUaSubjectServerSource<TSubject> _source;
     private readonly string? _rootName;
-    private readonly ISubjectRegistry _registry;
 
     public StringCollection NamespacesUris => new StringCollection([
         "https://foobar/",
@@ -22,16 +21,15 @@ internal class CustomNodeManagerFactory<TProxy> : INodeManagerFactory
         "http://opcfoundation.org/UA/Machinery/ProcessValues"
     ]);
 
-    public CustomNodeManagerFactory(TProxy proxy, OpcUaServerSubjectSource<TProxy> source, string? rootName, ISubjectRegistry registry)
+    public CustomNodeManagerFactory(TSubject subject, OpcUaSubjectServerSource<TSubject> source, string? rootName)
     {
-        _proxy = proxy;
+        _subject = subject;
         _source = source;
         _rootName = rootName;
-        _registry = registry;
     }
 
     public INodeManager Create(IServerInternal server, ApplicationConfiguration configuration)
     {
-        return new CustomNodeManager<TProxy>(_proxy, _source, server, configuration, _rootName, _registry);
+        return new CustomNodeManager<TSubject>(_subject, _source, server, configuration, _rootName);
     }
 }

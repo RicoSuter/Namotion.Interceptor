@@ -11,27 +11,27 @@ using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Proxy.OpcUa.Server;
 
-internal class OpcUaServerSubjectSource<TProxy> : BackgroundService, ISubjectSource, IDisposable
-    where TProxy : IInterceptorSubject
+internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectSource, IDisposable
+    where TSubject : IInterceptorSubject
 {
     internal const string OpcVariableKey = "OpcVariable";
 
-    private readonly TProxy _proxy;
+    private readonly TSubject _subject;
     private readonly ILogger _logger;
     private readonly string? _rootName;
 
-    private ProxyOpcUaServer<TProxy>? _server;
+    private OpcUaSubjectServer<TSubject>? _server;
     private Action<PropertyPathReference>? _propertyUpdateAction;
 
     internal ISourcePathProvider SourcePathProvider { get; }
 
-    public OpcUaServerSubjectSource(
-        TProxy proxy,
+    public OpcUaSubjectServerSource(
+        TSubject subject,
         ISourcePathProvider sourcePathProvider,
-        ILogger<OpcUaServerSubjectSource<TProxy>> logger,
+        ILogger<OpcUaSubjectServerSource<TSubject>> logger,
         string? rootName)
     {
-        _proxy = proxy;
+        _subject = subject;
         _logger = logger;
         _rootName = rootName;
 
@@ -40,11 +40,11 @@ internal class OpcUaServerSubjectSource<TProxy> : BackgroundService, ISubjectSou
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _proxy.Context.WithRegistry();
+        _subject.Context.WithRegistry();
         
         while (!stoppingToken.IsCancellationRequested)
         {
-            using var stream = typeof(OpcUaProxyExtensions).Assembly
+            using var stream = typeof(OpcUaSubjectExtensions).Assembly
                 .GetManifestResourceStream("Namotion.Proxy.OpcUa.MyOpcUaServer.Config.xml") ??
                 throw new InvalidOperationException("Config.xml not found.");
 
@@ -58,7 +58,7 @@ internal class OpcUaServerSubjectSource<TProxy> : BackgroundService, ISubjectSou
 
             try
             {
-                _server = new ProxyOpcUaServer<TProxy>(_proxy, this, _rootName, _proxy.Context.GetService<ISubjectRegistry>());
+                _server = new OpcUaSubjectServer<TSubject>(_subject, this, _rootName);
 
                 await application.CheckApplicationInstanceCertificate(true, CertificateFactory.DefaultKeySize);
                 await application.Start(_server);
