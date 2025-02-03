@@ -1,13 +1,13 @@
 using Microsoft.AspNetCore.Mvc;
+using Namotion.Interceptor.AspNetCore.Controllers;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Sources.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change.Attributes;
 using Namotion.Interceptor.Validation;
-using Namotion.Proxy.AspNetCore.Controllers;
-using Namotion.Proxy.Sources.Attributes;
 using NSwag.Annotations;
 
 namespace Namotion.Interceptor.SampleWeb
@@ -102,7 +102,7 @@ namespace Namotion.Interceptor.SampleWeb
             builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
 
             // trackable mqtt
-            builder.Services.AddMqttServerProxySource<Car>("mqtt");
+            builder.Services.AddMqttSubjectServerSource<Car>("mqtt");
 
             // trackable GraphQL
             builder.Services

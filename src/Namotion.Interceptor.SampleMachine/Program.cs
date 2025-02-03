@@ -1,10 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
+using Namotion.Interceptor.AspNetCore.Controllers;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.OpcUa.Annotations;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
-using Namotion.Proxy.AspNetCore.Controllers;
-using Namotion.Proxy.OpcUa.Annotations;
 using NSwag.Annotations;
 
 namespace Namotion.Interceptor.SampleMachine
