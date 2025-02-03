@@ -2,34 +2,30 @@
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Proxy.OpcUa.Annotations;
-
 using Opc.Ua.Server;
 using Opc.Ua;
 using Opc.Ua.Export;
 
 namespace Namotion.Proxy.OpcUa.Server;
 
-internal class CustomNodeManager<TProxy> : CustomNodeManager2
-    where TProxy : IInterceptorSubject
+internal class CustomNodeManager<TSubject> : CustomNodeManager2
+    where TSubject : IInterceptorSubject
 {
     private const string PathDelimiter = ".";
 
-    private readonly TProxy _proxy;
-    private readonly OpcUaServerSubjectSource<TProxy> _source;
+    private readonly TSubject _subject;
+    private readonly OpcUaSubjectServerSource<TSubject> _source;
     private readonly string? _rootName;
-
-    private readonly ISubjectRegistry _registry;
 
     private readonly Dictionary<RegisteredSubject, FolderState> _proxies = new();
 
     public CustomNodeManager(
-        TProxy proxy,
-        OpcUaServerSubjectSource<TProxy> source,
+        TSubject subject,
+        OpcUaSubjectServerSource<TSubject> source,
         IServerInternal server,
         ApplicationConfiguration configuration,
-        string? rootName,
-        ISubjectRegistry registry) :
-        base(server, configuration, new[] 
+        string? rootName) :
+        base(server, configuration, new[]
         {
             "https://foobar/",
             "http://opcfoundation.org/UA/",
@@ -39,10 +35,9 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
             "http://opcfoundation.org/UA/Machinery/ProcessValues"
         })
     {
-        _proxy = proxy;
+        _subject = subject;
         _source = source;
         _rootName = rootName;
-        _registry = registry;
     }
 
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)
@@ -62,7 +57,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     {
         var assembly = typeof(TAssemblyType).Assembly;
         using var stream = assembly.GetManifestResourceStream($"{assembly.FullName!.Split(',')[0]}.{name}");
-     
+
         var nodeSet = UANodeSet.Read(stream ?? throw new ArgumentException("Embedded resource could not be found.", nameof(name)));
         nodeSet.Import(context, nodes);
     }
@@ -70,8 +65,11 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     public override void CreateAddressSpace(IDictionary<NodeId, IList<IReference>> externalReferences)
     {
         base.CreateAddressSpace(externalReferences);
-        var metadata = _registry.KnownSubjects[_proxy];
-       
+
+        var metadata = _subject.Context
+            .GetService<ISubjectRegistry>()
+            .KnownSubjects[_subject];
+
         if (_rootName is not null)
         {
             var node = CreateFolder(ObjectIds.ObjectsFolder, new NodeId(_rootName, NamespaceIndex), _rootName, null, null);
@@ -193,18 +191,22 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
                 }
             };
 
-            property.Value.Property.SetPropertyData(OpcUaServerSubjectSource<TProxy>.OpcVariableKey, variable);
+            property.Value.Property.SetPropertyData(OpcUaSubjectServerSource<TSubject>.OpcVariableKey, variable);
         }
     }
 
     private void CreateChildObject(
         QualifiedName browseName,
-        IInterceptorSubject subject, 
-        string path, 
-        NodeId parentNodeId, 
+        IInterceptorSubject subject,
+        string path,
+        NodeId parentNodeId,
         NodeId? referenceTypeId)
     {
-        var registeredProxy = _registry.KnownSubjects[subject];
+        var registeredProxy = subject
+            .Context
+            .GetService<ISubjectRegistry>()
+            .KnownSubjects[subject];
+
         if (_proxies.TryGetValue(registeredProxy, out var objectNode))
         {
             var parentNode = FindNodeInAddressSpace(parentNodeId);
@@ -228,8 +230,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
             .OfType<OpcUaNodeReferenceTypeAttribute>()
             .FirstOrDefault();
 
-        return referenceTypeAttribute is not null ?
-            typeof(ReferenceTypeIds).GetField(referenceTypeAttribute.Type)?.GetValue(null) as NodeId : null;
+        return referenceTypeAttribute is not null ? typeof(ReferenceTypeIds).GetField(referenceTypeAttribute.Type)?.GetValue(null) as NodeId : null;
     }
 
     private static NodeId? GetChildReferenceTypeId(RegisteredSubjectProperty property)
@@ -238,8 +239,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
             .OfType<OpcUaNodeItemReferenceTypeAttribute>()
             .FirstOrDefault();
 
-        return referenceTypeAttribute is not null ?
-            typeof(ReferenceTypeIds).GetField(referenceTypeAttribute.Type)?.GetValue(null) as NodeId : null;
+        return referenceTypeAttribute is not null ? typeof(ReferenceTypeIds).GetField(referenceTypeAttribute.Type)?.GetValue(null) as NodeId : null;
     }
 
     private NodeId? GetTypeDefinitionId(RegisteredSubjectProperty property)
@@ -299,8 +299,8 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     private FolderState CreateFolder(
         NodeId parentNodeId,
         NodeId nodeId,
-        QualifiedName browseName, 
-        NodeId? typeDefinition, 
+        QualifiedName browseName,
+        NodeId? typeDefinition,
         NodeId? referenceType)
     {
         var parentNode = FindNodeInAddressSpace(parentNodeId);
@@ -326,7 +326,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     }
 
     private BaseDataVariableState CreateVariableNode(
-        NodeId parentNodeId, NodeId nodeId, QualifiedName browseName, 
+        NodeId parentNodeId, NodeId nodeId, QualifiedName browseName,
         Opc.Ua.TypeInfo dataType, int valueRank, NodeId? referenceType)
     {
         var parentNode = FindNodeInAddressSpace(parentNodeId);

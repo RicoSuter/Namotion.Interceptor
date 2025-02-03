@@ -7,23 +7,23 @@ using Namotion.Proxy.OpcUa.Server;
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class OpcUaProxyExtensions
+public static class OpcUaSubjectExtensions
 {
-    public static IServiceCollection AddOpcUaServerProxy<TProxy>(
+    public static IServiceCollection AddOpcUaSubjectServer<TProxy>(
         this IServiceCollection serviceCollection,
         string sourceName,
         string? pathPrefix = null,
         string? rootName = null)
         where TProxy : IInterceptorSubject
     {
-        return serviceCollection.AddOpcUaServerProxy(
+        return serviceCollection.AddOpcUaSubjectServer(
             sourceName,
             sp => sp.GetRequiredService<TProxy>(),
             pathPrefix,
             rootName);
     }
 
-    public static IServiceCollection AddOpcUaServerProxy<TSubject>(
+    public static IServiceCollection AddOpcUaSubjectServer<TSubject>(
         this IServiceCollection serviceCollection,
         string sourceName,
         Func<IServiceProvider, TSubject> subjectSelector,
@@ -34,20 +34,20 @@ public static class OpcUaProxyExtensions
         return serviceCollection
             .AddSingleton(sp =>
             {
-                var proxy = subjectSelector(sp);
+                var subject = subjectSelector(sp);
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, pathPrefix);
-                return new OpcUaServerSubjectSource<TSubject>(
-                    proxy,
+                return new OpcUaSubjectServerSource<TSubject>(
+                    subject,
                     sourcePathProvider,
-                    sp.GetRequiredService<ILogger<OpcUaServerSubjectSource<TSubject>>>(),
+                    sp.GetRequiredService<ILogger<OpcUaSubjectServerSource<TSubject>>>(),
                     rootName);
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaServerSubjectSource<TSubject>>())
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaSubjectServerSource<TSubject>>())
             .AddSingleton<IHostedService>(sp =>
             {
                 var proxy = subjectSelector(sp);
                 return new SubjectSourceBackgroundService<TSubject>(
-                    sp.GetRequiredService<OpcUaServerSubjectSource<TSubject>>(),
+                    sp.GetRequiredService<OpcUaSubjectServerSource<TSubject>>(),
                     proxy.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService<TSubject>>>());
             });

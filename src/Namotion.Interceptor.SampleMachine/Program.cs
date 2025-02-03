@@ -166,7 +166,7 @@ namespace Namotion.Interceptor.SampleMachine
             builder.Services.AddSubjectController<Root, SubjectController<Root>>();
 
             // OPC UA server
-            builder.Services.AddOpcUaServerProxy<Root>("opc");
+            builder.Services.AddOpcUaSubjectServer<Root>("opc");
             //builder.Services.AddOpcUaClientProxySource<Root>("opc", "opc.tcp://localhost:4840");
 
             // trackable GraphQL
