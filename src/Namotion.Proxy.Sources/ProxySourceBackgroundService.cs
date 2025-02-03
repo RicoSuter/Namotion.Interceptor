@@ -42,8 +42,8 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
                 // TODO: Currently newly added properties/trackable are not automatically tracked/subscribed to
 
                 var propertiesWithSetter = _context
-                    .GetService<IProxyRegistry>()
-                    .KnownProxies
+                    .GetService<ISubjectRegistry>()
+                    .KnownSubjects
                     .SelectMany(v => v.Value.Properties
                         .Where(p => p.Value.HasSetter)
                         .Select(p =>

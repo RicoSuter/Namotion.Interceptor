@@ -13,7 +13,7 @@ public static class InterceptorCollectionExtensions
     public static IInterceptorSubjectContext WithRegistry(this IInterceptorSubjectContext context)
     {
         context
-            .TryAddService(() => new ProxyRegistry(), _ => true);
+            .TryAddService(() => new SubjectRegistry(), _ => true);
 
         return context
             .WithInterceptorInheritance();

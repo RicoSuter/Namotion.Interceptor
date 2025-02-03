@@ -6,7 +6,7 @@ using Person = Namotion.Interceptor.Tests.Models.Person;
 
 namespace Namotion.Interceptor.Registry.Tests;
 
-public class ProxyRegistryTests
+public class SubjectRegistryTests
 {
     [Fact]
     public void WhenTwoChildrenAreAttachedSequentially_ThenWeHaveThreeAttaches()
@@ -39,8 +39,8 @@ public class ProxyRegistryTests
         Assert.Equal(3, attaches.Count);
         Assert.Empty(detaches);
 
-        var registry = context.GetService<IProxyRegistry>();
-        Assert.Equal(3, registry.KnownProxies.Count());
+        var registry = context.GetService<ISubjectRegistry>();
+        Assert.Equal(3, registry.KnownSubjects.Count());
     }
 
     [Fact]
@@ -74,8 +74,8 @@ public class ProxyRegistryTests
         Assert.Equal(3, attaches.Count);
         Assert.Empty(detaches);
 
-        var registry = context.GetService<IProxyRegistry>();
-        Assert.Equal(3, registry.KnownProxies.Count());
+        var registry = context.GetService<ISubjectRegistry>();
+        Assert.Equal(3, registry.KnownSubjects.Count());
     }
 
     [Fact]
@@ -111,8 +111,8 @@ public class ProxyRegistryTests
         Assert.Equal(3, attaches.Count);
         Assert.Equal(2, detaches.Count);
 
-        var registry = context.GetService<IProxyRegistry>();
-        Assert.Single(registry.KnownProxies);
+        var registry = context.GetService<ISubjectRegistry>();
+        Assert.Single(registry.KnownSubjects);
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public class ProxyRegistryTests
             .Create()
             .WithRegistry();
 
-        var registry = context.GetService<IProxyRegistry>();
+        var registry = context.GetService<ISubjectRegistry>();
 
         // Act
         var grandmother = new Person
@@ -144,10 +144,10 @@ public class ProxyRegistryTests
         };
 
         // Assert
-        Assert.Equal(3, registry.KnownProxies.Count());
-        Assert.Contains(person, registry.KnownProxies.Keys);
-        Assert.Contains(mother, registry.KnownProxies.Keys);
-        Assert.Contains(grandmother, registry.KnownProxies.Keys);
+        Assert.Equal(3, registry.KnownSubjects.Count());
+        Assert.Contains(person, registry.KnownSubjects.Keys);
+        Assert.Contains(mother, registry.KnownSubjects.Keys);
+        Assert.Contains(grandmother, registry.KnownSubjects.Keys);
     }
 
     [Fact]
@@ -158,7 +158,7 @@ public class ProxyRegistryTests
             .Create()
             .WithRegistry();
 
-        var registry = context.GetService<IProxyRegistry>();
+        var registry = context.GetService<ISubjectRegistry>();
 
         // Act
         var grandmother = new Person
@@ -181,10 +181,10 @@ public class ProxyRegistryTests
         mother.Mother = null;
 
         // Assert
-        Assert.Equal(2, registry.KnownProxies.Count());
-        Assert.Contains(person, registry.KnownProxies.Keys);
-        Assert.Contains(mother, registry.KnownProxies.Keys);
-        Assert.DoesNotContain(grandmother, registry.KnownProxies.Keys);
+        Assert.Equal(2, registry.KnownSubjects.Count());
+        Assert.Contains(person, registry.KnownSubjects.Keys);
+        Assert.Contains(mother, registry.KnownSubjects.Keys);
+        Assert.DoesNotContain(grandmother, registry.KnownSubjects.Keys);
     }
 
     [Fact]
@@ -210,7 +210,7 @@ public class ProxyRegistryTests
         };
 
         // Assert
-        await Verify(person.ToJsonObject(context.GetService<IProxyRegistry>())
+        await Verify(person.ToJsonObject(context.GetService<ISubjectRegistry>())
             .ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true }));
     }
 }
