@@ -8,22 +8,22 @@ namespace Namotion.Interceptor.Registry;
 
 internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
 {
-    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownProxies = new();
+    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
     {
         get
         {
-            lock (_knownProxies)
-                return _knownProxies.ToImmutableDictionary();
+            lock (_knownSubjects)
+                return _knownSubjects.ToImmutableDictionary();
         }
     }
 
     public void Attach(LifecycleContext context)
     {
-        lock (_knownProxies)
+        lock (_knownSubjects)
         {
-            if (!_knownProxies.TryGetValue(context.Subject, out var metadata))
+            if (!_knownSubjects.TryGetValue(context.Subject, out var metadata))
             {
                 metadata = new RegisteredSubject(context.Subject, context.Subject
                     .Properties
@@ -33,14 +33,14 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                         Attributes = p.Value.Attributes
                     }));
 
-                _knownProxies[context.Subject] = metadata;
+                _knownSubjects[context.Subject] = metadata;
             }
 
             if (context.Property is not null)
             {
                 metadata.AddParent(context.Property.Value);
 
-                _knownProxies
+                _knownSubjects
                     .TryGetProperty(context.Property.Value)?
                     .AddChild(new SubjectPropertyChild
                     {
@@ -61,16 +61,16 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
 
     public void Detach(LifecycleContext context)
     {
-        lock (_knownProxies)
+        lock (_knownSubjects)
         {
             if (context.ReferenceCount == 0)
             {
                 if (context.Property is not null)
                 {
-                    var metadata = _knownProxies[context.Subject];
+                    var metadata = _knownSubjects[context.Subject];
                     metadata.RemoveParent(context.Property.Value);
 
-                    _knownProxies
+                    _knownSubjects
                         .TryGetProperty(context.Property.Value)?
                         .RemoveChild(new SubjectPropertyChild
                         {
@@ -79,7 +79,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                         });
                 }
 
-                _knownProxies.Remove(context.Subject);
+                _knownSubjects.Remove(context.Subject);
             }
         }
     }
