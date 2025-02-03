@@ -15,7 +15,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
     private const string PathDelimiter = ".";
 
     private readonly TProxy _proxy;
-    private readonly OpcUaServerTrackableSource<TProxy> _source;
+    private readonly OpcUaServerSubjectSource<TProxy> _source;
     private readonly string? _rootName;
 
     private readonly ISubjectRegistry _registry;
@@ -24,7 +24,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
 
     public CustomNodeManager(
         TProxy proxy,
-        OpcUaServerTrackableSource<TProxy> source,
+        OpcUaServerSubjectSource<TProxy> source,
         IServerInternal server,
         ApplicationConfiguration configuration,
         string? rootName,
@@ -193,7 +193,7 @@ internal class CustomNodeManager<TProxy> : CustomNodeManager2
                 }
             };
 
-            property.Value.Property.SetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, variable);
+            property.Value.Property.SetPropertyData(OpcUaServerSubjectSource<TProxy>.OpcVariableKey, variable);
         }
     }
 

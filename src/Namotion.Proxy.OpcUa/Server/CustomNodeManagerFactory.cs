@@ -9,7 +9,7 @@ internal class CustomNodeManagerFactory<TProxy> : INodeManagerFactory
     where TProxy : IInterceptorSubject
 {
     private readonly TProxy _proxy;
-    private readonly OpcUaServerTrackableSource<TProxy> _source;
+    private readonly OpcUaServerSubjectSource<TProxy> _source;
     private readonly string? _rootName;
     private readonly ISubjectRegistry _registry;
 
@@ -22,7 +22,7 @@ internal class CustomNodeManagerFactory<TProxy> : INodeManagerFactory
         "http://opcfoundation.org/UA/Machinery/ProcessValues"
     ]);
 
-    public CustomNodeManagerFactory(TProxy proxy, OpcUaServerTrackableSource<TProxy> source, string? rootName, ISubjectRegistry registry)
+    public CustomNodeManagerFactory(TProxy proxy, OpcUaServerSubjectSource<TProxy> source, string? rootName, ISubjectRegistry registry)
     {
         _proxy = proxy;
         _source = source;

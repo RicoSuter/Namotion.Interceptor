@@ -11,7 +11,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Proxy.OpcUa.Server;
 
-internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, ISubjectSource, IDisposable
+internal class OpcUaServerSubjectSource<TProxy> : BackgroundService, ISubjectSource, IDisposable
     where TProxy : IInterceptorSubject
 {
     internal const string OpcVariableKey = "OpcVariable";
@@ -25,10 +25,10 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, ISubjectS
 
     internal ISourcePathProvider SourcePathProvider { get; }
 
-    public OpcUaServerTrackableSource(
+    public OpcUaServerSubjectSource(
         TProxy proxy,
         ISourcePathProvider sourcePathProvider,
-        ILogger<OpcUaServerTrackableSource<TProxy>> logger,
+        ILogger<OpcUaServerSubjectSource<TProxy>> logger,
         string? rootName)
     {
         _proxy = proxy;
