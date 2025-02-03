@@ -25,10 +25,10 @@ public static class MqttServerTrackableContextSourceExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<MqttServerTrackableSource<TProxy>>())
             .AddSingleton<IHostedService>(sp =>
             {
-                return new ProxySourceBackgroundService<TProxy>(
+                return new SubjectSourceBackgroundService<TProxy>(
                     sp.GetRequiredService<MqttServerTrackableSource<TProxy>>(),
                     sp.GetRequiredService<IInterceptorSubjectContext>(),
-                    sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TProxy>>>());
+                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService<TProxy>>>());
             });
     }
 }

@@ -8,10 +8,10 @@ using Namotion.Proxy.Sources.Abstractions;
 
 namespace Namotion.Proxy.Sources;
 
-public class ProxySourceBackgroundService<TProxy> : BackgroundService
-    where TProxy : IInterceptorSubject
+public class SubjectSourceBackgroundService<TSubject> : BackgroundService
+    where TSubject : IInterceptorSubject
 {
-    private readonly IProxySource _source;
+    private readonly ISubjectSource _source;
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
@@ -19,8 +19,8 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
 
     private HashSet<string>? _initializedProperties;
 
-    public ProxySourceBackgroundService(
-        IProxySource source,
+    public SubjectSourceBackgroundService(
+        ISubjectSource source,
         IInterceptorSubjectContext context,
         ILogger logger,
         TimeSpan? bufferTime = null,
@@ -49,12 +49,12 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
                         .Select(p =>
                         {
                             var reference = new PropertyReference(v.Key, p.Key);
-                            return new ProxyPropertyPathReference(reference,
+                            return new PropertyPathReference(reference,
                                 _source.TryGetSourcePath(reference) ?? string.Empty,
                                 p.Value.HasGetter ? p.Value.GetValue() : null);
                         }))
                     .Where(p => p.Path != string.Empty)
-                    .ToList();
+                    .ToList()!;
 
                 lock (this)
                 {
@@ -62,10 +62,10 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
                 }
 
                 // subscribe first and mark all properties as initialized which are updated before the read has completed 
-                using var disposable = await _source.InitializeAsync(propertiesWithSetter!, UpdatePropertyValueFromSource, stoppingToken);
+                using var disposable = await _source.InitializeAsync(propertiesWithSetter, UpdatePropertyValueFromSource, stoppingToken);
 
                 // read all properties (subscription during read will later be ignored)
-                var initialValues = await _source.ReadAsync(propertiesWithSetter!, stoppingToken);
+                var initialValues = await _source.ReadAsync(propertiesWithSetter, stoppingToken);
                 lock (this)
                 {
                     // ignore properties which have been updated via subscription
@@ -87,7 +87,7 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
                    .WithCancellation(stoppingToken))
                 {
                     var values = changes
-                        .Select(c => new ProxyPropertyPathReference(
+                        .Select(c => new PropertyPathReference(
                             c.Property, _source.TryGetSourcePath(c.Property)!, c.NewValue));
 
                     await _source.WriteAsync(values, stoppingToken);
@@ -103,7 +103,7 @@ public class ProxySourceBackgroundService<TProxy> : BackgroundService
         }
     }
 
-    private void UpdatePropertyValueFromSource(ProxyPropertyPathReference property)
+    private void UpdatePropertyValueFromSource(PropertyPathReference property)
     {
         try
         {
