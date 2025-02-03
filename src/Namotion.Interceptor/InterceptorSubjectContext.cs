@@ -26,9 +26,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             {
                 return true;
             }
-        }
 
-        return _contexts.Any(c => c.HasChangedSince(time));
+            return _contexts.Any(c => c.HasChangedSince(time));
+        }
     }
 
     public IEnumerable<TInterface> GetServices<TInterface>()
