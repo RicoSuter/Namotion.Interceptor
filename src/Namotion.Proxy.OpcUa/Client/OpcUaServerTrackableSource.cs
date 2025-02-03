@@ -12,7 +12,7 @@
 
 //namespace Namotion.Interceptable.OpcUa.Server;
 
-//internal class OpcUaClientTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
+//internal class OpcUaClientTrackableSource<TProxy> : BackgroundService, ISubjectSource, IDisposable
 //    where TProxy : IInterceptorCollection
 //{
 //    internal const string OpcVariableKey = "OpcVariable";
@@ -131,23 +131,23 @@
 //        }
 //    }
 
-//    public Task<IDisposable?> InitializeAsync(IEnumerable<ProxyPropertyPathReference> properties, Action<ProxyPropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
+//    public Task<IDisposable?> InitializeAsync(IEnumerable<PropertyPathReference> properties, Action<PropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
 //    {
 //        return Task.FromResult<IDisposable?>(null);
 //    }
 
-//    public Task<IEnumerable<ProxyPropertyPathReference>> ReadAsync(IEnumerable<ProxyPropertyPathReference> properties, CancellationToken cancellationToken)
+//    public Task<IEnumerable<PropertyPathReference>> ReadAsync(IEnumerable<PropertyPathReference> properties, CancellationToken cancellationToken)
 //    {
-//        return Task.FromResult<IEnumerable<ProxyPropertyPathReference>>(properties
+//        return Task.FromResult<IEnumerable<PropertyPathReference>>(properties
 //            .Where(p => p.Property.TryGetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, out var _))
 //            .Select(property => (property, node: property.Property.GetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey) as BaseDataVariableState))
 //            .Where(p => p.node is not null)
-//            .Select(p => new ProxyPropertyPathReference(p.property.Property, p.property.Path,
+//            .Select(p => new PropertyPathReference(p.property.Property, p.property.Path,
 //                p.property.Property.Metadata.Type == typeof(decimal) ? Convert.ToDecimal(p.node!.Value) : p.node!.Value))
 //            .ToList());
 //    }
 
-//    public Task WriteAsync(IEnumerable<ProxyPropertyPathReference> propertyChanges, CancellationToken cancellationToken)
+//    public Task WriteAsync(IEnumerable<PropertyPathReference> propertyChanges, CancellationToken cancellationToken)
 //    {
 //        //foreach (var property in propertyChanges
 //        //    .Where(p => p.Property.TryGetPropertyData(OpcUaServerTrackableSource<TProxy>.OpcVariableKey, out var _)))

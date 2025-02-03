@@ -11,7 +11,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Proxy.OpcUa.Server;
 
-internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySource, IDisposable
+internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, ISubjectSource, IDisposable
     where TProxy : IInterceptorSubject
 {
     internal const string OpcVariableKey = "OpcVariable";
@@ -21,7 +21,7 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
     private readonly string? _rootName;
 
     private ProxyOpcUaServer<TProxy>? _server;
-    private Action<ProxyPropertyPathReference>? _propertyUpdateAction;
+    private Action<PropertyPathReference>? _propertyUpdateAction;
 
     internal ISourcePathProvider SourcePathProvider { get; }
 
@@ -85,27 +85,27 @@ internal class OpcUaServerTrackableSource<TProxy> : BackgroundService, IProxySou
     internal void UpdateProperty(PropertyReference property, string sourcePath, object? value)
     {
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type); // TODO: improve conversion here
-        _propertyUpdateAction?.Invoke(new ProxyPropertyPathReference(property, sourcePath, convertedValue));
+        _propertyUpdateAction?.Invoke(new PropertyPathReference(property, sourcePath, convertedValue));
     }
 
-    public Task<IDisposable?> InitializeAsync(IEnumerable<ProxyPropertyPathReference> properties, Action<ProxyPropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
+    public Task<IDisposable?> InitializeAsync(IEnumerable<PropertyPathReference> properties, Action<PropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
     {
         _propertyUpdateAction = propertyUpdateAction;
         return Task.FromResult<IDisposable?>(null);
     }
 
-    public Task<IEnumerable<ProxyPropertyPathReference>> ReadAsync(IEnumerable<ProxyPropertyPathReference> properties, CancellationToken cancellationToken)
+    public Task<IEnumerable<PropertyPathReference>> ReadAsync(IEnumerable<PropertyPathReference> properties, CancellationToken cancellationToken)
     {
-        return Task.FromResult<IEnumerable<ProxyPropertyPathReference>>(properties
+        return Task.FromResult<IEnumerable<PropertyPathReference>>(properties
             .Where(p => p.Property.TryGetPropertyData(OpcVariableKey, out _))
             .Select(property => (property, node: property.Property.GetPropertyData(OpcVariableKey) as BaseDataVariableState))
             .Where(p => p.node is not null)
-            .Select(p => new ProxyPropertyPathReference(p.property.Property, p.property.Path,
+            .Select(p => new PropertyPathReference(p.property.Property, p.property.Path,
                 p.property.Property.Metadata.Type == typeof(decimal) ? Convert.ToDecimal(p.node!.Value) : p.node!.Value))
             .ToList());
     }
 
-    public Task WriteAsync(IEnumerable<ProxyPropertyPathReference> propertyChanges, CancellationToken cancellationToken)
+    public Task WriteAsync(IEnumerable<PropertyPathReference> propertyChanges, CancellationToken cancellationToken)
     {
         foreach (var property in propertyChanges
             .Where(p => p.Property.TryGetPropertyData(OpcVariableKey, out var _)))

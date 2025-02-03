@@ -17,7 +17,7 @@ using Namotion.Proxy.Sources.Abstractions;
 
 namespace Namotion.Proxy.Mqtt
 {
-    public class MqttServerTrackableSource<TProxy> : BackgroundService, IProxySource
+    public class MqttServerTrackableSource<TProxy> : BackgroundService, ISubjectSource
         where TProxy : IInterceptorSubject
     {
         private readonly TProxy _proxy;
@@ -27,7 +27,7 @@ namespace Namotion.Proxy.Mqtt
         private int _numberOfClients = 0;
         private MqttServer? _mqttServer;
 
-        private Action<ProxyPropertyPathReference>? _propertyUpdateAction;
+        private Action<PropertyPathReference>? _propertyUpdateAction;
         
         private readonly ConcurrentDictionary<PropertyReference, object?> _state = new();
 
@@ -88,25 +88,25 @@ namespace Namotion.Proxy.Mqtt
             }
         }
 
-        public Task<IDisposable?> InitializeAsync(IEnumerable<ProxyPropertyPathReference> properties, Action<ProxyPropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
+        public Task<IDisposable?> InitializeAsync(IEnumerable<PropertyPathReference> properties, Action<PropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
         {
             _propertyUpdateAction = propertyUpdateAction;
             return Task.FromResult<IDisposable?>(null);
         }
 
-        public Task<IEnumerable<ProxyPropertyPathReference>> ReadAsync(IEnumerable<ProxyPropertyPathReference> properties, CancellationToken cancellationToken)
+        public Task<IEnumerable<PropertyPathReference>> ReadAsync(IEnumerable<PropertyPathReference> properties, CancellationToken cancellationToken)
         {
             var propertyPaths = properties
                 .Select(p => p.Path)
                 .ToList();
 
-            return Task.FromResult<IEnumerable<ProxyPropertyPathReference>>(_state
+            return Task.FromResult<IEnumerable<PropertyPathReference>>(_state
                 .Where(s => propertyPaths.Contains(_sourcePathProvider.TryGetSourcePath(s.Key)!.Replace(".", "/")))
-                .Select(s => new ProxyPropertyPathReference(s.Key, null!, s.Value))
+                .Select(s => new PropertyPathReference(s.Key, null!, s.Value))
                 .ToList());
         }
 
-        public async Task WriteAsync(IEnumerable<ProxyPropertyPathReference> propertyChanges, CancellationToken cancellationToken)
+        public async Task WriteAsync(IEnumerable<PropertyPathReference> propertyChanges, CancellationToken cancellationToken)
         {
             foreach (var property in propertyChanges)
             {
@@ -180,7 +180,7 @@ namespace Namotion.Proxy.Mqtt
                     var value = document.Deserialize(property.Type);
 
                     _state[property.Property] = value;
-                    _propertyUpdateAction?.Invoke(new ProxyPropertyPathReference(property.Property, sourcePath, value));
+                    _propertyUpdateAction?.Invoke(new PropertyPathReference(property.Property, sourcePath, value));
                 }
             }
             catch (Exception ex)

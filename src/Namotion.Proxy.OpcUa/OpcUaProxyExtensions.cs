@@ -46,10 +46,10 @@ public static class OpcUaProxyExtensions
             .AddSingleton<IHostedService>(sp =>
             {
                 var proxy = subjectSelector(sp);
-                return new ProxySourceBackgroundService<TSubject>(
+                return new SubjectSourceBackgroundService<TSubject>(
                     sp.GetRequiredService<OpcUaServerTrackableSource<TSubject>>(),
                     proxy.Context,
-                    sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TSubject>>>());
+                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService<TSubject>>>());
             });
     }
 
@@ -102,10 +102,10 @@ public static class OpcUaProxyExtensions
     //            var context = interceptable.Context ??
     //                throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
-    //            return new ProxySourceBackgroundService<TProxy>(
+    //            return new SubjectSourceBackgroundService<TProxy>(
     //                sp.GetRequiredService<OpcUaClientTrackableSource<TProxy>>(),
     //                context,
-    //                sp.GetRequiredService<ILogger<ProxySourceBackgroundService<TProxy>>>());
+    //                sp.GetRequiredService<ILogger<SubjectSourceBackgroundService<TProxy>>>());
     //        });
     //}
 }

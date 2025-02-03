@@ -12,9 +12,9 @@ public static class SourceExtensions
 
     private const string IsChangingFromSourceKey = "Namotion.IsChangingFromSource";
 
-    public static void SetValueFromSource(this PropertyReference property, IProxySource source, object? valueFromSource)
+    public static void SetValueFromSource(this PropertyReference property, ISubjectSource source, object? valueFromSource)
     {
-        var contexts = property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<IProxySource>())!;
+        var contexts = property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ISubjectSource>())!;
         lock (contexts)
         {
             contexts.Add(source);
@@ -39,9 +39,9 @@ public static class SourceExtensions
         }
     }
 
-    public static bool IsChangingFromSource(this PropertyChangedContext change, IProxySource source)
+    public static bool IsChangingFromSource(this PropertyChangedContext change, ISubjectSource source)
     {
-        var contexts = change.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<IProxySource>())!;
+        var contexts = change.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ISubjectSource>())!;
         lock (contexts)
         {
             return contexts.Contains(source);
