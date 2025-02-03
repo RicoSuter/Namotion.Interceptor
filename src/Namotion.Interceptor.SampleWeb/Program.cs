@@ -15,17 +15,17 @@ namespace Namotion.Interceptor.SampleWeb
     [InterceptorSubject]
     public partial class Car
     {
-        [ProxySource("mqtt", "name")]
-        [ProxySource("opc", "Name")]
+        [SourceName("mqtt", "name")]
+        [SourceName("opc", "Name")]
         public partial string Name { get; set; }
 
-        [ProxySourcePath("mqtt", "tires")]
-        [ProxySourcePath("opc", "Tires")]
+        [SourcePath("mqtt", "tires")]
+        [SourcePath("opc", "Tires")]
         public partial Tire[] Tires { get; set; }
 
         [Derived]
-        [ProxySource("mqtt", "averagePressure")]
-        [ProxySource("opc", "AveragePressure")]
+        [SourceName("mqtt", "averagePressure")]
+        [SourceName("opc", "AveragePressure")]
         public decimal AveragePressure => Tires.Average(t => t.Pressure);
 
         public Car()
@@ -42,8 +42,8 @@ namespace Namotion.Interceptor.SampleWeb
     [InterceptorSubject]
     public partial class Tire
     {
-        [ProxySource("mqtt", "pressure")]
-        [ProxySource("opc", "Pressure")]
+        [SourceName("mqtt", "pressure")]
+        [SourceName("opc", "Pressure")]
         [Unit("bar")]
         public partial decimal Pressure { get; set; }
 
@@ -61,7 +61,7 @@ namespace Namotion.Interceptor.SampleWeb
         }
     }
 
-    public class UnitAttribute : Attribute, IProxyPropertyInitializer
+    public class UnitAttribute : Attribute, ISubjectPropertyInitializer
     {
         private readonly string _unit;
 
@@ -70,7 +70,7 @@ namespace Namotion.Interceptor.SampleWeb
             _unit = unit;
         }
 
-        public void InitializeProperty(RegisteredProxyProperty property, object? index)
+        public void InitializeProperty(RegisteredSubjectProperty property, object? index)
         {
             property.AddAttribute("Unit", typeof(string), () => _unit, null);
         }

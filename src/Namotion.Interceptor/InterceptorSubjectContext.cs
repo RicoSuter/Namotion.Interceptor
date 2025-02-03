@@ -1,23 +1,64 @@
-﻿namespace Namotion.Interceptor;
+﻿using System.Collections;
+using System.Collections.Concurrent;
+
+namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
-    private readonly List<IInterceptorSubjectContext> _interceptorCollections = [];
-    private readonly List<object> _services = []; // TODO: Do we need locking here?
-
+    private DateTimeOffset _lastChange = DateTimeOffset.MinValue;
+    
+    private DateTimeOffset _cacheResetTime = DateTimeOffset.MinValue;
+    private readonly ConcurrentDictionary<Type, IEnumerable> _serviceCache = new();
+    
+    private readonly List<InterceptorSubjectContext> _contexts = [];
+    private readonly List<object> _services = [];
+    
     public static InterceptorSubjectContext Create()
     {
         return new InterceptorSubjectContext();
     }
-    
-    public void AddFallbackContext(IInterceptorSubjectContext context)
+
+    public IEnumerable<TInterface> GetServices<TInterface>()
     {
-        _interceptorCollections.Add(context);
+        if (HasChangedSince(_cacheResetTime))
+        {
+            _serviceCache.Clear();
+            _cacheResetTime = DateTimeOffset.UtcNow;
+        }
+        
+        var services = _serviceCache.GetOrAdd(
+            typeof(TInterface), 
+            _ =>
+            {
+                lock (_services)
+                {
+                    return _services
+                        .OfType<TInterface>()
+                        .Concat(_contexts.SelectMany(c => c.GetServices<TInterface>()))
+                        .Distinct()
+                        .ToArray();
+                }
+            });
+
+        return services.OfType<TInterface>();
+    }
+    
+    public virtual void AddFallbackContext(IInterceptorSubjectContext context)
+    {
+        lock (_services)
+        {
+            _contexts.Add((InterceptorSubjectContext)context);
+            _lastChange = DateTimeOffset.UtcNow.AddSeconds(1);
+        }
     }
 
-    public void RemoveFallbackContext(IInterceptorSubjectContext context)
+    public virtual void RemoveFallbackContext(IInterceptorSubjectContext context)
     {
-        _interceptorCollections.Remove(context);
+        lock (_services)
+        {
+            _contexts.Remove((InterceptorSubjectContext)context);
+            _lastChange = DateTimeOffset.UtcNow.AddSeconds(1);
+        }
     }
 
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
@@ -33,7 +74,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     public void AddService<TService>(TService service)
     {
-        _services.Add(service!);
+        lock (_services)
+        {
+            _services.Add(service!);
+            _lastChange = DateTimeOffset.UtcNow.AddSeconds(1);
+        }
     }
 
     public TInterface? TryGetService<TInterface>()
@@ -41,11 +86,24 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return GetServices<TInterface>().Single();
     }
     
-    public IEnumerable<TInterface> GetServices<TInterface>()
+    private bool HasChangedSince(DateTimeOffset time)
     {
-        return _services
-            .OfType<TInterface>()
-            .Concat(_interceptorCollections.SelectMany(c => c.GetServices<TInterface>()))
-            .Distinct();
+        lock (_services)
+        {
+            if (_lastChange > time)
+            {
+                return true;
+            }
+
+            foreach (var context in _contexts)
+            {
+                if (context.HasChangedSince(time))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 }
