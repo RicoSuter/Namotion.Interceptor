@@ -374,3 +374,4 @@ FodyWeavers.xsd
 
 **/OpcUaServer/
 *.png.bkp
+**/.DS_Store
