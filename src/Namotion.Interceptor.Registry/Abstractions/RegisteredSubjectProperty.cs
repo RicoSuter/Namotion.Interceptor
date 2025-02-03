@@ -3,16 +3,16 @@
 namespace Namotion.Interceptor.Registry.Abstractions;
 
 #pragma warning disable CS8618
-public record RegisteredProxyProperty(PropertyReference Property)
+public record RegisteredSubjectProperty(PropertyReference Property)
 #pragma warning restore CS8618
 {
-    private readonly HashSet<ProxyPropertyChild> _children = new();
+    private readonly HashSet<SubjectPropertyChild> _children = new();
 
     public required Type Type { get; init; }
 
     public required object[] Attributes { get; init; }
 
-    public RegisteredProxy Parent { get; internal set; }
+    public RegisteredSubject Parent { get; internal set; }
 
     public virtual bool HasGetter => Property.Metadata.GetValue is not null;
 
@@ -28,7 +28,7 @@ public record RegisteredProxyProperty(PropertyReference Property)
         Property.Metadata.SetValue?.Invoke(Property.Subject, value);
     }
 
-    public ICollection<ProxyPropertyChild> Children
+    public ICollection<SubjectPropertyChild> Children
     {
         get
         {
@@ -39,13 +39,13 @@ public record RegisteredProxyProperty(PropertyReference Property)
         }
     }
 
-    public void AddChild(ProxyPropertyChild parent)
+    public void AddChild(SubjectPropertyChild parent)
     {
         lock (this)
             _children.Add(parent);
     }
 
-    public void RemoveChild(ProxyPropertyChild parent)
+    public void RemoveChild(SubjectPropertyChild parent)
     {
         lock (this)
             _children.Remove(parent);

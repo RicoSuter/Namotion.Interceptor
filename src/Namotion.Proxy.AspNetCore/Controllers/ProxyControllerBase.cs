@@ -17,12 +17,12 @@ public abstract class ProxyControllerBase<TSubject> : ControllerBase
     where TSubject : IInterceptorSubject
 {
     private readonly TSubject _subject;
-    private readonly IProxyRegistry _registry;
+    private readonly ISubjectRegistry _registry;
 
     protected ProxyControllerBase(TSubject subject)
     {
         _subject = subject;
-        _registry = subject.Context.GetService<IProxyRegistry>();
+        _registry = subject.Context.GetService<ISubjectRegistry>();
     }
 
     [HttpGet]
@@ -125,14 +125,14 @@ public abstract class ProxyControllerBase<TSubject> : ControllerBase
         return Ok(CreateProxyDescription(_subject, _registry));
     }
 
-    private static ProxyDescription CreateProxyDescription(IInterceptorSubject subject, IProxyRegistry registry)
+    private static ProxyDescription CreateProxyDescription(IInterceptorSubject subject, ISubjectRegistry registry)
     {
         var description = new ProxyDescription
         {
             Type = subject.GetType().Name
         };
 
-        if (registry.KnownProxies.TryGetValue(subject, out var metadata))
+        if (registry.KnownSubjects.TryGetValue(subject, out var metadata))
         {
             foreach (var property in metadata.Properties
                 .Where(p => p.Value.HasGetter &&
@@ -171,8 +171,8 @@ public abstract class ProxyControllerBase<TSubject> : ControllerBase
         public List<ProxyDescription>? Proxies { get; set; }
     }
 
-    private static ProxyPropertyDescription CreateDescription(IProxyRegistry registry, RegisteredProxy parent, 
-        string propertyName, RegisteredProxyProperty property, object? value)
+    private static ProxyPropertyDescription CreateDescription(ISubjectRegistry registry, RegisteredSubject parent, 
+        string propertyName, RegisteredSubjectProperty property, object? value)
     {
         var attributes = parent.Properties
             .Where(p => p.Value.HasGetter &&
