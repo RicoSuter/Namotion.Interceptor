@@ -50,6 +50,26 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         returnWriteValue(interception);
     }
 
+    public object? InvokeMethod(IInterceptorSubject subject, string methodName, object?[] parameters, Func<object?[], object?> invokeMethod)
+    {
+        var methodInterceptors = subject.Context.GetServices<IMethodInterceptor>();
+        var interception = new MethodInvocationInterception(subject, methodName, parameters);
+
+        var returnInvokeMethod = new Func<MethodInvocationInterception, object?>(context => invokeMethod(context.Parameters));
+    
+        foreach (var handler in methodInterceptors)
+        {
+            var previousInvokeMethod = returnInvokeMethod;
+            returnInvokeMethod = (context) =>
+            {
+                return handler.InvokeMethod(context,
+                    innerContext => previousInvokeMethod(innerContext));
+            };
+        }
+
+        return returnInvokeMethod(interception);
+    }
+
     public override void AddFallbackContext(IInterceptorSubjectContext context)
     {
         base.AddFallbackContext(context);

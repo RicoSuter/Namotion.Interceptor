@@ -17,8 +17,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
             .CreateSyntaxProvider(
                 predicate: (node, _) => node is ClassDeclarationSyntax cds && 
                                         cds.AttributeLists.Count > 0 && 
-                                        cds.AttributeLists.Any(a => a.ToString() == "[InterceptorSubject]"), 
-                                        // TODO: Use actual symbol
+                                        cds.AttributeLists.Any(a => a.ToString() == "[InterceptorSubject]"), // TODO: Use actual symbol
                 transform: (ctx, ct) =>
                 {
                     var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
@@ -29,7 +28,10 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                         ClassNode = (ClassDeclarationSyntax)ctx.Node,
                         Properties = classDeclaration.Members
                             .OfType<PropertyDeclarationSyntax>()
-                            .Where(p => p.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)) || p.AttributeLists.Any(a => a.ToString() == "[Derived]"))
+                            .Where(p => p.Modifiers
+                                .Any(m => m.IsKind(
+                                    SyntaxKind.PartialKeyword)) || 
+                                    p.AttributeLists.Any(a => a.ToString() == "[Derived]")) // TODO: Use actual symbol
                             .Select(p => new
                             {
                                 Property = p,
@@ -203,6 +205,11 @@ namespace {namespaceName}
             {{
                 _context.SetProperty(this, propertyName, newValue, readValue, setValue);
             }}
+        }}
+
+        private object? InterceptorMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
+        {{
+            return _context?.InvokeMethod(this, methodName, parameters, invokeMethod);
         }}
     }}
 }}

@@ -67,6 +67,16 @@ namespace Namotion.Interceptor.SampleConsole
 
         public partial Person[] Children { get; set; }
 
+        public int Sum(int a, int b)
+        {
+            return (int)InterceptorMethod("Sum", p => SumWithoutInterceptor((int)p[0]!, (int)p[1]!), a, b)!;
+        }
+        
+        protected int SumWithoutInterceptor(int a, int b)
+        {
+            return a + b;
+        }
+
         public Person()
         {
             Children = [];
