@@ -46,12 +46,12 @@ context
 var person = new Person(context)
 {
     FirstName = "John",
-// Property 'FirstName' changed from '' to 'John'.
-// Property 'FullName' changed from ' ' to 'John '.
+    // Property 'FirstName' changed from '' to 'John'.
+    // Property 'FullName' changed from ' ' to 'John '.
 
     LastName = "Doe"
-// Property 'LastName' changed from '' to 'Doe'.
-// Property 'FullName' changed from 'John ' to 'John Doe'.
+    // Property 'LastName' changed from '' to 'Doe'.
+    // Property 'FullName' changed from 'John ' to 'John Doe'.
 };
 
 person.FirstName = "Jane";
@@ -93,7 +93,7 @@ The context now automatically tracks the attachment and detachment of referenced
 ```csharp
 var context = ProxyContext
     .CreateBuilder()
-    .AddHandler(new LogPropertyChangesHandler())
+    .WithService(() => new LogPropertyChangesHandler())
     .WithFullPropertyTracking() // this will track property changes and subject attaches/detaches
     .Build();
 
