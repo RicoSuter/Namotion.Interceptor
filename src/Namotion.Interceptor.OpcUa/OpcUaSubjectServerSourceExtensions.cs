@@ -7,7 +7,7 @@ using Namotion.Interceptor.Sources;
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class OpcUaSubjectExtensions
+public static class OpcUaSubjectServerSourceExtensions
 {
     public static IServiceCollection AddOpcUaSubjectServer<TProxy>(
         this IServiceCollection serviceCollection,

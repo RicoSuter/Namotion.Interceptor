@@ -47,7 +47,7 @@
 //    {
 //        while (!stoppingToken.IsCancellationRequested)
 //        {
-//            using var stream = typeof(OpcUaSubjectExtensions).Assembly
+//            using var stream = typeof(OpcUaSubjectServerSourceExtensions).Assembly
 //                .GetManifestResourceStream("Namotion.Interceptable.OpcUa.MyOpcUaServer.Config.xml");
 
 //            var application = new ApplicationInstance
