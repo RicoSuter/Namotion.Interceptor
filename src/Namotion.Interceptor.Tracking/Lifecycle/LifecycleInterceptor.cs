@@ -9,7 +9,7 @@ public class LifecycleInterceptor : IWriteInterceptor
     // TODO(perf): Profile and improve this class, high potential to improve
 
     private readonly IInterceptorSubjectContext _context;
-    private readonly HashSet<IInterceptorSubject> _attachedSubjects = []; // TODO: Use in locks only
+    private readonly HashSet<(IInterceptorSubject, PropertyReference?)> _attachedSubjects = []; // TODO: Use in locks only
 
     public LifecycleInterceptor(IInterceptorSubjectContext context)
     {
@@ -27,7 +27,11 @@ public class LifecycleInterceptor : IWriteInterceptor
             AttachTo(child.Item1, child.Item2, child.Item3);
         }
 
-        AttachTo(subject, null, null);
+        var alreadyAttachedOnProperty = _attachedSubjects.Any(s => s.Item1 == subject);
+        if (!alreadyAttachedOnProperty)
+        {
+            AttachTo(subject, null, null);
+        }
     }
 
     public void DetachFrom(IInterceptorSubject subject)
@@ -45,7 +49,7 @@ public class LifecycleInterceptor : IWriteInterceptor
 
     private void AttachTo(IInterceptorSubject subject, PropertyReference? property, object? index)
     {
-        if (_attachedSubjects.Add(subject))
+        if (_attachedSubjects.Add((subject, property)))
         {
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
             var registryContext = new LifecycleContext(subject, property, index, count ?? 1);
@@ -59,7 +63,7 @@ public class LifecycleInterceptor : IWriteInterceptor
 
     private void DetachFrom(IInterceptorSubject subject, PropertyReference? property, object? index)
     {
-        if (_attachedSubjects.Remove(subject))
+        if (_attachedSubjects.Remove((subject, property)))
         {
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
             var registryContext = new LifecycleContext(subject, property, index, count ?? 1);
