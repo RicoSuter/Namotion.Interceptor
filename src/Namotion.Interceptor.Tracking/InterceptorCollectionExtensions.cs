@@ -86,8 +86,10 @@ public static class InterceptorCollectionExtensions
     /// <returns>The collection.</returns>
     public static IInterceptorSubjectContext WithParents(this IInterceptorSubjectContext context)
     {
+        context
+            .TryAddService(() => new ParentTrackingHandler(), _ => true);
+
         return context
-            .WithInterceptor(() => new ParentTrackingHandler())
             .WithLifecycle();
     }
 }

@@ -41,7 +41,7 @@ namespace Namotion.Interceptor.SampleWeb
     }
 
     [InterceptorSubject]
-    public partial class Tire : BackgroundService
+    public partial class Tire //: BackgroundService
     {
         [SourceName("mqtt", "pressure")]
         [SourceName("opc", "Pressure")]
@@ -61,15 +61,15 @@ namespace Namotion.Interceptor.SampleWeb
             Pressure_Minimum = 0.0m;
         }
 
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-        {
-            // This is automatically started by .WithHostedServices()
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                await Task.Delay(1000, stoppingToken);
-                Console.WriteLine("Current pressure: " + Pressure);
-            }
-        }
+        // protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        // {
+        //     // This is automatically started by .WithHostedServices()
+        //     while (!stoppingToken.IsCancellationRequested)
+        //     {
+        //         await Task.Delay(1000, stoppingToken);
+        //         Console.WriteLine("Current pressure: " + Pressure);
+        //     }
+        // }
     }
 
     public class UnitAttribute : Attribute, ISubjectPropertyInitializer
@@ -95,8 +95,9 @@ namespace Namotion.Interceptor.SampleWeb
 
             var context = InterceptorSubjectContext
                 .Create()
-                .WithRegistry()
                 .WithFullPropertyTracking()
+                .WithRegistry()
+                .WithParents()
                 .WithLifecycle()
                 .WithDataAnnotationValidation()
                 .WithHostedServices(builder.Services);

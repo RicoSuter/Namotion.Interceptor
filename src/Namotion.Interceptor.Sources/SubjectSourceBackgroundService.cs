@@ -48,7 +48,7 @@ public class SubjectSourceBackgroundService<TSubject> : BackgroundService
                         {
                             var reference = new PropertyReference(v.Key, p.Key);
                             return new PropertyPathReference(reference,
-                                _source.TryGetSourcePath(reference) ?? string.Empty,
+                                _source.TryGetSourcePropertyPath(reference) ?? string.Empty,
                                 p.Value.HasGetter ? p.Value.GetValue() : null);
                         }))
                     .Where(p => p.Path != string.Empty)
@@ -78,7 +78,9 @@ public class SubjectSourceBackgroundService<TSubject> : BackgroundService
                 
                 await foreach (var changes in _context
                    .GetPropertyChangedObservable()
-                   .Where(change => !change.IsChangingFromSource(_source) && _source.TryGetSourcePath(change.Property) != null)
+                   .Where(change => 
+                       !change.IsChangingFromSource(_source) && 
+                       _source.TryGetSourcePropertyPath(change.Property) != null)
                    .BufferChanges(_bufferTime)
                    .Where(changes => changes.Any())
                    .ToAsyncEnumerable()
@@ -86,7 +88,7 @@ public class SubjectSourceBackgroundService<TSubject> : BackgroundService
                 {
                     var values = changes
                         .Select(c => new PropertyPathReference(
-                            c.Property, _source.TryGetSourcePath(c.Property)!, c.NewValue));
+                            c.Property, _source.TryGetSourcePropertyPath(c.Property)!, c.NewValue));
 
                     await _source.WriteAsync(values, stoppingToken);
                 }
