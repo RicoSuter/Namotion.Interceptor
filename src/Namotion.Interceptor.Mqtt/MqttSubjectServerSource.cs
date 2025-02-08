@@ -16,10 +16,10 @@ using Namotion.Interceptor.Sources;
 
 namespace Namotion.Interceptor.Mqtt
 {
-    public class MqttSubjectServerSource<TProxy> : BackgroundService, ISubjectSource
-        where TProxy : IInterceptorSubject
+    public class MqttSubjectServerSource<TSubject> : BackgroundService, ISubjectSource
+        where TSubject : IInterceptorSubject
     {
-        private readonly TProxy _proxy;
+        private readonly TSubject _subject;
         private readonly ISourcePathProvider _sourcePathProvider;
         private readonly ILogger _logger;
 
@@ -38,11 +38,11 @@ namespace Namotion.Interceptor.Mqtt
 
         // TODO: Inject IInterceptorContext<TProxy> so that multiple contexts are supported.
         public MqttSubjectServerSource(
-            TProxy proxy,
+            TSubject subject,
             ISourcePathProvider sourcePathProvider,
-            ILogger<MqttSubjectServerSource<TProxy>> logger)
+            ILogger<MqttSubjectServerSource<TSubject>> logger)
         {
-            _proxy = proxy;
+            _subject = subject;
             _sourcePathProvider = sourcePathProvider;
             _logger = logger;
         }
@@ -100,7 +100,7 @@ namespace Namotion.Interceptor.Mqtt
                 .ToList();
 
             return Task.FromResult<IEnumerable<PropertyPathReference>>(_state
-                .Where(s => propertyPaths.Contains(_sourcePathProvider.TryGetSourcePropertyPath(s.Key)!.Replace(".", "/")))
+                .Where(s => propertyPaths.Contains(_sourcePathProvider.TryGetSourcePropertyPath(s.Key) ?? string.Empty))
                 .Select(s => new PropertyPathReference(s.Key, null!, s.Value))
                 .ToList());
         }
@@ -113,7 +113,7 @@ namespace Namotion.Interceptor.Mqtt
                     new InjectedMqttApplicationMessage(
                         new MqttApplicationMessage
                         {
-                            Topic = string.Join('/', property.Path!.Split('.')),
+                            Topic = property.Path,
                             ContentType = "application/json",
                             PayloadSegment = new ArraySegment<byte>(
                                Encoding.UTF8.GetBytes(JsonSerializer.Serialize(property.Value)))
@@ -133,7 +133,7 @@ namespace Namotion.Interceptor.Mqtt
             Task.Run(async () =>
             {
                 await Task.Delay(1000);
-                foreach (var property in _proxy
+                foreach (var property in _subject
                     .Context
                     .GetService<ISubjectRegistry>()
                     .GetProperties() // TODO: Only properties of proxy and children
@@ -153,7 +153,7 @@ namespace Namotion.Interceptor.Mqtt
             {
                 await _mqttServer!.InjectApplicationMessage(new InjectedMqttApplicationMessage(new MqttApplicationMessage
                 {
-                    Topic = string.Join('/', sourcePath.Split('.')),
+                    Topic = sourcePath,
                     ContentType = "application/json",
                     PayloadSegment = new ArraySegment<byte>(
                         Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value)))
@@ -165,14 +165,14 @@ namespace Namotion.Interceptor.Mqtt
         {
             try
             {
-                var sourcePath = args.ApplicationMessage.Topic.Replace('/', '.');
-                var property = _proxy
+                var sourcePath = args.ApplicationMessage.Topic;
+                var property = _subject
                     .Context
                     .GetService<ISubjectRegistry>()
                     .GetProperties()  // TODO: Only properties of proxy and children
                     .SingleOrDefault(p => _sourcePathProvider.TryGetSourcePropertyPath(p.Property) == sourcePath);
 
-                if (property != default)
+                if (property is not null)
                 {
                     var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
                     var document = JsonDocument.Parse(payload);

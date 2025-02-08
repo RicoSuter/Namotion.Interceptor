@@ -35,7 +35,7 @@ public static class OpcUaSubjectExtensions
             .AddSingleton(sp =>
             {
                 var subject = subjectSelector(sp);
-                var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, pathPrefix);
+                var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix);
                 return new OpcUaSubjectServerSource<TSubject>(
                     subject,
                     sourcePathProvider,

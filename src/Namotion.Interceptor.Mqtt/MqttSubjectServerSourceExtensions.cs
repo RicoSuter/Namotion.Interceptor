@@ -16,7 +16,7 @@ public static class MqttSubjectServerSourceExtensions
         return serviceCollection
             .AddSingleton(sp =>
             {
-                var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, pathPrefix);
+                var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, "/", pathPrefix);
                 return new MqttSubjectServerSource<TProxy>(
                     sp.GetRequiredService<TProxy>(),
                     sourcePathProvider,
