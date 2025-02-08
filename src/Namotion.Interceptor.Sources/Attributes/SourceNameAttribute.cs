@@ -1,46 +1,15 @@
-﻿using Namotion.Interceptor.Registry.Abstractions;
-
-namespace Namotion.Interceptor.Sources.Attributes;
+﻿namespace Namotion.Interceptor.Sources.Attributes;
 
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
-public class SourceNameAttribute : Attribute, ISubjectPropertyInitializer
+public class SourceNameAttribute : Attribute
 {
     public string SourceName { get; }
 
     public string? Path { get; }
-
-    public string? AbsolutePath { get; set; }
-
+    
     public SourceNameAttribute(string sourceName, string? path = null)
     {
         SourceName = sourceName;
         Path = path;
-    }
-
-    public void InitializeProperty(RegisteredSubjectProperty property, object? index)
-    {
-        var prefix = property.Parent.Parents.Any() ?
-            property.Parent.Parents.FirstOrDefault().TryGetAttributeBasedSourcePathPrefix(SourceName) : 
-            string.Empty;
-        
-        var parentPath = prefix + (index != null ? $"[{index}]" : string.Empty);
-
-        var sourcePath = GetSourcePath(parentPath, property.Property);
-        property.Property.SetAttributeBasedSourcePath(SourceName, sourcePath);
-        property.Property.SetAttributeBasedSourceProperty(SourceName, Path ?? property.Property.Name);
-    }
-
-    private string GetSourcePath(string? basePath, PropertyReference property)
-    {
-        if (AbsolutePath != null)
-        {
-            return AbsolutePath!;
-        }
-        else if (Path != null)
-        {
-            return (!string.IsNullOrEmpty(basePath) ? basePath + "." : "") + Path;
-        }
-
-        return (!string.IsNullOrEmpty(basePath) ? basePath + "." : "") + property.Name;
     }
 }

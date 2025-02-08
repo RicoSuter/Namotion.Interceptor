@@ -2,7 +2,7 @@
 
 public interface ISourcePathProvider
 {
-    string? TryGetSourcePropertyName(PropertyReference property);
+    string? TryGetSourcePathSegmentName(PropertyReference property);
 
-    string? TryGetSourcePath(PropertyReference property);
+    string? TryGetSourcePropertyPath(PropertyReference property);
 }

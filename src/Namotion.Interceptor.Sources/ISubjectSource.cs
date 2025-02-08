@@ -2,7 +2,7 @@
 
 public interface ISubjectSource
 {
-    string? TryGetSourcePath(PropertyReference property);
+    string? TryGetSourcePropertyPath(PropertyReference property);
 
     Task<IDisposable?> InitializeAsync(IEnumerable<PropertyPathReference> properties, Action<PropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken);
 

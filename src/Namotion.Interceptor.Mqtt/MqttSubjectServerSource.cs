@@ -100,7 +100,7 @@ namespace Namotion.Interceptor.Mqtt
                 .ToList();
 
             return Task.FromResult<IEnumerable<PropertyPathReference>>(_state
-                .Where(s => propertyPaths.Contains(_sourcePathProvider.TryGetSourcePath(s.Key)!.Replace(".", "/")))
+                .Where(s => propertyPaths.Contains(_sourcePathProvider.TryGetSourcePropertyPath(s.Key)!.Replace(".", "/")))
                 .Select(s => new PropertyPathReference(s.Key, null!, s.Value))
                 .ToList());
         }
@@ -121,9 +121,9 @@ namespace Namotion.Interceptor.Mqtt
             }
         }
 
-        public string? TryGetSourcePath(PropertyReference property)
+        public string? TryGetSourcePropertyPath(PropertyReference property)
         {
-            return _sourcePathProvider.TryGetSourcePath(property);
+            return _sourcePathProvider.TryGetSourcePropertyPath(property);
         }
 
         private Task ClientConnectedAsync(ClientConnectedEventArgs arg)
@@ -148,7 +148,7 @@ namespace Namotion.Interceptor.Mqtt
 
         private async Task PublishPropertyValueAsync(object? value, PropertyReference property)
         {
-            var sourcePath = _sourcePathProvider.TryGetSourcePath(property);
+            var sourcePath = _sourcePathProvider.TryGetSourcePropertyPath(property);
             if (sourcePath != null)
             {
                 await _mqttServer!.InjectApplicationMessage(new InjectedMqttApplicationMessage(new MqttApplicationMessage
@@ -170,7 +170,7 @@ namespace Namotion.Interceptor.Mqtt
                     .Context
                     .GetService<ISubjectRegistry>()
                     .GetProperties()  // TODO: Only properties of proxy and children
-                    .SingleOrDefault(p => _sourcePathProvider.TryGetSourcePath(p.Property) == sourcePath);
+                    .SingleOrDefault(p => _sourcePathProvider.TryGetSourcePropertyPath(p.Property) == sourcePath);
 
                 if (property != default)
                 {
