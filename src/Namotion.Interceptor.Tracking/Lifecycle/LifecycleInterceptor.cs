@@ -9,7 +9,7 @@ public class LifecycleInterceptor : IWriteInterceptor
     // TODO(perf): Profile and improve this class, high potential to improve
 
     private readonly IInterceptorSubjectContext _context;
-    private readonly HashSet<(IInterceptorSubject, PropertyReference?)> _attachedSubjects = []; // TODO: Use in locks only
+    private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference?>> _attachedSubjects = []; // TODO: Use in locks only
 
     public LifecycleInterceptor(IInterceptorSubjectContext context)
     {
@@ -18,38 +18,45 @@ public class LifecycleInterceptor : IWriteInterceptor
 
     public void AttachTo(IInterceptorSubject subject)
     {
-        var touchedProxies = new HashSet<IInterceptorSubject>();
-        var collectedSubjects = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-        FindSubjectsInProperties(subject, collectedSubjects, touchedProxies);
-
-        foreach (var child in collectedSubjects)
+        lock (_attachedSubjects)
         {
-            AttachTo(child.Item1, child.Item2, child.Item3);
-        }
+            var touchedProxies = new HashSet<IInterceptorSubject>();
+            var collectedSubjects = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
+            FindSubjectsInProperties(subject, collectedSubjects, touchedProxies);
 
-        var alreadyAttachedOnProperty = _attachedSubjects.Any(s => s.Item1 == subject);
-        if (!alreadyAttachedOnProperty)
-        {
-            AttachTo(subject, null, null);
+            foreach (var child in collectedSubjects)
+            {
+                AttachTo(child.Item1, child.Item2, child.Item3);
+            }
+
+            var alreadyAttached = _attachedSubjects.ContainsKey(subject);
+            if (!alreadyAttached)
+            {
+                AttachTo(subject, null, null);
+            }
         }
     }
 
     public void DetachFrom(IInterceptorSubject subject)
     {
-        var touchedProxies = new HashSet<IInterceptorSubject>();
-        var collectedSubjects = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-        FindSubjectsInProperties(subject, collectedSubjects, touchedProxies);
-
-        DetachFrom(subject, null, null);
-        foreach (var child in collectedSubjects)
+        lock (_attachedSubjects)
         {
-            DetachFrom(child.Item1, child.Item2, child.Item3);
+            var touchedProxies = new HashSet<IInterceptorSubject>();
+            var collectedSubjects = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
+            FindSubjectsInProperties(subject, collectedSubjects, touchedProxies);
+
+            DetachFrom(subject, null, null);
+            foreach (var child in collectedSubjects)
+            {
+                DetachFrom(child.Item1, child.Item2, child.Item3);
+            }
         }
     }
 
     private void AttachTo(IInterceptorSubject subject, PropertyReference? property, object? index)
     {
-        if (_attachedSubjects.Add((subject, property)))
+        _attachedSubjects.TryAdd(subject, []);
+        if (_attachedSubjects[subject].Add(property))
         {
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
             var registryContext = new LifecycleContext(subject, property, index, count ?? 1);
@@ -63,8 +70,13 @@ public class LifecycleInterceptor : IWriteInterceptor
 
     private void DetachFrom(IInterceptorSubject subject, PropertyReference? property, object? index)
     {
-        if (_attachedSubjects.Remove((subject, property)))
+        if (_attachedSubjects.TryGetValue(subject, out var set) && set.Remove(property))
         {
+            if (set.Count == 0)
+            {
+                _attachedSubjects.Remove(subject);
+            }
+            
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
             var registryContext = new LifecycleContext(subject, property, index, count ?? 1);
 
@@ -83,27 +95,30 @@ public class LifecycleInterceptor : IWriteInterceptor
 
         if (!Equals(currentValue, newValue))
         {
-            var oldProxies = new HashSet<IInterceptorSubject>();
-            var oldProxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-            FindSubjectsInProperty(context.Property, currentValue, null, oldProxyProperties, oldProxies);
-
-            var newProxies = new HashSet<IInterceptorSubject>();
-            var newProxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-            FindSubjectsInProperty(context.Property, newValue, null, newProxyProperties, newProxies);
-
-            if (oldProxyProperties.Count != 0 || newProxyProperties.Count != 0)
+            lock (_attachedSubjects)
             {
-                foreach (var d in oldProxyProperties
-                             .Reverse()
-                             .Where(u => !newProxies.Contains(u.Item1)))
-                {
-                    DetachFrom(d.Item1, d.Item2, d.Item3);
-                }
+                var oldProxies = new HashSet<IInterceptorSubject>();
+                var oldProxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
+                FindSubjectsInProperty(context.Property, currentValue, null, oldProxyProperties, oldProxies);
 
-                foreach (var d in newProxyProperties
-                             .Where(u => !oldProxies.Contains(u.Item1)))
+                var newProxies = new HashSet<IInterceptorSubject>();
+                var newProxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
+                FindSubjectsInProperty(context.Property, newValue, null, newProxyProperties, newProxies);
+
+                if (oldProxyProperties.Count != 0 || newProxyProperties.Count != 0)
                 {
-                    AttachTo(d.Item1, d.Item2, d.Item3);
+                    foreach (var d in oldProxyProperties
+                                 .Reverse()
+                                 .Where(u => !newProxies.Contains(u.Item1)))
+                    {
+                        DetachFrom(d.Item1, d.Item2, d.Item3);
+                    }
+
+                    foreach (var d in newProxyProperties
+                                 .Where(u => !oldProxies.Contains(u.Item1)))
+                    {
+                        AttachTo(d.Item1, d.Item2, d.Item3);
+                    }
                 }
             }
         }
