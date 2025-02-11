@@ -76,7 +76,7 @@ public static class InterceptorCollectionExtensions
     public static IInterceptorSubjectContext WithLifecycle(this IInterceptorSubjectContext context)
     {
         return context
-            .WithInterceptor(() => new LifecycleInterceptor(context));
+            .WithInterceptor(() => new LifecycleInterceptor());
     }
     
     /// <summary>

@@ -144,7 +144,7 @@ public class SubjectRegistryTests
         };
 
         // Assert
-        Assert.Equal(3, registry.KnownSubjects.Count());
+        Assert.Equal(3, registry.KnownSubjects.Count);
         Assert.Contains(person, registry.KnownSubjects.Keys);
         Assert.Contains(mother, registry.KnownSubjects.Keys);
         Assert.Contains(grandmother, registry.KnownSubjects.Keys);
