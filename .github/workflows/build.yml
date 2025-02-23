@@ -46,7 +46,7 @@ jobs:
           dotnet-version: 9.0.x
 
       - name: Get tag without 'v'
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+        run: echo "VERSION=${{ github.event.release.tag_name }}" | sed 's/^v//' >> $GITHUB_ENV
 
       - run: dotnet pack src/Namotion.Interceptor.sln --configuration Release --output ${{ env.NuGetDirectory }} -p:PackageVersion=${{ env.VERSION }}
       
