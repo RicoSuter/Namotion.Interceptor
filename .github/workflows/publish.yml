@@ -48,9 +48,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ create_nuget ]
     steps:
-      # Install the .NET SDK indicated in the global.json file
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
 
       # Download the NuGet package created in the previous job
       - uses: actions/download-artifact@v4
@@ -91,9 +92,10 @@ jobs:
           name: nuget
           path: ${{ env.NuGetDirectory }}
 
-      # Install the .NET SDK indicated in the global.json file
-      - name: Setup .NET Core
+      - name: Setup .NET
         uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
 
       # Publish all NuGet packages to NuGet.org
       # Use --skip-duplicate to prevent errors if a package with the same version already exists.
