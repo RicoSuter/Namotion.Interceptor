@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
+    <Authors>Rico Suter</Authors>
+    <Description>Interceptor library for .NET</Description>
+
+    <RepositoryUrl>https://github.com/RicoSuter/Namotion.Interceptor</RepositoryUrl>
+    <PackageTags>Interceptor</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    
+    <Version>0.0.2</Version>
+  </PropertyGroup>
+</Project>
