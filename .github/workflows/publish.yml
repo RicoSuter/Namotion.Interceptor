@@ -27,10 +27,11 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0 # Get all history to allow automatic versioning using MinVer
-      
-      # Install the .NET SDK indicated in the global.json file
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
       
       # Create the NuGet package in the folder from the environment variable NuGetDirectory
       - run: dotnet pack src/Namotion.Interceptor.sln --configuration Release --output ${{ env.NuGetDirectory }}
