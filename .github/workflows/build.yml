@@ -1,15 +1,15 @@
 name: publish
 on:
-  workflow_dispatch:  # Allow running the workflow manually from the GitHub UI
+  workflow_dispatch: # Allow running the workflow manually from the GitHub UI
   push:
     branches:
-      - 'main'        # Run the workflow when pushing to the main branch
+      - 'master'
   pull_request:
     branches:
-      - '*'           # Run the workflow for all pull requests
+      - '*'
   release:
     types:
-      - published     # Run the workflow when a new GitHub release is published
+      - published
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
@@ -33,6 +33,7 @@ jobs:
         run: dotnet test src/Namotion.Interceptor.sln --configuration Release
 
   pack:
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -57,6 +58,7 @@ jobs:
           path: ${{ env.NuGetDirectory }}/*.nupkg
 
   validate:
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     needs: [ pack ]
     steps:
@@ -73,17 +75,10 @@ jobs:
       - name: Install nuget validator
         run: dotnet tool update Meziantou.Framework.NuGetPackageValidation.Tool --global
 
-      # Validate metadata and content of the NuGet package
-      # https://www.nuget.org/packages/Meziantou.Framework.NuGetPackageValidation.Tool#readme-body-tab
-      # If some rules are not applicable, you can disable them
-      # using the --excluded-rules or --excluded-rule-ids option
       - name: Validate package
         run: meziantou.validate-nuget-package --excluded-rules IconMustBeSet,ReadmeMustBeSet,Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NuGetDirectory }}/*.nupkg")
 
   deploy:
-    # Publish only when creating a GitHub Release
-    # https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository
-    # You can update this logic if you want to manage releases differently
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     needs: [ validate, test ]
