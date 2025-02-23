@@ -45,10 +45,7 @@ jobs:
         with:
           dotnet-version: 9.0.x
 
-      - name: Get tag without 'v'
-        run: echo "VERSION=$(echo ${{ github.event.release.tag_name }} | sed 's/^v//')" >> $GITHUB_ENV
-
-      - run: dotnet pack src/Namotion.Interceptor.sln --configuration Release --output ${{ env.NuGetDirectory }} -p:PackageVersion=${{ env.VERSION }}
+      - run: dotnet pack src/Namotion.Interceptor.sln --configuration Release --output ${{ env.NuGetDirectory }} -p:PackageVersion=${{ github.event.release.tag_name }}
 
       - uses: actions/upload-artifact@v4
         with:
