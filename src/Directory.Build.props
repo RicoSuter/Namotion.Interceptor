@@ -12,5 +12,7 @@
     <RepositoryUrl>https://github.com/RicoSuter/Namotion.Interceptor</RepositoryUrl>
     <PackageTags>Interceptor</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    
+    <Version>0.0.1</Version>
   </PropertyGroup>
 </Project>
