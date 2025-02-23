@@ -2,5 +2,8 @@
   <PropertyGroup>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <Authors>Rico Suter</Authors>
+    <Description>Interceptor library for .NET</Description>
   </PropertyGroup>
 </Project>
