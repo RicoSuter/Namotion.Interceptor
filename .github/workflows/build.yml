@@ -1,15 +1,15 @@
 name: publish
 on:
-  workflow_dispatch: # Allow running the workflow manually from the GitHub UI
+  workflow_dispatch:  # Allow running the workflow manually from the GitHub UI
   push:
     branches:
-      - 'main'       # Run the workflow when pushing to the main branch
+      - 'main'        # Run the workflow when pushing to the main branch
   pull_request:
     branches:
-      - '*'          # Run the workflow for all pull requests
+      - '*'           # Run the workflow for all pull requests
   release:
     types:
-      - published    # Run the workflow when a new GitHub release is published
+      - published     # Run the workflow when a new GitHub release is published
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
@@ -26,17 +26,15 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          fetch-depth: 0 # Get all history to allow automatic versioning using MinVer
+          fetch-depth: 0 
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
       
-      # Create the NuGet package in the folder from the environment variable NuGetDirectory
       - run: dotnet pack src/Namotion.Interceptor.sln --configuration Release --output ${{ env.NuGetDirectory }}
       
-      # Publish the NuGet package as an artifact, so they can be used in the following jobs
       - uses: actions/upload-artifact@v4
         with:
           name: nuget
@@ -53,7 +51,6 @@ jobs:
         with:
           dotnet-version: 9.0.x
 
-      # Download the NuGet package created in the previous job
       - uses: actions/download-artifact@v4
         with:
           name: nuget
@@ -88,7 +85,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ validate, test ]
     steps:
-      # Download the NuGet package created in the previous job
       - uses: actions/download-artifact@v4
         with:
           name: nuget
