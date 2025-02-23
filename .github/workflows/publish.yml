@@ -33,7 +33,7 @@ jobs:
         uses: actions/setup-dotnet@v4
       
       # Create the NuGet package in the folder from the environment variable NuGetDirectory
-      - run: dotnet pack --configuration Release --output ${{ env.NuGetDirectory }}
+      - run: dotnet pack src/Namotion.Interceptor.sln --configuration Release --output ${{ env.NuGetDirectory }}
       
       # Publish the NuGet package as an artifact, so they can be used in the following jobs
       - uses: actions/upload-artifact@v4
@@ -74,7 +74,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
       - name: Run tests
-        run: dotnet test --configuration Release
+        run: dotnet test src/Namotion.Interceptor.sln --configuration Release
 
   deploy:
     # Publish only when creating a GitHub Release
