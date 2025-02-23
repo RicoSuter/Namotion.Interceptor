@@ -14,13 +14,24 @@ on:
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
   DOTNET_NOLOGO: true
-  NuGetDirectory: ${{ github.workspace}}/nuget
+  NuGetDirectory: ${{ github.workspace }}/nuget
 
 defaults:
   run:
     shell: pwsh
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Run tests
+        run: dotnet test src/Namotion.Interceptor.sln --configuration Release
+
   pack:
     runs-on: ubuntu-latest
     steps:
@@ -32,8 +43,11 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
-      
-      - run: dotnet pack src/Namotion.Interceptor.sln --configuration Release --output ${{ env.NuGetDirectory }} -p:PackageVersion=0.0.2
+
+      - name: Get tag without 'v'
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV 
+        
+      - run: dotnet pack src/Namotion.Interceptor.sln --configuration Release --output ${{ env.NuGetDirectory }} -p:PackageVersion=$VERSION
       
       - uses: actions/upload-artifact@v4
         with:
@@ -65,17 +79,6 @@ jobs:
       # using the --excluded-rules or --excluded-rule-ids option
       - name: Validate package
         run: meziantou.validate-nuget-package --excluded-rules IconMustBeSet,ReadmeMustBeSet,Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NuGetDirectory }}/*.nupkg")
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0.x
-      - name: Run tests
-        run: dotnet test src/Namotion.Interceptor.sln --configuration Release
 
   deploy:
     # Publish only when creating a GitHub Release
