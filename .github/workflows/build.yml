@@ -33,7 +33,7 @@ jobs:
         with:
           dotnet-version: 9.0.x
       
-      - run: dotnet pack src/Namotion.Interceptor.sln --configuration Release --output ${{ env.NuGetDirectory }}
+      - run: dotnet pack src/Namotion.Interceptor.sln --configuration Release --output ${{ env.NuGetDirectory }} -p:PackageVersion=0.0.2
       
       - uses: actions/upload-artifact@v4
         with:
