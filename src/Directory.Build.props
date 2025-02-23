@@ -3,7 +3,14 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
     <Authors>Rico Suter</Authors>
     <Description>Interceptor library for .NET</Description>
+
+    <PackageProjectUrl>https://github.com/RicoSuter/Namotion.Interceptor</PackageProjectUrl>
+    <PackageTags>Interceptor</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 </Project>
