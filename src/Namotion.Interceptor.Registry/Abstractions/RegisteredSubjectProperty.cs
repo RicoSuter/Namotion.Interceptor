@@ -12,7 +12,9 @@ public record RegisteredSubjectProperty(PropertyReference Property)
 
     public required object[] Attributes { get; init; }
 
+#pragma warning disable CS8618
     public RegisteredSubject Parent { get; internal set; }
+#pragma warning restore CS8618
 
     public virtual bool HasGetter => Property.Metadata.GetValue is not null;
 
