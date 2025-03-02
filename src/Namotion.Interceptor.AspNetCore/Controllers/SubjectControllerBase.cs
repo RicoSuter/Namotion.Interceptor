@@ -23,14 +23,14 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
     }
 
     [HttpGet]
-    public ActionResult<TSubject> GetVariables()
+    public ActionResult<TSubject> GetSubject()
     {
         // TODO: correctly generate OpenAPI schema
         return Ok(_subject.ToJsonObject());
     }
 
     [HttpPost]
-    public ActionResult UpdateVariables(
+    public ActionResult UpdatePropertyValues(
         [FromBody] Dictionary<string, JsonElement> updates,
         [FromServices] IEnumerable<IPropertyValidator> propertyValidators)
     {
@@ -39,19 +39,19 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
             var resolvedUpdates = updates
                 .Select(t =>
                 {
-                    var (proxy, property) = _subject.FindPropertyFromJsonPath(t.Key);
+                    var (subject, property) = _subject.FindPropertyFromJsonPath(t.Key);
                     return new
                     {
                         t.Key,
                         t.Value,
-                        Proxy = proxy,
+                        Subject = subject,
                         Property = property
                     };
                 })
                 .ToArray();
 
             // check only known variables
-            if (resolvedUpdates.Any(u => u.Proxy == null))
+            if (resolvedUpdates.Any(u => u.Subject == null))
             {
                 return BadRequest(new ProblemDetails
                 {
@@ -74,7 +74,7 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
             {
                 var updateErrors = propertyValidators
                     .SelectMany(v => v.Validate(
-                        new PropertyReference(update.Proxy!, update.Property.Name), update.Value))
+                        new PropertyReference(update.Subject!, update.Property.Name), update.Value))
                     .ToArray();
 
                 if (updateErrors.Any())
@@ -98,7 +98,7 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
             // write updates
             foreach (var update in resolvedUpdates)
             {
-                update.Property.SetValue?.Invoke(update.Proxy, update.Value.Deserialize(update.Property.Type));
+                update.Property.SetValue?.Invoke(update.Subject, update.Value.Deserialize(update.Property.Type));
             }
 
             return Ok();
@@ -117,58 +117,58 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
     /// </summary>
     /// <returns></returns>
     [HttpGet("properties")]
-    public ActionResult<ProxyDescription> GetProperties()
+    public ActionResult<SubjectDescription> GetProperties()
     {
-        return Ok(CreateProxyDescription(_subject, _subject.Context.GetService<ISubjectRegistry>()));
+        return Ok(CreateSubjectDescription(_subject, _subject.Context.GetService<ISubjectRegistry>()));
     }
 
-    private static ProxyDescription CreateProxyDescription(IInterceptorSubject subject, ISubjectRegistry registry)
+    private static SubjectDescription CreateSubjectDescription(IInterceptorSubject subject, ISubjectRegistry registry)
     {
-        var description = new ProxyDescription
+        var description = new SubjectDescription
         {
             Type = subject.GetType().Name
         };
 
-        if (registry.KnownSubjects.TryGetValue(subject, out var metadata))
+        if (registry.KnownSubjects.TryGetValue(subject, out var registeredSubject))
         {
-            foreach (var property in metadata.Properties
+            foreach (var property in registeredSubject.Properties
                 .Where(p => p.Value.HasGetter &&
                             p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any() == false))
             {
                 var propertyName = property.GetJsonPropertyName();
                 var value = property.Value.GetValue();
 
-                description.Properties[propertyName] = CreateDescription(registry, metadata, property.Key, property.Value, value);
+                description.Properties[propertyName] = CreatePropertyDescription(registry, registeredSubject, property.Key, property.Value, value);
             }
         }
 
         return description;
     }
 
-    public class ProxyDescription
+    public class SubjectDescription
     {
         public required string Type { get; init; }
 
-        public Dictionary<string, ProxyPropertyDescription> Properties { get; } = new();
+        public Dictionary<string, SubjectPropertyDescription> Properties { get; } = new();
     }
 
-    public class ProxyPropertyDescription
+    public class SubjectPropertyDescription
     {
         public required string Type { get; init; }
 
         public object? Value { get; internal set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public IReadOnlyDictionary<string, ProxyPropertyDescription>? Attributes { get; init; }
+        public IReadOnlyDictionary<string, SubjectPropertyDescription>? Attributes { get; init; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public ProxyDescription? Proxy { get; set; }
+        public SubjectDescription? Subject { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public List<ProxyDescription>? Proxies { get; set; }
+        public List<SubjectDescription>? Subjects { get; set; }
     }
 
-    private static ProxyPropertyDescription CreateDescription(ISubjectRegistry registry, RegisteredSubject parent, 
+    private static SubjectPropertyDescription CreatePropertyDescription(ISubjectRegistry registry, RegisteredSubject parent, 
         string propertyName, RegisteredSubjectProperty property, object? value)
     {
         var attributes = parent.Properties
@@ -176,26 +176,24 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
                         p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any(a => a.PropertyName == propertyName))
             .ToDictionary(
                 p => p.Value.Attributes.OfType<PropertyAttributeAttribute>().Single().AttributeName,
-                p => CreateDescription(registry, parent, p.Key, p.Value, p.Value.GetValue()));
+                p => CreatePropertyDescription(registry, parent, p.Key, p.Value, p.Value.GetValue()));
 
-        var description = new ProxyPropertyDescription
+        var description = new SubjectPropertyDescription
         {
             Type = property.Type.Name,
             Attributes = attributes.Any() ? attributes : null
         };
 
-        if (value is IInterceptorSubject childProxy)
+        if (value is IInterceptorSubject childSubject)
         {
-            description.Proxy = CreateProxyDescription(childProxy, registry);
+            description.Subject = CreateSubjectDescription(childSubject, registry);
         }
         else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
         {
-            var children = new List<ProxyDescription>();
-            foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
-            {
-                children.Add(CreateProxyDescription(arrayProxyItem, registry));
-            }
-            description.Proxies = children;
+            description.Subjects = collection
+                .OfType<IInterceptorSubject>()
+                .Select(arrayProxyItem => CreateSubjectDescription(arrayProxyItem, registry))
+                .ToList();
         }
         else
         {

@@ -1,12 +1,29 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor.Registry.Abstractions;
+﻿using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Registry;
 
 public static class SubjectRegistryExtensions
 {
-    public static IEnumerable<RegisteredSubjectProperty> GetProperties(this ISubjectRegistry registry)
+    public static IEnumerable<RegisteredSubjectProperty> GetSubjectAndChildProperties(this IInterceptorSubject subject)
+    {
+        var registry = subject.Context.GetService<ISubjectRegistry>();
+        if (registry.KnownSubjects.TryGetValue(subject, out var registeredSubject))
+        {
+            foreach (var property in registeredSubject.Properties.Values)
+            {
+                yield return property;
+
+                foreach (var child in property.Children
+                    .SelectMany(c => GetSubjectAndChildProperties(c.Subject)))
+                {
+                    yield return child;
+                }
+            }
+        }
+    }
+
+    public static IEnumerable<RegisteredSubjectProperty> GetAllProperties(this ISubjectRegistry registry)
     {
         foreach (var pair in registry.KnownSubjects)
         {
