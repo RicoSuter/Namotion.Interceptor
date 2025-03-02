@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Namotion.Interceptor.AspNetCore.Controllers;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
@@ -40,7 +41,7 @@ namespace Namotion.Interceptor.SampleWeb
     }
 
     [InterceptorSubject]
-    public partial class Tire
+    public partial class Tire //: BackgroundService
     {
         [SourceName("mqtt", "pressure")]
         [SourceName("opc", "Pressure")]
@@ -59,6 +60,16 @@ namespace Namotion.Interceptor.SampleWeb
         {
             Pressure_Minimum = 0.0m;
         }
+
+        // protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        // {
+        //     // This is automatically started by .WithHostedServices()
+        //     while (!stoppingToken.IsCancellationRequested)
+        //     {
+        //         await Task.Delay(1000, stoppingToken);
+        //         Console.WriteLine("Current pressure: " + Pressure);
+        //     }
+        // }
     }
 
     public class UnitAttribute : Attribute, ISubjectPropertyInitializer
@@ -84,10 +95,12 @@ namespace Namotion.Interceptor.SampleWeb
 
             var context = InterceptorSubjectContext
                 .Create()
-                .WithRegistry()
                 .WithFullPropertyTracking()
+                .WithRegistry()
+                .WithParents()
                 .WithLifecycle()
-                .WithDataAnnotationValidation();
+                .WithDataAnnotationValidation()
+                .WithHostedServices(builder.Services);
 
             var car = new Car(context);
 
@@ -102,7 +115,7 @@ namespace Namotion.Interceptor.SampleWeb
             builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
 
             // trackable mqtt
-            builder.Services.AddMqttSubjectServerSource<Car>("mqtt");
+            builder.Services.AddMqttSubjectServer<Car>("mqtt");
 
             // trackable GraphQL
             builder.Services

@@ -78,6 +78,7 @@ using System.Linq;
 using System.Text.Json.Serialization;
 
 #pragma warning disable CS8669
+#pragma warning disable CS0649
 
 namespace {namespaceName} 
 {{

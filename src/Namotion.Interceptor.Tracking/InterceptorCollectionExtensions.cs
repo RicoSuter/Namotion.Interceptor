@@ -76,7 +76,7 @@ public static class InterceptorCollectionExtensions
     public static IInterceptorSubjectContext WithLifecycle(this IInterceptorSubjectContext context)
     {
         return context
-            .WithInterceptor(() => new LifecycleInterceptor(context));
+            .WithInterceptor(() => new LifecycleInterceptor());
     }
     
     /// <summary>
@@ -86,8 +86,10 @@ public static class InterceptorCollectionExtensions
     /// <returns>The collection.</returns>
     public static IInterceptorSubjectContext WithParents(this IInterceptorSubjectContext context)
     {
+        context
+            .TryAddService(() => new ParentTrackingHandler(), _ => true);
+
         return context
-            .WithInterceptor(() => new ParentTrackingHandler())
             .WithLifecycle();
     }
 }

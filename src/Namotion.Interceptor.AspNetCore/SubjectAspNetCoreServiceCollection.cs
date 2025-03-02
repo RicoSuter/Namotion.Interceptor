@@ -7,7 +7,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class SubjectAspNetCoreServiceCollection
 {
     /// <summary>
-    /// Registers a generic controller with the signature 'SubjectController{TProxy} : SubjectControllerBase{TProxy} where TProxy : class'.
+    /// Registers a generic controller with the signature 'SubjectController{TSubject} : SubjectControllerBase{TSubject} where TSubject : class'.
     /// </summary>
     /// <typeparam name="TController">The controller type.</typeparam>
     /// <typeparam name="TSubject">The subject type.</typeparam>

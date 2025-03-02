@@ -1,7 +1,7 @@
 ﻿using System.Reactive.Linq;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Sources;
@@ -9,8 +9,8 @@ namespace Namotion.Interceptor.Sources;
 public class SubjectSourceBackgroundService<TSubject> : BackgroundService
     where TSubject : IInterceptorSubject
 {
+    private readonly TSubject _subject;
     private readonly ISubjectSource _source;
-    private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
@@ -18,14 +18,14 @@ public class SubjectSourceBackgroundService<TSubject> : BackgroundService
     private HashSet<string>? _initializedProperties;
 
     public SubjectSourceBackgroundService(
+        TSubject subject,
         ISubjectSource source,
-        IInterceptorSubjectContext context,
         ILogger logger,
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null)
     {
+        _subject = subject;
         _source = source;
-        _context = context;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
@@ -39,20 +39,14 @@ public class SubjectSourceBackgroundService<TSubject> : BackgroundService
             {
                 // TODO: Currently newly added properties/trackable are not automatically tracked/subscribed to
 
-                var propertiesWithSetter = _context
-                    .GetService<ISubjectRegistry>()
-                    .KnownSubjects
-                    .SelectMany(v => v.Value.Properties
-                        .Where(p => p.Value.HasSetter)
-                        .Select(p =>
-                        {
-                            var reference = new PropertyReference(v.Key, p.Key);
-                            return new PropertyPathReference(reference,
-                                _source.TryGetSourcePath(reference) ?? string.Empty,
-                                p.Value.HasGetter ? p.Value.GetValue() : null);
-                        }))
+                var propertiesWithSetter = _subject
+                    .GetSubjectAndChildProperties()
+                    .Where(p => p.HasSetter)
+                    .Select(p => new PropertyPathReference(p.Property,
+                        _source.TryGetSourcePropertyPath(p.Property) ?? string.Empty,
+                        p.HasGetter ? p.GetValue() : null))
                     .Where(p => p.Path != string.Empty)
-                    .ToList()!;
+                    .ToList();
 
                 lock (this)
                 {
@@ -76,17 +70,20 @@ public class SubjectSourceBackgroundService<TSubject> : BackgroundService
                     _initializedProperties = null;
                 }
                 
-                await foreach (var changes in _context
-                   .GetPropertyChangedObservable()
-                   .Where(change => !change.IsChangingFromSource(_source) && _source.TryGetSourcePath(change.Property) != null)
-                   .BufferChanges(_bufferTime)
-                   .Where(changes => changes.Any())
-                   .ToAsyncEnumerable()
-                   .WithCancellation(stoppingToken))
+                await foreach (var changes in _subject
+                    .Context
+                    .GetPropertyChangedObservable()
+                    .Where(change => 
+                        !change.IsChangingFromSource(_source) && 
+                       _source.TryGetSourcePropertyPath(change.Property) != null)
+                    .BufferChanges(_bufferTime)
+                    .Where(changes => changes.Any())
+                    .ToAsyncEnumerable()
+                    .WithCancellation(stoppingToken))
                 {
                     var values = changes
                         .Select(c => new PropertyPathReference(
-                            c.Property, _source.TryGetSourcePath(c.Property)!, c.NewValue));
+                            c.Property, _source.TryGetSourcePropertyPath(c.Property)!, c.NewValue));
 
                     await _source.WriteAsync(values, stoppingToken);
                 }

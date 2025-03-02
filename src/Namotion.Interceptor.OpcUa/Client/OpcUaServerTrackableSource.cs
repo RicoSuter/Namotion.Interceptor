@@ -47,7 +47,7 @@
 //    {
 //        while (!stoppingToken.IsCancellationRequested)
 //        {
-//            using var stream = typeof(OpcUaSubjectExtensions).Assembly
+//            using var stream = typeof(OpcUaSubjectServerSourceExtensions).Assembly
 //                .GetManifestResourceStream("Namotion.Interceptable.OpcUa.MyOpcUaServer.Config.xml");
 
 //            var application = new ApplicationInstance
@@ -169,8 +169,8 @@
 //        return Task.CompletedTask;
 //    }
 
-//    public string? TryGetSourcePath(PropertyReference property)
+//    public string? TryGetSourcePropertyPath(PropertyReference property)
 //    {
-//        return SourcePathProvider.TryGetSourcePath(property);
+//        return SourcePathProvider.TryGetSourcePropertyPath(property);
 //    }
 //}

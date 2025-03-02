@@ -9,17 +9,17 @@ public class ParentTrackingHandlerTests
     public void WhenReferencedByTwoPropertiesOfTheSameParent_ThenTwoReferencesAreSet()
     {
         // Arrange
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithParents();
 
         // Act
-        var parent = new Person(collection)
+        var parent = new Person(context)
         {
             FirstName = "Parent"
         };
 
-        var person = new Person(collection);
+        var person = new Person(context);
         person.FirstName = "Child";
         person.Mother = parent;
         person.Father = parent;
@@ -33,17 +33,17 @@ public class ParentTrackingHandlerTests
     public void WhenReferencesAreSetToNull_ThenParentIsEmpty()
     {
         // Arrange
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithParents();
 
         // Act
-        var parent = new Person(collection)
+        var parent = new Person(context)
         {
             FirstName = "Parent"
         };
 
-        var person = new Person(collection);
+        var person = new Person(context);
         person.FirstName = "Child";
         person.Mother = parent;
         person.Father = parent;
@@ -60,21 +60,19 @@ public class ParentTrackingHandlerTests
     public void WhenReferencedByTwoOtherSubjects_ThenItHasTwoParents()
     {
         // Arrange
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithParents();
 
         // Act
-        var mother = new Person(collection);
+        var mother = new Person(context);
         mother.FirstName = "Mother";
 
-        var child1 = new Person(collection)
-        {
-            FirstName = "Child1",
-            Mother = mother
-        };
+        var child1 = new Person(context);
+        child1.FirstName = "Child1";
+        child1.Mother = mother;
 
-        var child2 = new Person(collection)
+        var child2 = new Person(context)
         {
             FirstName = "Child2",
             Mother = mother
