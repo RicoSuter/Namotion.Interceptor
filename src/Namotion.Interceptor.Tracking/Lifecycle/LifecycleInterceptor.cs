@@ -4,70 +4,110 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public class LifecycleInterceptor : IWriteInterceptor
 {
-    private const string ReferenceCountKey = "Namotion.ReferenceCount";
-
     // TODO(perf): Profile and improve this class, high potential to improve
 
-    private readonly IInterceptorSubjectContext _context;
-    private readonly HashSet<IInterceptorSubject> _attachedSubjects = []; // TODO: Use in locks only
-
-    public LifecycleInterceptor(IInterceptorSubjectContext context)
-    {
-        _context = context; // TODO: remove and use subject context instead?
-    }
+    private const string ReferenceCountKey = "Namotion.ReferenceCount";
+    
+    private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference?>> _attachedSubjects = [];
 
     public void AttachTo(IInterceptorSubject subject)
     {
-        var touchedProxies = new HashSet<IInterceptorSubject>();
-        var collectedSubjects = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-        FindSubjectsInProperties(subject, collectedSubjects, touchedProxies);
-
-        foreach (var child in collectedSubjects)
+        lock (_attachedSubjects)
         {
-            AttachTo(child.Item1, child.Item2, child.Item3);
-        }
+            var touchedSubjects = new HashSet<IInterceptorSubject>();
+            var collectedSubjects = new HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)>();
+            FindSubjectsInProperties(subject, collectedSubjects, touchedSubjects);
 
-        AttachTo(subject, null, null);
+            foreach (var child in collectedSubjects)
+            {
+                AttachTo(child.subject, subject.Context, child.property, child.index);
+            }
+
+            var alreadyAttached = _attachedSubjects.ContainsKey(subject);
+            if (!alreadyAttached)
+            {
+                AttachTo(subject, subject.Context, null, null);
+            }
+        }
     }
 
     public void DetachFrom(IInterceptorSubject subject)
     {
-        var touchedProxies = new HashSet<IInterceptorSubject>();
-        var collectedSubjects = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-        FindSubjectsInProperties(subject, collectedSubjects, touchedProxies);
-
-        DetachFrom(subject, null, null);
-        foreach (var child in collectedSubjects)
+        lock (_attachedSubjects)
         {
-            DetachFrom(child.Item1, child.Item2, child.Item3);
+            var touchedProxies = new HashSet<IInterceptorSubject>();
+            var collectedSubjects = new HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)>();
+            FindSubjectsInProperties(subject, collectedSubjects, touchedProxies);
+
+            DetachFrom(subject, subject.Context, null, null);
+            foreach (var child in collectedSubjects)
+            {
+                DetachFrom(child.subject, subject.Context, child.property, child.index);
+            }
         }
     }
 
-    private void AttachTo(IInterceptorSubject subject, PropertyReference? property, object? index)
+    private void AttachTo(IInterceptorSubject subject, IInterceptorSubjectContext context, PropertyReference? property, object? index)
     {
-        if (_attachedSubjects.Add(subject))
+        _attachedSubjects.TryAdd(subject, []);
+        if (_attachedSubjects[subject].Add(property))
         {
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
             var registryContext = new LifecycleContext(subject, property, index, count ?? 1);
 
-            foreach (var handler in _context.GetServices<ILifecycleHandler>())
+            foreach (var handler in context.GetServices<ILifecycleHandler>())
             {
                 handler.Attach(registryContext);
             }
+            
+            // bool newHandlersFound;
+            // var handlers = new HashSet<ILifecycleHandler>();
+            // do
+            // {
+            //     newHandlersFound = false;
+            //     foreach (var handler in context
+            //          .GetServices<ILifecycleHandler>()
+            //          .Where(h => !handlers.Contains(h)))
+            //     {
+            //         handlers.Add(handler);
+            //         handler.Attach(registryContext);
+            //         newHandlersFound = true;
+            //     }
+            // } while (newHandlersFound);
         }
     }
 
-    private void DetachFrom(IInterceptorSubject subject, PropertyReference? property, object? index)
+    private void DetachFrom(IInterceptorSubject subject, IInterceptorSubjectContext context, PropertyReference? property, object? index)
     {
-        if (_attachedSubjects.Remove(subject))
+        if (_attachedSubjects.TryGetValue(subject, out var set) && set.Remove(property))
         {
-            var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
-            var registryContext = new LifecycleContext(subject, property, index, count ?? 1);
+            if (set.Count == 0)
+            {
+                _attachedSubjects.Remove(subject);
+            }
 
-            foreach (var handler in _context.GetServices<ILifecycleHandler>())
+            var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
+           
+            var registryContext = new LifecycleContext(subject, property, index, count ?? 1);
+            foreach (var handler in context.GetServices<ILifecycleHandler>())
             {
                 handler.Detach(registryContext);
             }
+            
+            // bool newHandlersFound;
+            // var handlers = new HashSet<ILifecycleHandler>();
+            // do
+            // {
+            //     newHandlersFound = false;
+            //     foreach (var handler in context
+            //          .GetServices<ILifecycleHandler>()
+            //          .Where(h => !handlers.Contains(h)))
+            //     {
+            //         handlers.Add(handler);
+            //         handler.Detach(registryContext);
+            //         newHandlersFound = true;
+            //     }
+            // } while (newHandlersFound);
         }
     }
 
@@ -79,27 +119,30 @@ public class LifecycleInterceptor : IWriteInterceptor
 
         if (!Equals(currentValue, newValue))
         {
-            var oldProxies = new HashSet<IInterceptorSubject>();
-            var oldProxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-            FindSubjectsInProperty(context.Property, currentValue, null, oldProxyProperties, oldProxies);
-
-            var newProxies = new HashSet<IInterceptorSubject>();
-            var newProxyProperties = new HashSet<(IInterceptorSubject, PropertyReference, object?)>();
-            FindSubjectsInProperty(context.Property, newValue, null, newProxyProperties, newProxies);
-
-            if (oldProxyProperties.Count != 0 || newProxyProperties.Count != 0)
+            lock (_attachedSubjects)
             {
-                foreach (var d in oldProxyProperties
-                             .Reverse()
-                             .Where(u => !newProxies.Contains(u.Item1)))
-                {
-                    DetachFrom(d.Item1, d.Item2, d.Item3);
-                }
+                var oldTouchedSubjects = new HashSet<IInterceptorSubject>();
+                var oldCollectedSubjects = new HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)>();
+                FindSubjectsInProperty(context.Property, currentValue, null, oldCollectedSubjects, oldTouchedSubjects);
 
-                foreach (var d in newProxyProperties
-                             .Where(u => !oldProxies.Contains(u.Item1)))
+                var newTouchedSubjects = new HashSet<IInterceptorSubject>();
+                var newCollectedSubjects = new HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)>();
+                FindSubjectsInProperty(context.Property, newValue, null, newCollectedSubjects, newTouchedSubjects);
+
+                if (oldCollectedSubjects.Count != 0 || newCollectedSubjects.Count != 0)
                 {
-                    AttachTo(d.Item1, d.Item2, d.Item3);
+                    foreach (var d in oldCollectedSubjects
+                        .Reverse()
+                        .Where(u => !newTouchedSubjects.Contains(u.subject)))
+                    {
+                        DetachFrom(d.subject, context.Property.Subject.Context, d.property, d.index);
+                    }
+
+                    foreach (var d in newCollectedSubjects
+                        .Where(u => !oldTouchedSubjects.Contains(u.Item1)))
+                    {
+                        AttachTo(d.subject, context.Property.Subject.Context, d.property, d.index);
+                    }
                 }
             }
         }
@@ -108,7 +151,7 @@ public class LifecycleInterceptor : IWriteInterceptor
     }
 
     private void FindSubjectsInProperties(IInterceptorSubject subject,
-        HashSet<(IInterceptorSubject, PropertyReference, object?)> collectedSubjects,
+        HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject> touchedSubjects)
     {
         foreach (var property in subject.Properties)
@@ -123,7 +166,7 @@ public class LifecycleInterceptor : IWriteInterceptor
 
     private void FindSubjectsInProperty(PropertyReference property,
         object? value, object? index,
-        HashSet<(IInterceptorSubject, PropertyReference, object?)> collectedSubjects,
+        HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject> touchedSubjects)
     {
         if (value is IDictionary dictionary)

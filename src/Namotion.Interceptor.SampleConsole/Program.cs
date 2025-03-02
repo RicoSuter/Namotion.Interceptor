@@ -9,12 +9,12 @@ namespace Namotion.Interceptor.SampleConsole
     {
         static void Main(string[] args)
         {
-            var collection = InterceptorSubjectContext
+            var context = InterceptorSubjectContext
                 .Create()
                 .WithService(() => new LogPropertyChangesHandler())
                 .WithFullPropertyTracking();
 
-            collection
+            context
                 .GetPropertyChangedObservable()
                 .Subscribe((change) => 
                     Console.WriteLine($"Property {change.Property.Name} changed from {change.OldValue} to {change.NewValue}."));
@@ -23,7 +23,7 @@ namespace Namotion.Interceptor.SampleConsole
             var child2 = new Person { FirstName = "Child2" };
             var child3 = new Person { FirstName = "Child3" };
 
-            var person = new Person(collection)
+            var person = new Person(context)
             {
                 FirstName = "Rico",
                 LastName = "Suter",

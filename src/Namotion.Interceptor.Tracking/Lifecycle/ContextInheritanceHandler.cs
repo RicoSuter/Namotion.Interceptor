@@ -1,5 +1,7 @@
 ﻿namespace Namotion.Interceptor.Tracking.Lifecycle;
 
+#pragma warning disable CS0659
+
 public class ContextInheritanceHandler : ILifecycleHandler
 {
     public void Attach(LifecycleContext context)

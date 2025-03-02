@@ -1,5 +1,5 @@
 ﻿using Microsoft.AspNetCore.Components;
-using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Recorder;
 
 namespace Namotion.Interceptor.Blazor;
@@ -13,9 +13,6 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
     private PropertyReference[]? _properties;
 
     [Inject]
-    public IObservable<PropertyChangedContext>? PropertyChangedObservable { get; set; }
-
-    [Inject]
     public TSubject? Subject { get; set; }
         
     [Inject]
@@ -23,7 +20,9 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
 
     protected override void OnInitialized()
     {
-        _subscription = PropertyChangedObservable!
+        _subscription = Subject?
+            .Context
+            .GetPropertyChangedObservable()
             .Subscribe(change =>
             {
                 if (_properties?.Any(p => p == change.Property) != false)

@@ -7,7 +7,7 @@ using Namotion.Interceptor.Sources;
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class OpcUaSubjectExtensions
+public static class OpcUaSubjectServerSourceExtensions
 {
     public static IServiceCollection AddOpcUaSubjectServer<TProxy>(
         this IServiceCollection serviceCollection,
@@ -35,7 +35,7 @@ public static class OpcUaSubjectExtensions
             .AddSingleton(sp =>
             {
                 var subject = subjectSelector(sp);
-                var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, pathPrefix);
+                var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix);
                 return new OpcUaSubjectServerSource<TSubject>(
                     subject,
                     sourcePathProvider,
@@ -45,10 +45,10 @@ public static class OpcUaSubjectExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaSubjectServerSource<TSubject>>())
             .AddSingleton<IHostedService>(sp =>
             {
-                var proxy = subjectSelector(sp);
+                var subject = subjectSelector(sp);
                 return new SubjectSourceBackgroundService<TSubject>(
+                    subject,
                     sp.GetRequiredService<OpcUaSubjectServerSource<TSubject>>(),
-                    proxy.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService<TSubject>>>());
             });
     }
