@@ -11,7 +11,6 @@ using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Server;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 
 namespace Namotion.Interceptor.Mqtt
@@ -134,9 +133,7 @@ namespace Namotion.Interceptor.Mqtt
             {
                 await Task.Delay(1000);
                 foreach (var property in _subject
-                    .Context
-                    .GetService<ISubjectRegistry>()
-                    .GetProperties() // TODO: Only properties of proxy and children
+                    .GetSubjectAndChildProperties()
                     .Where(p => p.HasGetter))
                 {
                     await PublishPropertyValueAsync(property.GetValue(), property.Property);
@@ -166,12 +163,13 @@ namespace Namotion.Interceptor.Mqtt
             try
             {
                 var sourcePath = args.ApplicationMessage.Topic;
+               
+                // TODO(perf): Going through all might be slow
                 var property = _subject
-                    .Context
-                    .GetService<ISubjectRegistry>()
-                    .GetProperties()  // TODO: Only properties of proxy and children
-                    .SingleOrDefault(p => _sourcePathProvider.TryGetSourcePropertyPath(p.Property) == sourcePath);
-
+                    .GetSubjectAndChildProperties()
+                    .SingleOrDefault(p => _sourcePathProvider
+                        .TryGetSourcePropertyPath(p.Property) == sourcePath);
+                
                 if (property is not null)
                 {
                     var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);

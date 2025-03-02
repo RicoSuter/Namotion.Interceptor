@@ -45,10 +45,10 @@ public static class OpcUaSubjectServerSourceExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<OpcUaSubjectServerSource<TSubject>>())
             .AddSingleton<IHostedService>(sp =>
             {
-                var proxy = subjectSelector(sp);
+                var subject = subjectSelector(sp);
                 return new SubjectSourceBackgroundService<TSubject>(
+                    subject,
                     sp.GetRequiredService<OpcUaSubjectServerSource<TSubject>>(),
-                    proxy.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService<TSubject>>>());
             });
     }
