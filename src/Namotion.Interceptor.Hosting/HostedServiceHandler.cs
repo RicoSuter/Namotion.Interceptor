@@ -27,14 +27,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
 
         if (context is { ReferenceCount: 1, Subject: IHostedService hostedService })
         {
-            if (_hostedServices.Add(hostedService))
-            {
-                _actions.Post(token =>
-                {
-                    _logger?.LogInformation("Starting attached hosted service {Service}.", hostedService.ToString());
-                    return hostedService.StartAsync(token);
-                });
-            }
+            AttachHostedService(hostedService);
         }
     }
 
@@ -44,17 +37,10 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
 
         if (context is { ReferenceCount: 0, Subject: IHostedService hostedService })
         {
-            if (_hostedServices.Remove(hostedService))
-            {
-                _actions.Post(token =>
-                {
-                    _logger?.LogInformation("Stopping detached hosted service {Service}.", hostedService.ToString());
-                    return hostedService.StopAsync(token);
-                });
-            }
+            DetachHostedService(hostedService);
         }
     }
-    
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
         if (_executeTask is not null)
@@ -65,6 +51,30 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _executeTask = ExecuteAsync(_stoppingCts.Token);
         return _executeTask.IsCompleted ? _executeTask : Task.CompletedTask;
+    }
+
+    internal void AttachHostedService(IHostedService hostedService)
+    {
+        if (_hostedServices.Add(hostedService))
+        {
+            _actions.Post(token =>
+            {
+                _logger?.LogInformation("Starting attached hosted service {Service}.", hostedService.ToString());
+                return hostedService.StartAsync(token);
+            });
+        }
+    }
+
+    internal void DetachHostedService(IHostedService hostedService)
+    {
+        if (_hostedServices.Remove(hostedService))
+        {
+            _actions.Post(token =>
+            {
+                _logger?.LogInformation("Stopping detached hosted service {Service}.", hostedService.ToString());
+                return hostedService.StopAsync(token);
+            });
+        }
     }
 
     private async Task ExecuteAsync(CancellationToken stoppingToken)
