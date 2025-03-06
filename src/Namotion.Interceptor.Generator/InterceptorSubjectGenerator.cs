@@ -44,6 +44,16 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                                 HasSetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true,
                                 HasInit = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.InitAccessorDeclaration)) == true
                             })
+                            .ToArray(),
+                        Methods = classDeclaration.Members
+                            .OfType<MethodDeclarationSyntax>()
+                            .Where(p => p.Identifier.Text.EndsWith("WithoutInterceptor"))
+                            .Select(p => new
+                            {
+                                Method = p,
+                                ReturnType = p.ReturnType,
+                                Parameters = p.ParameterList.Parameters
+                            })
                             .ToArray()
                     };
                 })
@@ -189,6 +199,41 @@ namespace {namespaceName}
 ";
                     }
 
+                    foreach (var method in cls.SelectMany(c => c.Methods))
+                    {
+                        var methodName = method.Method.Identifier.Text.Replace("WithoutInterceptor", string.Empty);
+                        var returnType = GetFullTypeName(method.Method.ReturnType, semanticModel);
+                        var parameters = method.Parameters.Select(p => new
+                        {
+                            Name = p.Identifier.ValueText,
+                            Type = GetFullTypeName(p.Type, semanticModel)
+                        }).ToList();
+
+                        var directParameterCode = string.Join(", ", parameters.Select((p, i) => $"({p.Type})p[{i}]!"));
+                        var invokeParameterCode = parameters.Any() ? ", " + string.Join(", ", parameters.Select(p => p.Name)) : string.Empty;
+
+                        if (returnType != "void")
+                        {
+                            generatedCode += 
+    $@"
+        public {returnType} {methodName}({string.Join(", ", parameters.Select(p => p.Type + " " + p.Name))})
+        {{
+            return ({returnType})InvokeMethod(""{methodName}"", p => {methodName}WithoutInterceptor({directParameterCode}){invokeParameterCode})!;
+        }}
+";
+                        }
+                        else
+                        {
+                            generatedCode += 
+    $@"
+        public {returnType} {methodName}({string.Join(", ", parameters.Select(p => p.Type + " " + p.Name))})
+        {{
+            InvokeMethod(""{methodName}"", p => {{ {methodName}WithoutInterceptor({directParameterCode}); return null; }}{invokeParameterCode});
+        }}
+";
+                        }
+                    }
+
                     generatedCode +=
     $@"
         private T GetProperty<T>(string propertyName, Func<object?> readValue)
@@ -208,7 +253,7 @@ namespace {namespaceName}
             }}
         }}
 
-        private object? InterceptorMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
+        private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
         {{
             return _context?.InvokeMethod(this, methodName, parameters, invokeMethod);
         }}
