@@ -1,4 +1,4 @@
-﻿namespace Namotion.Interceptor.Registry.Tests
+﻿namespace Namotion.Interceptor.Generator.Tests
 {
     public class VerifyChecksTests
     {
