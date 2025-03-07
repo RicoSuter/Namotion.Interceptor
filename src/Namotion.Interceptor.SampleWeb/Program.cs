@@ -7,7 +7,6 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Sources.Attributes;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Change.Attributes;
 using Namotion.Interceptor.Validation;
 using NSwag.Annotations;
 

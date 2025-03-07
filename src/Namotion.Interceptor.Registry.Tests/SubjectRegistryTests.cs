@@ -2,7 +2,7 @@
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
-using Person = Namotion.Interceptor.Tests.Models.Person;
+using Person = Namotion.Interceptor.Registry.Tests.Models.Person;
 
 namespace Namotion.Interceptor.Registry.Tests;
 

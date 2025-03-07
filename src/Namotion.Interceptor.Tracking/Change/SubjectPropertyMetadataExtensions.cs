@@ -1,4 +1,4 @@
-using Namotion.Interceptor.Tracking.Change.Attributes;
+using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
