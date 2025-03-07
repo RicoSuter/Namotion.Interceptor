@@ -62,7 +62,7 @@ public class HostedServiceHandlerTests
          
             var hostedService = new PersonBackgroundService(person);
             person.AttachHostedService(hostedService);
-            var attachedHostedServices = person.TryGetAttachedHostedServices();
+            var attachedHostedServices = person.GetAttachedHostedServices();
             
             await Task.Delay(100);
             
@@ -72,7 +72,7 @@ public class HostedServiceHandlerTests
 
             // Act
             person.DetachHostedService(hostedService);
-            attachedHostedServices = person.TryGetAttachedHostedServices();
+            attachedHostedServices = person.GetAttachedHostedServices();
 
             // Assert
             await Task.Delay(100);

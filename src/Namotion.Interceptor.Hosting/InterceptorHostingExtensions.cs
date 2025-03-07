@@ -16,8 +16,8 @@ public static class InterceptorHostingExtensions
             },
             (_, value) =>
             {
-                var hashSet = value as HashSet<IHostedService>;
-                if (hashSet?.Add(hostedService) == true)
+                var hashSet = value as HashSet<IHostedService> ?? [];
+                if (hashSet.Add(hostedService))
                 {
                     HandleAttachHostedService(subject, hostedService);
                 }
@@ -52,8 +52,8 @@ public static class InterceptorHostingExtensions
         hostedServiceHandler?.DetachHostedService(hostedService);
     }
 
-    public static HashSet<IHostedService>? TryGetAttachedHostedServices(this IInterceptorSubject subject)
+    public static HashSet<IHostedService> GetAttachedHostedServices(this IInterceptorSubject subject)
     {
-        return subject.Data.GetOrAdd(AttachedHostedServicesKey, _ => null) as HashSet<IHostedService>;
+        return subject.Data.GetOrAdd(AttachedHostedServicesKey, _ => null) as HashSet<IHostedService> ?? [];
     }
 }
