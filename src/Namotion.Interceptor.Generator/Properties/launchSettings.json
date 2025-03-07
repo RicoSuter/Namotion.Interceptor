@@ -1,28 +1,33 @@
 {
+  "$schema": "http://json.schemastore.org/launchsettings.json",
   "profiles": {
     "SampleConsole": {
       "commandName": "DebugRoslynComponent",
-      "targetProject": "..\\Namotion.Interceptor.SampleConsole\\Namotion.Interceptor.SampleConsole.csproj"
+      "targetProject": "../Namotion.Interceptor.SampleConsole/Namotion.Interceptor.SampleConsole.csproj"
     },
     "SampleWeb": {
       "commandName": "DebugRoslynComponent",
-      "targetProject": "..\\Namotion.Interceptor.Sample\\Namotion.Interceptor.Sample.csproj"
+      "targetProject": "../Namotion.Interceptor.Sample/Namotion.Interceptor.Sample.csproj"
     },
     "SampleBlazor": {
       "commandName": "DebugRoslynComponent",
-      "targetProject": "..\\Namotion.Interceptor.SampleBlazor\\Namotion.Interceptor.SampleBlazor.csproj"
+      "targetProject": "../Namotion.Interceptor.SampleBlazor/Namotion.Interceptor.SampleBlazor.csproj"
     },
     "SampleMachine": {
       "commandName": "DebugRoslynComponent",
-      "targetProject": "..\\Namotion.Interceptor.SampleMachine\\Namotion.Interceptor.SampleMachine.csproj"
+      "targetProject": "../Namotion.Interceptor.SampleMachine/Namotion.Interceptor.SampleMachine.csproj"
     },
     "Benchmark": {
       "commandName": "DebugRoslynComponent",
-      "targetProject": "..\\Namotion.Interceptor.Benchmark\\Namotion.Interceptor.Benchmark.csproj"
+      "targetProject": "../Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj"
     },
     "Tests": {
       "commandName": "DebugRoslynComponent",
-      "targetProject": "..\\Namotion.Interceptor.Tests\\Namotion.Interceptor.Tests.csproj"
+      "targetProject": "../Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj"
+    },
+    "Generator.Tests": {
+      "commandName": "DebugRoslynComponent",
+      "targetProject": "../Namotion.Interceptor.Generator.Tests/Namotion.Interceptor.Generator.Tests.csproj"
     }
   }
 }

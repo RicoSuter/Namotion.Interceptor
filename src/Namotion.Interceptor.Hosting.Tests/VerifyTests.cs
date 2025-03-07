@@ -1,6 +1,6 @@
 ﻿namespace Namotion.Interceptor.Hosting.Tests
 {
-    public partial class VerifyChecksTests
+    public class VerifyChecksTests
     {
         [Fact]
         public Task Run() => VerifyChecks.Run();
