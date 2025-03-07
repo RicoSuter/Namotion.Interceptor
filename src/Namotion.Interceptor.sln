@@ -64,6 +64,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Valida
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Hosting", "Namotion.Interceptor.Hosting\Namotion.Interceptor.Hosting.csproj", "{7892B1D8-5170-475B-BF2E-77B5F5F2F085}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Hosting.Tests", "Namotion.Interceptor.Hosting.Tests\Namotion.Interceptor.Hosting.Tests.csproj", "{02EF1BFB-AC60-4853-9190-5389F65DC638}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -158,6 +160,10 @@ Global
 		{7892B1D8-5170-475B-BF2E-77B5F5F2F085}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7892B1D8-5170-475B-BF2E-77B5F5F2F085}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7892B1D8-5170-475B-BF2E-77B5F5F2F085}.Release|Any CPU.Build.0 = Release|Any CPU
+		{02EF1BFB-AC60-4853-9190-5389F65DC638}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{02EF1BFB-AC60-4853-9190-5389F65DC638}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{02EF1BFB-AC60-4853-9190-5389F65DC638}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{02EF1BFB-AC60-4853-9190-5389F65DC638}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -177,6 +183,7 @@ Global
 		{A8BE4D4F-DA09-44D1-A613-95EAE0948242} = {31C2A126-61B9-402D-B2F4-9772341EBF09}
 		{F1AC0D56-BCE6-4B5F-B5C8-51CF74F0C110} = {31C2A126-61B9-402D-B2F4-9772341EBF09}
 		{3E57D6F1-0E5F-4E2F-A914-58DDEBA0837A} = {D977E1EA-C167-4BEB-B7C5-4214DDD470D3}
+		{02EF1BFB-AC60-4853-9190-5389F65DC638} = {31C2A126-61B9-402D-B2F4-9772341EBF09}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {D7E90F8C-B0AE-4ACF-9226-306D8EA3D35B}
