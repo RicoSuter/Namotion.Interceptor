@@ -2,7 +2,7 @@
 
 namespace Namotion.Interceptor.Sources;
 
-public static class SourceExtensions
+public static class InterceptorSourcesExtensions
 {
     private const string IsChangingFromSourceKey = "Namotion.IsChangingFromSource";
 
