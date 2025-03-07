@@ -260,7 +260,7 @@ namespace {namespaceName}
 
         private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
         {{
-            return _context?.InvokeMethod(this, methodName, parameters, invokeMethod);
+            return _context is not null ? _context.InvokeMethod(this, methodName, parameters, invokeMethod) : invokeMethod(parameters);
         }}
     }}
 }}
