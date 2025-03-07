@@ -1,6 +1,6 @@
 ﻿namespace Namotion.Interceptor.Tracking.Tests
 {
-    public partial class VerifyChecksTests
+    public class VerifyChecksTests
     {
         [Fact]
         public Task Run() => VerifyChecks.Run();
