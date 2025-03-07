@@ -14,7 +14,7 @@ on:
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
   DOTNET_NOLOGO: true
-  NuGetDirectory: ${{ github.workspace }}/nuget
+  NUGET_DIRECTORY: ${{ github.workspace }}/nuget
 
 defaults:
   run:
@@ -45,14 +45,14 @@ jobs:
         with:
           dotnet-version: 9.0.x
 
-      - run: dotnet pack src/Namotion.Interceptor.sln --configuration Release --output ${{ env.NuGetDirectory }} -p:PackageVersion=${{ github.event.release.tag_name }}
+      - run: dotnet pack src/Namotion.Interceptor.sln --configuration Release --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ github.event.release.tag_name }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: nuget
           if-no-files-found: error
           retention-days: 7
-          path: ${{ env.NuGetDirectory }}/*.nupkg
+          path: ${{ env.NUGET_DIRECTORY }}/*.nupkg
 
   validate:
     if: github.event_name == 'release'
@@ -67,13 +67,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: nuget
-          path: ${{ env.NuGetDirectory }}
+          path: ${{ env.NUGET_DIRECTORY }}
 
       - name: Install nuget validator
         run: dotnet tool update Meziantou.Framework.NuGetPackageValidation.Tool --global
 
       - name: Validate package
-        run: meziantou.validate-nuget-package --excluded-rules IconMustBeSet,ReadmeMustBeSet,Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NuGetDirectory }}/*.nupkg")
+        run: meziantou.validate-nuget-package --excluded-rules IconMustBeSet,ReadmeMustBeSet,Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NUGET_DIRECTORY }}/*.nupkg")
 
   deploy:
     if: github.event_name == 'release'
@@ -83,7 +83,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: nuget
-          path: ${{ env.NuGetDirectory }}
+          path: ${{ env.NUGET_DIRECTORY }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -95,6 +95,6 @@ jobs:
       # If you retry a failed workflow, already published packages will be skipped without error.
       - name: Publish NuGet package
         run: |
-          foreach($file in (Get-ChildItem "${{ env.NuGetDirectory }}" -Recurse -Include *.nupkg)) {
+          foreach($file in (Get-ChildItem "${{ env.NUGET_DIRECTORY }}" -Recurse -Include *.nupkg)) {
               dotnet nuget push $file --api-key "${{ secrets.NUGET_APIKEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
           }
