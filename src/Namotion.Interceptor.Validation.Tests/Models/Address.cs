@@ -1,5 +1,4 @@
 ﻿using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Tracking.Change.Attributes;
 
 namespace Namotion.Interceptor.Validation.Tests.Models
 {

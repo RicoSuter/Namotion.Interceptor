@@ -1,7 +1,6 @@
 ﻿using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Tracking.Change.Attributes;
 
-namespace Namotion.Interceptor.Tests
+namespace Namotion.Interceptor.Registry.Tests.Models
 {
     // test different property types
 
