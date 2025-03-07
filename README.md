@@ -1,3 +1,5 @@
+[![Nuget](https://img.shields.io/nuget/v/Namotion.Interceptor.svg)](https://apimundo.com/organizations/nuget-org/nuget-feeds/public/packages/Namotion.Interceptor/versions/latest)
+
 **The library is currently in development and the APIs might change.**
 
 # Namotion.Interceptor for .NET
