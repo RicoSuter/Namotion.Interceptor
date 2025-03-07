@@ -24,10 +24,18 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     public void Attach(LifecycleContext context)
     {
         _logger ??= _loggerResolver();
-
-        if (context is { ReferenceCount: 1, Subject: IHostedService hostedService })
+        
+        if (context.ReferenceCount == 1)
         {
-            AttachHostedService(hostedService);
+            if (context.Subject is IHostedService hostedService)
+            {
+                AttachHostedService(hostedService);
+            }
+
+            foreach (var hostedService2 in context.Subject.GetAttachedHostedServices())
+            {
+                AttachHostedService(hostedService2);
+            }
         }
     }
 
@@ -35,9 +43,17 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     {
         _logger ??= _loggerResolver();
 
-        if (context is { ReferenceCount: 0, Subject: IHostedService hostedService })
+        if (context.ReferenceCount == 0)
         {
-            DetachHostedService(hostedService);
+            if (context.Subject is IHostedService hostedService)
+            {
+                DetachHostedService(hostedService);
+            }
+
+            foreach (var hostedService2 in context.Subject.GetAttachedHostedServices())
+            {
+                DetachHostedService(hostedService2);
+            }
         }
     }
 
@@ -51,30 +67,6 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _executeTask = ExecuteAsync(_stoppingCts.Token);
         return _executeTask.IsCompleted ? _executeTask : Task.CompletedTask;
-    }
-
-    internal void AttachHostedService(IHostedService hostedService)
-    {
-        if (_hostedServices.Add(hostedService))
-        {
-            _actions.Post(token =>
-            {
-                _logger?.LogInformation("Starting attached hosted service {Service}.", hostedService.ToString());
-                return hostedService.StartAsync(token);
-            });
-        }
-    }
-
-    internal void DetachHostedService(IHostedService hostedService)
-    {
-        if (_hostedServices.Remove(hostedService))
-        {
-            _actions.Post(token =>
-            {
-                _logger?.LogInformation("Stopping detached hosted service {Service}.", hostedService.ToString());
-                return hostedService.StopAsync(token);
-            });
-        }
     }
 
     private async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -112,27 +104,67 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 await _stoppingCts.CancelAsync();
             }
             
-            await Task.WhenAll(_hostedServices.Select(async hostedService =>
+            Task[] tasks;
+            lock (_hostedServices)
             {
-                try
-                {
-                    _logger?.LogInformation("Stopping hosted service {Service}.", hostedService.ToString());
-                    await hostedService.StopAsync(cancellationToken);
-                }
-                catch (Exception exception)
-                {
-                    if (exception is not OperationCanceledException)
+                tasks = _hostedServices
+                    .Select(async hostedService =>
                     {
-                        _logger?.LogError(exception, "Failed to stop hosted service {Service}.", hostedService.ToString());
-                    }
-                }
-            }));
+                        try
+                        {
+                            _logger?.LogInformation("Stopping hosted service {Service}.", hostedService.ToString());
+                            await hostedService.StopAsync(cancellationToken);
+                        }
+                        catch (Exception exception)
+                        {
+                            if (exception is not OperationCanceledException)
+                            {
+                                _logger?.LogError(exception, "Failed to stop hosted service {Service}.", hostedService.ToString());
+                            }
+                        }
+                    })
+                    .ToArray();
+                
+                _hostedServices.Clear();
+            }
+            
+            await Task.WhenAll(tasks);
         }
         finally
         {
             await _executeTask
                 .WaitAsync(cancellationToken)
                 .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+    }
+    
+    internal void AttachHostedService(IHostedService hostedService)
+    {
+        lock (hostedService)
+        {
+            if (_hostedServices.Add(hostedService))
+            {
+                _actions.Post(token =>
+                {
+                    _logger?.LogInformation("Starting attached hosted service {Service}.", hostedService.ToString());
+                    return hostedService.StartAsync(token);
+                });
+            }
+        }
+    }
+
+    internal void DetachHostedService(IHostedService hostedService)
+    {
+        lock (_hostedServices)
+        {
+            if (_hostedServices.Remove(hostedService))
+            {
+                _actions.Post(token =>
+                {
+                    _logger?.LogInformation("Stopping detached hosted service {Service}.", hostedService.ToString());
+                    return hostedService.StopAsync(token);
+                });
+            }
         }
     }
     
