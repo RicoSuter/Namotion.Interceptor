@@ -66,19 +66,6 @@ namespace Namotion.Interceptor.SampleConsole
         public partial Person? Mother { get; set; }
 
         public partial Person[] Children { get; set; }
-        
-        protected void ExecuteWithoutInterceptor()
-        {
-        }
-        
-        protected void ExecuteParamsWithoutInterceptor(int a, int b)
-        {
-        }
-        
-        protected int SumWithoutInterceptor(int a, int b)
-        {
-            return a + b;
-        }
 
         public Person()
         {
