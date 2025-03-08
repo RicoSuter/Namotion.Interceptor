@@ -13,6 +13,16 @@ public class GeneratorTests
         // Assert
         Assert.NotNull(person);
     }
+    
+    [Fact]
+    public void WhenHasBlocScopedkNamespace_ThenCodeIsGenerated()
+    {
+        // Arrange & Act
+        var person = new PersonWithBlockScopedNamespace() as IInterceptorSubject;
+        
+        // Assert
+        Assert.NotNull(person);
+    }
 
     [Fact]
     public void WhenFunctionIsInterceptable_ThenInterctorMethodIsGenerator()
