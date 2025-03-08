@@ -165,12 +165,17 @@ namespace {namespaceName}
                         //var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
                         var fullyQualifiedName = property.Type.Type!.ToString();
                         var propertyName = property.Property.Identifier.Value;
+                        var propertyModifier =
+                            property.Property.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) ? "public" :
+                            property.Property.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword)) ? "internal" :
+                            property.Property.Modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)) ? "protected" : 
+                            "private";
 
                         generatedCode +=
     $@"
         private {fullyQualifiedName} _{propertyName};
 
-        public {(property.IsRequired ? "required " : "")}partial {fullyQualifiedName} {propertyName}
+        {propertyModifier} {(property.IsRequired ? "required " : "")}partial {fullyQualifiedName} {propertyName}
         {{";
                         if (property.HasGetter)
                         {
