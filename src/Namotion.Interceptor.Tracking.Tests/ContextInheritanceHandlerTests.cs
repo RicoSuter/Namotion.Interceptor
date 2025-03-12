@@ -10,23 +10,23 @@ public class ContextInheritanceHandlerTests
     public void WhenPropertyIsAssigned_ThenContextIsSet()
     {
         // Arrange
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithContextInheritance();
 
         // Act
-        var person = new Person(collection);
+        var person = new Person(context);
         person.Mother = new Person { FirstName = "Mother" };
 
         // Assert
-        Assert.Equal(collection.GetServices<IInterceptor>(), person.Mother.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), person.Mother.GetServices<IInterceptor>());
     }
 
     [Fact]
     public void WhenPropertyWithDeepStructureIsAssigned_ThenChildrenAlsoHaveContext()
     {
         // Arrange
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithContextInheritance();
 
@@ -42,16 +42,16 @@ public class ContextInheritanceHandlerTests
             Mother = grandmother
         };
 
-        var person = new Person(collection)
+        var person = new Person(context)
         {
             FirstName = "Child",
             Mother = mother
         };
 
         // Assert
-        Assert.Equal(collection.GetServices<IInterceptor>(), person.GetServices<IInterceptor>());
-        Assert.Equal(collection.GetServices<IInterceptor>(), mother.GetServices<IInterceptor>());
-        Assert.Equal(collection.GetServices<IInterceptor>(), grandmother.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), person.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), mother.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), grandmother.GetServices<IInterceptor>());
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public class ContextInheritanceHandlerTests
     public void WhenArrayIsAssigned_ThenAllChildrenAreAttached()
     {
         // Arrange
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithContextInheritance();
 
@@ -100,7 +100,7 @@ public class ContextInheritanceHandlerTests
         var child1 = new Person { FirstName = "Child1" };
         var child2 = new Person { FirstName = "Child2" };
 
-        var person = new Person(collection)
+        var person = new Person(context)
         {
             FirstName = "Mother",
             Children = [
@@ -110,21 +110,21 @@ public class ContextInheritanceHandlerTests
         };
 
         // Assert
-        Assert.Equal(collection.GetServices<IInterceptor>(), person.GetServices<IInterceptor>());
-        Assert.Equal(collection.GetServices<IInterceptor>(), child1.GetServices<IInterceptor>());
-        Assert.Equal(collection.GetServices<IInterceptor>(), child2.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), person.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), child1.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), child2.GetServices<IInterceptor>());
     }
 
     [Fact]
     public void WhenUsingCircularDependencies_ThenProxiesAreAttached()
     {
         // Arrange
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithContextInheritance();
 
         // Act
-        var child1 = new Person(collection) { FirstName = "Child1" };
+        var child1 = new Person(context) { FirstName = "Child1" };
         var child2 = new Person { FirstName = "Child2" };
         var child3 = new Person { FirstName = "Child2" };
 
@@ -133,9 +133,9 @@ public class ContextInheritanceHandlerTests
         child3.Mother = child1;
 
         // Assert
-        Assert.Equal(collection.GetServices<IInterceptor>(), child1.GetServices<IInterceptor>());
-        Assert.Equal(collection.GetServices<IInterceptor>(), child2.GetServices<IInterceptor>());
-        Assert.Equal(collection.GetServices<IInterceptor>(), child3.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), child1.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), child2.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<IInterceptor>(), child3.GetServices<IInterceptor>());
     }
     
     [Fact]
@@ -145,13 +145,13 @@ public class ContextInheritanceHandlerTests
         var service1 = 1;
         var service2 = 2;
         
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithService(() => service1, x => x == 1)
             .WithContextInheritance();
 
         // Act
-        var person = new Person(collection)
+        var person = new Person(context)
         {
             Mother = new Person
             {

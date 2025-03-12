@@ -1,0 +1,54 @@
+﻿{
+  Type: Person,
+  Properties: {
+    father: {
+      Type: Person,
+      Subject: {
+        Type: Person,
+        Properties: {
+          father: {
+            Type: Person
+          },
+          firstName: {
+            Type: String,
+            Value: Father
+          },
+          lastName: {
+            Type: String
+          },
+          mother: {
+            Type: Person
+          }
+        }
+      }
+    },
+    firstName: {
+      Type: String,
+      Value: Child
+    },
+    lastName: {
+      Type: String
+    },
+    mother: {
+      Type: Person,
+      Subject: {
+        Type: Person,
+        Properties: {
+          father: {
+            Type: Person
+          },
+          firstName: {
+            Type: String,
+            Value: Mother
+          },
+          lastName: {
+            Type: String
+          },
+          mother: {
+            Type: Person
+          }
+        }
+      }
+    }
+  }
+}

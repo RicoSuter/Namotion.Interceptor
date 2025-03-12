@@ -1,0 +1,23 @@
+﻿[
+  {
+    Type: Person,
+    Properties: {
+      Father: {
+        Type: Person,
+        Subject: {
+          Type: Person,
+          Properties: {
+            firstName: {
+              Type: String,
+              Value: New
+            }
+          }
+        }
+      },
+      firstName: {
+        Type: String,
+        Value: New
+      }
+    }
+  }
+]

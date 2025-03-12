@@ -210,7 +210,12 @@ public class SubjectRegistryTests
         };
 
         // Assert
-        await Verify(person.ToJsonObject()
-            .ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true }));
+        var jsonSerializerOptions = new JsonSerializerOptions(JsonSerializerOptions.Default)
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+        
+        await Verify(person.ToJsonObject(jsonSerializerOptions).ToJsonString(jsonSerializerOptions));
     }
 }
