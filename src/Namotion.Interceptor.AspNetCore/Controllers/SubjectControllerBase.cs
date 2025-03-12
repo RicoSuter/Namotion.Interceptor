@@ -1,13 +1,11 @@
-﻿using System.Collections;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
+using Namotion.Interceptor.AspNetCore.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Validation;
 
 namespace Namotion.Interceptor.AspNetCore.Controllers;
@@ -119,87 +117,6 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
     [HttpGet("properties")]
     public ActionResult<SubjectDescription> GetProperties()
     {
-        return Ok(CreateSubjectDescription(_subject, _subject.Context.GetService<ISubjectRegistry>()));
-    }
-
-    private static SubjectDescription CreateSubjectDescription(IInterceptorSubject subject, ISubjectRegistry registry)
-    {
-        var description = new SubjectDescription
-        {
-            Type = subject.GetType().Name
-        };
-
-        if (registry.KnownSubjects.TryGetValue(subject, out var registeredSubject))
-        {
-            foreach (var property in registeredSubject.Properties
-                .Where(p => p.Value.HasGetter &&
-                            p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any() == false))
-            {
-                var propertyName = property.GetJsonPropertyName();
-                var value = property.Value.GetValue();
-
-                description.Properties[propertyName] = CreatePropertyDescription(registry, registeredSubject, property.Key, property.Value, value);
-            }
-        }
-
-        return description;
-    }
-
-    public class SubjectDescription
-    {
-        public required string Type { get; init; }
-
-        public Dictionary<string, SubjectPropertyDescription> Properties { get; } = new();
-    }
-
-    public class SubjectPropertyDescription
-    {
-        public required string Type { get; init; }
-
-        public object? Value { get; internal set; }
-
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public IReadOnlyDictionary<string, SubjectPropertyDescription>? Attributes { get; init; }
-
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public SubjectDescription? Subject { get; set; }
-
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public List<SubjectDescription>? Subjects { get; set; }
-    }
-
-    private static SubjectPropertyDescription CreatePropertyDescription(ISubjectRegistry registry, RegisteredSubject parent, 
-        string propertyName, RegisteredSubjectProperty property, object? value)
-    {
-        var attributes = parent.Properties
-            .Where(p => p.Value.HasGetter &&
-                        p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any(a => a.PropertyName == propertyName))
-            .ToDictionary(
-                p => p.Value.Attributes.OfType<PropertyAttributeAttribute>().Single().AttributeName,
-                p => CreatePropertyDescription(registry, parent, p.Key, p.Value, p.Value.GetValue()));
-
-        var description = new SubjectPropertyDescription
-        {
-            Type = property.Type.Name,
-            Attributes = attributes.Any() ? attributes : null
-        };
-
-        if (value is IInterceptorSubject childSubject)
-        {
-            description.Subject = CreateSubjectDescription(childSubject, registry);
-        }
-        else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
-        {
-            description.Subjects = collection
-                .OfType<IInterceptorSubject>()
-                .Select(arrayProxyItem => CreateSubjectDescription(arrayProxyItem, registry))
-                .ToList();
-        }
-        else
-        {
-            description.Value = value;
-        }
-
-        return description;
+        return Ok(SubjectDescription.Create(_subject, _subject.Context.GetService<ISubjectRegistry>()));
     }
 }
