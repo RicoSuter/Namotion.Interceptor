@@ -47,7 +47,7 @@ public class SubjectDescription
 
         foreach (var change in propertyChanges)
         {
-            var subjectDescription = GetOrCreateSubjectDescription(change.Property, knownSubjectDescriptions);
+            var subjectDescription = GetOrCreateSubjectDescription(change.Property.Subject, knownSubjectDescriptions);
 
             var registry = change.Property.Subject.Context.GetService<ISubjectRegistry>();
             var registeredSubject = registry.KnownSubjects[change.Property.Subject];
@@ -79,12 +79,12 @@ public class SubjectDescription
         Dictionary<IInterceptorSubject, SubjectDescription> knownSubjectDescriptions, 
         JsonSerializerOptions jsonSerializerOptions)
     {
-        var parentSubjectDescription = GetOrCreateSubjectDescription(parentProperty, knownSubjectDescriptions);
+        var parentSubjectDescription = GetOrCreateSubjectDescription(parentProperty.Subject, knownSubjectDescriptions);
         
         var propertyName = jsonSerializerOptions.PropertyNamingPolicy?.ConvertName(parentProperty.Name) ?? parentProperty.Name;
         parentSubjectDescription.Properties[propertyName] = new SubjectPropertyDescription
         {
-            Type = parentProperty.Subject.GetType().Name,
+            Type = parentProperty.Metadata.Type.Name,
             Subject = childSubjectDescription 
             // TODO: handle collections (subjects)
         };
@@ -93,13 +93,13 @@ public class SubjectDescription
     }
 
     private static SubjectDescription GetOrCreateSubjectDescription(
-        PropertyReference property, Dictionary<IInterceptorSubject, SubjectDescription> knownSubjectDescriptions)
+        IInterceptorSubject subject, Dictionary<IInterceptorSubject, SubjectDescription> knownSubjectDescriptions)
     {
-        var parentSubjectDescription = knownSubjectDescriptions.TryGetValue(property.Subject, out var description) ?
+        var parentSubjectDescription = knownSubjectDescriptions.TryGetValue(subject, out var description) ?
             description :
-            new SubjectDescription { Type = property.Subject.GetType().Name };
+            new SubjectDescription { Type = subject.GetType().Name };
         
-        knownSubjectDescriptions[property.Subject] = parentSubjectDescription;
+        knownSubjectDescriptions[subject] = parentSubjectDescription;
         return parentSubjectDescription;
     }
 }
