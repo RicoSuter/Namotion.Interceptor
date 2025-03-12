@@ -47,13 +47,13 @@ public class SubjectDescription
 
         foreach (var change in propertyChanges)
         {
-            var parentSubjectDescription = GetOrCreateSubjectDescription(change.Property, knownSubjectDescriptions);
+            var subjectDescription = GetOrCreateSubjectDescription(change.Property, knownSubjectDescriptions);
 
             var registry = change.Property.Subject.Context.GetService<ISubjectRegistry>();
             var registeredSubject = registry.KnownSubjects[change.Property.Subject];
             
-            var propertyName = JsonNamingPolicy.CamelCase.ConvertName(change.Property.Name);
-            parentSubjectDescription.Properties[propertyName] = SubjectPropertyDescription.Create(
+            var propertyName = jsonSerializerOptions.PropertyNamingPolicy?.ConvertName(change.Property.Name) ?? change.Property.Name;
+            subjectDescription.Properties[propertyName] = SubjectPropertyDescription.Create(
                 registeredSubject, change.Property.Name, 
                 registeredSubject.Properties[change.Property.Name], 
                 change.NewValue, jsonSerializerOptions);
@@ -61,8 +61,10 @@ public class SubjectDescription
             while (registeredSubject.Parents.Any())
             {
                 var parentProperty = registeredSubject.Parents.First();
-                (registeredSubject, parentSubjectDescription) = CreateParentSubjectDescription(
-                    parentProperty, parentSubjectDescription, knownSubjectDescriptions);
+
+                registeredSubject = registry.KnownSubjects[parentProperty.Subject];
+                subjectDescription = CreateParentSubjectDescription(
+                    parentProperty, subjectDescription, knownSubjectDescriptions, jsonSerializerOptions);
             }
 
             roots.Add(registeredSubject.Subject);
@@ -71,22 +73,23 @@ public class SubjectDescription
         return roots.Select(r => knownSubjectDescriptions[r]);
     }
 
-    private static (RegisteredSubject, SubjectDescription) CreateParentSubjectDescription(
+    private static SubjectDescription CreateParentSubjectDescription(
         PropertyReference parentProperty, 
         SubjectDescription childSubjectDescription, 
-        Dictionary<IInterceptorSubject, SubjectDescription> knownSubjectDescriptions)
+        Dictionary<IInterceptorSubject, SubjectDescription> knownSubjectDescriptions, 
+        JsonSerializerOptions jsonSerializerOptions)
     {
         var parentSubjectDescription = GetOrCreateSubjectDescription(parentProperty, knownSubjectDescriptions);
-
-        var registry = parentProperty.Subject.Context.GetService<ISubjectRegistry>();
-        var registeredSubject = registry.KnownSubjects[parentProperty.Subject];
-        parentSubjectDescription.Properties[parentProperty.Name] = new SubjectPropertyDescription
+        
+        var propertyName = jsonSerializerOptions.PropertyNamingPolicy?.ConvertName(parentProperty.Name) ?? parentProperty.Name;
+        parentSubjectDescription.Properties[propertyName] = new SubjectPropertyDescription
         {
             Type = parentProperty.Subject.GetType().Name,
-            Subject = childSubjectDescription
+            Subject = childSubjectDescription 
+            // TODO: handle collections (subjects)
         };
         
-        return (registeredSubject, parentSubjectDescription);
+        return parentSubjectDescription;
     }
 
     private static SubjectDescription GetOrCreateSubjectDescription(

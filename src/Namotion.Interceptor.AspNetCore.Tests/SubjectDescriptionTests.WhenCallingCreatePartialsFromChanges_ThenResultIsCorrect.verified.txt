@@ -2,7 +2,7 @@
   {
     Type: Person,
     Properties: {
-      Father: {
+      father: {
         Type: Person,
         Subject: {
           Type: Person,
