@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
@@ -13,75 +14,89 @@ public class SubjectDescription
 
     public Dictionary<string, SubjectPropertyDescription> Properties { get; } = new();
     
-    public static SubjectDescription Create(IInterceptorSubject subject, ISubjectRegistry registry)
+    public static SubjectDescription Create(IInterceptorSubject subject, JsonSerializerOptions jsonSerializerOptions)
     {
         var description = new SubjectDescription
         {
             Type = subject.GetType().Name
         };
 
+        var registry = subject.Context.GetService<ISubjectRegistry>();
         if (registry.KnownSubjects.TryGetValue(subject, out var registeredSubject))
         {
             foreach (var property in registeredSubject.Properties
                          .Where(p => p.Value.HasGetter &&
                                      p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any() == false))
             {
-                var propertyName = property.GetJsonPropertyName();
+                var propertyName = property.GetJsonPropertyName(jsonSerializerOptions);
                 var value = property.Value.GetValue();
 
-                description.Properties[propertyName] = SubjectPropertyDescription.Create(registry, registeredSubject, property.Key, property.Value, value);
+                description.Properties[propertyName] = SubjectPropertyDescription.Create(
+                    registeredSubject, property.Key, property.Value, value, jsonSerializerOptions);
             }
         }
 
         return description;
     }
     
-    // TODO(perf): Clean up and test!!!
-    
-    public static SubjectDescription CreatePartialFromChanges(IEnumerable<PropertyChangedContext> propertyChanges)
+    public static IEnumerable<SubjectDescription> CreatePartialsFromChanges(
+        IEnumerable<PropertyChangedContext> propertyChanges, JsonSerializerOptions jsonSerializerOptions)
     {
+        var roots = new HashSet<IInterceptorSubject>();
         var knownSubjectDescriptions = new Dictionary<IInterceptorSubject, SubjectDescription>();
-        IInterceptorSubject? root = null;
 
         foreach (var change in propertyChanges)
         {
+            var parentSubjectDescription = GetOrCreateSubjectDescription(change.Property, knownSubjectDescriptions);
+
             var registry = change.Property.Subject.Context.GetService<ISubjectRegistry>();
-
-            var parent = knownSubjectDescriptions.ContainsKey(change.Property.Subject) ?
-                knownSubjectDescriptions[change.Property.Subject] :
-                new SubjectDescription { Type = change.Property.Subject.GetType().Name };
-
-            knownSubjectDescriptions[change.Property.Subject] = parent;
-
             var registeredSubject = registry.KnownSubjects[change.Property.Subject];
-            var propertyName = new KeyValuePair<string, RegisteredSubjectProperty>(change.Property.Name, registeredSubject.Properties[change.Property.Name]).GetJsonPropertyName();
-            parent.Properties[propertyName] = SubjectPropertyDescription.Create(
-                registry, registeredSubject, change.Property.Name, registeredSubject.Properties[change.Property.Name], change.NewValue);
+            
+            var propertyName = JsonNamingPolicy.CamelCase.ConvertName(change.Property.Name);
+            parentSubjectDescription.Properties[propertyName] = SubjectPropertyDescription.Create(
+                registeredSubject, change.Property.Name, 
+                registeredSubject.Properties[change.Property.Name], 
+                change.NewValue, jsonSerializerOptions);
 
             while (registeredSubject.Parents.Any())
             {
-                var p = registeredSubject.Parents.First();
-                registeredSubject = Foo(knownSubjectDescriptions, p, registry, registeredSubject.Subject);
+                var parentProperty = registeredSubject.Parents.First();
+                (registeredSubject, parentSubjectDescription) = CreateParentSubjectDescription(
+                    parentProperty, parentSubjectDescription, knownSubjectDescriptions);
             }
 
-            root = registeredSubject.Subject;
+            roots.Add(registeredSubject.Subject);
         }
 
-        return knownSubjectDescriptions[root!];
+        return roots.Select(r => knownSubjectDescriptions[r]);
     }
 
-    private static RegisteredSubject Foo(Dictionary<IInterceptorSubject, SubjectDescription> subjectDescriptions, PropertyReference property, ISubjectRegistry registry, IInterceptorSubject child)
+    private static (RegisteredSubject, SubjectDescription) CreateParentSubjectDescription(
+        PropertyReference parentProperty, 
+        SubjectDescription childSubjectDescription, 
+        Dictionary<IInterceptorSubject, SubjectDescription> knownSubjectDescriptions)
     {
-        var parent = subjectDescriptions.ContainsKey(property.Subject) ?
-            subjectDescriptions[property.Subject] :
+        var parentSubjectDescription = GetOrCreateSubjectDescription(parentProperty, knownSubjectDescriptions);
+
+        var registry = parentProperty.Subject.Context.GetService<ISubjectRegistry>();
+        var registeredSubject = registry.KnownSubjects[parentProperty.Subject];
+        parentSubjectDescription.Properties[parentProperty.Name] = new SubjectPropertyDescription
+        {
+            Type = parentProperty.Subject.GetType().Name,
+            Subject = childSubjectDescription
+        };
+        
+        return (registeredSubject, parentSubjectDescription);
+    }
+
+    private static SubjectDescription GetOrCreateSubjectDescription(
+        PropertyReference property, Dictionary<IInterceptorSubject, SubjectDescription> knownSubjectDescriptions)
+    {
+        var parentSubjectDescription = knownSubjectDescriptions.TryGetValue(property.Subject, out var description) ?
+            description :
             new SubjectDescription { Type = property.Subject.GetType().Name };
-
-        subjectDescriptions[property.Subject] = parent;
-
-        var registeredSubject = registry.KnownSubjects[property.Subject];
-        parent.Properties[property.Name] = SubjectPropertyDescription.Create(
-            registry, registeredSubject, property.Name, registeredSubject.Properties[property.Name], child);
-
-        return registeredSubject;
+        
+        knownSubjectDescriptions[property.Subject] = parentSubjectDescription;
+        return parentSubjectDescription;
     }
 }

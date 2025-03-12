@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Namotion.Interceptor.AspNetCore.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -14,17 +15,19 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
     where TSubject : IInterceptorSubject
 {
     private readonly TSubject _subject;
+    private readonly IOptions<JsonOptions> _jsonOptions;
 
-    protected SubjectControllerBase(TSubject subject)
+    protected SubjectControllerBase(TSubject subject, IOptions<JsonOptions> jsonOptions)
     {
         _subject = subject;
+        _jsonOptions = jsonOptions;
     }
 
     [HttpGet]
     public ActionResult<TSubject> GetSubject()
     {
         // TODO: correctly generate OpenAPI schema
-        return Ok(_subject.ToJsonObject());
+        return Ok(_subject.ToJsonObject(_jsonOptions.Value.JsonSerializerOptions));
     }
 
     [HttpPost]
@@ -117,6 +120,6 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
     [HttpGet("properties")]
     public ActionResult<SubjectDescription> GetProperties()
     {
-        return Ok(SubjectDescription.Create(_subject, _subject.Context.GetService<ISubjectRegistry>()));
+        return Ok(SubjectDescription.Create(_subject, _jsonOptions.Value.JsonSerializerOptions));
     }
 }

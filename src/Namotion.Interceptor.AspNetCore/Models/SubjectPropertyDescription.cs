@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
@@ -22,15 +23,15 @@ public class SubjectPropertyDescription
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public List<SubjectDescription>? Subjects { get; set; }
     
-    public static SubjectPropertyDescription Create(ISubjectRegistry registry, RegisteredSubject parent, 
-        string propertyName, RegisteredSubjectProperty property, object? value)
+    public static SubjectPropertyDescription Create(RegisteredSubject parent, 
+        string propertyName, RegisteredSubjectProperty property, object? value, JsonSerializerOptions jsonSerializerOptions)
     {
         var attributes = parent.Properties
             .Where(p => p.Value.HasGetter &&
                         p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any(a => a.PropertyName == propertyName))
             .ToDictionary(
                 p => p.Value.Attributes.OfType<PropertyAttributeAttribute>().Single().AttributeName,
-                p => Create(registry, parent, p.Key, p.Value, p.Value.GetValue()));
+                p => Create(parent, p.Key, p.Value, p.Value.GetValue(), jsonSerializerOptions));
 
         var description = new SubjectPropertyDescription
         {
@@ -40,13 +41,13 @@ public class SubjectPropertyDescription
 
         if (value is IInterceptorSubject childSubject)
         {
-            description.Subject = SubjectDescription.Create(childSubject, registry);
+            description.Subject = SubjectDescription.Create(childSubject, jsonSerializerOptions);
         }
         else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
         {
             description.Subjects = collection
                 .OfType<IInterceptorSubject>()
-                .Select(arrayProxyItem => SubjectDescription.Create(arrayProxyItem, registry))
+                .Select(arrayProxyItem => SubjectDescription.Create(arrayProxyItem, jsonSerializerOptions))
                 .ToList();
         }
         else

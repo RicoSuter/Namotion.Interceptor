@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Namotion.Interceptor.AspNetCore.Controllers;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.OpcUa.Annotations;
@@ -199,7 +200,8 @@ namespace Namotion.Interceptor.SampleMachine
         [Route("/api/root")]
         public class SubjectController<TProxy> : SubjectControllerBase<TProxy> where TProxy : IInterceptorSubject
         {
-            public SubjectController(TProxy subject) : base(subject)
+            public SubjectController(TProxy subject, IOptions<JsonOptions> jsonOptions) 
+                : base(subject, jsonOptions)
             {
             }
         }
