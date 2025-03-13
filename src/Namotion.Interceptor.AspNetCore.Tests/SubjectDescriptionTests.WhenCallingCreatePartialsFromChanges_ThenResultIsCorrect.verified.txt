@@ -4,27 +4,36 @@
     Properties: {
       children: {
         Type: IReadOnlyCollection`1,
-        Subjects: [
+        Children: [
           {
-            Type: Person,
-            Properties: {
-              firstName: {
-                Type: String,
-                Value: NewChild1
+            Subject: {
+              Type: Person,
+              Properties: {
+                firstName: {
+                  Type: String,
+                  Value: NewChild1
+                }
               }
-            }
+            },
+            Index: 0
           },
           {
-            Type: Person
+            Subject: {
+              Type: Person
+            },
+            Index: 1
           },
           {
-            Type: Person,
-            Properties: {
-              firstName: {
-                Type: String,
-                Value: NewChild3
+            Subject: {
+              Type: Person,
+              Properties: {
+                firstName: {
+                  Type: String,
+                  Value: NewChild3
+                }
               }
-            }
+            },
+            Index: 2
           }
         ]
       },
