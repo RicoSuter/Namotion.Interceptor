@@ -14,13 +14,13 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
             .WithService(() => handler);
 
         // Act
-        var mother = new Person(collection) { FirstName = "Mother" };
+        var mother = new Person(context) { FirstName = "Mother" };
         var child1 = new Person { FirstName = "Child1" };
         var child2 = new Person { FirstName = "Child2" };
 
@@ -40,7 +40,7 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
             .WithService(() => handler);
@@ -52,7 +52,7 @@ public class LifecycleInterceptorTests
 
         mother.Children = [child1, child2];
         
-        ((IInterceptorSubject)mother).Context.AddFallbackContext(collection);
+        ((IInterceptorSubject)mother).Context.AddFallbackContext(context);
 
         // Assert
         Assert.Equal(3, attaches.Count);
@@ -66,14 +66,14 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithContextInheritance()
             .WithLifecycle()
             .WithService(() => handler);
 
         // Act
-        var mother1 = new Person(collection) { FirstName = "Mother1" };
+        var mother1 = new Person(context) { FirstName = "Mother1" };
         var mother2 = new Person { FirstName = "Mother2" };
         var mother3 = new Person { FirstName = "Mother3" };
 
@@ -96,7 +96,7 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithContextInheritance()
             .WithLifecycle()
@@ -110,7 +110,7 @@ public class LifecycleInterceptorTests
         mother1.Mother = mother2;
         mother2.Mother = mother3;
 
-        ((IInterceptorSubject)mother1).Context.AddFallbackContext(collection);
+        ((IInterceptorSubject)mother1).Context.AddFallbackContext(context);
 
         // Assert
         Assert.Equal(3, attaches.Count);
@@ -124,18 +124,18 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
             .WithService(() => handler);
 
         // Act
-        var mother = new Person(collection) { FirstName = "Mother" };
+        var mother = new Person(context) { FirstName = "Mother" };
         var child1 = new Person { FirstName = "Child1" };
         var child2 = new Person { FirstName = "Child2" };
 
         mother.Children = [child1, child2];
-        ((IInterceptorSubject)mother).Context.RemoveFallbackContext(collection);
+        ((IInterceptorSubject)mother).Context.RemoveFallbackContext(context);
 
         // Assert
         Assert.Equal(3, detaches.Count);
@@ -149,20 +149,20 @@ public class LifecycleInterceptorTests
         var detaches = new List<LifecycleContext>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
-        var collection = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithContextInheritance()
             .WithLifecycle()
             .WithService(() => handler);
 
         // Act
-        var mother1 = new Person(collection) { FirstName = "Mother1" };
+        var mother1 = new Person(context) { FirstName = "Mother1" };
         var mother2 = new Person { FirstName = "Mother2" };
         var mother3 = new Person { FirstName = "Mother3" };
 
         mother1.Mother = mother2;
         mother2.Mother = mother3;
-        ((IInterceptorSubject)mother1).Context.RemoveFallbackContext(collection);
+        ((IInterceptorSubject)mother1).Context.RemoveFallbackContext(context);
 
         // Assert
         Assert.Equal(3, detaches.Count);

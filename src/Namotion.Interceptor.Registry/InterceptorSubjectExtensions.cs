@@ -77,7 +77,7 @@ public static class InterceptorSubjectExtensions
         }
     }
 
-    public static JsonObject ToJsonObject(this IInterceptorSubject subject)
+    public static JsonObject ToJsonObject(this IInterceptorSubject subject, JsonSerializerOptions jsonSerializerOptions)
     {
         var registry = subject.Context.TryGetService<ISubjectRegistry>();
         var obj = new JsonObject();
@@ -85,18 +85,18 @@ public static class InterceptorSubjectExtensions
             .Properties
             .Where(p => p.Value.GetValue is not null))
         {
-            var propertyName = GetJsonPropertyName(subject, property.Value);
+            var propertyName = GetJsonPropertyName(subject, property.Value, jsonSerializerOptions);
             var value = property.Value.GetValue?.Invoke(subject);
             if (value is IInterceptorSubject childProxy)
             {
-                obj[propertyName] = childProxy.ToJsonObject();
+                obj[propertyName] = childProxy.ToJsonObject(jsonSerializerOptions);
             }
             else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
             {
                 var children = new JsonArray();
                 foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
                 {
-                    children.Add(arrayProxyItem.ToJsonObject());
+                    children.Add(arrayProxyItem.ToJsonObject(jsonSerializerOptions));
                 }
                 obj[propertyName] = children;
             }
@@ -113,18 +113,18 @@ public static class InterceptorSubjectExtensions
                 .Where(p => p.Value.HasGetter && 
                             subject.Properties.ContainsKey(p.Key) == false))
             {
-                var propertyName = property.GetJsonPropertyName();
+                var propertyName = property.GetJsonPropertyName(jsonSerializerOptions);
                 var value = property.Value.GetValue();
                 if (value is IInterceptorSubject childProxy)
                 {
-                    obj[propertyName] = childProxy.ToJsonObject();
+                    obj[propertyName] = childProxy.ToJsonObject(jsonSerializerOptions);
                 }
                 else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
                 {
                     var children = new JsonArray();
                     foreach (var arrayProxyItem in collection.OfType<IInterceptorSubject>())
                     {
-                        children.Add(arrayProxyItem.ToJsonObject());
+                        children.Add(arrayProxyItem.ToJsonObject(jsonSerializerOptions));
                     }
                     obj[propertyName] = children;
                 }
@@ -138,7 +138,7 @@ public static class InterceptorSubjectExtensions
         return obj;
     }
 
-    private static string GetJsonPropertyName(IInterceptorSubject subject, SubjectPropertyMetadata property)
+    private static string GetJsonPropertyName(IInterceptorSubject subject, SubjectPropertyMetadata property, JsonSerializerOptions jsonSerializerOptions)
     {
         var attribute = property
             .Attributes
@@ -147,14 +147,14 @@ public static class InterceptorSubjectExtensions
 
         if (attribute is not null)
         {
-            var propertyName = GetJsonPropertyName(subject, subject.Properties[attribute.PropertyName]);
+            var propertyName = GetJsonPropertyName(subject, subject.Properties[attribute.PropertyName], jsonSerializerOptions);
             return $"{propertyName}@{attribute.AttributeName}";
         }
 
-        return JsonNamingPolicy.CamelCase.ConvertName(property.Name);
+        return jsonSerializerOptions.PropertyNamingPolicy?.ConvertName(property.Name) ?? property.Name;
     }
 
-    public static string GetJsonPropertyName(this KeyValuePair<string, RegisteredSubjectProperty> property)
+    public static string GetJsonPropertyName(this KeyValuePair<string, RegisteredSubjectProperty> property, JsonSerializerOptions jsonSerializerOptions)
     {
         var attribute = property
             .Value
@@ -167,10 +167,10 @@ public static class InterceptorSubjectExtensions
             return property.Value
                 .Parent.Properties
                 .Single(p => p.Key == attribute.PropertyName) // TODO: Improve performance??
-                .GetJsonPropertyName() + "@" + attribute.AttributeName;
+                .GetJsonPropertyName(jsonSerializerOptions) + "@" + attribute.AttributeName;
         }
 
-        return JsonNamingPolicy.CamelCase.ConvertName(property.Key);
+        return jsonSerializerOptions.PropertyNamingPolicy?.ConvertName(property.Key) ?? property.Key;
     }
 
     public static (IInterceptorSubject?, SubjectPropertyMetadata) FindPropertyFromJsonPath(this IInterceptorSubject subject, string path)

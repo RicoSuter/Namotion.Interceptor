@@ -1,0 +1,137 @@
+﻿{
+  Type: Person,
+  Properties: {
+    children: {
+      Type: IReadOnlyCollection`1,
+      Items: [
+        {
+          Index: 0,
+          Item: {
+            Type: Person,
+            Properties: {
+              children: {
+                Type: IReadOnlyCollection`1
+              },
+              father: {
+                Type: Person
+              },
+              firstName: {
+                Type: String,
+                Value: Child1
+              },
+              lastName: {
+                Type: String
+              },
+              mother: {
+                Type: Person
+              }
+            }
+          }
+        },
+        {
+          Index: 1,
+          Item: {
+            Type: Person,
+            Properties: {
+              children: {
+                Type: IReadOnlyCollection`1
+              },
+              father: {
+                Type: Person
+              },
+              firstName: {
+                Type: String,
+                Value: Child2
+              },
+              lastName: {
+                Type: String
+              },
+              mother: {
+                Type: Person
+              }
+            }
+          }
+        },
+        {
+          Index: 2,
+          Item: {
+            Type: Person,
+            Properties: {
+              children: {
+                Type: IReadOnlyCollection`1
+              },
+              father: {
+                Type: Person
+              },
+              firstName: {
+                Type: String,
+                Value: Child3
+              },
+              lastName: {
+                Type: String
+              },
+              mother: {
+                Type: Person
+              }
+            }
+          }
+        }
+      ]
+    },
+    father: {
+      Type: Person,
+      Item: {
+        Type: Person,
+        Properties: {
+          children: {
+            Type: IReadOnlyCollection`1
+          },
+          father: {
+            Type: Person
+          },
+          firstName: {
+            Type: String,
+            Value: Father
+          },
+          lastName: {
+            Type: String
+          },
+          mother: {
+            Type: Person
+          }
+        }
+      }
+    },
+    firstName: {
+      Type: String,
+      Value: Child
+    },
+    lastName: {
+      Type: String
+    },
+    mother: {
+      Type: Person,
+      Item: {
+        Type: Person,
+        Properties: {
+          children: {
+            Type: IReadOnlyCollection`1
+          },
+          father: {
+            Type: Person
+          },
+          firstName: {
+            Type: String,
+            Value: Mother
+          },
+          lastName: {
+            Type: String
+          },
+          mother: {
+            Type: Person
+          }
+        }
+      }
+    }
+  }
+}
