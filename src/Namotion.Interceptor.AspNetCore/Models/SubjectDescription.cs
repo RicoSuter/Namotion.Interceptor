@@ -58,13 +58,14 @@ public class SubjectDescription
                 registeredSubject.Properties[change.Property.Name], 
                 change.NewValue, jsonSerializerOptions);
 
+            var childSubject = change.Property.Subject;
             while (registeredSubject.Parents.Any())
             {
                 var parentProperty = registeredSubject.Parents.First();
 
                 registeredSubject = registry.KnownSubjects[parentProperty.Subject];
-                subjectDescription = CreateParentSubjectDescription(
-                    parentProperty, subjectDescription, knownSubjectDescriptions, jsonSerializerOptions);
+                childSubject = CreateParentSubjectDescription(
+                    parentProperty, childSubject, knownSubjectDescriptions, jsonSerializerOptions);
             }
 
             roots.Add(registeredSubject.Subject);
@@ -73,23 +74,44 @@ public class SubjectDescription
         return roots.Select(r => knownSubjectDescriptions[r]);
     }
 
-    private static SubjectDescription CreateParentSubjectDescription(
+    private static IInterceptorSubject CreateParentSubjectDescription(
         PropertyReference parentProperty, 
-        SubjectDescription childSubjectDescription, 
+        IInterceptorSubject childSubject, 
         Dictionary<IInterceptorSubject, SubjectDescription> knownSubjectDescriptions, 
         JsonSerializerOptions jsonSerializerOptions)
     {
-        var parentSubjectDescription = GetOrCreateSubjectDescription(parentProperty.Subject, knownSubjectDescriptions);
-        
         var propertyName = jsonSerializerOptions.PropertyNamingPolicy?.ConvertName(parentProperty.Name) ?? parentProperty.Name;
-        parentSubjectDescription.Properties[propertyName] = new SubjectPropertyDescription
+
+        var parentSubjectDescription = GetOrCreateSubjectDescription(parentProperty.Subject, knownSubjectDescriptions);
+        var property = GetOrCreateProperty(parentSubjectDescription, propertyName, parentProperty.Metadata.Type.Name);
+
+        var registry = parentProperty.Subject.Context.GetService<ISubjectRegistry>();
+        var parentRegisteredSubject = registry.KnownSubjects[parentProperty.Subject];
+       
+        var children = parentRegisteredSubject.Properties[parentProperty.Name].Children;
+        if (children.Any(c => c.Index is not null))
         {
-            Type = parentProperty.Metadata.Type.Name,
-            Subject = childSubjectDescription 
-            // TODO: handle collections (subjects)
-        };
+            property.Subjects = children
+                .Select(s => GetOrCreateSubjectDescription(s.Subject, knownSubjectDescriptions))
+                .ToList();
+        }
+        else
+        {
+            property.Subject = GetOrCreateSubjectDescription(childSubject, knownSubjectDescriptions);
+        }
         
-        return parentSubjectDescription;
+        return parentProperty.Subject;
+    }
+
+    private static SubjectPropertyDescription GetOrCreateProperty(SubjectDescription parentSubjectDescription, string propertyName, string propertyType)
+    {
+        if (!parentSubjectDescription.Properties.TryGetValue(propertyName, out var property))
+        {
+            property = new SubjectPropertyDescription { Type = propertyType };
+            parentSubjectDescription.Properties[propertyName] = property;
+        }
+        
+        return property;
     }
 
     private static SubjectDescription GetOrCreateSubjectDescription(

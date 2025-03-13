@@ -8,6 +8,7 @@ namespace Namotion.Interceptor.AspNetCore.Tests.Models
     {
         public Person()
         {
+            Children = [];
         }
 
         [MaxLength(4)]
@@ -18,5 +19,7 @@ namespace Namotion.Interceptor.AspNetCore.Tests.Models
         public partial Person? Father { get; set; }
 
         public partial Person? Mother { get; set; }
+
+        public partial IReadOnlyCollection<Person> Children { get; set; }
     }
 }

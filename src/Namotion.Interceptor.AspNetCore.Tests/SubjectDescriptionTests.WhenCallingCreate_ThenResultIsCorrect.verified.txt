@@ -1,11 +1,82 @@
 ﻿{
   Type: Person,
   Properties: {
+    children: {
+      Type: IReadOnlyCollection`1,
+      Subjects: [
+        {
+          Type: Person,
+          Properties: {
+            children: {
+              Type: IReadOnlyCollection`1
+            },
+            father: {
+              Type: Person
+            },
+            firstName: {
+              Type: String,
+              Value: Child1
+            },
+            lastName: {
+              Type: String
+            },
+            mother: {
+              Type: Person
+            }
+          }
+        },
+        {
+          Type: Person,
+          Properties: {
+            children: {
+              Type: IReadOnlyCollection`1
+            },
+            father: {
+              Type: Person
+            },
+            firstName: {
+              Type: String,
+              Value: Child2
+            },
+            lastName: {
+              Type: String
+            },
+            mother: {
+              Type: Person
+            }
+          }
+        },
+        {
+          Type: Person,
+          Properties: {
+            children: {
+              Type: IReadOnlyCollection`1
+            },
+            father: {
+              Type: Person
+            },
+            firstName: {
+              Type: String,
+              Value: Child3
+            },
+            lastName: {
+              Type: String
+            },
+            mother: {
+              Type: Person
+            }
+          }
+        }
+      ]
+    },
     father: {
       Type: Person,
       Subject: {
         Type: Person,
         Properties: {
+          children: {
+            Type: IReadOnlyCollection`1
+          },
           father: {
             Type: Person
           },
@@ -34,6 +105,9 @@
       Subject: {
         Type: Person,
         Properties: {
+          children: {
+            Type: IReadOnlyCollection`1
+          },
           father: {
             Type: Person
           },
