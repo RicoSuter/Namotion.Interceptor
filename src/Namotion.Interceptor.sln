@@ -68,6 +68,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Hostin
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Generator.Tests", "Namotion.Interceptor.Generator.Tests\Namotion.Interceptor.Generator.Tests.csproj", "{B87CCDF4-A443-47A0-8A56-1CEB0A6EBACD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.AspNetCore.Tests", "Namotion.Interceptor.AspNetCore.Tests\Namotion.Interceptor.AspNetCore.Tests.csproj", "{D266C5C9-D82A-4E4E-9ABB-8C1941295A08}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -170,6 +172,10 @@ Global
 		{B87CCDF4-A443-47A0-8A56-1CEB0A6EBACD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B87CCDF4-A443-47A0-8A56-1CEB0A6EBACD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B87CCDF4-A443-47A0-8A56-1CEB0A6EBACD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D266C5C9-D82A-4E4E-9ABB-8C1941295A08}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D266C5C9-D82A-4E4E-9ABB-8C1941295A08}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D266C5C9-D82A-4E4E-9ABB-8C1941295A08}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D266C5C9-D82A-4E4E-9ABB-8C1941295A08}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -191,6 +197,7 @@ Global
 		{3E57D6F1-0E5F-4E2F-A914-58DDEBA0837A} = {D977E1EA-C167-4BEB-B7C5-4214DDD470D3}
 		{02EF1BFB-AC60-4853-9190-5389F65DC638} = {31C2A126-61B9-402D-B2F4-9772341EBF09}
 		{B87CCDF4-A443-47A0-8A56-1CEB0A6EBACD} = {31C2A126-61B9-402D-B2F4-9772341EBF09}
+		{D266C5C9-D82A-4E4E-9ABB-8C1941295A08} = {31C2A126-61B9-402D-B2F4-9772341EBF09}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {D7E90F8C-B0AE-4ACF-9226-306D8EA3D35B}
