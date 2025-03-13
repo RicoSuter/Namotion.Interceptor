@@ -1,46 +1,38 @@
 ﻿[
   {
-    Type: Person,
     Properties: {
       children: {
-        Type: IReadOnlyCollection`1,
-        Children: [
+        Items: [
           {
-            Subject: {
-              Type: Person,
+            Index: 0,
+            Item: {
               Properties: {
                 firstName: {
                   Type: String,
                   Value: NewChild1
                 }
               }
-            },
-            Index: 0
+            }
           },
           {
-            Subject: {
-              Type: Person
-            },
-            Index: 1
+            Index: 1,
+            Item: {}
           },
           {
-            Subject: {
-              Type: Person,
+            Index: 2,
+            Item: {
               Properties: {
                 firstName: {
                   Type: String,
                   Value: NewChild3
                 }
               }
-            },
-            Index: 2
+            }
           }
         ]
       },
       father: {
-        Type: Person,
-        Subject: {
-          Type: Person,
+        Item: {
           Properties: {
             firstName: {
               Type: String,

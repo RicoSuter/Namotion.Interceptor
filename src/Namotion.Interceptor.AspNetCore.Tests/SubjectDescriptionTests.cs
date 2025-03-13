@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.AspNetCore.Tests;
 public class SubjectDescriptionTests
 {
     [Fact]
-    public async Task WhenCallingCreate_ThenResultIsCorrect()
+    public async Task WhenGeneratingCompleteSubjectDescription_ThenResultIsCorrect()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -38,7 +38,7 @@ public class SubjectDescriptionTests
     }
 
     [Fact]
-    public async Task WhenCallingCreatePartialsFromChanges_ThenResultIsCorrect()
+    public async Task WhenGeneratingPartialSubjectDescription_ThenResultIsCorrect()
     {
         // Arrange
         var context = InterceptorSubjectContext

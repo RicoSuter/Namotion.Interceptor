@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.AspNetCore.Models;
 
 public class SubjectPropertyDescription
 {
-    public required string Type { get; init; }
+    public string? Type { get; init; }
 
     public object? Value { get; internal set; }
 
@@ -18,10 +18,10 @@ public class SubjectPropertyDescription
     public IReadOnlyDictionary<string, SubjectPropertyDescription>? Attributes { get; init; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public SubjectDescription? Subject { get; set; }
+    public SubjectDescription? Item { get; set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public List<SubjectPropertyChildDescription>? Children { get; set; }
+    public List<SubjectPropertyChildDescription>? Items { get; set; }
     
     public static SubjectPropertyDescription Create(RegisteredSubject parent, 
         string propertyName, RegisteredSubjectProperty property, object? value, JsonSerializerOptions jsonSerializerOptions)
@@ -42,17 +42,17 @@ public class SubjectPropertyDescription
         var children = property.Children;
         if (children.Any(c => c.Index is not null))
         {
-            description.Children = children
+            description.Items = children
                 .Select(s => new SubjectPropertyChildDescription
                 {
-                    Subject = SubjectDescription.Create(s.Subject, jsonSerializerOptions),
+                    Item = SubjectDescription.Create(s.Subject, jsonSerializerOptions),
                     Index = s.Index
                 })
                 .ToList();
         }
         else if (value is IInterceptorSubject childSubject)
         {
-            description.Subject = SubjectDescription.Create(childSubject, jsonSerializerOptions);
+            description.Item = SubjectDescription.Create(childSubject, jsonSerializerOptions);
         }
         else
         {

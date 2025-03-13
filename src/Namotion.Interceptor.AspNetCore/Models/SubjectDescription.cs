@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.AspNetCore.Models;
 
 public class SubjectDescription
 {
-    public required string Type { get; init; }
+    public string? Type { get; init; }
 
     public Dictionary<string, SubjectPropertyDescription> Properties { get; } = new();
     
@@ -91,17 +91,17 @@ public class SubjectDescription
         var children = parentRegisteredSubject.Properties[parentProperty.Name].Children;
         if (children.Any(c => c.Index is not null))
         {
-            property.Children = children
+            property.Items = children
                 .Select(s => new SubjectPropertyChildDescription
                 {
-                    Subject = GetOrCreateSubjectDescription(s.Subject, knownSubjectDescriptions),
+                    Item = GetOrCreateSubjectDescription(s.Subject, knownSubjectDescriptions),
                     Index = s.Index
                 })
                 .ToList();
         }
         else
         {
-            property.Subject = GetOrCreateSubjectDescription(childSubject, knownSubjectDescriptions);
+            property.Item = GetOrCreateSubjectDescription(childSubject, knownSubjectDescriptions);
         }
         
         return parentProperty.Subject;
@@ -111,7 +111,7 @@ public class SubjectDescription
     {
         if (!parentSubjectDescription.Properties.TryGetValue(propertyName, out var property))
         {
-            property = new SubjectPropertyDescription { Type = propertyType };
+            property = new SubjectPropertyDescription();
             parentSubjectDescription.Properties[propertyName] = property;
         }
         
@@ -122,8 +122,7 @@ public class SubjectDescription
         IInterceptorSubject subject, Dictionary<IInterceptorSubject, SubjectDescription> knownSubjectDescriptions)
     {
         var parentSubjectDescription = knownSubjectDescriptions.TryGetValue(subject, out var description) ?
-            description :
-            new SubjectDescription { Type = subject.GetType().Name };
+            description : new SubjectDescription();
         
         knownSubjectDescriptions[subject] = parentSubjectDescription;
         return parentSubjectDescription;
