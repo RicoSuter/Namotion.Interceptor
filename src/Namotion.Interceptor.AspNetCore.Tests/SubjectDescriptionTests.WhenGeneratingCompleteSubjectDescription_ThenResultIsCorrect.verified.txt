@@ -3,9 +3,10 @@
   Properties: {
     children: {
       Type: IReadOnlyCollection`1,
-      Children: [
+      Items: [
         {
-          Subject: {
+          Index: 0,
+          Item: {
             Type: Person,
             Properties: {
               children: {
@@ -25,11 +26,11 @@
                 Type: Person
               }
             }
-          },
-          Index: 0
+          }
         },
         {
-          Subject: {
+          Index: 1,
+          Item: {
             Type: Person,
             Properties: {
               children: {
@@ -49,11 +50,11 @@
                 Type: Person
               }
             }
-          },
-          Index: 1
+          }
         },
         {
-          Subject: {
+          Index: 2,
+          Item: {
             Type: Person,
             Properties: {
               children: {
@@ -73,14 +74,13 @@
                 Type: Person
               }
             }
-          },
-          Index: 2
+          }
         }
       ]
     },
     father: {
       Type: Person,
-      Subject: {
+      Item: {
         Type: Person,
         Properties: {
           children: {
@@ -111,7 +111,7 @@
     },
     mother: {
       Type: Person,
-      Subject: {
+      Item: {
         Type: Person,
         Properties: {
           children: {
