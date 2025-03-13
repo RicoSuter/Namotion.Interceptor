@@ -91,8 +91,12 @@ public class SubjectDescription
         var children = parentRegisteredSubject.Properties[parentProperty.Name].Children;
         if (children.Any(c => c.Index is not null))
         {
-            property.Subjects = children
-                .Select(s => GetOrCreateSubjectDescription(s.Subject, knownSubjectDescriptions))
+            property.Children = children
+                .Select(s => new SubjectPropertyChildDescription
+                {
+                    Subject = GetOrCreateSubjectDescription(s.Subject, knownSubjectDescriptions),
+                    Index = s.Index
+                })
                 .ToList();
         }
         else

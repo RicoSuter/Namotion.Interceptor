@@ -21,7 +21,7 @@ public class SubjectPropertyDescription
     public SubjectDescription? Subject { get; set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public List<SubjectDescription>? Subjects { get; set; }
+    public List<SubjectPropertyChildDescription>? Children { get; set; }
     
     public static SubjectPropertyDescription Create(RegisteredSubject parent, 
         string propertyName, RegisteredSubjectProperty property, object? value, JsonSerializerOptions jsonSerializerOptions)
@@ -39,16 +39,20 @@ public class SubjectPropertyDescription
             Attributes = attributes.Any() ? attributes : null
         };
 
-        if (value is IInterceptorSubject childSubject)
+        var children = property.Children;
+        if (children.Any(c => c.Index is not null))
+        {
+            description.Children = children
+                .Select(s => new SubjectPropertyChildDescription
+                {
+                    Subject = SubjectDescription.Create(s.Subject, jsonSerializerOptions),
+                    Index = s.Index
+                })
+                .ToList();
+        }
+        else if (value is IInterceptorSubject childSubject)
         {
             description.Subject = SubjectDescription.Create(childSubject, jsonSerializerOptions);
-        }
-        else if (value is ICollection collection && collection.OfType<IInterceptorSubject>().Any())
-        {
-            description.Subjects = collection
-                .OfType<IInterceptorSubject>()
-                .Select(arrayProxyItem => SubjectDescription.Create(arrayProxyItem, jsonSerializerOptions))
-                .ToList();
         }
         else
         {
