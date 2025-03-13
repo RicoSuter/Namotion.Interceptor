@@ -2,6 +2,32 @@
   {
     Type: Person,
     Properties: {
+      children: {
+        Type: IReadOnlyCollection`1,
+        Subjects: [
+          {
+            Type: Person,
+            Properties: {
+              firstName: {
+                Type: String,
+                Value: NewChild1
+              }
+            }
+          },
+          {
+            Type: Person
+          },
+          {
+            Type: Person,
+            Properties: {
+              firstName: {
+                Type: String,
+                Value: NewChild3
+              }
+            }
+          }
+        ]
+      },
       father: {
         Type: Person,
         Subject: {
@@ -9,14 +35,14 @@
           Properties: {
             firstName: {
               Type: String,
-              Value: New
+              Value: NewFather
             }
           }
         }
       },
       firstName: {
         Type: String,
-        Value: New
+        Value: NewPerson
       }
     }
   }
