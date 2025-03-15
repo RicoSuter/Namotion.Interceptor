@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Namotion.Interceptor.Sources;
+namespace Namotion.Interceptor.Sources.Extensions;
 
 public static class SubjectUpdateJsonExtensions
 {

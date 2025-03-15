@@ -26,10 +26,8 @@ public static class MqttSubjectServerSourceExtensions
             .AddSingleton(sp =>
             {
                 var subject = subjectSelector(sp);
-                var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, "/", pathPrefix);
                 return new MqttSubjectServerSource<TSubject>(
-                    subject, sourcePathProvider,
-                    sp.GetRequiredService<ILogger<MqttSubjectServerSource<TSubject>>>());
+                    subject, sp.GetRequiredService<ILogger<MqttSubjectServerSource<TSubject>>>());
             })
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<MqttSubjectServerSource<TSubject>>())
             .AddSingleton<IHostedService>(sp =>

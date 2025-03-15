@@ -1,6 +1,7 @@
 ﻿using System.Reactive.Linq;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Sources;
@@ -38,7 +39,7 @@ public class SubjectSourceBackgroundService : BackgroundService
                 }
 
                 using var disposable = await _source.InitializeAsync(UpdatePropertyValueFromSource, stoppingToken);
-                var initialData = await _source.ReadAsync(stoppingToken);
+                var initialData = await _source.ReadFromSourceAsync(stoppingToken);
                
                 lock (this)
                 {
@@ -63,10 +64,9 @@ public class SubjectSourceBackgroundService : BackgroundService
                     .ToAsyncEnumerable()
                     .WithCancellation(stoppingToken))
                 {
-                    var values = SubjectUpdate.CreatePartialUpdateFromChanges(changes);
-                    foreach (var value in values)
+                    foreach (var update in SubjectUpdate.CreatePartialUpdateFromChanges(changes))
                     {
-                        await _source.WriteAsync(value, stoppingToken);
+                        await _source.WriteToSourceAsync(update, stoppingToken);
                     }
                 }
             }
@@ -90,7 +90,7 @@ public class SubjectSourceBackgroundService : BackgroundService
             }
             else
             {
-                _source.Subject.UpdatePropertyValueFromSource(update, _source);
+                _source.Subject.ApplySubjectUpdate(update, _source);
             }
         }
     }

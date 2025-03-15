@@ -1,7 +1,7 @@
 ﻿using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Sources;
+namespace Namotion.Interceptor.Sources.Extensions;
 
 public static class ObservableExtensions
 {

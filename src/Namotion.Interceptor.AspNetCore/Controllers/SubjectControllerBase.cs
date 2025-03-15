@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Validation;
 
 namespace Namotion.Interceptor.AspNetCore.Controllers;
