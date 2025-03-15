@@ -1,8 +1,8 @@
 ﻿using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Sources;
+namespace Namotion.Interceptor.Sources.Extensions;
 
-public static class InterceptorSourcesExtensions
+public static class SubjectDataExtensions
 {
     private const string IsChangingFromSourceKey = "Namotion.IsChangingFromSource";
 

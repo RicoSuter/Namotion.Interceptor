@@ -33,13 +33,7 @@ public class SubjectUpdate
         return subjectUpdate;
     }
 
-    public static SubjectUpdate CreatePartialUpdateFromChange(PropertyChangedContext propertyChange)
-    {
-        return CreatePartialUpdateFromChanges([propertyChange]).Single();
-    }
-
-    public static IEnumerable<SubjectUpdate> CreatePartialUpdateFromChanges(
-        IEnumerable<PropertyChangedContext> propertyChanges)
+    public static IEnumerable<SubjectUpdate> CreatePartialUpdateFromChanges(IEnumerable<PropertyChangedContext> propertyChanges)
     {
         var roots = new HashSet<IInterceptorSubject>();
         var knownSubjectDescriptions = new Dictionary<IInterceptorSubject, SubjectUpdate>();
@@ -79,7 +73,7 @@ public class SubjectUpdate
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectDescriptions)
     {
         var parentSubjectDescription = GetOrCreateSubjectDescription(parentProperty.Subject, knownSubjectDescriptions);
-        var property = GetOrCreateProperty(parentSubjectDescription, parentProperty.Name, parentProperty.Metadata.Type.Name);
+        var property = GetOrCreateProperty(parentSubjectDescription, parentProperty.Name);
 
         var registry = parentProperty.Subject.Context.GetService<ISubjectRegistry>();
         var parentRegisteredSubject = registry.KnownSubjects[parentProperty.Subject];
@@ -103,7 +97,7 @@ public class SubjectUpdate
         return parentProperty.Subject;
     }
 
-    private static SubjectPropertyUpdate GetOrCreateProperty(SubjectUpdate parentSubjectUpdate, string propertyName, string propertyType)
+    private static SubjectPropertyUpdate GetOrCreateProperty(SubjectUpdate parentSubjectUpdate, string propertyName)
     {
         if (!parentSubjectUpdate.Properties.TryGetValue(propertyName, out var property))
         {

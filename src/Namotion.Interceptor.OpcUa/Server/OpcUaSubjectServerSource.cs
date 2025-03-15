@@ -131,17 +131,17 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
 
     public IInterceptorSubject Subject => _subject;
     
-    public Task<IDisposable?> InitializeAsync(Action<SubjectUpdate> updateAction, CancellationToken cancellationToken)
+    public Task<IDisposable?> InitializeAsync(Action<SubjectUpdate> applySourceChangeAction, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    public Task<SubjectUpdate> ReadAsync(CancellationToken cancellationToken)
+    public Task<SubjectUpdate> ReadFromSourceAsync(CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    public Task WriteAsync(SubjectUpdate update, CancellationToken cancellationToken)
+    public Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }

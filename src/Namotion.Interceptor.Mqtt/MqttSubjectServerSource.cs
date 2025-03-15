@@ -12,6 +12,7 @@ using MQTTnet;
 using MQTTnet.Server;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -20,17 +21,16 @@ namespace Namotion.Interceptor.Mqtt
     public class MqttSubjectServerSource<TSubject> : BackgroundService, ISubjectSource
         where TSubject : IInterceptorSubject
     {
+        private readonly string _serverClientId = "Server" +  Guid.NewGuid().ToString("N");
+
         private readonly TSubject _subject;
-        private readonly ISourcePathProvider _sourcePathProvider;
         private readonly ILogger _logger;
 
         private int _numberOfClients = 0;
         private MqttServer? _mqttServer;
 
         private Action<SubjectUpdate>? _propertyUpdateAction;
-
-        private readonly ConcurrentDictionary<PropertyReference, object?> _state = new();
-
+        
         public int Port { get; set; } = 1883;
 
         public bool IsListening { get; private set; }
@@ -39,13 +39,9 @@ namespace Namotion.Interceptor.Mqtt
 
         public IInterceptorSubject Subject => _subject;
 
-        public MqttSubjectServerSource(
-            TSubject subject,
-            ISourcePathProvider sourcePathProvider,
-            ILogger<MqttSubjectServerSource<TSubject>> logger)
+        public MqttSubjectServerSource(TSubject subject, ILogger<MqttSubjectServerSource<TSubject>> logger)
         {
             _subject = subject;
-            _sourcePathProvider = sourcePathProvider;
             _logger = logger;
         }
 
@@ -89,32 +85,23 @@ namespace Namotion.Interceptor.Mqtt
             }
         }
         
-        public Task<IDisposable?> InitializeAsync(Action<SubjectUpdate> updateAction, CancellationToken cancellationToken)
+        public Task<IDisposable?> InitializeAsync(Action<SubjectUpdate> applySourceChangeAction, CancellationToken cancellationToken)
         {
-            _propertyUpdateAction = updateAction;
+            _propertyUpdateAction = applySourceChangeAction;
             return Task.FromResult<IDisposable?>(null);
         }
 
-        public Task<SubjectUpdate> ReadAsync(CancellationToken cancellationToken)
+        public Task<SubjectUpdate> ReadFromSourceAsync(CancellationToken cancellationToken)
         {
             // As this is an MQTT server, there is initially no data to read.
             return Task.FromResult(new SubjectUpdate());
         }
 
-        public async Task WriteAsync(SubjectUpdate update, CancellationToken cancellationToken)
+        public async Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken)
         {
-            foreach (var (path, value) in update
-                 .EnumerateProperties("/"))
+            foreach (var (path, value) in update.EnumerateProperties("/"))
             {
-                await _mqttServer!.InjectApplicationMessage(
-                    new InjectedMqttApplicationMessage(
-                        new MqttApplicationMessage
-                        {
-                            Topic = path,
-                            ContentType = "application/json",
-                            PayloadSegment = new ArraySegment<byte>(
-                                Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value)))
-                        }), cancellationToken);
+                await PublishPropertyValueAsync(path, value, cancellationToken);^
             }
         }
 
@@ -125,56 +112,48 @@ namespace Namotion.Interceptor.Mqtt
             Task.Run(async () =>
             {
                 await Task.Delay(1000);
-                foreach (var property in _subject
-                             .GetSubjectAndChildProperties()
-                             .Where(p => p.HasGetter))
+                foreach (var (path, value) in SubjectUpdate
+                     .CreateCompleteUpdate(_subject)
+                     .EnumerateProperties("/"))
                 {
-                    await PublishPropertyValueAsync(property.GetValue(), property.Property);
+                    // TODO: Send only to new client
+                    await PublishPropertyValueAsync(path, value, CancellationToken.None);
                 }
             });
 
             return Task.CompletedTask;
         }
 
-        private async Task PublishPropertyValueAsync(object? value, PropertyReference property)
+        private async Task PublishPropertyValueAsync(string path, object? value, CancellationToken cancellationToken)
         {
-            var sourcePath = _sourcePathProvider.TryGetSourcePropertyPath(property);
-            if (sourcePath != null)
-            {
-                await _mqttServer!.InjectApplicationMessage(new InjectedMqttApplicationMessage(new MqttApplicationMessage
-                {
-                    Topic = sourcePath,
-                    ContentType = "application/json",
-                    PayloadSegment = new ArraySegment<byte>(
-                        Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))),
-                }));
-            }
+            await _mqttServer!.InjectApplicationMessage(
+                new InjectedMqttApplicationMessage(
+                    new MqttApplicationMessage
+                    {
+                        Topic = path,
+                        ContentType = "application/json",
+                        PayloadSegment = new ArraySegment<byte>(
+                            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))),
+                    }) { SenderClientId = _serverClientId }, cancellationToken);
         }
 
         private Task InterceptingPublishAsync(InterceptingPublishEventArgs args)
         {
-            // TODO: Ignore updates from PublishPropertyValueAsync
+            if (args.ClientId == _serverClientId)
+            {
+                return Task.CompletedTask;
+            }
+
             try
             {
-                var sourcePath = args.ApplicationMessage.Topic;
+                var path = args.ApplicationMessage.Topic;
 
-                // TODO(perf): Going through all might be slow
-                var property = _subject
-                    .GetSubjectAndChildProperties()
-                    .SingleOrDefault(p => _sourcePathProvider
-                        .TryGetSourcePropertyPath(p.Property) == sourcePath);
+                var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
+                var document = JsonDocument.Parse(payload);
 
-                if (property is not null)
+                var update = _subject.TryCreateSubjectUpdateFromPath(path, property => document.Deserialize(property.Type), "/");
+                if (update is not null)
                 {
-                    var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
-                    var document = JsonDocument.Parse(payload);
-                    var value = document.Deserialize(property.Type);
-
-                    _state[property.Property] = value;
-
-                    var update = SubjectUpdate.CreatePartialUpdateFromChange(
-                        new PropertyChangedContext(property.Property, null, value));
-
                     _propertyUpdateAction?.Invoke(update);
                 }
             }

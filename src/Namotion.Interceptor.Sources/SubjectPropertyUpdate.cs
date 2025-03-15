@@ -19,8 +19,7 @@ public class SubjectPropertyUpdate
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public List<SubjectPropertyCollectionUpdate>? Items { get; internal set; }
     
-    public static SubjectPropertyUpdate Create(RegisteredSubject parent, 
-        string propertyName, RegisteredSubjectProperty property, object? value)
+    public static SubjectPropertyUpdate Create(RegisteredSubject parent, string propertyName, RegisteredSubjectProperty property, object? value)
     {
         var attributes = parent.Properties
             .Where(p => p.Value.HasGetter &&
@@ -32,7 +31,7 @@ public class SubjectPropertyUpdate
         var description = new SubjectPropertyUpdate
         {
             Type = property.Type.Name,
-            Attributes = attributes.Any() ? attributes : null
+            Attributes = attributes.Count != 0 ? attributes : null
         };
 
         var children = property.Children;
