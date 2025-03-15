@@ -1,13 +1,14 @@
 ﻿using System.Text.Json;
-using Namotion.Interceptor.AspNetCore.Models;
-using Namotion.Interceptor.AspNetCore.Tests.Models;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.AspNetCore.Tests;
+namespace Namotion.Interceptor.Sources.Tests;
 
-public class SubjectDescriptionTests
+public class SubjectUpdateTests
 {
+    // TODO: Move to source tests
+    
     [Fact]
     public async Task WhenGeneratingCompleteSubjectDescription_ThenResultIsCorrect()
     {
@@ -31,7 +32,9 @@ public class SubjectDescriptionTests
         };
 
         // Act
-        var partialSubjectDescription = SubjectDescription.Create(person, CreateJsonSerializerOptions());
+        var partialSubjectDescription = SubjectUpdate
+            .CreateCompleteUpdate(person)
+            .ConvertPropertyNames(CreateJsonSerializerOptions());
 
         // Assert
         await Verify(partialSubjectDescription);
@@ -68,8 +71,9 @@ public class SubjectDescriptionTests
         };
 
         // Act
-        var partialSubjectDescription =
-            SubjectDescription.CreatePartialsFromChanges(changes, CreateJsonSerializerOptions());
+        var partialSubjectDescription = SubjectUpdate
+            .CreatePartialUpdateFromChanges(changes)
+            .Select(c => c.ConvertPropertyNames(CreateJsonSerializerOptions()));
 
         // Assert
         await Verify(partialSubjectDescription);

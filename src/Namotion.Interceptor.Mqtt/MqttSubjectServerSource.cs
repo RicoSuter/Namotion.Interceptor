@@ -12,6 +12,8 @@ using MQTTnet;
 using MQTTnet.Server;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt
 {
@@ -25,8 +27,8 @@ namespace Namotion.Interceptor.Mqtt
         private int _numberOfClients = 0;
         private MqttServer? _mqttServer;
 
-        private Action<PropertyPathReference>? _propertyUpdateAction;
-        
+        private Action<SubjectUpdate>? _propertyUpdateAction;
+
         private readonly ConcurrentDictionary<PropertyReference, object?> _state = new();
 
         public int Port { get; set; } = 1883;
@@ -35,7 +37,8 @@ namespace Namotion.Interceptor.Mqtt
 
         public int? NumberOfClients => _numberOfClients;
 
-        // TODO: Inject IInterceptorContext<TProxy> so that multiple contexts are supported.
+        public IInterceptorSubject Subject => _subject;
+
         public MqttSubjectServerSource(
             TSubject subject,
             ISourcePathProvider sourcePathProvider,
@@ -85,44 +88,34 @@ namespace Namotion.Interceptor.Mqtt
                 }
             }
         }
-
-        public Task<IDisposable?> InitializeAsync(IEnumerable<PropertyPathReference> properties, Action<PropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
+        
+        public Task<IDisposable?> InitializeAsync(Action<SubjectUpdate> updateAction, CancellationToken cancellationToken)
         {
-            _propertyUpdateAction = propertyUpdateAction;
+            _propertyUpdateAction = updateAction;
             return Task.FromResult<IDisposable?>(null);
         }
 
-        public Task<IEnumerable<PropertyPathReference>> ReadAsync(IEnumerable<PropertyPathReference> properties, CancellationToken cancellationToken)
+        public Task<SubjectUpdate> ReadAsync(CancellationToken cancellationToken)
         {
-            var propertyPaths = properties
-                .Select(p => p.Path)
-                .ToList();
-
-            return Task.FromResult<IEnumerable<PropertyPathReference>>(_state
-                .Where(s => propertyPaths.Contains(_sourcePathProvider.TryGetSourcePropertyPath(s.Key) ?? string.Empty))
-                .Select(s => new PropertyPathReference(s.Key, null!, s.Value))
-                .ToList());
+            // As this is an MQTT server, there is initially no data to read.
+            return Task.FromResult(new SubjectUpdate());
         }
 
-        public async Task WriteAsync(IEnumerable<PropertyPathReference> propertyChanges, CancellationToken cancellationToken)
+        public async Task WriteAsync(SubjectUpdate update, CancellationToken cancellationToken)
         {
-            foreach (var property in propertyChanges)
+            foreach (var (path, value) in update
+                 .EnumerateProperties("/"))
             {
                 await _mqttServer!.InjectApplicationMessage(
                     new InjectedMqttApplicationMessage(
                         new MqttApplicationMessage
                         {
-                            Topic = property.Path,
+                            Topic = path,
                             ContentType = "application/json",
                             PayloadSegment = new ArraySegment<byte>(
-                               Encoding.UTF8.GetBytes(JsonSerializer.Serialize(property.Value)))
+                                Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value)))
                         }), cancellationToken);
             }
-        }
-
-        public string? TryGetSourcePropertyPath(PropertyReference property)
-        {
-            return _sourcePathProvider.TryGetSourcePropertyPath(property);
         }
 
         private Task ClientConnectedAsync(ClientConnectedEventArgs arg)
@@ -133,8 +126,8 @@ namespace Namotion.Interceptor.Mqtt
             {
                 await Task.Delay(1000);
                 foreach (var property in _subject
-                    .GetSubjectAndChildProperties()
-                    .Where(p => p.HasGetter))
+                             .GetSubjectAndChildProperties()
+                             .Where(p => p.HasGetter))
                 {
                     await PublishPropertyValueAsync(property.GetValue(), property.Property);
                 }
@@ -153,23 +146,24 @@ namespace Namotion.Interceptor.Mqtt
                     Topic = sourcePath,
                     ContentType = "application/json",
                     PayloadSegment = new ArraySegment<byte>(
-                        Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value)))
+                        Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))),
                 }));
             }
         }
 
         private Task InterceptingPublishAsync(InterceptingPublishEventArgs args)
         {
+            // TODO: Ignore updates from PublishPropertyValueAsync
             try
             {
                 var sourcePath = args.ApplicationMessage.Topic;
-               
+
                 // TODO(perf): Going through all might be slow
                 var property = _subject
                     .GetSubjectAndChildProperties()
                     .SingleOrDefault(p => _sourcePathProvider
                         .TryGetSourcePropertyPath(p.Property) == sourcePath);
-                
+
                 if (property is not null)
                 {
                     var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
@@ -177,7 +171,11 @@ namespace Namotion.Interceptor.Mqtt
                     var value = document.Deserialize(property.Type);
 
                     _state[property.Property] = value;
-                    _propertyUpdateAction?.Invoke(new PropertyPathReference(property.Property, sourcePath, value));
+
+                    var update = SubjectUpdate.CreatePartialUpdateFromChange(
+                        new PropertyChangedContext(property.Property, null, value));
+
+                    _propertyUpdateAction?.Invoke(update);
                 }
             }
             catch (Exception ex)

@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
-using Namotion.Interceptor.AspNetCore.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Validation;
 
 namespace Namotion.Interceptor.AspNetCore.Controllers;
@@ -118,8 +118,10 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
     /// </summary>
     /// <returns></returns>
     [HttpGet("properties")]
-    public ActionResult<SubjectDescription> GetProperties()
+    public ActionResult<SubjectUpdate> GetProperties()
     {
-        return Ok(SubjectDescription.Create(_subject, _jsonOptions.Value.JsonSerializerOptions));
+        return Ok(SubjectUpdate
+            .CreateCompleteUpdate(_subject)
+            .ConvertPropertyNames(_jsonOptions.Value.JsonSerializerOptions));
     }
 }

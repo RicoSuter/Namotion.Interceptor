@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mqtt;
 using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Sources.Paths;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -34,10 +35,9 @@ public static class MqttSubjectServerSourceExtensions
             .AddSingleton<IHostedService>(sp =>
             {
                 var subject = subjectSelector(sp);
-                return new SubjectSourceBackgroundService<TSubject>(
-                    subject,
+                return new SubjectSourceBackgroundService(
                     sp.GetRequiredService<MqttSubjectServerSource<TSubject>>(),
-                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService<TSubject>>>());
+                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>());
             });
     }
 }

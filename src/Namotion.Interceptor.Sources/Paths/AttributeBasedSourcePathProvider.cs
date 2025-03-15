@@ -2,7 +2,7 @@
 using Namotion.Interceptor.Sources.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
 
-namespace Namotion.Interceptor.Sources;
+namespace Namotion.Interceptor.Sources.Paths;
 
 public class AttributeBasedSourcePathProvider : ISourcePathProvider
 {
