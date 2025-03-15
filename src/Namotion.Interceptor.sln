@@ -68,7 +68,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Hostin
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Generator.Tests", "Namotion.Interceptor.Generator.Tests\Namotion.Interceptor.Generator.Tests.csproj", "{B87CCDF4-A443-47A0-8A56-1CEB0A6EBACD}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.AspNetCore.Tests", "Namotion.Interceptor.AspNetCore.Tests\Namotion.Interceptor.AspNetCore.Tests.csproj", "{D266C5C9-D82A-4E4E-9ABB-8C1941295A08}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Sources.Tests", "Namotion.Interceptor.Sources.Tests\Namotion.Interceptor.Sources.Tests.csproj", "{D266C5C9-D82A-4E4E-9ABB-8C1941295A08}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
