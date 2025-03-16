@@ -64,7 +64,7 @@ public class SubjectUpdate
                     registry = property.Subject.Context.GetService<ISubjectRegistry>();
                     registeredSubject = registry.KnownSubjects[property.Subject];
 
-                    propertySubject = CreateParentSubjectDescription(property, propertySubject, knownSubjectDescriptions);
+                    CreateParentSubjectDescription(property, propertySubject, knownSubjectDescriptions);
                 }
             } 
             while (property.Subject is not null && property.Subject != subject && registeredSubject.Parents.Any());
@@ -73,7 +73,7 @@ public class SubjectUpdate
         return update;
     }
 
-    private static IInterceptorSubject CreateParentSubjectDescription(
+    private static void CreateParentSubjectDescription(
         PropertyReference parentProperty,
         IInterceptorSubject childSubject,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectDescriptions)
@@ -99,8 +99,6 @@ public class SubjectUpdate
         {
             property.Item = GetOrCreateSubjectDescription(childSubject, knownSubjectDescriptions);
         }
-
-        return parentProperty.Subject;
     }
 
     private static SubjectPropertyUpdate GetOrCreateProperty(SubjectUpdate parentSubjectUpdate, string propertyName)
