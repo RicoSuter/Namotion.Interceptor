@@ -115,8 +115,8 @@ namespace Namotion.Interceptor.SampleWeb
             // builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
 
             // trackable mqtt
-            // builder.Services.AddMqttSubjectServer<Car>("mqtt");
-            builder.Services.AddMqttSubjectServer<Tire>(sp => sp.GetRequiredService<Car>().Tires[2], "mqtt");
+            builder.Services.AddMqttSubjectServer<Car>("mqtt");
+            //builder.Services.AddMqttSubjectServer<Tire>(sp => sp.GetRequiredService<Car>().Tires[2], "mqtt");
 
             // trackable GraphQL
             builder.Services
