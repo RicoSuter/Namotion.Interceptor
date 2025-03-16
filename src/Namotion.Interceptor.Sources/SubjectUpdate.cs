@@ -21,11 +21,18 @@ public class SubjectUpdate
         if (registry.KnownSubjects.TryGetValue(subject, out var registeredSubject))
         {
             foreach (var property in registeredSubject.Properties
-                         .Where(p => p.Value.HasGetter &&
-                                     p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any() == false))
+                .Where(p => p.Value is { HasGetter: true, IsAttribute: false }))
             {
                 var value = property.Value.GetValue();
                 subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.Create(
+                    registeredSubject, property.Key, property.Value, value);
+            }
+            
+            foreach (var property in registeredSubject.Properties
+                .Where(p => p.Value is { HasGetter: true, IsAttribute: true }))
+            {
+                var value = property.Value.GetValue();
+                subjectUpdate.Properties[property.Value.GetPropertyOrAttributeName()] = SubjectPropertyUpdate.Create(
                     registeredSubject, property.Key, property.Value, value);
             }
         }
@@ -35,6 +42,8 @@ public class SubjectUpdate
 
     public static SubjectUpdate CreatePartialUpdateFromChanges(IInterceptorSubject subject, IEnumerable<PropertyChangedContext> propertyChanges)
     {
+        // TODO: Verify correctness of the CreatePartialUpdateFromChanges method
+        
         var update = new SubjectUpdate();
         var knownSubjectDescriptions = new Dictionary<IInterceptorSubject, SubjectUpdate>
         {

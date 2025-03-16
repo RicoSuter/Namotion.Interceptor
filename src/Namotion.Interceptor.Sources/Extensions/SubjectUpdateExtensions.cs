@@ -1,16 +1,20 @@
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
+
 namespace Namotion.Interceptor.Sources.Extensions;
 
 public static class SubjectUpdateExtensions
 {
-    public static void ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update, ISubjectSource? source)
+    public static void VisitSubjectValueUpdates(this IInterceptorSubject subject, SubjectUpdate update, 
+        Action<PropertyReference, SubjectPropertyUpdate> applySubjectUpdate)
     {
         foreach (var (propertyName, propertyUpdate) in update.Properties)
         {
             if (propertyUpdate.Item is not null)
             {
-                if (subject.Properties[propertyName].GetValue?.Invoke(subject) is IInterceptorSubject childSubject)
+                if (subject.GetRegisteredSubjectPropertyValue(propertyName) is IInterceptorSubject childSubject)
                 {
-                    ApplySubjectUpdate(childSubject, propertyUpdate.Item, source);
+                    ApplySubjectUpdate(childSubject, propertyUpdate.Item, applySubjectUpdate);
                 }
                 // TODO: Implement
             }
@@ -20,7 +24,7 @@ public static class SubjectUpdateExtensions
                 var i = 0;
                 foreach (var item in childSubjects ?? [])
                 {
-                    ApplySubjectUpdate(item, propertyUpdate.Items[i].Item!, source);
+                    ApplySubjectUpdate(item, propertyUpdate.Items[i].Item!, applySubjectUpdate);
                     i++;
                 }
                 // TODO: Implement dictionary
@@ -28,15 +32,29 @@ public static class SubjectUpdateExtensions
             else
             {
                 var propertyReference = new PropertyReference(subject, propertyName);
-                if (source is not null)
-                {
-                    propertyReference.SetValueFromSource(source, propertyUpdate.Value);
-                }
-                else
-                {
-                    propertyReference.Metadata.SetValue?.Invoke(propertyReference.Subject, propertyUpdate.Value);
-                }
+                applySubjectUpdate.Invoke(propertyReference, propertyUpdate);
             }
         }
+    }
+
+
+    public static void ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update, 
+        Action<PropertyReference, SubjectPropertyUpdate>? transform = null)
+    {
+        subject.VisitSubjectValueUpdates(update, (propertyReference, propertyUpdate) =>
+        {
+            transform?.Invoke(propertyReference, propertyUpdate);
+            propertyReference.Metadata.SetValue?.Invoke(propertyReference.Subject, propertyUpdate.Value);
+        });
+    }
+
+    public static void ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update, ISubjectSource source, 
+        Action<PropertyReference, SubjectPropertyUpdate>? transform = null)
+    {
+        subject.VisitSubjectValueUpdates(update, (propertyReference, propertyUpdate) =>
+        {
+            transform?.Invoke(propertyReference, propertyUpdate);
+            propertyReference.SetValueFromSource(source, propertyUpdate.Value);
+        });
     }
 }

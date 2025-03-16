@@ -22,8 +22,8 @@ public class SubjectPropertyUpdate
     public static SubjectPropertyUpdate Create(RegisteredSubject parent, string propertyName, RegisteredSubjectProperty property, object? value)
     {
         var attributes = parent.Properties
-            .Where(p => p.Value.HasGetter &&
-                        p.Value.Attributes.OfType<PropertyAttributeAttribute>().Any(a => a.PropertyName == propertyName))
+            .Where(p => 
+                p.Value.HasGetter && p.Value.HasPropertyAttributes(propertyName))
             .ToDictionary(
                 p => p.Value.Attributes.OfType<PropertyAttributeAttribute>().Single().AttributeName,
                 p => Create(parent, p.Key, p.Value, p.Value.GetValue()));

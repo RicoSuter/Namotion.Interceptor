@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Registry.Abstractions;
+﻿using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
 
@@ -19,8 +20,7 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
 
     public string? TryGetSourcePathSegmentName(PropertyReference property)
     {
-        var registry = property.Subject.Context.GetService<ISubjectRegistry>();
-        var registeredProperty = registry.KnownSubjects[property.Subject].Properties[property.Name];
+        var registeredProperty = property.GetRegisteredProperty();
         return TryGetAttributeBasedSourcePathSegmentName(registeredProperty, _sourceName);
     }
 

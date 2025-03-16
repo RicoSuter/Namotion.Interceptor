@@ -58,13 +58,14 @@ public static class SubjectUpdatePathExtensions
         return rootUpdate;
     }
     
-    public static IEnumerable<(string path, object? value)> EnumerateProperties(this SubjectUpdate update, string delimiter = ".")
+    public static IEnumerable<(string path, object? value)> EnumeratePropertyPaths(
+        this SubjectUpdate update, string delimiter = ".")
     {
         foreach (var property in update.Properties)
         {
             if (property.Value.Item is not null)
             {
-                foreach (var (path, value) in EnumerateProperties(property.Value.Item))
+                foreach (var (path, value) in EnumeratePropertyPaths(property.Value.Item))
                 {
                     yield return ($"{property.Key}{delimiter}{path}", value);
                 }
@@ -78,7 +79,7 @@ public static class SubjectUpdatePathExtensions
                         continue;
                     }
                     
-                    foreach (var (path, value) in EnumerateProperties(item.Item))
+                    foreach (var (path, value) in EnumeratePropertyPaths(item.Item))
                     {
                         yield return ($"{property.Key}[{item.Index}]{delimiter}{path}", value);
                     }
