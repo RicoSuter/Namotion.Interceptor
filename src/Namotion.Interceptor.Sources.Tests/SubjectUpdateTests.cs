@@ -112,7 +112,7 @@ public class SubjectUpdateTests
 
         // Act
         var partialSubjectDescription = SubjectUpdate
-            .CreatePartialUpdateFromChanges(father, changes)
+            .CreatePartialUpdateFromChanges(father, changes) // TODO(perf): This method can probably made much faster in case of non-root subjects (no need to create many objects)
             .ConvertPropertyNames(CreateJsonSerializerOptions());
 
         // Assert
