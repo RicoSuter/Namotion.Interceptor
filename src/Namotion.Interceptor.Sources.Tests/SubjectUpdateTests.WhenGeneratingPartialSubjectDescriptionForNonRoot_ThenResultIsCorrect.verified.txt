@@ -1,10 +1,38 @@
-﻿[
-  {
-    Properties: {
-      firstName: {
-        Type: String,
-        Value: NewFather
-      }
+﻿{
+  Properties: {
+    children: {
+      Items: [
+        {
+          Index: 0,
+          Item: {
+            Properties: {
+              firstName: {
+                Type: String,
+                Value: NewChild1
+              }
+            }
+          }
+        },
+        {
+          Index: 1,
+          Item: {}
+        },
+        {
+          Index: 2,
+          Item: {
+            Properties: {
+              firstName: {
+                Type: String,
+                Value: NewChild3
+              }
+            }
+          }
+        }
+      ]
+    },
+    firstName: {
+      Type: String,
+      Value: NewFather
     }
   }
-]
+}
