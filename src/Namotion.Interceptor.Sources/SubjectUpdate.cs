@@ -33,41 +33,44 @@ public class SubjectUpdate
         return subjectUpdate;
     }
 
-    public static IEnumerable<SubjectUpdate> CreatePartialUpdateFromChanges(IInterceptorSubject rootSubject, IEnumerable<PropertyChangedContext> propertyChanges)
+    public static SubjectUpdate CreatePartialUpdateFromChanges(IInterceptorSubject subject, IEnumerable<PropertyChangedContext> propertyChanges)
     {
-        var roots = new HashSet<IInterceptorSubject>();
-        var knownSubjectDescriptions = new Dictionary<IInterceptorSubject, SubjectUpdate>();
+        var update = new SubjectUpdate();
+        var knownSubjectDescriptions = new Dictionary<IInterceptorSubject, SubjectUpdate>
+        {
+            [subject] = update
+        };
 
         foreach (var change in propertyChanges)
         {
-            var subjectDescription = GetOrCreateSubjectDescription(change.Property.Subject, knownSubjectDescriptions);
+            var property = change.Property;
+            var registry = property.Subject.Context.GetService<ISubjectRegistry>();
+            var registeredSubject = registry.KnownSubjects[property.Subject];
 
-            var registry = change.Property.Subject.Context.GetService<ISubjectRegistry>();
-            var registeredSubject = registry.KnownSubjects[change.Property.Subject];
+            do
+            {           
+                var propertySubject = property.Subject;
+                var subjectDescription = GetOrCreateSubjectDescription(propertySubject, knownSubjectDescriptions);
 
-            var propertyName = change.Property.Name;
-            subjectDescription.Properties[propertyName] = SubjectPropertyUpdate.Create(
-                registeredSubject, propertyName,
-                registeredSubject.Properties[propertyName],
-                change.NewValue);
-
-            var childSubject = change.Property.Subject;
-            if (registeredSubject.Parents.Any())
-            {
-                while (registeredSubject.Parents.Any(p => p.Subject != rootSubject))
+                var propertyName = property.Name;
+                subjectDescription.Properties[propertyName] = SubjectPropertyUpdate.Create(
+                    registeredSubject, propertyName,
+                    registeredSubject.Properties[propertyName],
+                    change.NewValue);
+                
+                property = registeredSubject.Parents.FirstOrDefault();
+                if (property.Subject is not null)
                 {
-                    var parentProperty = registeredSubject.Parents.FirstOrDefault();
+                    registry = property.Subject.Context.GetService<ISubjectRegistry>();
+                    registeredSubject = registry.KnownSubjects[property.Subject];
 
-                    registeredSubject = registry.KnownSubjects[parentProperty.Subject];
-                    childSubject = CreateParentSubjectDescription(
-                        parentProperty, childSubject, knownSubjectDescriptions);
+                    propertySubject = CreateParentSubjectDescription(property, propertySubject, knownSubjectDescriptions);
                 }
-
-                roots.Add(registeredSubject.Subject);
-            }
+            } 
+            while (property.Subject is not null && property.Subject != subject && registeredSubject.Parents.Any());
         }
 
-        return roots.Select(r => knownSubjectDescriptions[r]);
+        return update;
     }
 
     private static IInterceptorSubject CreateParentSubjectDescription(

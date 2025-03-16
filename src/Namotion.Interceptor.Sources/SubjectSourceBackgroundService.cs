@@ -64,10 +64,8 @@ public class SubjectSourceBackgroundService : BackgroundService
                     .ToAsyncEnumerable()
                     .WithCancellation(stoppingToken))
                 {
-                    foreach (var update in SubjectUpdate.CreatePartialUpdateFromChanges(_source.Subject, changes))
-                    {
-                        await _source.WriteToSourceAsync(update, stoppingToken);
-                    }
+                    var update = SubjectUpdate.CreatePartialUpdateFromChanges(_source.Subject, changes);
+                    await _source.WriteToSourceAsync(update, stoppingToken);
                 }
             }
             catch (Exception ex)
