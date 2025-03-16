@@ -55,7 +55,7 @@ public record RegisteredSubject
             _parents.Remove(parent);
     }
 
-    public void AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params object[] attributes)
+    public void AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params Attribute[] attributes)
     {
         lock (_lock)
         {

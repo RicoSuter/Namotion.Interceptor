@@ -10,7 +10,9 @@ public record RegisteredSubjectProperty(PropertyReference Property)
 
     public required Type Type { get; init; }
 
-    public required object[] Attributes { get; init; }
+    public required Attribute[] Attributes { get; init; }
+    
+    public bool IsAttribute => Attributes.Any(a => a is PropertyAttributeAttribute);
 
 #pragma warning disable CS8618
     public RegisteredSubject Parent { get; internal set; }
@@ -19,6 +21,19 @@ public record RegisteredSubjectProperty(PropertyReference Property)
     public virtual bool HasGetter => Property.Metadata.GetValue is not null;
 
     public virtual bool HasSetter => Property.Metadata.SetValue is not null;
+
+    public bool HasPropertyAttributes(string propertyName) 
+        => Attributes.OfType<PropertyAttributeAttribute>().Any(a => a.PropertyName == propertyName);
+
+    public string GetPropertyOrAttributeName()
+    {
+        if (Attributes.OfType<PropertyAttributeAttribute>().SingleOrDefault() is { } attribute)
+        {
+            return $"{attribute.PropertyName}@{attribute.AttributeName}";
+        }
+
+        return Property.Name;
+    }
 
     public virtual object? GetValue()
     {
@@ -56,7 +71,7 @@ public record RegisteredSubjectProperty(PropertyReference Property)
     public void AddAttribute(string name, Type type, Func<object?>? getValue, Action<object?>? setValue)
     {
         Parent.AddProperty(
-            $"{Property.Name}_{name}",
+            $"{Property.Name}@{name}",
             type, getValue, setValue,
             new PropertyAttributeAttribute(Property.Name, name));
     }
