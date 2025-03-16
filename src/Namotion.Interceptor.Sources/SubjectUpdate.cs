@@ -33,7 +33,7 @@ public class SubjectUpdate
         return subjectUpdate;
     }
 
-    public static IEnumerable<SubjectUpdate> CreatePartialUpdateFromChanges(IEnumerable<PropertyChangedContext> propertyChanges)
+    public static IEnumerable<SubjectUpdate> CreatePartialUpdateFromChanges(IInterceptorSubject rootSubject, IEnumerable<PropertyChangedContext> propertyChanges)
     {
         var roots = new HashSet<IInterceptorSubject>();
         var knownSubjectDescriptions = new Dictionary<IInterceptorSubject, SubjectUpdate>();
@@ -52,16 +52,19 @@ public class SubjectUpdate
                 change.NewValue);
 
             var childSubject = change.Property.Subject;
-            while (registeredSubject.Parents.Any())
+            if (registeredSubject.Parents.Any())
             {
-                var parentProperty = registeredSubject.Parents.First();
+                while (registeredSubject.Parents.Any(p => p.Subject != rootSubject))
+                {
+                    var parentProperty = registeredSubject.Parents.FirstOrDefault();
 
-                registeredSubject = registry.KnownSubjects[parentProperty.Subject];
-                childSubject = CreateParentSubjectDescription(
-                    parentProperty, childSubject, knownSubjectDescriptions);
+                    registeredSubject = registry.KnownSubjects[parentProperty.Subject];
+                    childSubject = CreateParentSubjectDescription(
+                        parentProperty, childSubject, knownSubjectDescriptions);
+                }
+
+                roots.Add(registeredSubject.Subject);
             }
-
-            roots.Add(registeredSubject.Subject);
         }
 
         return roots.Select(r => knownSubjectDescriptions[r]);

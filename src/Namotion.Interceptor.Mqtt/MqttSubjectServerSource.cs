@@ -101,7 +101,7 @@ namespace Namotion.Interceptor.Mqtt
         {
             foreach (var (path, value) in update.EnumerateProperties("/"))
             {
-                await PublishPropertyValueAsync(path, value, cancellationToken);^
+                await PublishPropertyValueAsync(path, value, cancellationToken);
             }
         }
 

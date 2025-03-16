@@ -1,0 +1,10 @@
+﻿[
+  {
+    Properties: {
+      firstName: {
+        Type: String,
+        Value: NewFather
+      }
+    }
+  }
+]

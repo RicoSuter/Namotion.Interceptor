@@ -32,7 +32,6 @@ public static class MqttSubjectServerSourceExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<MqttSubjectServerSource<TSubject>>())
             .AddSingleton<IHostedService>(sp =>
             {
-                var subject = subjectSelector(sp);
                 return new SubjectSourceBackgroundService(
                     sp.GetRequiredService<MqttSubjectServerSource<TSubject>>(),
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>());
