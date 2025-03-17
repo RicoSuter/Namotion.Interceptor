@@ -45,8 +45,8 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                 property
                     .AddChild(new SubjectPropertyChild
                     {
+                        Index = context.Index,
                         Subject = context.Subject,
-                        Index = context.Index
                     });
             }
 
