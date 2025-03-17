@@ -27,6 +27,11 @@ public static class SubjectUpdateExtensions
     {
         switch (propertyUpdate.Action)
         {
+            case SubjectPropertyUpdateAction.UpdateValue:
+                var propertyReference = new PropertyReference(subject, propertyName);
+                applySubjectValueUpdate.Invoke(propertyReference, propertyUpdate);
+                break;
+            
             case SubjectPropertyUpdateAction.UpdateItem:
                 if (subject.TryGetRegisteredProperty(propertyName) is { } registeredProperty)
                 {
@@ -66,11 +71,6 @@ public static class SubjectUpdateExtensions
                         // TODO: Implement add collection
                     }
                 }
-                break;
-                
-            case SubjectPropertyUpdateAction.UpdateValue:
-                var propertyReference = new PropertyReference(subject, propertyName);
-                applySubjectValueUpdate.Invoke(propertyReference, propertyUpdate);
                 break;
         }
     }
