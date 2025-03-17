@@ -3,27 +3,33 @@
   Properties: {
     children: {
       Type: IReadOnlyCollection`1,
-      Items: [
+      Action: Collection,
+      Collection: [
         {
           Index: 0,
           Item: {
             Type: Person,
             Properties: {
               children: {
-                Type: IReadOnlyCollection`1
+                Type: IReadOnlyCollection`1,
+                Action: Value
               },
               father: {
-                Type: Person
+                Type: Person,
+                Action: Value
               },
               firstName: {
                 Type: String,
-                Value: Child1
+                Value: Child1,
+                Action: Value
               },
               lastName: {
-                Type: String
+                Type: String,
+                Action: Value
               },
               mother: {
-                Type: Person
+                Type: Person,
+                Action: Value
               }
             }
           }
@@ -34,20 +40,25 @@
             Type: Person,
             Properties: {
               children: {
-                Type: IReadOnlyCollection`1
+                Type: IReadOnlyCollection`1,
+                Action: Value
               },
               father: {
-                Type: Person
+                Type: Person,
+                Action: Value
               },
               firstName: {
                 Type: String,
-                Value: Child2
+                Value: Child2,
+                Action: Value
               },
               lastName: {
-                Type: String
+                Type: String,
+                Action: Value
               },
               mother: {
-                Type: Person
+                Type: Person,
+                Action: Value
               }
             }
           }
@@ -58,20 +69,25 @@
             Type: Person,
             Properties: {
               children: {
-                Type: IReadOnlyCollection`1
+                Type: IReadOnlyCollection`1,
+                Action: Value
               },
               father: {
-                Type: Person
+                Type: Person,
+                Action: Value
               },
               firstName: {
                 Type: String,
-                Value: Child3
+                Value: Child3,
+                Action: Value
               },
               lastName: {
-                Type: String
+                Type: String,
+                Action: Value
               },
               mother: {
-                Type: Person
+                Type: Person,
+                Action: Value
               }
             }
           }
@@ -80,55 +96,69 @@
     },
     father: {
       Type: Person,
+      Action: Item,
       Item: {
         Type: Person,
         Properties: {
           children: {
-            Type: IReadOnlyCollection`1
+            Type: IReadOnlyCollection`1,
+            Action: Value
           },
           father: {
-            Type: Person
+            Type: Person,
+            Action: Value
           },
           firstName: {
             Type: String,
-            Value: Father
+            Value: Father,
+            Action: Value
           },
           lastName: {
-            Type: String
+            Type: String,
+            Action: Value
           },
           mother: {
-            Type: Person
+            Type: Person,
+            Action: Value
           }
         }
       }
     },
     firstName: {
       Type: String,
-      Value: Child
+      Value: Child,
+      Action: Value
     },
     lastName: {
-      Type: String
+      Type: String,
+      Action: Value
     },
     mother: {
       Type: Person,
+      Action: Item,
       Item: {
         Type: Person,
         Properties: {
           children: {
-            Type: IReadOnlyCollection`1
+            Type: IReadOnlyCollection`1,
+            Action: Value
           },
           father: {
-            Type: Person
+            Type: Person,
+            Action: Value
           },
           firstName: {
             Type: String,
-            Value: Mother
+            Value: Mother,
+            Action: Value
           },
           lastName: {
-            Type: String
+            Type: String,
+            Action: Value
           },
           mother: {
-            Type: Person
+            Type: Person,
+            Action: Value
           }
         }
       }

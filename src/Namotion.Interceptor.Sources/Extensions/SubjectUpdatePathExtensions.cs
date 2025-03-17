@@ -19,12 +19,12 @@ public static class SubjectUpdatePathExtensions
             var propertyName = segmentParts[0];
             
             var registeredSubject = registry.KnownSubjects[subject];
-            if (registeredSubject.Properties.TryGetValue(propertyName, out var property))
+            if (registeredSubject.Properties.TryGetValue(propertyName, out var registeredProperty))
             {
                 if (index is not null)
                 {
-                    var item = property.Children.Single(c => Equals(c.Index, index));
-                    var childUpdates = property.Children
+                    var item = registeredProperty.Children.Single(c => Equals(c.Index, index));
+                    var childUpdates = registeredProperty.Children
                         .Select(c => new SubjectPropertyCollectionUpdate
                         {
                             Index = c.Index,
@@ -32,24 +32,36 @@ public static class SubjectUpdatePathExtensions
                         })
                         .ToList();
                     
-                    update.Properties[propertyName] = new SubjectPropertyUpdate { Items = childUpdates };
+                    update.Properties[propertyName] = new SubjectPropertyUpdate
+                    {
+                        Action = SubjectPropertyUpdateAction.UpdateCollection,
+                        Collection = childUpdates
+                    };
                   
                     update = childUpdates.Single(u => Equals(u.Index, index)).Item!;
                     subject = item.Subject;
                     
                 }
-                else if (property.Children.Any())
+                else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
                 {
-                    var item = property.Children.Single();
+                    var item = registeredProperty.Children.Single();
                     var childUpdate = new SubjectUpdate();
-                    update.Properties[propertyName] = new SubjectPropertyUpdate { Item = childUpdate };
+                    update.Properties[propertyName] = new SubjectPropertyUpdate
+                    {
+                        Action = SubjectPropertyUpdateAction.UpdateItem,
+                        Item = childUpdate
+                    };
              
                     update = childUpdate;
                     subject = item.Subject;
                 }
                 else
                 {
-                    update.Properties[propertyName] = new SubjectPropertyUpdate { Value = getValue(property) };
+                    update.Properties[propertyName] = new SubjectPropertyUpdate
+                    {
+                        Action = SubjectPropertyUpdateAction.UpdateValue,
+                        Value = getValue(registeredProperty), 
+                    };
                     break;
                 }
             }
@@ -58,36 +70,46 @@ public static class SubjectUpdatePathExtensions
         return rootUpdate;
     }
     
-    public static IEnumerable<(string path, object? value)> EnumeratePropertyPaths(
-        this SubjectUpdate update, string delimiter = ".")
+    public static IEnumerable<(string path, object? value)> EnumeratePaths(
+        this IReadOnlyDictionary<string, SubjectPropertyUpdate> propertyUpdates, string propertyPathDelimiter, string attributePathDelimiter)
     {
-        foreach (var property in update.Properties)
+        foreach (var property in propertyUpdates)
         {
-            if (property.Value.Item is not null)
+            if (property.Value.Attributes is not null)
             {
-                foreach (var (path, value) in EnumeratePropertyPaths(property.Value.Item))
+                foreach (var (path, value) in EnumeratePaths(property.Value.Attributes, propertyPathDelimiter, attributePathDelimiter))
                 {
-                    yield return ($"{property.Key}{delimiter}{path}", value);
+                    yield return ($"{property.Key}{propertyPathDelimiter}{path}", value);
                 }
             }
-            else if (property.Value.Items is not null)
+            
+            switch (property.Value.Action)
             {
-                foreach (var item in property.Value.Items)
-                {
-                    if (item.Item is null)
+                case SubjectPropertyUpdateAction.UpdateItem:
+                    foreach (var (path, value) in EnumeratePaths(property.Value.Item!.Properties, propertyPathDelimiter, attributePathDelimiter))
                     {
-                        continue;
+                        yield return ($"{property.Key}{propertyPathDelimiter}{path}", value);
                     }
+                    break;
+                
+                case SubjectPropertyUpdateAction.UpdateCollection:
+                    foreach (var item in property.Value.Collection!)
+                    {
+                        if (item.Item is null)
+                        {
+                            continue;
+                        }
                     
-                    foreach (var (path, value) in EnumeratePropertyPaths(item.Item))
-                    {
-                        yield return ($"{property.Key}[{item.Index}]{delimiter}{path}", value);
+                        foreach (var (path, value) in EnumeratePaths(item.Item.Properties, propertyPathDelimiter, attributePathDelimiter))
+                        {
+                            yield return ($"{property.Key}[{item.Index}]{propertyPathDelimiter}{path}", value);
+                        }
                     }
-                }
-            }
-            else
-            {
-                yield return (property.Key, property.Value.Value);
+                    break;
+                
+                case SubjectPropertyUpdateAction.UpdateValue:
+                    yield return (property.Key, property.Value.Value);
+                    break;
             }
         }
     }

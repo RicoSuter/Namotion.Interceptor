@@ -13,6 +13,8 @@ public record RegisteredSubjectProperty(PropertyReference Property)
     public required Attribute[] Attributes { get; init; }
     
     public bool IsAttribute => Attributes.Any(a => a is PropertyAttributeAttribute);
+    
+    public PropertyAttributeAttribute Attribute => Attributes.OfType<PropertyAttributeAttribute>().Single();
 
 #pragma warning disable CS8618
     public RegisteredSubject Parent { get; internal set; }
@@ -24,16 +26,6 @@ public record RegisteredSubjectProperty(PropertyReference Property)
 
     public bool HasPropertyAttributes(string propertyName) 
         => Attributes.OfType<PropertyAttributeAttribute>().Any(a => a.PropertyName == propertyName);
-
-    public string GetPropertyOrAttributeName()
-    {
-        if (Attributes.OfType<PropertyAttributeAttribute>().SingleOrDefault() is { } attribute)
-        {
-            return $"{attribute.PropertyName}@{attribute.AttributeName}";
-        }
-
-        return Property.Name;
-    }
 
     public virtual object? GetValue()
     {

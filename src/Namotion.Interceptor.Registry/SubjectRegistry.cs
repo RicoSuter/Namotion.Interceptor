@@ -62,7 +62,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
 
     private RegisteredSubject RegisterSubject(IInterceptorSubject subject)
     {
-        var metadata = new RegisteredSubject(subject, subject
+        var registeredSubject = new RegisteredSubject(subject, subject
             .Properties
             .Select(p => new RegisteredSubjectProperty(new PropertyReference(subject, p.Key))
             {
@@ -70,8 +70,8 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                 Attributes = p.Value.Attributes
             }));
 
-        _knownSubjects[subject] = metadata;
-        return metadata;
+        _knownSubjects[subject] = registeredSubject;
+        return registeredSubject;
     }
 
     public void Detach(LifecycleContext context)

@@ -20,12 +20,14 @@ public static class SubjectUpdateJsonExtensions
         return new SubjectPropertyUpdate
         {
             Type = update.Type,
-            Value = update.Value,
             Attributes = update.Attributes?.ToDictionary(
                 a => options.PropertyNamingPolicy?.ConvertName(a.Key) ?? a.Key,
                 a => a.Value.ConvertPropertyNames(options)),
+
+            Action = update.Action,
+            Value = update.Value,
             Item = update.Item?.ConvertPropertyNames(options),
-            Items = update.Items?
+            Collection = update.Collection?
                 .Select(i => new SubjectPropertyCollectionUpdate
                 {
                     Index = i.Index,

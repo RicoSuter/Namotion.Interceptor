@@ -54,11 +54,6 @@ public static class SubjectRegistryExtensions
                ?? throw new InvalidOperationException($"Property '{propertyReference.Name}' not found.");
     }
     
-    public static object? GetRegisteredSubjectPropertyValue(this IInterceptorSubject subject, string propertyName)
-    {
-        return subject.TryGetRegisteredProperty(propertyName)?.GetValue();
-    }
-    
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName)
     {
         var registry = subject.Context.GetService<ISubjectRegistry>();
@@ -66,11 +61,8 @@ public static class SubjectRegistryExtensions
             ? registeredSubject.Properties.GetValueOrDefault(propertyName)
             : null;
     }
-
     
-
-    
-    public static RegisteredSubjectProperty? TryGetRegisteredPropertyAttribute(this PropertyReference property, string attributeName)
+    public static RegisteredSubjectProperty? TryGetRegisteredAttribute(this PropertyReference property, string attributeName)
     {
         return TryGetRegisteredAttribute(property.Subject, property.Name, attributeName);
     }

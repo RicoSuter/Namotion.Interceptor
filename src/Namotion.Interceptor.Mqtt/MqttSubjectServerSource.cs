@@ -1,7 +1,4 @@
 ﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -10,11 +7,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Server;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Extensions;
-using Namotion.Interceptor.Sources.Paths;
-using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt
 {
@@ -99,7 +93,7 @@ namespace Namotion.Interceptor.Mqtt
 
         public async Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken)
         {
-            foreach (var (path, value) in update.EnumeratePropertyPaths("/"))
+            foreach (var (path, value) in update.Properties.EnumeratePaths("/", "/"))
             {
                 await PublishPropertyValueAsync(path, value, cancellationToken);
             }
@@ -114,7 +108,8 @@ namespace Namotion.Interceptor.Mqtt
                 await Task.Delay(1000);
                 foreach (var (path, value) in SubjectUpdate
                      .CreateCompleteUpdate(_subject)
-                     .EnumeratePropertyPaths("/"))
+                     .Properties
+                     .EnumeratePaths("/", "/"))
                 {
                     // TODO: Send only to new client
                     await PublishPropertyValueAsync(path, value, CancellationToken.None);

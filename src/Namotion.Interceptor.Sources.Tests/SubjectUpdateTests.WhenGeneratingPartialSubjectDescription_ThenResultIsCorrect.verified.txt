@@ -1,14 +1,15 @@
 ﻿{
   Properties: {
     children: {
-      Items: [
+      Action: Collection,
+      Collection: [
         {
           Index: 0,
           Item: {
             Properties: {
               firstName: {
-                Type: String,
-                Value: NewChild1
+                Value: NewChild1,
+                Action: Value
               }
             }
           }
@@ -22,8 +23,8 @@
           Item: {
             Properties: {
               firstName: {
-                Type: String,
-                Value: NewChild3
+                Value: NewChild3,
+                Action: Value
               }
             }
           }
@@ -31,18 +32,19 @@
       ]
     },
     father: {
+      Action: Item,
       Item: {
         Properties: {
           firstName: {
-            Type: String,
-            Value: NewFather
+            Value: NewFather,
+            Action: Value
           }
         }
       }
     },
     firstName: {
-      Type: String,
-      Value: NewPerson
+      Value: NewPerson,
+      Action: Value
     }
   }
 }
