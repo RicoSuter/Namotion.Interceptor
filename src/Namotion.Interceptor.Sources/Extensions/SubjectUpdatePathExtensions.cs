@@ -6,21 +6,20 @@ public static class SubjectUpdatePathExtensions
 {
     // TODO: Make this extensible for path transformations and ignore callbacks
     
-    public static SubjectUpdate? TryCreateSubjectUpdateFromPath(
+    public static SubjectUpdate CreateSubjectUpdateFromPath(
         this IInterceptorSubject subject, string path, 
         string propertyPathDelimiter, string attributePathDelimiter,
         Func<RegisteredSubjectProperty, object?> getValue)
     {
-        var registry = subject.Context.GetService<ISubjectRegistry>();
         var rootUpdate = new SubjectUpdate();
         var update = rootUpdate;
-        
         foreach (var segment in path.Split(propertyPathDelimiter).SelectMany(a => a.Split(attributePathDelimiter)))
         {
             var segmentParts = segment.Split('[', ']');
             object? index = segmentParts.Length >= 2 ? (int.TryParse(segmentParts[1], out var intIndex) ? intIndex : segmentParts[1]) : null;
             var propertyName = segmentParts[0];
             
+            var registry = subject.Context.GetService<ISubjectRegistry>();
             var registeredSubject = registry.KnownSubjects[subject];
             if (registeredSubject.Properties.TryGetValue(propertyName, out var registeredProperty))
             {
@@ -88,14 +87,18 @@ public static class SubjectUpdatePathExtensions
             
             switch (property.Value.Action)
             {
-                case SubjectPropertyUpdateAction.UpdateItem:
+                case SubjectPropertyUpdateAction.UpdateValue: // handle value
+                    yield return (property.Key, property.Value.Value);
+                    break;
+                
+                case SubjectPropertyUpdateAction.UpdateItem: // handle item
                     foreach (var (path, value) in EnumeratePaths(property.Value.Item!.Properties, propertyPathDelimiter, attributePathDelimiter))
                     {
                         yield return ($"{property.Key}{propertyPathDelimiter}{path}", value);
                     }
                     break;
                 
-                case SubjectPropertyUpdateAction.UpdateCollection:
+                case SubjectPropertyUpdateAction.UpdateCollection: // handle array or dictionary
                     foreach (var item in property.Value.Collection!)
                     {
                         if (item.Item is null)
@@ -108,10 +111,6 @@ public static class SubjectUpdatePathExtensions
                             yield return ($"{property.Key}[{item.Index}]{propertyPathDelimiter}{path}", value);
                         }
                     }
-                    break;
-                
-                case SubjectPropertyUpdateAction.UpdateValue:
-                    yield return (property.Key, property.Value.Value);
                     break;
             }
         }
