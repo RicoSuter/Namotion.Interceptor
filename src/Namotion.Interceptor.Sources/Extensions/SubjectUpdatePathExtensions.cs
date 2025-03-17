@@ -1,3 +1,4 @@
+using System.Collections;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -33,10 +34,12 @@ public static class SubjectUpdatePathExtensions
                 if (index is not null) // handle array or dictionary item update
                 {
                     var item = registeredProperty.Children.Single(c => Equals(c.Index, index));
-                    var childUpdates = registeredProperty.Children
+                    
+                    var childUpdates = registeredProperty
+                        .Children
                         .Select(c => new SubjectPropertyCollectionUpdate
                         {
-                            Index = c.Index,
+                            Index = c.Index ?? throw new InvalidOperationException("Index must not be null."),
                             Item = new SubjectUpdate()
                         })
                         .ToList();
@@ -86,7 +89,8 @@ public static class SubjectUpdatePathExtensions
     {
         foreach (var property in propertyUpdates)
         {
-            foreach (var (path, value) in EnumeratePaths(subject, property.Key, property.Key, property.Value, propertyPathDelimiter, attributePathDelimiter, isPropertyIncludedPredicate))
+            foreach (var (path, value) in subject
+                .EnumeratePaths(property.Key, property.Key, property.Value, propertyPathDelimiter, attributePathDelimiter, isPropertyIncludedPredicate))
             {
                 yield return (path, value);
             }
@@ -94,8 +98,9 @@ public static class SubjectUpdatePathExtensions
     }
 
     private static IEnumerable<(string path, object? value)> EnumeratePaths(
-        IInterceptorSubject subject, string name, string propertyName, SubjectPropertyUpdate propertyUpdate, 
-        string propertyPathDelimiter, string attributePathDelimiter, 
+        this IInterceptorSubject subject, string pathPrefix, string propertyName,
+        SubjectPropertyUpdate propertyUpdate,
+        string propertyPathDelimiter, string attributePathDelimiter,
         Func<RegisteredSubjectProperty, bool> isPropertyIncludedPredicate)
     {
         var registeredProperty = subject.TryGetRegisteredProperty(propertyName) ?? throw new KeyNotFoundException(propertyName);
@@ -103,14 +108,15 @@ public static class SubjectUpdatePathExtensions
         {
             yield break;
         }
-        
+
         if (propertyUpdate.Attributes is not null)
         {
             foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
             {
                 var registeredAttribute = subject.TryGetRegisteredAttribute(propertyName, attributeName) ?? throw new KeyNotFoundException(propertyName);
-                var attributePath = $"{name}{propertyPathDelimiter}{attributeName}";
-                foreach (var (path, value) in EnumeratePaths(subject, attributePath, registeredAttribute.Property.Name, 
+            
+                var attributePath = $"{pathPrefix}{propertyPathDelimiter}{attributeName}";
+                foreach (var (path, value) in EnumeratePaths(subject, attributePath, registeredAttribute.Property.Name,
                     attributeUpdate, propertyPathDelimiter, attributePathDelimiter, isPropertyIncludedPredicate))
                 {
                     yield return (path, value);
@@ -121,20 +127,27 @@ public static class SubjectUpdatePathExtensions
         switch (propertyUpdate.Action)
         {
             case SubjectPropertyUpdateAction.UpdateValue: // handle value
-                yield return (name, propertyUpdate.Value);
+                yield return (pathPrefix, propertyUpdate.Value);
                 break;
 
             case SubjectPropertyUpdateAction.UpdateItem: // handle item
-                foreach (var (path, value) in propertyUpdate.Item!.Properties
-                             .EnumeratePaths((IInterceptorSubject?)registeredProperty.GetValue()!, propertyPathDelimiter, attributePathDelimiter, isPropertyIncludedPredicate))
+                if (registeredProperty.GetValue() is IInterceptorSubject currentItem)
                 {
-                    yield return ($"{name}{propertyPathDelimiter}{path}", value);
+                    foreach (var (path, value) in propertyUpdate.Item!.Properties
+                        .EnumeratePaths(currentItem, propertyPathDelimiter, attributePathDelimiter, isPropertyIncludedPredicate))
+                    {
+                        yield return ($"{pathPrefix}{propertyPathDelimiter}{path}", value);
+                    }
+                }
+                else
+                {
+                    // TODO: Handle missing item
                 }
 
                 break;
 
             case SubjectPropertyUpdateAction.UpdateCollection: // handle array or dictionary
-                var collection = (IList<IInterceptorSubject>)registeredProperty.GetValue()!;
+                var collection = registeredProperty.GetValue()!;
                 foreach (var item in propertyUpdate.Collection!)
                 {
                     if (item.Item is null)
@@ -142,10 +155,21 @@ public static class SubjectUpdatePathExtensions
                         continue;
                     }
 
-                    foreach (var (path, value) in item.Item.Properties
-                                 .EnumeratePaths(collection[(int)item.Index!], propertyPathDelimiter, attributePathDelimiter, isPropertyIncludedPredicate))
+                    var currentCollectionItem = item.Index is int ? 
+                        ((ICollection<IInterceptorSubject>)collection).ElementAt(Convert.ToInt32(item.Index)) : 
+                        ((IDictionary)collection)[item.Index] as IInterceptorSubject;
+
+                    if (currentCollectionItem is not null)
                     {
-                        yield return ($"{name}[{item.Index}]{propertyPathDelimiter}{path}", value);
+                        foreach (var (path, value) in item.Item.Properties
+                            .EnumeratePaths(currentCollectionItem, propertyPathDelimiter, attributePathDelimiter, isPropertyIncludedPredicate))
+                        {
+                            yield return ($"{pathPrefix}[{item.Index}]{propertyPathDelimiter}{path}", value);
+                        }
+                    }
+                    else
+                    {
+                        // TODO: Handle missing item
                     }
                 }
 

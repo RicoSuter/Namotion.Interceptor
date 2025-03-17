@@ -122,7 +122,7 @@ public class SubjectUpdate
                 .Select(s => new SubjectPropertyCollectionUpdate
                 {
                     Item = GetOrCreateSubjectUpdate(s.Subject, knownSubjectDescriptions),
-                    Index = s.Index
+                    Index = s.Index ?? throw new InvalidOperationException("Index must not be null.")
                 })
                 .ToList();
         }
