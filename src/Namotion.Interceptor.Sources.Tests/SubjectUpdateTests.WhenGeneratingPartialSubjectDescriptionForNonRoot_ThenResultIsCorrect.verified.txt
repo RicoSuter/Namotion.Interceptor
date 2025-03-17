@@ -1,7 +1,7 @@
 ﻿{
   Properties: {
     children: {
-      Action: Collection,
+      Action: UpdateCollection,
       Collection: [
         {
           Index: 0,
@@ -9,7 +9,7 @@
             Properties: {
               firstName: {
                 Value: NewChild1,
-                Action: Value
+                Action: UpdateValue
               }
             }
           }
@@ -24,7 +24,7 @@
             Properties: {
               firstName: {
                 Value: NewChild3,
-                Action: Value
+                Action: UpdateValue
               }
             }
           }
@@ -33,7 +33,7 @@
     },
     firstName: {
       Value: NewFather,
-      Action: Value
+      Action: UpdateValue
     }
   }
 }

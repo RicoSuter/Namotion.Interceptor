@@ -30,14 +30,14 @@ public class SubjectPropertyUpdate
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public List<SubjectPropertyCollectionUpdate>? Collection { get; internal set; }
     
-    public static SubjectPropertyUpdate Create(RegisteredSubject subject, string propertyName, RegisteredSubjectProperty property, object? value)
+    public static SubjectPropertyUpdate Create(RegisteredSubject subject, string propertyName, RegisteredSubjectProperty property)
     {
         var attributes = subject.Properties
             .Where(p => 
                 p.Value.HasGetter && p.Value.HasPropertyAttributes(propertyName))
             .ToDictionary(
                 p => p.Value.Attribute.AttributeName,
-                p => Create(subject, p.Key, p.Value, p.Value.GetValue()));
+                p => Create(subject, p.Key, p.Value));
 
         var propertyUpdate = new SubjectPropertyUpdate
         {
@@ -45,7 +45,7 @@ public class SubjectPropertyUpdate
             Attributes = attributes.Count != 0 ? attributes : null
         };
 
-        propertyUpdate.ApplyRegisteredPropertyValue(property, value);
+        propertyUpdate.ApplyPropertyValue(property);
         return propertyUpdate;
     }
 }
