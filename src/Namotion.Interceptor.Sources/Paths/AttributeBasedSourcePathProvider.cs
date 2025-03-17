@@ -41,22 +41,22 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
         return nameAttribute?.Path ?? pathAttribute?.Path;
     }
 
-    public string? TryGetSourcePropertyPath(string proposedPath, RegisteredSubjectProperty property)
+    public string? TryGetSourcePropertyPath(RegisteredSubjectProperty property, string fullPathHint)
     {
         var path = TryGetAttributeBasedSourcePropertyPath(property, _sourceName);
         return path is not null ? _pathPrefix + path : null;
     }
     
-    public string GetAttributePath(RegisteredSubjectProperty property, RegisteredSubjectProperty attribute, string pathHint)
+    public string GetAttributePath(string path, RegisteredSubjectProperty property, RegisteredSubjectProperty attribute)
     {
-        return string.IsNullOrEmpty(pathHint) ? 
+        return string.IsNullOrEmpty(path) ? 
             property.Property.Name + _delimiter + attribute.Attribute.AttributeName : 
-            pathHint + _delimiter + property.Property.Name + _delimiter + attribute.Attribute.AttributeName;
+            path + _delimiter + property.Property.Name + _delimiter + attribute.Attribute.AttributeName;
     }
 
-    public string GetPropertyPath(RegisteredSubjectProperty property, string pathHint)
+    public string GetPropertyPath(string path, RegisteredSubjectProperty property)
     {
-        return string.IsNullOrEmpty(pathHint) ? property.Property.Name : pathHint + _delimiter + property.Property.Name;
+        return string.IsNullOrEmpty(path) ? property.Property.Name : path + _delimiter + property.Property.Name;
     }
 
     public string GetAttributePath(string path, string attributeName)

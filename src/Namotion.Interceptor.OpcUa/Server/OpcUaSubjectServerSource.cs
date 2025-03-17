@@ -124,6 +124,6 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
 
     public string? TryGetSourcePropertyPath(PropertyReference property)
     {
-        return SourcePathProvider.TryGetSourcePropertyPath(null!, property.GetRegisteredProperty());
+        return SourcePathProvider.TryGetSourcePropertyPath(property.GetRegisteredProperty(), null!);
     }
 }
