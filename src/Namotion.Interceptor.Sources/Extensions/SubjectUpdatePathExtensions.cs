@@ -6,13 +6,16 @@ public static class SubjectUpdatePathExtensions
 {
     // TODO: Make this extensible for path transformations and ignore callbacks
     
-    public static SubjectUpdate? TryCreateSubjectUpdateFromPath(this IInterceptorSubject subject, string path, Func<RegisteredSubjectProperty, object?> getValue, string delimiter = ".")
+    public static SubjectUpdate? TryCreateSubjectUpdateFromPath(
+        this IInterceptorSubject subject, string path, 
+        string propertyPathDelimiter, string attributePathDelimiter,
+        Func<RegisteredSubjectProperty, object?> getValue)
     {
         var registry = subject.Context.GetService<ISubjectRegistry>();
         var rootUpdate = new SubjectUpdate();
         var update = rootUpdate;
         
-        foreach (var segment in path.Split(delimiter))
+        foreach (var segment in path.Split(propertyPathDelimiter).SelectMany(a => a.Split(attributePathDelimiter)))
         {
             var segmentParts = segment.Split('[', ']');
             object? index = segmentParts.Length >= 2 ? (int.TryParse(segmentParts[1], out var intIndex) ? intIndex : segmentParts[1]) : null;
@@ -21,7 +24,7 @@ public static class SubjectUpdatePathExtensions
             var registeredSubject = registry.KnownSubjects[subject];
             if (registeredSubject.Properties.TryGetValue(propertyName, out var registeredProperty))
             {
-                if (index is not null)
+                if (index is not null) // handle array or dictionary item update
                 {
                     var item = registeredProperty.Children.Single(c => Equals(c.Index, index));
                     var childUpdates = registeredProperty.Children
@@ -42,7 +45,7 @@ public static class SubjectUpdatePathExtensions
                     subject = item.Subject;
                     
                 }
-                else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
+                else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject))) // handle item update
                 {
                     var item = registeredProperty.Children.Single();
                     var childUpdate = new SubjectUpdate();
@@ -55,7 +58,7 @@ public static class SubjectUpdatePathExtensions
                     update = childUpdate;
                     subject = item.Subject;
                 }
-                else
+                else // handle value update
                 {
                     update.Properties[propertyName] = new SubjectPropertyUpdate
                     {
@@ -79,7 +82,7 @@ public static class SubjectUpdatePathExtensions
             {
                 foreach (var (path, value) in EnumeratePaths(property.Value.Attributes, propertyPathDelimiter, attributePathDelimiter))
                 {
-                    yield return ($"{property.Key}{propertyPathDelimiter}{path}", value);
+                    yield return ($"{property.Key}{attributePathDelimiter}{path}", value);
                 }
             }
             

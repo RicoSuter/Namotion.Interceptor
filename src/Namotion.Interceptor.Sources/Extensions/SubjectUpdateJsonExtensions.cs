@@ -25,6 +25,7 @@ public static class SubjectUpdateJsonExtensions
                 a => a.Value.ConvertPropertyNames(options)),
 
             Action = update.Action,
+
             Value = update.Value,
             Item = update.Item?.ConvertPropertyNames(options),
             Collection = update.Collection?
