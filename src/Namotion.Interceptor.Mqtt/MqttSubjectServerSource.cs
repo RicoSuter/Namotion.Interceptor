@@ -146,11 +146,8 @@ namespace Namotion.Interceptor.Mqtt
                 var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
                 var document = JsonDocument.Parse(payload);
 
-                var update = _subject.TryCreateSubjectUpdateFromPath(path, "/", "/", property => document.Deserialize(property.Type));
-                if (update is not null)
-                {
-                    _propertyUpdateAction?.Invoke(update);
-                }
+                var update = _subject.CreateSubjectUpdateFromPath(path, "/", "/", property => document.Deserialize(property.Type));
+                _propertyUpdateAction?.Invoke(update);
             }
             catch (Exception ex)
             {
