@@ -5,38 +5,102 @@ namespace Namotion.Interceptor.Sources.Extensions;
 
 public static class SubjectUpdateExtensions
 {
+    public static void ApplyRegisteredPropertyValue(this SubjectPropertyUpdate propertyUpdate, RegisteredSubjectProperty property, object? value)
+    {
+        var children = property.Children; // TODO: Use value instead?
+        if (children.Any(c => c.Index is not null))
+        {
+            propertyUpdate.Action = SubjectPropertyUpdateAction.UpdateCollection;
+            propertyUpdate.Collection = children
+                .Select(s => new SubjectPropertyCollectionUpdate
+                {
+                    Item = SubjectUpdate.CreateCompleteUpdate(s.Subject),
+                    Index = s.Index
+                })
+                .ToList();
+        }
+        else if (value is IInterceptorSubject itemSubject)
+        {
+            propertyUpdate.Action = SubjectPropertyUpdateAction.UpdateItem;
+            propertyUpdate.Item = SubjectUpdate.CreateCompleteUpdate(itemSubject);
+        }
+        else
+        {
+            propertyUpdate.Action = SubjectPropertyUpdateAction.UpdateValue;
+            propertyUpdate.Value = value;
+        }
+    }
+    
     public static void VisitSubjectValueUpdates(this IInterceptorSubject subject, SubjectUpdate update, 
-        Action<PropertyReference, SubjectPropertyUpdate> applySubjectUpdate)
+        Action<PropertyReference, SubjectPropertyUpdate> applySubjectValueUpdate)
     {
         foreach (var (propertyName, propertyUpdate) in update.Properties)
         {
-            if (propertyUpdate.Item is not null)
+            if (propertyUpdate.Attributes is not null)
             {
-                if (subject.GetRegisteredSubjectPropertyValue(propertyName) is IInterceptorSubject childSubject)
+                foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
                 {
-                    ApplySubjectUpdate(childSubject, propertyUpdate.Item, applySubjectUpdate);
+                    VisitSubjectValueUpdates(subject, attributeName, attributeUpdate, applySubjectValueUpdate);
                 }
-                // TODO: Implement
             }
-            else if (propertyUpdate.Items is not null)
-            {
-                var childSubjects = subject.Properties[propertyName].GetValue?.Invoke(subject) as IEnumerable<IInterceptorSubject>;
-                var i = 0;
-                foreach (var item in childSubjects ?? [])
-                {
-                    ApplySubjectUpdate(item, propertyUpdate.Items[i].Item!, applySubjectUpdate);
-                    i++;
-                }
-                // TODO: Implement dictionary
-            }
-            else
-            {
-                var propertyReference = new PropertyReference(subject, propertyName);
-                applySubjectUpdate.Invoke(propertyReference, propertyUpdate);
-            }
+
+            VisitSubjectValueUpdates(subject, propertyName, propertyUpdate, applySubjectValueUpdate);
         }
     }
 
+    private static void VisitSubjectValueUpdates(
+        IInterceptorSubject subject, string propertyName, SubjectPropertyUpdate propertyUpdate,
+        Action<PropertyReference, SubjectPropertyUpdate> applySubjectValueUpdate)
+    {
+        switch (propertyUpdate.Action)
+        {
+            case SubjectPropertyUpdateAction.UpdateItem:
+                if (subject.TryGetRegisteredProperty(propertyName) is { } registeredProperty)
+                {
+                    if (registeredProperty.GetValue() is IInterceptorSubject existingItem)
+                    {
+                        if (propertyUpdate.Item is not null)
+                        {
+                            ApplySubjectUpdate(existingItem, propertyUpdate.Item, applySubjectValueUpdate);
+                        }
+                        else
+                        {
+                            // TODO: Implement removal
+                        }
+                    }
+                    else
+                    {
+                        // TODO: Implement add/set item
+                    }
+                }
+                break;
+                
+            case SubjectPropertyUpdateAction.UpdateCollection:
+                if (subject.TryGetRegisteredProperty(propertyName) is { } registeredCollectionProperty)
+                {
+                    // TODO: Handle dictionary
+
+                    var value = registeredCollectionProperty.GetValue();
+                    if (value is IEnumerable<IInterceptorSubject> existingCollection)
+                    {
+                        foreach (var (item, index) in existingCollection.Select((item, index) => (item, index)))
+                        {
+                            ApplySubjectUpdate(item, propertyUpdate.Collection![index].Item!, applySubjectValueUpdate);
+                        }
+                    }
+                    else
+                    {
+                        // TODO: Implement add collection
+                    }
+                }
+                break;
+                
+            case SubjectPropertyUpdateAction.UpdateValue:
+                var propertyReference = new PropertyReference(subject, propertyName);
+                applySubjectValueUpdate.Invoke(propertyReference, propertyUpdate);
+                break;
+        }
+    }
 
     public static void ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update, 
         Action<PropertyReference, SubjectPropertyUpdate>? transform = null)

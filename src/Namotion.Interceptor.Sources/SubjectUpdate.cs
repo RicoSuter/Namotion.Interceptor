@@ -1,5 +1,7 @@
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources;
@@ -8,6 +10,7 @@ public class SubjectUpdate
 {
     public string? Type { get; init; }
 
+    // TODO: Convert to read only
     public Dictionary<string, SubjectPropertyUpdate> Properties { get; init; } = new();
 
     public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject)
@@ -27,14 +30,6 @@ public class SubjectUpdate
                 subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.Create(
                     registeredSubject, property.Key, property.Value, value);
             }
-            
-            foreach (var property in registeredSubject.Properties
-                .Where(p => p.Value is { HasGetter: true, IsAttribute: true }))
-            {
-                var value = property.Value.GetValue();
-                subjectUpdate.Properties[property.Value.GetPropertyOrAttributeName()] = SubjectPropertyUpdate.Create(
-                    registeredSubject, property.Key, property.Value, value);
-            }
         }
 
         return subjectUpdate;
@@ -43,7 +38,7 @@ public class SubjectUpdate
     public static SubjectUpdate CreatePartialUpdateFromChanges(IInterceptorSubject subject, IEnumerable<PropertyChangedContext> propertyChanges)
     {
         // TODO: Verify correctness of the CreatePartialUpdateFromChanges method
-        
+
         var update = new SubjectUpdate();
         var knownSubjectDescriptions = new Dictionary<IInterceptorSubject, SubjectUpdate>
         {
@@ -57,16 +52,45 @@ public class SubjectUpdate
             var registeredSubject = registry.KnownSubjects[property.Subject];
 
             do
-            {           
+            {
                 var propertySubject = property.Subject;
-                var subjectDescription = GetOrCreateSubjectDescription(propertySubject, knownSubjectDescriptions);
+                var subjectUpdate = GetOrCreateSubjectUpdate(propertySubject, knownSubjectDescriptions);
 
-                var propertyName = property.Name;
-                subjectDescription.Properties[propertyName] = SubjectPropertyUpdate.Create(
-                    registeredSubject, propertyName,
-                    registeredSubject.Properties[propertyName],
-                    change.NewValue);
-                
+                var registeredProperty = property.GetRegisteredProperty();
+                if (registeredProperty.IsAttribute)
+                {
+                    // handle attribute changes
+                    var attributeUpdate = new SubjectPropertyUpdate();
+                    attributeUpdate.ApplyRegisteredPropertyValue(registeredProperty, change.NewValue);
+                    
+                    PropertyAttributeAttribute attribute;
+                    var currentRegisteredProperty = registeredProperty;
+                    do
+                    {
+                        attribute = currentRegisteredProperty.Attribute;
+
+                        var childAttributeUpdate = attributeUpdate;
+                        attributeUpdate = GetOrCreateSubjectPropertyUpdate(registeredSubject, attribute.PropertyName, knownSubjectDescriptions);
+                        attributeUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
+                        attributeUpdate.Attributes[attribute.AttributeName] = childAttributeUpdate;
+                    
+                        currentRegisteredProperty = registeredSubject.Properties[attribute.PropertyName];
+                    } while (currentRegisteredProperty.IsAttribute);
+                    
+                    var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredSubject, attribute.PropertyName, knownSubjectDescriptions);
+                    subjectUpdate.Properties[attribute.PropertyName] = propertyUpdate;
+                }
+                else
+                {
+                    // handle property changes
+                    var propertyName = property.Name;
+                 
+                    var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredSubject, propertyName, knownSubjectDescriptions);
+                    propertyUpdate.ApplyRegisteredPropertyValue(registeredProperty, change.NewValue);
+                 
+                    subjectUpdate.Properties[propertyName] = propertyUpdate;
+                }
+
                 property = registeredSubject.Parents.FirstOrDefault();
                 if (property.Subject is not null)
                 {
@@ -75,8 +99,7 @@ public class SubjectUpdate
 
                     CreateParentSubjectDescription(property, propertySubject, knownSubjectDescriptions);
                 }
-            } 
-            while (property.Subject is not null && property.Subject != subject && registeredSubject.Parents.Any());
+            } while (property.Subject is not null && property.Subject != subject && registeredSubject.Parents.Any());
         }
 
         return update;
@@ -87,7 +110,7 @@ public class SubjectUpdate
         IInterceptorSubject childSubject,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectDescriptions)
     {
-        var parentSubjectDescription = GetOrCreateSubjectDescription(parentProperty.Subject, knownSubjectDescriptions);
+        var parentSubjectDescription = GetOrCreateSubjectUpdate(parentProperty.Subject, knownSubjectDescriptions);
         var property = GetOrCreateProperty(parentSubjectDescription, parentProperty.Name);
 
         var registry = parentProperty.Subject.Context.GetService<ISubjectRegistry>();
@@ -96,17 +119,19 @@ public class SubjectUpdate
         var children = parentRegisteredSubject.Properties[parentProperty.Name].Children;
         if (children.Any(c => c.Index is not null))
         {
-            property.Items = children
+            property.Action = SubjectPropertyUpdateAction.UpdateCollection;
+            property.Collection = children
                 .Select(s => new SubjectPropertyCollectionUpdate
                 {
-                    Item = GetOrCreateSubjectDescription(s.Subject, knownSubjectDescriptions),
+                    Item = GetOrCreateSubjectUpdate(s.Subject, knownSubjectDescriptions),
                     Index = s.Index
                 })
                 .ToList();
         }
         else
         {
-            property.Item = GetOrCreateSubjectDescription(childSubject, knownSubjectDescriptions);
+            property.Action = SubjectPropertyUpdateAction.UpdateItem;
+            property.Item = GetOrCreateSubjectUpdate(childSubject, knownSubjectDescriptions);
         }
     }
 
@@ -121,12 +146,28 @@ public class SubjectUpdate
         return property;
     }
 
-    private static SubjectUpdate GetOrCreateSubjectDescription(
-        IInterceptorSubject subject, Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectDescriptions)
+    private static SubjectUpdate GetOrCreateSubjectUpdate(
+        IInterceptorSubject subject, 
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectDescriptions)
     {
         var parentSubjectDescription = knownSubjectDescriptions.TryGetValue(subject, out var description) ? description : new SubjectUpdate();
 
         knownSubjectDescriptions[subject] = parentSubjectDescription;
         return parentSubjectDescription;
+    }
+
+    private static SubjectPropertyUpdate GetOrCreateSubjectPropertyUpdate(
+        RegisteredSubject registeredSubject, string propertyName,
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectDescriptions)
+    {
+        var subjectUpdate = GetOrCreateSubjectUpdate(registeredSubject.Subject, knownSubjectDescriptions);
+        if (subjectUpdate.Properties.TryGetValue(propertyName, out var existingSubjectUpdate))
+        {
+            return existingSubjectUpdate;
+        }
+        
+        var propertyUpdate = new SubjectPropertyUpdate();
+        subjectUpdate.Properties[propertyName] = propertyUpdate;
+        return propertyUpdate;
     }
 }
