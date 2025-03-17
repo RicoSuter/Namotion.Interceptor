@@ -84,7 +84,7 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
     {
         foreach (var property in subject.Properties)
         {
-            var propertyName = _source.SourcePathProvider.TryGetSourcePathSegmentName(property.Value.Property);
+            var propertyName = _source.SourcePathProvider.TryGetSourcePathSegmentName(property.Value);
             if (propertyName is not null)
             {
                 var children = property.Value.Children;

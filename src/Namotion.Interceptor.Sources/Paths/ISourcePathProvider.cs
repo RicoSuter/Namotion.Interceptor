@@ -1,8 +1,12 @@
-﻿namespace Namotion.Interceptor.Sources.Paths;
+﻿using Namotion.Interceptor.Registry.Abstractions;
+
+namespace Namotion.Interceptor.Sources.Paths;
 
 public interface ISourcePathProvider
 {
-    string? TryGetSourcePathSegmentName(PropertyReference property);
+    bool IsIncluded(RegisteredSubjectProperty property);
+    
+    string? TryGetSourcePathSegmentName(RegisteredSubjectProperty property);
 
-    string? TryGetSourcePropertyPath(PropertyReference property);
+    string? TryGetSourcePropertyPath(string path, RegisteredSubjectProperty property);
 }

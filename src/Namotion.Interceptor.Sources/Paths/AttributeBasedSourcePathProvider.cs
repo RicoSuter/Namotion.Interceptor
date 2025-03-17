@@ -18,17 +18,22 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
         _pathPrefix = pathPrefix ?? string.Empty;
     }
 
-    public string? TryGetSourcePathSegmentName(PropertyReference property)
+    public bool IsIncluded(RegisteredSubjectProperty property)
     {
-        var registeredProperty = property.GetRegisteredProperty();
-        return TryGetAttributeBasedSourcePathSegmentName(registeredProperty, _sourceName);
+        return property.IsAttribute || property.Attributes.Any(a => a is SourceNameAttribute || a is SourcePathAttribute);
     }
 
-    public string? TryGetSourcePropertyPath(PropertyReference property)
+    public string? TryGetSourcePathSegmentName(RegisteredSubjectProperty property)
     {
-        var registry = property.Subject.Context.GetService<ISubjectRegistry>();
-        var registeredProperty = registry.KnownSubjects[property.Subject].Properties[property.Name];
-        var path = TryGetAttributeBasedSourcePropertyPath(registeredProperty, _sourceName);
+        return TryGetAttributeBasedSourcePathSegmentName(property, _sourceName);
+    }
+
+    public string? TryGetSourcePropertyPath(string proposedPath, RegisteredSubjectProperty property)
+    {
+        if (property.IsAttribute)
+            return proposedPath;
+        
+        var path = TryGetAttributeBasedSourcePropertyPath(property, _sourceName);
         return path is not null ? _pathPrefix + path : null;
     }
 
