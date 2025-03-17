@@ -27,8 +27,7 @@ public class SubjectUpdate
                 .Where(p => p.Value is { HasGetter: true, IsAttribute: false }))
             {
                 var value = property.Value.GetValue();
-                subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.Create(
-                    registeredSubject, property.Key, property.Value, value);
+                subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.Create(registeredSubject, property.Key, property.Value);
             }
         }
 
@@ -61,7 +60,7 @@ public class SubjectUpdate
                 {
                     // handle attribute changes
                     var attributeUpdate = new SubjectPropertyUpdate();
-                    attributeUpdate.ApplyRegisteredPropertyValue(registeredProperty, change.NewValue);
+                    attributeUpdate.ApplyPropertyValue(change.NewValue);
                     
                     PropertyAttributeAttribute attribute;
                     var currentRegisteredProperty = registeredProperty;
@@ -86,7 +85,7 @@ public class SubjectUpdate
                     var propertyName = property.Name;
                  
                     var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredSubject, propertyName, knownSubjectDescriptions);
-                    propertyUpdate.ApplyRegisteredPropertyValue(registeredProperty, change.NewValue);
+                    propertyUpdate.ApplyPropertyValue(change.NewValue);
                  
                     subjectUpdate.Properties[propertyName] = propertyUpdate;
                 }

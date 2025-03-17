@@ -1,36 +1,9 @@
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Sources.Extensions;
 
 public static class SubjectUpdateExtensions
 {
-    public static void ApplyRegisteredPropertyValue(this SubjectPropertyUpdate propertyUpdate, RegisteredSubjectProperty property, object? value)
-    {
-        var children = property.Children; // TODO: Use value instead?
-        if (children.Any(c => c.Index is not null))
-        {
-            propertyUpdate.Action = SubjectPropertyUpdateAction.UpdateCollection;
-            propertyUpdate.Collection = children
-                .Select(s => new SubjectPropertyCollectionUpdate
-                {
-                    Item = SubjectUpdate.CreateCompleteUpdate(s.Subject),
-                    Index = s.Index
-                })
-                .ToList();
-        }
-        else if (value is IInterceptorSubject itemSubject)
-        {
-            propertyUpdate.Action = SubjectPropertyUpdateAction.UpdateItem;
-            propertyUpdate.Item = SubjectUpdate.CreateCompleteUpdate(itemSubject);
-        }
-        else
-        {
-            propertyUpdate.Action = SubjectPropertyUpdateAction.UpdateValue;
-            propertyUpdate.Value = value;
-        }
-    }
-    
     public static void VisitSubjectValueUpdates(this IInterceptorSubject subject, SubjectUpdate update, 
         Action<PropertyReference, SubjectPropertyUpdate> applySubjectValueUpdate)
     {
