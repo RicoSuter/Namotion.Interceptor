@@ -26,7 +26,6 @@ public class SubjectUpdate
             foreach (var property in registeredSubject.Properties
                 .Where(p => p.Value is { HasGetter: true, IsAttribute: false }))
             {
-                var value = property.Value.GetValue();
                 subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.Create(registeredSubject, property.Key, property.Value);
             }
         }

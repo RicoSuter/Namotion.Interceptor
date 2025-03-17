@@ -4,14 +4,6 @@ using Namotion.Interceptor.Sources.Extensions;
 
 namespace Namotion.Interceptor.Sources;
 
-public enum SubjectPropertyUpdateAction
-{
-    None,
-    UpdateValue,
-    UpdateItem,
-    UpdateCollection
-}
-
 public class SubjectPropertyUpdate
 {
     public string? Type { get; init; }
@@ -44,8 +36,8 @@ public class SubjectPropertyUpdate
             Type = property.Type.Name,
             Attributes = attributes.Count != 0 ? attributes : null
         };
-
-        propertyUpdate.ApplyPropertyValue(property);
+        
+        propertyUpdate.ApplyPropertyValue(property.GetValue());
         return propertyUpdate;
     }
 }
