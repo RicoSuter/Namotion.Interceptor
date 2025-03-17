@@ -17,7 +17,7 @@ public static class MqttSubjectServerSourceExtensions
     {
         return serviceCollection.AddMqttSubjectServer(sp => sp.GetRequiredService<TSubject>(), sourceName, pathPrefix);
     }
-    
+
     public static IServiceCollection AddMqttSubjectServer<TSubject>(this IServiceCollection serviceCollection,
         Func<IServiceProvider, TSubject> subjectSelector, string sourceName, string? pathPrefix = null)
         where TSubject : IInterceptorSubject
@@ -26,8 +26,9 @@ public static class MqttSubjectServerSourceExtensions
             .AddSingleton(sp =>
             {
                 var subject = subjectSelector(sp);
+                var attributeBasedSourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, "/", pathPrefix);
                 return new MqttSubjectServerSource<TSubject>(
-                    subject, sp.GetRequiredService<ILogger<MqttSubjectServerSource<TSubject>>>());
+                    subject, attributeBasedSourcePathProvider, sp.GetRequiredService<ILogger<MqttSubjectServerSource<TSubject>>>());
             })
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<MqttSubjectServerSource<TSubject>>())
             .AddSingleton<IHostedService>(sp =>

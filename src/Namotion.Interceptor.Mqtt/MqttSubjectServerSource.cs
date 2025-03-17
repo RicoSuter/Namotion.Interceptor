@@ -9,6 +9,7 @@ using MQTTnet;
 using MQTTnet.Server;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Extensions;
+using Namotion.Interceptor.Sources.Paths;
 
 namespace Namotion.Interceptor.Mqtt
 {
@@ -18,6 +19,7 @@ namespace Namotion.Interceptor.Mqtt
         private readonly string _serverClientId = "Server" +  Guid.NewGuid().ToString("N");
 
         private readonly TSubject _subject;
+        private readonly ISourcePathProvider _sourcePathProvider;
         private readonly ILogger _logger;
 
         private int _numberOfClients = 0;
@@ -33,9 +35,12 @@ namespace Namotion.Interceptor.Mqtt
 
         public IInterceptorSubject Subject => _subject;
 
-        public MqttSubjectServerSource(TSubject subject, ILogger<MqttSubjectServerSource<TSubject>> logger)
+        public MqttSubjectServerSource(TSubject subject, 
+            ISourcePathProvider sourcePathProvider,
+            ILogger<MqttSubjectServerSource<TSubject>> logger)
         {
             _subject = subject;
+            _sourcePathProvider = sourcePathProvider;
             _logger = logger;
         }
 
@@ -93,7 +98,9 @@ namespace Namotion.Interceptor.Mqtt
 
         public async Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken)
         {
-            foreach (var (path, value) in update.Properties.EnumeratePaths("/", "/"))
+            foreach (var (path, value) in update.Properties
+                .EnumeratePaths(_subject, "/", "/",
+                    property => property.IsAttribute || _sourcePathProvider.TryGetSourcePathSegmentName(property.Property) is not null))
             {
                 await PublishPropertyValueAsync(path, value, cancellationToken);
             }
@@ -109,7 +116,8 @@ namespace Namotion.Interceptor.Mqtt
                 foreach (var (path, value) in SubjectUpdate
                      .CreateCompleteUpdate(_subject)
                      .Properties
-                     .EnumeratePaths("/", "/"))
+                     .EnumeratePaths(_subject, "/", "/",
+                         property => property.IsAttribute || _sourcePathProvider.TryGetSourcePathSegmentName(property.Property) is not null))
                 {
                     // TODO: Send only to new client
                     await PublishPropertyValueAsync(path, value, CancellationToken.None);
@@ -146,8 +154,14 @@ namespace Namotion.Interceptor.Mqtt
                 var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
                 var document = JsonDocument.Parse(payload);
 
-                var update = _subject.CreateSubjectUpdateFromPath(path, "/", "/", property => document.Deserialize(property.Type));
-                _propertyUpdateAction?.Invoke(update);
+                var update = _subject.TryCreateSubjectUpdateFromPath(path, "/", "/", 
+                    property => property.IsAttribute || _sourcePathProvider.TryGetSourcePathSegmentName(property.Property) is not null,
+                    property => document.Deserialize(property.Type));
+              
+                if (update is not null)
+                {
+                    _propertyUpdateAction?.Invoke(update);
+                }
             }
             catch (Exception ex)
             {

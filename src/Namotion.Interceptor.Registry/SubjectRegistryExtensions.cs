@@ -67,7 +67,7 @@ public static class SubjectRegistryExtensions
         return TryGetRegisteredAttribute(property.Subject, property.Name, attributeName);
     }
 
-    private static RegisteredSubjectProperty? TryGetRegisteredAttribute(this IInterceptorSubject subject, string propertyName, string attributeName)
+    public static RegisteredSubjectProperty? TryGetRegisteredAttribute(this IInterceptorSubject subject, string propertyName, string attributeName)
     {
         var registry = subject.Context.GetService<ISubjectRegistry>();
         var attribute = registry.KnownSubjects[subject].Properties
