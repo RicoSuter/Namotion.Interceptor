@@ -78,10 +78,8 @@ public static class SubjectRegistryExtensions
         return attribute.Value;
     }
 
-    public static IReadOnlyDictionary<string, RegisteredSubjectProperty> GetRegisteredPropertyAttributes(this PropertyReference property)
+    public static IReadOnlyDictionary<string, RegisteredSubjectProperty> GetRegisteredAttributes(this PropertyReference property)
     {
-        // TODO: Also support non-registry scenario
-
         var registry = property.Subject.Context.GetService<ISubjectRegistry>();
         return registry.KnownSubjects[property.Subject].Properties
             .Where(p => p.Value.Attributes
