@@ -40,7 +40,7 @@ public static class SubjectUpdatePathExtensions
                         .Children
                         .Select(c => new SubjectPropertyCollectionUpdate
                         {
-                            Index = c.Index ?? throw new InvalidOperationException("Index must not be null."),
+                            Index = c.Index ?? throw new InvalidOperationException($"Index of collection property '{registeredProperty.Property.Name}' must not be null."),
                             Item = new SubjectUpdate()
                         })
                         .ToList();
@@ -115,7 +115,8 @@ public static class SubjectUpdatePathExtensions
         {
             foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
             {
-                var registeredAttribute = subject.TryGetRegisteredAttribute(propertyName, attributeName) ?? throw new KeyNotFoundException(propertyName);
+                var registeredAttribute = subject.TryGetRegisteredAttribute(propertyName, attributeName) 
+                    ?? throw new InvalidOperationException($"The attribute '{attributeName}' is not registered for property '{propertyName}'.");
             
                 var attributePath = $"{pathPrefix}{propertyPathDelimiter}{attributeName}";
                 foreach (var (path, value, property) in attributeUpdate.EnumeratePaths(attributePath, subject, registeredAttribute.Property.Name, propertyPathDelimiter, attributePathDelimiter, sourcePathProvider))
@@ -128,7 +129,9 @@ public static class SubjectUpdatePathExtensions
         switch (propertyUpdate.Action)
         {
             case SubjectPropertyUpdateAction.UpdateValue: // handle value
-                var resolvedPath = sourcePathProvider.TryGetSourcePropertyPath(pathPrefix, registeredProperty) ?? throw new InvalidOperationException("Source path must not be null.");
+                var resolvedPath = sourcePathProvider.TryGetSourcePropertyPath(pathPrefix, registeredProperty) 
+                    ?? throw new InvalidOperationException($"Source path for the proposed path '{pathPrefix}' must not be null.");
+         
                 yield return (resolvedPath, propertyUpdate.Value, registeredProperty);
                 break;
 

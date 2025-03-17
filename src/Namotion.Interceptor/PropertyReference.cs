@@ -8,11 +8,6 @@ public readonly record struct PropertyReference
         Name = name;
     }
 
-    public static PropertyReference Create(IInterceptorSubject subject, string name)
-    {
-        return new PropertyReference(subject, name);
-    }
-    
     public IInterceptorSubject Subject { get; }
     
     public string Name { get; }
