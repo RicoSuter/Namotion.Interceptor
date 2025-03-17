@@ -17,7 +17,7 @@ namespace Namotion.Interceptor.Mqtt
     public class MqttSubjectServerSource<TSubject> : BackgroundService, ISubjectSource
         where TSubject : IInterceptorSubject
     {
-        private readonly string _serverClientId = "Server" + Guid.NewGuid().ToString("N");
+        private readonly string _serverClientId = "Server_" + Guid.NewGuid().ToString("N");
 
         private readonly TSubject _subject;
         private readonly ISourcePathProvider _sourcePathProvider;
