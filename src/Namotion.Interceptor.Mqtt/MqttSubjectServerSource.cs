@@ -99,8 +99,7 @@ namespace Namotion.Interceptor.Mqtt
 
         public async Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken)
         {
-            foreach (var (path, value) in update.Properties
-                         .EnumeratePaths(_subject, "/", "/", IsPropertyIncluded))
+            foreach (var (path, value) in update.EnumeratePaths(_subject, "/", "/", _sourcePathProvider))
             {
                 await PublishPropertyValueAsync(path, value, cancellationToken);
             }
@@ -114,9 +113,8 @@ namespace Namotion.Interceptor.Mqtt
             {
                 await Task.Delay(1000);
                 foreach (var (path, value) in SubjectUpdate
-                             .CreateCompleteUpdate(_subject)
-                             .Properties
-                             .EnumeratePaths(_subject, "/", "/", IsPropertyIncluded))
+                    .CreateCompleteUpdate(_subject)
+                    .EnumeratePaths(_subject, "/", "/", _sourcePathProvider))
                 {
                     // TODO: Send only to new client
                     await PublishPropertyValueAsync(path, value, CancellationToken.None);
@@ -154,7 +152,7 @@ namespace Namotion.Interceptor.Mqtt
                 var document = JsonDocument.Parse(payload);
 
                 var update = _subject.TryCreateSubjectUpdateFromPath(path,
-                    "/", "/", IsPropertyIncluded,
+                    "/", "/", _sourcePathProvider,
                     property => document.Deserialize(property.Type));
 
                 if (update is not null)
@@ -168,11 +166,6 @@ namespace Namotion.Interceptor.Mqtt
             }
 
             return Task.CompletedTask;
-        }
-
-        private bool IsPropertyIncluded(RegisteredSubjectProperty property)
-        {
-            return property.IsAttribute || _sourcePathProvider.TryGetSourcePathSegmentName(property.Property) is not null;
         }
 
         private Task ClientDisconnectedAsync(ClientDisconnectedEventArgs arg)
