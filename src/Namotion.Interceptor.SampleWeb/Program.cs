@@ -49,10 +49,12 @@ namespace Namotion.Interceptor.SampleWeb
         public partial decimal Pressure { get; set; }
 
         [Unit("bar")]
+        [SourceName("mqtt", "pressure/minimum")]
         [PropertyAttribute(nameof(Pressure), "Minimum")]
         public partial decimal Pressure_Minimum { get; set; }
 
         [Derived]
+        [SourceName("mqtt", "pressure/maximum")]
         [PropertyAttribute(nameof(Pressure), "Maximum")]
         public decimal Pressure_Maximum => 4 * Pressure;
 
@@ -112,7 +114,7 @@ namespace Namotion.Interceptor.SampleWeb
             builder.Services.AddSubjectController<Car, SubjectController<Car>>();
 
             // trackable UPC UA
-            // builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
+            builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
 
             // trackable mqtt
             builder.Services.AddMqttSubjectServer<Car>("mqtt");

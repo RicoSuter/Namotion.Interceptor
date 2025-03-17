@@ -20,36 +20,31 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
 
     public bool IsIncluded(RegisteredSubjectProperty property)
     {
-        return property.IsAttribute || property.Attributes.Any(a => a is SourceNameAttribute || a is SourcePathAttribute);
+        return property.Attributes
+            .Any(a => 
+                (a is SourceNameAttribute sna && sna.SourceName == _sourceName) || 
+                (a is SourcePathAttribute spa && spa.SourceName == _sourceName));
     }
 
     public string? TryGetSourcePathSegmentName(RegisteredSubjectProperty property)
     {
-        return TryGetAttributeBasedSourcePathSegmentName(property, _sourceName);
-    }
-
-    public string? TryGetSourcePropertyPath(string proposedPath, RegisteredSubjectProperty property)
-    {
-        if (property.IsAttribute)
-            return proposedPath;
-        
-        var path = TryGetAttributeBasedSourcePropertyPath(property, _sourceName);
-        return path is not null ? _pathPrefix + path : null;
-    }
-
-    private string? TryGetAttributeBasedSourcePathSegmentName(RegisteredSubjectProperty property, string sourceName)
-    {
         var nameAttribute = property
             .Attributes
             .OfType<SourceNameAttribute>()
-            .FirstOrDefault(a => a.SourceName == sourceName);
+            .FirstOrDefault(a => a.SourceName == _sourceName);
 
         var pathAttribute = property
             .Attributes
             .OfType<SourcePathAttribute>()
-            .FirstOrDefault(a => a.SourceName == sourceName);
+            .FirstOrDefault(a => a.SourceName == _sourceName);
 
         return nameAttribute?.Path ?? pathAttribute?.Path;
+    }
+
+    public string? TryGetSourcePropertyPath(string proposedPath, RegisteredSubjectProperty property)
+    {
+        var path = TryGetAttributeBasedSourcePropertyPath(property, _sourceName);
+        return path is not null ? _pathPrefix + path : null;
     }
 
     private string? TryGetAttributeBasedSourcePropertyPath(RegisteredSubjectProperty property, string sourceName)

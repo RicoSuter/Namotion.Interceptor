@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 
@@ -19,7 +20,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
     private readonly string? _rootName;
 
     private OpcUaSubjectServer<TSubject>? _server;
-    // private Action<PropertyPathReference>? _propertyUpdateAction;
+    private Action<SubjectUpdate>? _applySourceChangeAction;
 
     internal ISourcePathProvider SourcePathProvider { get; }
 
@@ -34,6 +35,40 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         _rootName = rootName;
 
         SourcePathProvider = sourcePathProvider;
+    }
+
+    public IInterceptorSubject Subject => _subject;
+    
+    public Task<IDisposable?> InitializeAsync(Action<SubjectUpdate> applySourceChangeAction, CancellationToken cancellationToken)
+    {
+        _applySourceChangeAction = applySourceChangeAction;
+        return Task.FromResult<IDisposable?>(null);
+    }
+
+    public Task<SubjectUpdate> ReadFromSourceAsync(CancellationToken cancellationToken)
+    {
+        return Task.FromResult(new SubjectUpdate());
+    }
+
+    public Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken)
+    {
+        foreach (var (_, _, property) in update
+             .EnumeratePaths(_subject, ".", ".", SourcePathProvider))
+        {
+            if (property.Property.GetPropertyData(OpcVariableKey) is BaseDataVariableState node)
+            {
+                var actualValue = property.GetValue();
+                if (actualValue is decimal)
+                {
+                    actualValue = Convert.ToDouble(actualValue);
+                }
+    
+                node.Value = actualValue;
+                node.ClearChangeMasks(_server?.CurrentInstance.DefaultSystemContext, false);
+            }
+        }
+    
+        return Task.CompletedTask;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -80,69 +115,15 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         }
     }
 
-    // internal void UpdateProperty(PropertyReference property, string sourcePath, object? value)
-    // {
-    //     var convertedValue = Convert.ChangeType(value, property.Metadata.Type); // TODO: improve conversion here
-    //     _propertyUpdateAction?.Invoke(new PropertyPathReference(property, sourcePath, convertedValue));
-    // }
-    //
-    // public Task<IDisposable?> InitializeAsync(IEnumerable<PropertyPathReference> properties, Action<PropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
-    // {
-    //     _propertyUpdateAction = propertyUpdateAction;
-    //     return Task.FromResult<IDisposable?>(null);
-    // }
-    //
-    // public Task<IEnumerable<PropertyPathReference>> ReadAsync(IEnumerable<PropertyPathReference> properties, CancellationToken cancellationToken)
-    // {
-    //     return Task.FromResult<IEnumerable<PropertyPathReference>>(properties
-    //         .Where(p => p.Property.TryGetPropertyData(OpcVariableKey, out _))
-    //         .Select(property => (property, node: property.Property.GetPropertyData(OpcVariableKey) as BaseDataVariableState))
-    //         .Where(p => p.node is not null)
-    //         .Select(p => new PropertyPathReference(p.property.Property, p.property.Path,
-    //             p.property.Property.Metadata.Type == typeof(decimal) ? Convert.ToDecimal(p.node!.Value) : p.node!.Value))
-    //         .ToList());
-    // }
-    //
-    // public Task WriteAsync(IEnumerable<PropertyPathReference> propertyChanges, CancellationToken cancellationToken)
-    // {
-    //     foreach (var property in propertyChanges
-    //         .Where(p => p.Property.TryGetPropertyData(OpcVariableKey, out var _)))
-    //     {
-    //         if (property.Property.GetPropertyData(OpcVariableKey) is BaseDataVariableState node)
-    //         {
-    //             var actualValue = property.Value;
-    //             if (actualValue is decimal)
-    //             {
-    //                 actualValue = Convert.ToDouble(actualValue);
-    //             }
-    //
-    //             node.Value = actualValue;
-    //             node.ClearChangeMasks(_server?.CurrentInstance.DefaultSystemContext, false);
-    //         }
-    //     }
-    //
-    //     return Task.CompletedTask;
-    // }
+    internal void UpdateProperty(PropertyReference property, string sourcePath, object? value)
+    {
+        var convertedValue = Convert.ChangeType(value, property.Metadata.Type); // TODO: improve conversion here
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, [new PropertyChangedContext(property, null, convertedValue)]);
+        _applySourceChangeAction?.Invoke(update);
+    }
 
     public string? TryGetSourcePropertyPath(PropertyReference property)
     {
         return SourcePathProvider.TryGetSourcePropertyPath(null!, property.GetRegisteredProperty());
-    }
-
-    public IInterceptorSubject Subject => _subject;
-    
-    public Task<IDisposable?> InitializeAsync(Action<SubjectUpdate> applySourceChangeAction, CancellationToken cancellationToken)
-    {
-        throw new NotImplementedException();
-    }
-
-    public Task<SubjectUpdate> ReadFromSourceAsync(CancellationToken cancellationToken)
-    {
-        throw new NotImplementedException();
-    }
-
-    public Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken)
-    {
-        throw new NotImplementedException();
     }
 }
