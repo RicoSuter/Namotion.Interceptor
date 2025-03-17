@@ -116,7 +116,7 @@ public static class SubjectUpdatePathExtensions
                 var registeredAttribute = subject.TryGetRegisteredAttribute(propertyName, attributeName) 
                     ?? throw new InvalidOperationException($"The attribute '{attributeName}' is not registered for property '{propertyName}'.");
             
-                var attributePath = sourcePathProvider.GetAttributePath(registeredProperty, registeredAttribute, pathPrefix);
+                var attributePath = sourcePathProvider.GetAttributePath(pathPrefix, registeredProperty, registeredAttribute);
                 foreach (var (path, value, property) in attributeUpdate
                     .EnumeratePaths(subject, registeredAttribute.Property.Name, sourcePathProvider, attributePath))
                 {
@@ -129,10 +129,10 @@ public static class SubjectUpdatePathExtensions
         {
             case SubjectPropertyUpdateAction.UpdateValue: // handle value
                 var propertyPath = registeredProperty.IsAttribute == false ? 
-                    sourcePathProvider.GetPropertyPath(registeredProperty, pathPrefix) : 
+                    sourcePathProvider.GetPropertyPath(pathPrefix, registeredProperty) : 
                     pathPrefix;
 
-                var resolvedPath = sourcePathProvider.TryGetSourcePropertyPath(propertyPath, registeredProperty) 
+                var resolvedPath = sourcePathProvider.TryGetSourcePropertyPath(registeredProperty, propertyPath) 
                     ?? throw new InvalidOperationException($"Source path for the proposed path '{pathPrefix}' must not be null.");
          
                 yield return (resolvedPath, propertyUpdate.Value, registeredProperty);
@@ -140,7 +140,7 @@ public static class SubjectUpdatePathExtensions
 
             case SubjectPropertyUpdateAction.UpdateItem: // handle item
                 var propertyPath2 = registeredProperty.IsAttribute == false ? 
-                    sourcePathProvider.GetPropertyPath(registeredProperty, pathPrefix) : 
+                    sourcePathProvider.GetPropertyPath(pathPrefix, registeredProperty) : 
                     pathPrefix;
                 
                 if (registeredProperty.GetValue() is IInterceptorSubject currentItem)
@@ -172,7 +172,7 @@ public static class SubjectUpdatePathExtensions
 
                     if (currentCollectionItem is not null)
                     {
-                        var propertyPath3 = sourcePathProvider.GetPropertyPath(registeredProperty, pathPrefix) + $"[{item.Index}]";
+                        var propertyPath3 = sourcePathProvider.GetPropertyPath(pathPrefix, registeredProperty) + $"[{item.Index}]";
                         foreach (var (path, value, property) in item.Item
                             .EnumeratePaths(currentCollectionItem, sourcePathProvider, propertyPath3))
                         {

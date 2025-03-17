@@ -8,10 +8,10 @@ public interface ISourcePathProvider
     
     string? TryGetSourcePathSegmentName(RegisteredSubjectProperty property);
 
-    // string GetSourcePropertyPath(property, path) => path;
-    string? TryGetSourcePropertyPath(string path, RegisteredSubjectProperty property);
+    // change to GetP(path, property) and exclude property segment?
+    string? TryGetSourcePropertyPath(RegisteredSubjectProperty property, string fullPathHint);
     
-    string GetAttributePath(RegisteredSubjectProperty property, RegisteredSubjectProperty attribute, string pathHint);
+    string GetAttributePath(string path, RegisteredSubjectProperty property, RegisteredSubjectProperty attribute);
     
-    string GetPropertyPath(RegisteredSubjectProperty property, string pathHint);
+    string GetPropertyPath(string path, RegisteredSubjectProperty property);
 }
