@@ -82,16 +82,15 @@ public static class SubjectUpdatePathExtensions
         return rootUpdate;
     }
 
-    public static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePaths(
-        this SubjectUpdate subjectUpdate,
+    public static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePaths(this SubjectUpdate subjectUpdate,
         IInterceptorSubject subject,
-        string propertyPathDelimiter, string attributePathDelimiter,
-        ISourcePathProvider sourcePathProvider)
+        ISourcePathProvider sourcePathProvider,
+        string pathPrefix = "")
     {
         foreach (var property in subjectUpdate.Properties)
         {
             foreach (var (path, value, registeredProperty) in property.Value
-                .EnumeratePaths(property.Key, subject, property.Key, propertyPathDelimiter, attributePathDelimiter, sourcePathProvider))
+                .EnumeratePaths(subject, property.Key, sourcePathProvider, pathPrefix))
             {
                 yield return (path, value, registeredProperty);
             }
@@ -99,11 +98,10 @@ public static class SubjectUpdatePathExtensions
     }
 
     private static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePaths(this SubjectPropertyUpdate propertyUpdate,
-        string pathPrefix,
         IInterceptorSubject subject,
         string propertyName,
-        string propertyPathDelimiter, string attributePathDelimiter,
-        ISourcePathProvider sourcePathProvider)
+        ISourcePathProvider sourcePathProvider,
+        string pathPrefix = "")
     {
         var registeredProperty = subject.TryGetRegisteredProperty(propertyName) ?? throw new KeyNotFoundException(propertyName);
         if (sourcePathProvider.IsIncluded(registeredProperty) == false)
@@ -118,28 +116,37 @@ public static class SubjectUpdatePathExtensions
                 var registeredAttribute = subject.TryGetRegisteredAttribute(propertyName, attributeName) 
                     ?? throw new InvalidOperationException($"The attribute '{attributeName}' is not registered for property '{propertyName}'.");
             
-                var attributePath = $"{pathPrefix}{propertyPathDelimiter}{attributeName}";
-                foreach (var (path, value, property) in attributeUpdate.EnumeratePaths(attributePath, subject, registeredAttribute.Property.Name, propertyPathDelimiter, attributePathDelimiter, sourcePathProvider))
+                var attributePath = sourcePathProvider.GetAttributePath(registeredProperty, registeredAttribute, pathPrefix);
+                foreach (var (path, value, property) in attributeUpdate
+                    .EnumeratePaths(subject, registeredAttribute.Property.Name, sourcePathProvider, attributePath))
                 {
                     yield return (path, value, property);
                 }
             }
         }
-
+        
         switch (propertyUpdate.Action)
         {
             case SubjectPropertyUpdateAction.UpdateValue: // handle value
-                var resolvedPath = sourcePathProvider.TryGetSourcePropertyPath(pathPrefix, registeredProperty) 
+                var propertyPath = registeredProperty.IsAttribute == false ? 
+                    sourcePathProvider.GetPropertyPath(registeredProperty, pathPrefix) : 
+                    pathPrefix;
+
+                var resolvedPath = sourcePathProvider.TryGetSourcePropertyPath(propertyPath, registeredProperty) 
                     ?? throw new InvalidOperationException($"Source path for the proposed path '{pathPrefix}' must not be null.");
          
                 yield return (resolvedPath, propertyUpdate.Value, registeredProperty);
                 break;
 
             case SubjectPropertyUpdateAction.UpdateItem: // handle item
+                var propertyPath2 = registeredProperty.IsAttribute == false ? 
+                    sourcePathProvider.GetPropertyPath(registeredProperty, pathPrefix) : 
+                    pathPrefix;
+                
                 if (registeredProperty.GetValue() is IInterceptorSubject currentItem)
                 {
                     foreach (var (path, value, property) in propertyUpdate.Item!
-                        .EnumeratePaths(currentItem, propertyPathDelimiter, attributePathDelimiter, sourcePathProvider))
+                        .EnumeratePaths(currentItem, sourcePathProvider, propertyPath2))
                     {
                         yield return (path, value, property);
                     }
@@ -165,8 +172,9 @@ public static class SubjectUpdatePathExtensions
 
                     if (currentCollectionItem is not null)
                     {
+                        var propertyPath3 = sourcePathProvider.GetPropertyPath(registeredProperty, pathPrefix) + $"[{item.Index}]";
                         foreach (var (path, value, property) in item.Item
-                            .EnumeratePaths(currentCollectionItem, propertyPathDelimiter, attributePathDelimiter, sourcePathProvider))
+                            .EnumeratePaths(currentCollectionItem, sourcePathProvider, propertyPath3))
                         {
                             yield return (path, value, property);
                         }

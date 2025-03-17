@@ -53,7 +53,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
     public Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken)
     {
         foreach (var (_, _, property) in update
-             .EnumeratePaths(_subject, ".", ".", SourcePathProvider))
+             .EnumeratePaths(_subject, SourcePathProvider))
         {
             if (property.Property.GetPropertyData(OpcVariableKey) is BaseDataVariableState node)
             {
