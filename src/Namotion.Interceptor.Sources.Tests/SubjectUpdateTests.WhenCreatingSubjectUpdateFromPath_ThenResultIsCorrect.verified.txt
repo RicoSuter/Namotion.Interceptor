@@ -1,0 +1,46 @@
+﻿{
+  Properties: {
+    Children: {
+      Action: UpdateCollection,
+      Collection: [
+        {
+          Index: 0,
+          Item: {}
+        },
+        {
+          Index: 1,
+          Item: {
+            Properties: {
+              FirstName: {
+                Value: RandomName1,
+                Action: UpdateValue
+              }
+            }
+          }
+        },
+        {
+          Index: 2,
+          Item: {
+            Properties: {
+              FirstName: {
+                Value: RandomName2,
+                Action: UpdateValue
+              }
+            }
+          }
+        }
+      ]
+    },
+    Father: {
+      Action: UpdateItem,
+      Item: {
+        Properties: {
+          FirstName: {
+            Value: RandomName3,
+            Action: UpdateValue
+          }
+        }
+      }
+    }
+  }
+}
