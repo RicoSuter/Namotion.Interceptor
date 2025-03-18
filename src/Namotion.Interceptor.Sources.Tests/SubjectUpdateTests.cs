@@ -10,8 +10,6 @@ namespace Namotion.Interceptor.Sources.Tests;
 
 public class SubjectUpdateTests
 {
-    // TODO: Move to source tests
-
     [Fact]
     public async Task WhenGeneratingCompleteSubjectDescription_ThenResultIsCorrect()
     {
@@ -144,7 +142,7 @@ public class SubjectUpdateTests
         };
 
         // Act
-        var sourcePathProvider = new TestSourcePathProvider(".", "@");
+        var sourcePathProvider = new TestSourcePathProvider();
         var partialSubjectUpdate = person.CreateSubjectUpdateFromPaths(
             new Dictionary<string, object?>
             {
@@ -159,15 +157,6 @@ public class SubjectUpdateTests
 
     public class TestSourcePathProvider : ISourcePathProvider
     {
-        private readonly string _propertyPathDelimiter;
-        private readonly string _attributePathDelimiter;
-
-        public TestSourcePathProvider(string propertyPathDelimiter, string attributePathDelimiter)
-        {
-            _propertyPathDelimiter = propertyPathDelimiter;
-            _attributePathDelimiter = attributePathDelimiter;
-        }
-
         public bool IsPropertyIncluded(RegisteredSubjectProperty property)
         {
             return true;

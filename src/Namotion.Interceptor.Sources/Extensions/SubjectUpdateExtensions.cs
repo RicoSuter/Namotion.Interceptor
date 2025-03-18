@@ -47,14 +47,14 @@ public static class SubjectUpdateExtensions
         SubjectPropertyUpdate propertyUpdate,
         Action<PropertyReference, SubjectPropertyUpdate> visitValuePropertyUpdate)
     {
-        switch (propertyUpdate.Action)
+        switch (propertyUpdate.Kind)
         {
-            case SubjectPropertyUpdateAction.UpdateValue:
+            case SubjectPropertyUpdateKind.Value:
                 var propertyReference = new PropertyReference(subject, propertyName);
                 visitValuePropertyUpdate.Invoke(propertyReference, propertyUpdate);
                 break;
 
-            case SubjectPropertyUpdateAction.UpdateItem:
+            case SubjectPropertyUpdateKind.Item:
                 if (subject.TryGetRegisteredProperty(propertyName) is { } registeredProperty)
                 {
                     if (registeredProperty.GetValue() is IInterceptorSubject existingItem)
@@ -76,7 +76,7 @@ public static class SubjectUpdateExtensions
 
                 break;
 
-            case SubjectPropertyUpdateAction.UpdateCollection:
+            case SubjectPropertyUpdateKind.Collection:
                 if (subject.TryGetRegisteredProperty(propertyName) is { } registeredCollectionProperty)
                 {
                     // TODO: Handle dictionary
