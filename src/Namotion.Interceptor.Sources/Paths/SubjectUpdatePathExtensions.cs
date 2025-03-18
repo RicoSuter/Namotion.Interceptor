@@ -11,72 +11,79 @@ public static class SubjectUpdatePathExtensions
     public static SubjectUpdate? TryCreateSubjectUpdateFromPath(
         this IInterceptorSubject subject, 
         string path,
-        string propertyPathDelimiter, string attributePathDelimiter,
         ISourcePathProvider sourcePathProvider,
         Func<RegisteredSubjectProperty, object?> getPropertyValue)
     {
         var rootUpdate = new SubjectUpdate();
         var update = rootUpdate;
-        foreach (var segment in path.Split(propertyPathDelimiter).SelectMany(a => a.Split(attributePathDelimiter)))
+        RegisteredSubjectProperty? previousProperty = null;
+        foreach (var (segment, isAttribute) in sourcePathProvider.ParsePathSegments(path))
         {
+            // TODO: Use isAttribute
+            
             var segmentParts = segment.Split('[', ']');
             object? index = segmentParts.Length >= 2 ? (int.TryParse(segmentParts[1], out var intIndex) ? intIndex : segmentParts[1]) : null;
             var propertyName = segmentParts[0];
 
             var registry = subject.Context.GetService<ISubjectRegistry>();
             var registeredSubject = registry.KnownSubjects[subject];
-            if (registeredSubject.Properties.TryGetValue(propertyName, out var registeredProperty))
+
+            var registeredProperty = isAttribute
+                ? subject.GetRegisteredAttribute(previousProperty?.Property.Name 
+                    ?? throw new InvalidOperationException("Attribute segment must have a property path segment before."), segment)
+                : registeredSubject.Properties[propertyName];
+                
+            if (sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
             {
-                if (sourcePathProvider.IsIncluded(registeredProperty) == false)
-                {
-                    return null;
-                }
-
-                if (index is not null) // handle array or dictionary item update
-                {
-                    var item = registeredProperty.Children.Single(c => Equals(c.Index, index));
-                    
-                    var childUpdates = registeredProperty
-                        .Children
-                        .Select(c => new SubjectPropertyCollectionUpdate
-                        {
-                            Index = c.Index ?? throw new InvalidOperationException($"Index of collection property '{registeredProperty.Property.Name}' must not be null."),
-                            Item = new SubjectUpdate()
-                        })
-                        .ToList();
-
-                    update.Properties[propertyName] = new SubjectPropertyUpdate
-                    {
-                        Action = SubjectPropertyUpdateAction.UpdateCollection,
-                        Collection = childUpdates
-                    };
-
-                    update = childUpdates.Single(u => Equals(u.Index, index)).Item!;
-                    subject = item.Subject;
-                }
-                else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject))) // handle item update
-                {
-                    var item = registeredProperty.Children.Single();
-                    var childUpdate = new SubjectUpdate();
-                    update.Properties[propertyName] = new SubjectPropertyUpdate
-                    {
-                        Action = SubjectPropertyUpdateAction.UpdateItem,
-                        Item = childUpdate
-                    };
-
-                    update = childUpdate;
-                    subject = item.Subject;
-                }
-                else // handle value update
-                {
-                    update.Properties[propertyName] = new SubjectPropertyUpdate
-                    {
-                        Action = SubjectPropertyUpdateAction.UpdateValue,
-                        Value = getPropertyValue(registeredProperty),
-                    };
-                    break;
-                }
+                return null;
             }
+
+            if (index is not null) // handle array or dictionary item update
+            {
+                var item = registeredProperty.Children.Single(c => Equals(c.Index, index));
+                
+                var childUpdates = registeredProperty
+                    .Children
+                    .Select(c => new SubjectPropertyCollectionUpdate
+                    {
+                        Index = c.Index ?? throw new InvalidOperationException($"Index of collection property '{registeredProperty.Property.Name}' must not be null."),
+                        Item = new SubjectUpdate()
+                    })
+                    .ToList();
+
+                update.Properties[propertyName] = new SubjectPropertyUpdate
+                {
+                    Action = SubjectPropertyUpdateAction.UpdateCollection,
+                    Collection = childUpdates
+                };
+
+                update = childUpdates.Single(u => Equals(u.Index, index)).Item!;
+                subject = item.Subject;
+            }
+            else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject))) // handle item update
+            {
+                var item = registeredProperty.Children.Single();
+                var childUpdate = new SubjectUpdate();
+                update.Properties[propertyName] = new SubjectPropertyUpdate
+                {
+                    Action = SubjectPropertyUpdateAction.UpdateItem,
+                    Item = childUpdate
+                };
+
+                update = childUpdate;
+                subject = item.Subject;
+            }
+            else // handle value update
+            {
+                update.Properties[propertyName] = new SubjectPropertyUpdate
+                {
+                    Action = SubjectPropertyUpdateAction.UpdateValue,
+                    Value = getPropertyValue(registeredProperty),
+                };
+                break;
+            }
+
+            previousProperty = registeredProperty;
         }
 
         return rootUpdate;
@@ -104,21 +111,22 @@ public static class SubjectUpdatePathExtensions
         string pathPrefix = "")
     {
         var registeredProperty = subject.TryGetRegisteredProperty(propertyName) ?? throw new KeyNotFoundException(propertyName);
-        if (sourcePathProvider.IsIncluded(registeredProperty) == false)
+        if (sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
         {
             yield break;
         }
+        
+        var propertyPath = registeredProperty.IsAttribute ? 
+            sourcePathProvider.GetPropertyAttributePath(pathPrefix, registeredProperty) :
+            sourcePathProvider.GetPropertyPath(pathPrefix, registeredProperty);
 
         if (propertyUpdate.Attributes is not null)
         {
             foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
             {
-                var registeredAttribute = subject.TryGetRegisteredAttribute(propertyName, attributeName) 
-                    ?? throw new InvalidOperationException($"The attribute '{attributeName}' is not registered for property '{propertyName}'.");
-            
-                var attributePath = sourcePathProvider.GetAttributePath(pathPrefix, registeredProperty, registeredAttribute);
+                var registeredAttribute = subject.GetRegisteredAttribute(propertyName, attributeName);
                 foreach (var (path, value, property) in attributeUpdate
-                    .EnumeratePaths(subject, registeredAttribute.Property.Name, sourcePathProvider, attributePath))
+                    .EnumeratePaths(subject, registeredAttribute.Property.Name, sourcePathProvider, propertyPath))
                 {
                     yield return (path, value, property);
                 }
@@ -128,25 +136,14 @@ public static class SubjectUpdatePathExtensions
         switch (propertyUpdate.Action)
         {
             case SubjectPropertyUpdateAction.UpdateValue: // handle value
-                var propertyPath = registeredProperty.IsAttribute == false ? 
-                    sourcePathProvider.GetPropertyPath(pathPrefix, registeredProperty) : 
-                    pathPrefix;
-
-                var resolvedPath = sourcePathProvider.TryGetSourcePropertyPath(registeredProperty, propertyPath) 
-                    ?? throw new InvalidOperationException($"Source path for the proposed path '{pathPrefix}' must not be null.");
-         
-                yield return (resolvedPath, propertyUpdate.Value, registeredProperty);
+                yield return (propertyPath, propertyUpdate.Value, registeredProperty);
                 break;
 
             case SubjectPropertyUpdateAction.UpdateItem: // handle item
-                var propertyPath2 = registeredProperty.IsAttribute == false ? 
-                    sourcePathProvider.GetPropertyPath(pathPrefix, registeredProperty) : 
-                    pathPrefix;
-                
                 if (registeredProperty.GetValue() is IInterceptorSubject currentItem)
                 {
                     foreach (var (path, value, property) in propertyUpdate.Item!
-                        .EnumeratePaths(currentItem, sourcePathProvider, propertyPath2))
+                        .EnumeratePaths(currentItem, sourcePathProvider, propertyPath))
                     {
                         yield return (path, value, property);
                     }
@@ -172,9 +169,9 @@ public static class SubjectUpdatePathExtensions
 
                     if (currentCollectionItem is not null)
                     {
-                        var propertyPath3 = sourcePathProvider.GetPropertyPath(pathPrefix, registeredProperty) + $"[{item.Index}]";
+                        var itemPropertyPath = $"{propertyPath}[{item.Index}]";
                         foreach (var (path, value, property) in item.Item
-                            .EnumeratePaths(currentCollectionItem, sourcePathProvider, propertyPath3))
+                            .EnumeratePaths(currentCollectionItem, sourcePathProvider, itemPropertyPath))
                         {
                             yield return (path, value, property);
                         }

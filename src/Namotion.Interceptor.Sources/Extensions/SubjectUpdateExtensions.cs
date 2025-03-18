@@ -4,7 +4,7 @@ namespace Namotion.Interceptor.Sources.Extensions;
 
 public static class SubjectUpdateExtensions
 {
-    public static void VisitSubjectValueUpdates(this IInterceptorSubject subject, SubjectUpdate update, 
+    public static void VisitSubjectValueUpdates(this IInterceptorSubject subject, SubjectUpdate update,
         Action<PropertyReference, SubjectPropertyUpdate> applySubjectValueUpdate)
     {
         foreach (var (propertyName, propertyUpdate) in update.Properties)
@@ -13,7 +13,8 @@ public static class SubjectUpdateExtensions
             {
                 foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
                 {
-                    VisitSubjectValueUpdates(subject, attributeName, attributeUpdate, applySubjectValueUpdate);
+                    var registeredAttribute = subject.GetRegisteredAttribute(propertyName, attributeName);
+                    VisitSubjectValueUpdates(subject, registeredAttribute.Property.Name, attributeUpdate, applySubjectValueUpdate);
                 }
             }
 
@@ -31,7 +32,7 @@ public static class SubjectUpdateExtensions
                 var propertyReference = new PropertyReference(subject, propertyName);
                 applySubjectValueUpdate.Invoke(propertyReference, propertyUpdate);
                 break;
-            
+
             case SubjectPropertyUpdateAction.UpdateItem:
                 if (subject.TryGetRegisteredProperty(propertyName) is { } registeredProperty)
                 {
@@ -51,8 +52,9 @@ public static class SubjectUpdateExtensions
                         // TODO: Implement add/set item
                     }
                 }
+
                 break;
-                
+
             case SubjectPropertyUpdateAction.UpdateCollection:
                 if (subject.TryGetRegisteredProperty(propertyName) is { } registeredCollectionProperty)
                 {
@@ -71,11 +73,12 @@ public static class SubjectUpdateExtensions
                         // TODO: Implement add collection
                     }
                 }
+
                 break;
         }
     }
 
-    public static void ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update, 
+    public static void ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update,
         Action<PropertyReference, SubjectPropertyUpdate>? transform = null)
     {
         subject.VisitSubjectValueUpdates(update, (propertyReference, propertyUpdate) =>
@@ -85,7 +88,7 @@ public static class SubjectUpdateExtensions
         });
     }
 
-    public static void ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update, ISubjectSource source, 
+    public static void ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update, ISubjectSource source,
         Action<PropertyReference, SubjectPropertyUpdate>? transform = null)
     {
         subject.VisitSubjectValueUpdates(update, (propertyReference, propertyUpdate) =>

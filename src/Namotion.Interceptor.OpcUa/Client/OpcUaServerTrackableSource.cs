@@ -169,8 +169,8 @@
 //        return Task.CompletedTask;
 //    }
 
-//    public string? TryGetSourcePropertyPath(PropertyReference property)
+//    public string? GetSourcePropertyPath(PropertyReference property)
 //    {
-//        return SourcePathProvider.TryGetSourcePropertyPath(property);
+//        return SourcePathProvider.GetSourcePropertyPath(property);
 //    }
 //}

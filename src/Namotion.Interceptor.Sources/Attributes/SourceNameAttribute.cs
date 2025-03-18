@@ -5,9 +5,9 @@ public class SourceNameAttribute : Attribute
 {
     public string SourceName { get; }
 
-    public string? Path { get; }
+    public string Path { get; }
     
-    public SourceNameAttribute(string sourceName, string? path = null)
+    public SourceNameAttribute(string sourceName, string path)
     {
         SourceName = sourceName;
         Path = path;
