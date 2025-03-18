@@ -6,82 +6,146 @@ namespace Namotion.Interceptor.Sources.Paths;
 
 public static class SubjectUpdatePathExtensions
 {
-    public static SubjectUpdate? TryCreateSubjectUpdateFromPath(
-        this IInterceptorSubject subject, 
+    /// <summary>
+    /// Creates a partial subject update with the given path and given value.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="path">The path.</param>
+    /// <param name="value">The value.</param>
+    /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
+    /// <returns>The update.</returns>
+    public static SubjectUpdate CreateSubjectUpdateFromPath(
+        this IInterceptorSubject subject,
+        string path,
+        object? value,
+        ISourcePathProvider sourcePathProvider)
+    {
+        return subject.CreateSubjectUpdateFromPaths([path], sourcePathProvider, 
+            (_, _) => value);
+    }
+
+    /// <summary>
+    /// Creates a partial subject update with the given path and the value retrieve function.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="path">The path.</param>
+    /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
+    /// <param name="getPropertyValue">The function to resolve a property value, called per path.</param>
+    /// <returns>The update.</returns>
+    public static SubjectUpdate CreateSubjectUpdateFromPath(
+        this IInterceptorSubject subject,
         string path,
         ISourcePathProvider sourcePathProvider,
-        Func<RegisteredSubjectProperty, object?> getPropertyValue)
+        Func<RegisteredSubjectProperty, string, object?> getPropertyValue)
     {
-        var rootUpdate = new SubjectUpdate();
-        var update = rootUpdate;
+        return subject.CreateSubjectUpdateFromPaths([path], sourcePathProvider, getPropertyValue);
+    }
+
+    /// <summary>
+    /// Creates a partial subject update with the given paths and values.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="pathsWithValues">The dictionary with paths and values.</param>
+    /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
+    /// <returns>The update.</returns>
+    public static SubjectUpdate CreateSubjectUpdateFromPaths(
+        this IInterceptorSubject subject,
+        IReadOnlyDictionary<string, object?> pathsWithValues,
+        ISourcePathProvider sourcePathProvider)
+    {
+        return subject.CreateSubjectUpdateFromPaths(pathsWithValues.Keys, sourcePathProvider, 
+            (_, path) => pathsWithValues[path]);
+    }
+
+    /// <summary>
+    /// Creates a partial subject update with the given path and the value retrieve function.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="paths">The paths.</param>
+    /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
+    /// <param name="getPropertyValue">The function to resolve a property value, called per path.</param>
+    /// <returns>The update.</returns>
+    public static SubjectUpdate CreateSubjectUpdateFromPaths(
+        this IInterceptorSubject subject,
+        IEnumerable<string> paths,
+        ISourcePathProvider sourcePathProvider,
+        Func<RegisteredSubjectProperty, string, object?> getPropertyValue)
+    {
+        var update = new SubjectUpdate();
         RegisteredSubjectProperty? previousProperty = null;
-        foreach (var (segment, isAttribute) in sourcePathProvider.ParsePathSegments(path))
+
+        foreach (var path in paths)
         {
-            var segmentParts = segment.Split('[', ']');
-            object? index = segmentParts.Length >= 2 ? (int.TryParse(segmentParts[1], out var intIndex) ? intIndex : segmentParts[1]) : null;
-            var propertyName = segmentParts[0];
-
-            var registry = subject.Context.GetService<ISubjectRegistry>();
-            var registeredSubject = registry.KnownSubjects[subject];
-
-            var registeredProperty = isAttribute
-                ? previousProperty?.Property.GetRegisteredAttribute(segment) ?? throw new InvalidOperationException("Attribute segment must have a property path segment before.")
-                : registeredSubject.Properties[propertyName];
-                
-            if (sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
+            var currentSubject = subject;
+            var currentUpdate = update;
+            foreach (var (segment, isAttribute) in sourcePathProvider.ParsePathSegments(path))
             {
-                return null;
-            }
+                var segmentParts = segment.Split('[', ']');
+                object? index = segmentParts.Length >= 2 ? (int.TryParse(segmentParts[1], out var intIndex) ? intIndex : segmentParts[1]) : null;
+                var propertyName = segmentParts[0];
 
-            if (index is not null) // handle array or dictionary item update
-            {
-                var item = registeredProperty.Children.Single(c => Equals(c.Index, index));
-                
-                var childUpdates = registeredProperty
-                    .Children
-                    .Select(c => new SubjectPropertyCollectionUpdate
+                var registry = currentSubject.Context.GetService<ISubjectRegistry>();
+                var registeredSubject = registry.KnownSubjects[currentSubject];
+
+                var registeredProperty = isAttribute
+                    ? previousProperty?.Property.GetRegisteredAttribute(segment) ?? throw new InvalidOperationException("Attribute segment must have a property path segment before.")
+                    : registeredSubject.Properties[propertyName];
+
+                if (sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
+                {
+                    break;
+                }
+
+                if (index is not null) // handle array or dictionary item update
+                {
+                    var item = registeredProperty.Children.Single(c => Equals(c.Index, index));
+
+                    var childUpdates = registeredProperty
+                        .Children
+                        .Select(c => new SubjectPropertyCollectionUpdate
+                        {
+                            Index = c.Index ?? throw new InvalidOperationException($"Index of collection property '{registeredProperty.Property.Name}' must not be null."),
+                            Item = new SubjectUpdate()
+                        })
+                        .ToList();
+
+                    currentUpdate.Properties[propertyName] = new SubjectPropertyUpdate
                     {
-                        Index = c.Index ?? throw new InvalidOperationException($"Index of collection property '{registeredProperty.Property.Name}' must not be null."),
-                        Item = new SubjectUpdate()
-                    })
-                    .ToList();
+                        Action = SubjectPropertyUpdateAction.UpdateCollection,
+                        Collection = childUpdates
+                    };
 
-                update.Properties[propertyName] = new SubjectPropertyUpdate
+                    currentUpdate = childUpdates.Single(u => Equals(u.Index, index)).Item!;
+                    currentSubject = item.Subject;
+                }
+                else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject))) // handle item update
                 {
-                    Action = SubjectPropertyUpdateAction.UpdateCollection,
-                    Collection = childUpdates
-                };
+                    var item = registeredProperty.Children.Single();
+                    var childUpdate = new SubjectUpdate();
+                    currentUpdate.Properties[propertyName] = new SubjectPropertyUpdate
+                    {
+                        Action = SubjectPropertyUpdateAction.UpdateItem,
+                        Item = childUpdate
+                    };
 
-                update = childUpdates.Single(u => Equals(u.Index, index)).Item!;
-                subject = item.Subject;
-            }
-            else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject))) // handle item update
-            {
-                var item = registeredProperty.Children.Single();
-                var childUpdate = new SubjectUpdate();
-                update.Properties[propertyName] = new SubjectPropertyUpdate
+                    currentUpdate = childUpdate;
+                    currentSubject = item.Subject;
+                }
+                else // handle value update
                 {
-                    Action = SubjectPropertyUpdateAction.UpdateItem,
-                    Item = childUpdate
-                };
+                    currentUpdate.Properties[propertyName] = new SubjectPropertyUpdate
+                    {
+                        Action = SubjectPropertyUpdateAction.UpdateValue,
+                        Value = getPropertyValue(registeredProperty, path),
+                    };
+                    break;
+                }
 
-                update = childUpdate;
-                subject = item.Subject;
+                previousProperty = registeredProperty;
             }
-            else // handle value update
-            {
-                update.Properties[propertyName] = new SubjectPropertyUpdate
-                {
-                    Action = SubjectPropertyUpdateAction.UpdateValue,
-                    Value = getPropertyValue(registeredProperty),
-                };
-                break;
-            }
-
-            previousProperty = registeredProperty;
         }
-
-        return rootUpdate;
+        
+        return update;
     }
 
     public static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePaths(
@@ -111,10 +175,8 @@ public static class SubjectUpdatePathExtensions
         {
             yield break;
         }
-        
-        var propertyPath = registeredProperty.IsAttribute ? 
-            sourcePathProvider.GetPropertyAttributePath(pathPrefix, registeredProperty) :
-            sourcePathProvider.GetPropertyPath(pathPrefix, registeredProperty);
+
+        var propertyPath = registeredProperty.IsAttribute ? sourcePathProvider.GetPropertyAttributePath(pathPrefix, registeredProperty) : sourcePathProvider.GetPropertyPath(pathPrefix, registeredProperty);
 
         if (propertyUpdate.Attributes is not null)
         {
@@ -122,13 +184,13 @@ public static class SubjectUpdatePathExtensions
             {
                 var registeredAttribute = subject.GetRegisteredAttribute(propertyName, attributeName);
                 foreach (var (path, value, property) in attributeUpdate
-                    .EnumeratePaths(subject, registeredAttribute.Property.Name, sourcePathProvider, propertyPath))
+                             .EnumeratePaths(subject, registeredAttribute.Property.Name, sourcePathProvider, propertyPath))
                 {
                     yield return (path, value, property);
                 }
             }
         }
-        
+
         switch (propertyUpdate.Action)
         {
             case SubjectPropertyUpdateAction.UpdateValue: // handle value
@@ -139,7 +201,7 @@ public static class SubjectUpdatePathExtensions
                 if (registeredProperty.GetValue() is IInterceptorSubject currentItem)
                 {
                     foreach (var (path, value, property) in propertyUpdate.Item!
-                        .EnumeratePaths(currentItem, sourcePathProvider, propertyPath))
+                                 .EnumeratePaths(currentItem, sourcePathProvider, propertyPath))
                     {
                         yield return (path, value, property);
                     }
@@ -148,6 +210,7 @@ public static class SubjectUpdatePathExtensions
                 {
                     // TODO: Handle missing item
                 }
+
                 break;
 
             case SubjectPropertyUpdateAction.UpdateCollection: // handle array or dictionary
@@ -159,15 +222,13 @@ public static class SubjectUpdatePathExtensions
                         continue;
                     }
 
-                    var currentCollectionItem = item.Index is int ? 
-                        ((ICollection<IInterceptorSubject>)collection).ElementAt(Convert.ToInt32(item.Index)) : 
-                        ((IDictionary)collection)[item.Index] as IInterceptorSubject;
+                    var currentCollectionItem = item.Index is int ? ((ICollection<IInterceptorSubject>)collection).ElementAt(Convert.ToInt32(item.Index)) : ((IDictionary)collection)[item.Index] as IInterceptorSubject;
 
                     if (currentCollectionItem is not null)
                     {
                         var itemPropertyPath = $"{propertyPath}[{item.Index}]";
                         foreach (var (path, value, property) in item.Item
-                            .EnumeratePaths(currentCollectionItem, sourcePathProvider, itemPropertyPath))
+                                     .EnumeratePaths(currentCollectionItem, sourcePathProvider, itemPropertyPath))
                         {
                             yield return (path, value, property);
                         }
@@ -177,6 +238,7 @@ public static class SubjectUpdatePathExtensions
                         // TODO: Handle missing item
                     }
                 }
+
                 break;
         }
     }
