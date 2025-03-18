@@ -6,8 +6,6 @@ namespace Namotion.Interceptor.Sources.Paths;
 
 public static class SubjectUpdatePathExtensions
 {
-    // TODO: Make this extensible for path transformations and ignore callbacks
-
     public static SubjectUpdate? TryCreateSubjectUpdateFromPath(
         this IInterceptorSubject subject, 
         string path,
@@ -19,8 +17,6 @@ public static class SubjectUpdatePathExtensions
         RegisteredSubjectProperty? previousProperty = null;
         foreach (var (segment, isAttribute) in sourcePathProvider.ParsePathSegments(path))
         {
-            // TODO: Use isAttribute
-            
             var segmentParts = segment.Split('[', ']');
             object? index = segmentParts.Length >= 2 ? (int.TryParse(segmentParts[1], out var intIndex) ? intIndex : segmentParts[1]) : null;
             var propertyName = segmentParts[0];
@@ -29,8 +25,7 @@ public static class SubjectUpdatePathExtensions
             var registeredSubject = registry.KnownSubjects[subject];
 
             var registeredProperty = isAttribute
-                ? subject.GetRegisteredAttribute(previousProperty?.Property.Name 
-                    ?? throw new InvalidOperationException("Attribute segment must have a property path segment before."), segment)
+                ? previousProperty?.Property.GetRegisteredAttribute(segment) ?? throw new InvalidOperationException("Attribute segment must have a property path segment before.")
                 : registeredSubject.Properties[propertyName];
                 
             if (sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
@@ -89,7 +84,8 @@ public static class SubjectUpdatePathExtensions
         return rootUpdate;
     }
 
-    public static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePaths(this SubjectUpdate subjectUpdate,
+    public static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePaths(
+        this SubjectUpdate subjectUpdate,
         IInterceptorSubject subject,
         ISourcePathProvider sourcePathProvider,
         string pathPrefix = "")
@@ -104,9 +100,9 @@ public static class SubjectUpdatePathExtensions
         }
     }
 
-    private static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePaths(this SubjectPropertyUpdate propertyUpdate,
-        IInterceptorSubject subject,
-        string propertyName,
+    private static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePaths(
+        this SubjectPropertyUpdate propertyUpdate,
+        IInterceptorSubject subject, string propertyName,
         ISourcePathProvider sourcePathProvider,
         string pathPrefix = "")
     {
