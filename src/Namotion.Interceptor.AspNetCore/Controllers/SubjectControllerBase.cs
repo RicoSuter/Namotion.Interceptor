@@ -25,6 +25,9 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
         _jsonOptions = jsonOptions;
     }
 
+    /// <summary>
+    /// Gets the subject as JSON object.
+    /// </summary>
     [HttpGet]
     public ActionResult<TSubject> GetSubject()
     {
@@ -32,6 +35,20 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
         return Ok(_subject.ToJsonObject(_jsonOptions.Value.JsonSerializerOptions));
     }
 
+    /// <summary>
+    /// Gets the subject structure with metadata.
+    /// </summary>
+    [HttpGet("description")]
+    public ActionResult<SubjectUpdate> GetSubjectDescription()
+    {
+        return Ok(SubjectUpdate
+            .CreateCompleteUpdate(_subject)
+            .ConvertPropertyNames(_jsonOptions.Value.JsonSerializerOptions));
+    }
+
+    /// <summary>
+    /// Patches the subject JSON object using JSON paths.
+    /// </summary>
     [HttpPost]
     public ActionResult UpdatePropertyValues(
         [FromBody] Dictionary<string, JsonElement> updates,
@@ -73,9 +90,10 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
 
             // run validators
             var errors = new Dictionary<string, ValidationResult[]>();
+            var propertyValidatorsArray = propertyValidators.ToArray();
             foreach (var update in resolvedUpdates)
             {
-                var updateErrors = propertyValidators
+                var updateErrors = propertyValidatorsArray
                     .SelectMany(v => v.Validate(
                         new PropertyReference(update.Subject!, update.Property.Name), update.Value))
                     .ToArray();
@@ -113,17 +131,5 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
                 Detail = "Invalid property value."
             });
         }
-    }
-
-    /// <summary>
-    /// Gets all leaf properties.
-    /// </summary>
-    /// <returns></returns>
-    [HttpGet("properties")]
-    public ActionResult<SubjectUpdate> GetProperties()
-    {
-        return Ok(SubjectUpdate
-            .CreateCompleteUpdate(_subject)
-            .ConvertPropertyNames(_jsonOptions.Value.JsonSerializerOptions));
     }
 }
