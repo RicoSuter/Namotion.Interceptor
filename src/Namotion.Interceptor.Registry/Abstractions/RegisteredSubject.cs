@@ -59,12 +59,15 @@ public record RegisteredSubject
     {
         lock (_lock)
         {
-            _properties!.Add(name, new CustomRegisteredSubjectProperty(new PropertyReference(Subject, name), getValue, setValue)
+            var property = new CustomRegisteredSubjectProperty(new PropertyReference(Subject, name), getValue, setValue)
             {
                 Parent = this,
                 Type = type,
                 Attributes = attributes
-            });
+            };
+            
+            _properties!.Add(name, property);
+            // TODO: Raise registry changed event
         }
     }
 }

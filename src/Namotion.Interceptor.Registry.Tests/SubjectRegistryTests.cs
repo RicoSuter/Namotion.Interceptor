@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Namotion.Interceptor.AspNetCore.Extensions;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -190,6 +191,8 @@ public class SubjectRegistryTests
     [Fact]
     public async Task WhenConvertingToJson_ThenGraphIsPreserved()
     {
+        // TODO: Move to Namotion.Interceptor.AspNetCore.Tests
+        
         // Arrange
         var context = InterceptorSubjectContext
             .Create()

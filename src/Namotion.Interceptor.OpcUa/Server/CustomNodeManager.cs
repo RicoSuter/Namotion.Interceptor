@@ -84,7 +84,7 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
     {
         foreach (var property in subject.Properties)
         {
-            var propertyName = _source.SourcePathProvider.TryGetSourcePathSegmentName(property.Value);
+            var propertyName = _source.SourcePathProvider.TryGetPropertySegmentName(property.Value);
             if (propertyName is not null)
             {
                 var children = property.Value.Children;
@@ -162,7 +162,7 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
 
     private void CreateVariableNode(string propertyName, KeyValuePair<string, RegisteredSubjectProperty> property, NodeId parentNodeId, string parentPath)
     {
-        var sourcePath = _source.TryGetSourcePropertyPath(property.Value.Property);
+        var sourcePath = _source.GetSourcePropertyPath(property.Value.Property);
         if (sourcePath is not null)
         {
             var value = property.Value.GetValue();
