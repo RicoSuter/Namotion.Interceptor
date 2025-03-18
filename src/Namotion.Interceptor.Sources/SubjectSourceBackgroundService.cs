@@ -88,7 +88,7 @@ public class SubjectSourceBackgroundService : BackgroundService
             }
             else
             {
-                _source.Subject.ApplySubjectUpdate(update, _source);
+                _source.Subject.ApplySubjectSourceUpdate(update, _source);
             }
         }
     }
