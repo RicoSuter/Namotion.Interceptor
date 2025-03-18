@@ -133,7 +133,7 @@ public static class SubjectUpdatePathExtensions
                     // handle value update
                     currentUpdate.Properties[propertyName] = new SubjectPropertyUpdate
                     {
-                        Action = SubjectPropertyUpdateAction.UpdateValue,
+                        Kind = SubjectPropertyUpdateKind.Value,
                         Value = getPropertyValue(registeredProperty, path),
                     };
                     break;
@@ -153,7 +153,7 @@ public static class SubjectUpdatePathExtensions
         {
             itemProperty = new SubjectPropertyUpdate
             {
-                Action = SubjectPropertyUpdateAction.UpdateItem,
+                Kind = SubjectPropertyUpdateKind.Item,
                 Item = new SubjectUpdate()
             };
                         
@@ -179,7 +179,7 @@ public static class SubjectUpdatePathExtensions
 
             collectionProperty = new SubjectPropertyUpdate
             {
-                Action = SubjectPropertyUpdateAction.UpdateCollection,
+                Kind = SubjectPropertyUpdateKind.Collection,
                 Collection = childUpdates
             };
                         
@@ -232,13 +232,13 @@ public static class SubjectUpdatePathExtensions
             }
         }
 
-        switch (propertyUpdate.Action)
+        switch (propertyUpdate.Kind)
         {
-            case SubjectPropertyUpdateAction.UpdateValue: // handle value
+            case SubjectPropertyUpdateKind.Value: // handle value
                 yield return (propertyPath, propertyUpdate.Value, registeredProperty);
                 break;
 
-            case SubjectPropertyUpdateAction.UpdateItem: // handle item
+            case SubjectPropertyUpdateKind.Item: // handle item
                 if (registeredProperty.GetValue() is IInterceptorSubject currentItem)
                 {
                     foreach (var (path, value, property) in propertyUpdate.Item!
@@ -254,7 +254,7 @@ public static class SubjectUpdatePathExtensions
 
                 break;
 
-            case SubjectPropertyUpdateAction.UpdateCollection: // handle array or dictionary
+            case SubjectPropertyUpdateKind.Collection: // handle array or dictionary
                 var collection = registeredProperty.GetValue()!;
                 foreach (var item in propertyUpdate.Collection!)
                 {

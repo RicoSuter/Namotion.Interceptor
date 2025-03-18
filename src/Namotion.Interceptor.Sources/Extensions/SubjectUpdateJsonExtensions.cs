@@ -24,7 +24,7 @@ public static class SubjectUpdateJsonExtensions
                 a => options.PropertyNamingPolicy?.ConvertName(a.Key) ?? a.Key,
                 a => a.Value.ConvertPropertyNames(options)),
 
-            Action = update.Action,
+            Kind = update.Kind,
 
             Value = update.Value,
             Item = update.Item?.ConvertPropertyNames(options),

@@ -8,11 +8,23 @@ namespace Namotion.Interceptor.Sources;
 
 public class SubjectUpdate
 {
+    /// <summary>
+    /// Gets the type of the subject.
+    /// </summary>
     public string? Type { get; init; }
 
-    // TODO: Convert to read only
-    public Dictionary<string, SubjectPropertyUpdate> Properties { get; init; } = new();
+    /// <summary>
+    /// Gets a dictionary of property updates.
+    /// The dictionary is mutable so that additional updates can be attached.
+    /// </summary>
+    public IDictionary<string, SubjectPropertyUpdate> Properties { get; init; } 
+        = new Dictionary<string, SubjectPropertyUpdate>();
 
+    /// <summary>
+    /// Creates a complete update with all objects and properties for the given subject as root.
+    /// </summary>
+    /// <param name="subject">The root subject.</param>
+    /// <returns>The update.</returns>
     public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject)
     {
         var subjectUpdate = new SubjectUpdate
@@ -33,6 +45,13 @@ public class SubjectUpdate
         return subjectUpdate;
     }
 
+    /// <summary>
+    /// Creates a partial update from the given property changes.
+    /// Only directly or indirectly needed objects and properties are added.
+    /// </summary>
+    /// <param name="subject">The root subject.</param>
+    /// <param name="propertyChanges">The changes to look up within the object graph.</param>
+    /// <returns>The update.</returns>
     public static SubjectUpdate CreatePartialUpdateFromChanges(IInterceptorSubject subject, IEnumerable<PropertyChangedContext> propertyChanges)
     {
         // TODO: Verify correctness of the CreatePartialUpdateFromChanges method
@@ -117,7 +136,7 @@ public class SubjectUpdate
         var children = parentRegisteredSubject.Properties[parentProperty.Name].Children;
         if (children.Any(c => c.Index is not null))
         {
-            property.Action = SubjectPropertyUpdateAction.UpdateCollection;
+            property.Kind = SubjectPropertyUpdateKind.Collection;
             property.Collection = children
                 .Select(s => new SubjectPropertyCollectionUpdate
                 {
@@ -128,7 +147,7 @@ public class SubjectUpdate
         }
         else
         {
-            property.Action = SubjectPropertyUpdateAction.UpdateItem;
+            property.Kind = SubjectPropertyUpdateKind.Item;
             property.Item = GetOrCreateSubjectUpdate(childSubject, knownSubjectDescriptions);
         }
     }

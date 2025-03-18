@@ -117,8 +117,10 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
 
     internal void UpdateProperty(PropertyReference property, string sourcePath, object? value)
     {
-        var convertedValue = Convert.ChangeType(value, property.Metadata.Type); // TODO: improve conversion here
-        var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, [new PropertyChangedContext(property, null, convertedValue)]);
+        // TODO: Implement actual correct conversion based on the property type
+        var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
+        
+        var update = _subject.CreateSubjectUpdateFromPath(sourcePath, convertedValue, SourcePathProvider);
         _applySourceChangeAction?.Invoke(update);
     }
 

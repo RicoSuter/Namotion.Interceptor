@@ -9,12 +9,12 @@ public class SubjectPropertyUpdate
     public string? Type { get; init; }
     
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public Dictionary<string, SubjectPropertyUpdate>? Attributes { get; internal set; }
+    public IDictionary<string, SubjectPropertyUpdate>? Attributes { get; internal set; }
 
     public object? Value { get; internal set; }
     
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public SubjectPropertyUpdateAction Action { get; internal set; }
+    public SubjectPropertyUpdateKind Kind { get; internal set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public SubjectUpdate? Item { get; internal set; }
