@@ -38,8 +38,8 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
     /// <summary>
     /// Gets the subject structure with metadata.
     /// </summary>
-    [HttpGet("description")]
-    public ActionResult<SubjectUpdate> GetSubjectDescription()
+    [HttpGet("structure")]
+    public ActionResult<SubjectUpdate> GetSubjectStructure()
     {
         return Ok(SubjectUpdate
             .CreateCompleteUpdate(_subject)
