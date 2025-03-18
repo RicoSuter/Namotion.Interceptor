@@ -78,17 +78,21 @@ public static class SubjectUpdatePathExtensions
         {
             var currentSubject = subject;
             var currentUpdate = update;
-            foreach (var (segment, isAttribute) in sourcePathProvider.ParsePathSegments(path))
-            {
-                var segmentParts = segment.Split('[', ']');
-                object? index = segmentParts.Length >= 2 ? (int.TryParse(segmentParts[1], out var intIndex) ? intIndex : segmentParts[1]) : null;
-                var propertyName = segmentParts[0];
+            
+            var segments = sourcePathProvider
+                .ParsePathSegments(path)
+                .ToArray();
 
+            for (var i = 0; i < segments.Length; i++)
+            {
+                var (propertyName, index, isAttribute) = segments[i];
+                var isLastSegment = i == segments.Length - 1;
+                
                 var registry = currentSubject.Context.GetService<ISubjectRegistry>();
                 var registeredSubject = registry.KnownSubjects[currentSubject];
 
                 var registeredProperty = isAttribute
-                    ? previousProperty?.Property.GetRegisteredAttribute(segment) ?? throw new InvalidOperationException("Attribute segment must have a property path segment before.")
+                    ? previousProperty?.Property.GetRegisteredAttribute(propertyName) ?? throw new InvalidOperationException("Attribute segment must have a property path segment before.")
                     : registeredSubject.Properties[propertyName];
 
                 if (sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
@@ -96,43 +100,30 @@ public static class SubjectUpdatePathExtensions
                     break;
                 }
 
-                if (index is not null) // handle array or dictionary item update
+                if (!isLastSegment && index is not null)
                 {
+                    // handle array or dictionary item update
+                    var collectionProperty = GetOrCreateCollectionSubjectPropertyUpdate(currentUpdate, propertyName, registeredProperty);
                     var item = registeredProperty.Children.Single(c => Equals(c.Index, index));
 
-                    var childUpdates = registeredProperty
-                        .Children
-                        .Select(c => new SubjectPropertyCollectionUpdate
-                        {
-                            Index = c.Index ?? throw new InvalidOperationException($"Index of collection property '{registeredProperty.Property.Name}' must not be null."),
-                            Item = new SubjectUpdate()
-                        })
-                        .ToList();
-
-                    currentUpdate.Properties[propertyName] = new SubjectPropertyUpdate
-                    {
-                        Action = SubjectPropertyUpdateAction.UpdateCollection,
-                        Collection = childUpdates
-                    };
-
-                    currentUpdate = childUpdates.Single(u => Equals(u.Index, index)).Item!;
+                    currentUpdate = collectionProperty?.Collection?
+                            .Single(u => Equals(u.Index, index)).Item!
+                        ?? throw new InvalidOperationException("Collection item could not be found.");
+                    
                     currentSubject = item.Subject;
                 }
-                else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject))) // handle item update
+                else if (!isLastSegment && 
+                         registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
                 {
+                    // handle item update
+                    var itemProperty = CreateItemSubjectPropertyUpdate(currentUpdate, propertyName);
                     var item = registeredProperty.Children.Single();
-                    var childUpdate = new SubjectUpdate();
-                    currentUpdate.Properties[propertyName] = new SubjectPropertyUpdate
-                    {
-                        Action = SubjectPropertyUpdateAction.UpdateItem,
-                        Item = childUpdate
-                    };
-
-                    currentUpdate = childUpdate;
+                    currentUpdate = itemProperty?.Item ?? throw new InvalidOperationException("Item could not be found.");
                     currentSubject = item.Subject;
                 }
-                else // handle value update
+                else 
                 {
+                    // handle value update
                     currentUpdate.Properties[propertyName] = new SubjectPropertyUpdate
                     {
                         Action = SubjectPropertyUpdateAction.UpdateValue,
@@ -146,6 +137,49 @@ public static class SubjectUpdatePathExtensions
         }
         
         return update;
+    }
+
+    private static SubjectPropertyUpdate? CreateItemSubjectPropertyUpdate(SubjectUpdate currentUpdate, string propertyName)
+    {
+        var exists = currentUpdate.Properties.TryGetValue(propertyName, out var itemProperty);
+        if (!exists)
+        {
+            itemProperty = new SubjectPropertyUpdate
+            {
+                Action = SubjectPropertyUpdateAction.UpdateItem,
+                Item = new SubjectUpdate()
+            };
+                        
+            currentUpdate.Properties[propertyName] = itemProperty;
+        }
+
+        return itemProperty;
+    }
+
+    private static SubjectPropertyUpdate? GetOrCreateCollectionSubjectPropertyUpdate(SubjectUpdate currentUpdate, string propertyName, RegisteredSubjectProperty registeredProperty)
+    {
+        var exists = currentUpdate.Properties.TryGetValue(propertyName, out var collectionProperty);
+        if (!exists)
+        {
+            var childUpdates = registeredProperty
+                .Children
+                .Select(c => new SubjectPropertyCollectionUpdate
+                {
+                    Index = c.Index ?? throw new InvalidOperationException($"Index of collection property '{registeredProperty.Property.Name}' must not be null."),
+                    Item = new SubjectUpdate()
+                })
+                .ToList();
+
+            collectionProperty = new SubjectPropertyUpdate
+            {
+                Action = SubjectPropertyUpdateAction.UpdateCollection,
+                Collection = childUpdates
+            };
+                        
+            currentUpdate.Properties[propertyName] = collectionProperty;
+        }
+
+        return collectionProperty;
     }
 
     public static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePaths(
