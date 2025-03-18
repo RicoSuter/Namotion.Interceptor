@@ -3,7 +3,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry;
 
-public static class InterceptorCollectionExtensions
+public static class InterceptorSubjectContextExtensions
 {
     /// <summary>
     /// Adds support for <see cref="ILifecycleHandler"/> handlers.

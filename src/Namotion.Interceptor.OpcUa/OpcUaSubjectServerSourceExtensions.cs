@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Sources.Paths;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -46,10 +47,9 @@ public static class OpcUaSubjectServerSourceExtensions
             .AddSingleton<IHostedService>(sp =>
             {
                 var subject = subjectSelector(sp);
-                return new SubjectSourceBackgroundService<TSubject>(
-                    subject,
+                return new SubjectSourceBackgroundService(
                     sp.GetRequiredService<OpcUaSubjectServerSource<TSubject>>(),
-                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService<TSubject>>>());
+                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>());
             });
     }
 

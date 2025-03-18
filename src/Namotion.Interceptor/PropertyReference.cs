@@ -7,7 +7,7 @@ public readonly record struct PropertyReference
         Subject = subject;
         Name = name;
     }
-    
+
     public IInterceptorSubject Subject { get; }
     
     public string Name { get; }

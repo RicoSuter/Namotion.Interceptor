@@ -2,14 +2,11 @@
 
 public interface ISubjectSource
 {
-    string? TryGetSourcePropertyPath(PropertyReference property);
+    IInterceptorSubject Subject { get; }
+    
+    Task<IDisposable?> InitializeAsync(Action<SubjectUpdate> applySourceChangeAction, CancellationToken cancellationToken);
 
-    Task<IDisposable?> InitializeAsync(IEnumerable<PropertyPathReference> properties, Action<PropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken);
-
-    // TODO: Should return dict<path, obj?>?
-    Task<IEnumerable<PropertyPathReference>> ReadAsync(IEnumerable<PropertyPathReference> properties, CancellationToken cancellationToken);
-
-    Task WriteAsync(IEnumerable<PropertyPathReference> propertyChanges, CancellationToken cancellationToken);
+    Task<SubjectUpdate> ReadFromSourceAsync(CancellationToken cancellationToken);
+    
+    Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken);
 }
-
-public readonly record struct PropertyPathReference(PropertyReference Property, string Path, object? Value);

@@ -55,16 +55,19 @@ public record RegisteredSubject
             _parents.Remove(parent);
     }
 
-    public void AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params object[] attributes)
+    public void AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params Attribute[] attributes)
     {
         lock (_lock)
         {
-            _properties!.Add(name, new CustomRegisteredSubjectProperty(new PropertyReference(Subject, name), getValue, setValue)
+            var property = new CustomRegisteredSubjectProperty(new PropertyReference(Subject, name), getValue, setValue)
             {
                 Parent = this,
                 Type = type,
                 Attributes = attributes
-            });
+            };
+            
+            _properties!.Add(name, property);
+            // TODO: Raise registry changed event
         }
     }
 }

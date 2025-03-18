@@ -1,13 +1,15 @@
 ﻿using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
 
-namespace Namotion.Interceptor.Registry;
+namespace Namotion.Interceptor.AspNetCore.Extensions;
 
-public static class InterceptorSubjectExtensions
+public static class SubjectRegistryJsonExtensions
 {
     public static string GetJsonPath(this PropertyReference property)
     {
@@ -154,7 +156,7 @@ public static class InterceptorSubjectExtensions
         return jsonSerializerOptions.PropertyNamingPolicy?.ConvertName(property.Name) ?? property.Name;
     }
 
-    public static string GetJsonPropertyName(this KeyValuePair<string, RegisteredSubjectProperty> property, JsonSerializerOptions jsonSerializerOptions)
+    private static string GetJsonPropertyName(this KeyValuePair<string, RegisteredSubjectProperty> property, JsonSerializerOptions jsonSerializerOptions)
     {
         var attribute = property
             .Value
@@ -175,6 +177,7 @@ public static class InterceptorSubjectExtensions
 
     public static (IInterceptorSubject?, SubjectPropertyMetadata) FindPropertyFromJsonPath(this IInterceptorSubject subject, string path)
     {
+        // TODO: Should return RegisteredSubjectProperty and use registry internally, also handle attributes
         return subject.FindPropertyFromJsonPath(path.Split('.'));
     }
 

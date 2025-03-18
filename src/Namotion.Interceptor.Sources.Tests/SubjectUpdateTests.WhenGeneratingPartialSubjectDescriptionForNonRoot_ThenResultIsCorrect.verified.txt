@@ -1,0 +1,39 @@
+﻿{
+  Properties: {
+    children: {
+      Action: UpdateCollection,
+      Collection: [
+        {
+          Index: 0,
+          Item: {
+            Properties: {
+              firstName: {
+                Value: NewChild1,
+                Action: UpdateValue
+              }
+            }
+          }
+        },
+        {
+          Index: 1,
+          Item: {}
+        },
+        {
+          Index: 2,
+          Item: {
+            Properties: {
+              firstName: {
+                Value: NewChild3,
+                Action: UpdateValue
+              }
+            }
+          }
+        }
+      ]
+    },
+    firstName: {
+      Value: NewFather,
+      Action: UpdateValue
+    }
+  }
+}
