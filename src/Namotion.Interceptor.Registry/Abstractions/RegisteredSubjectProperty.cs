@@ -14,6 +14,8 @@ public record RegisteredSubjectProperty(PropertyReference Property)
     
     public bool IsAttribute => Attributes.Any(a => a is PropertyAttributeAttribute);
     
+    public string BrowseName => IsAttribute ? Attribute.AttributeName : Property.Name;
+    
     // TODO(perf): Cache this
     public PropertyAttributeAttribute Attribute => Attributes.OfType<PropertyAttributeAttribute>().Single();
 
