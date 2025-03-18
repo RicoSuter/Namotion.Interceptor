@@ -146,12 +146,12 @@ public class SubjectUpdateTests
         // Act
         var sourcePathProvider = new TestSourcePathProvider(".", "@");
         var partialSubjectUpdate = person.CreateSubjectUpdateFromPaths(
-            [
-                "Children[1].FirstName",
-                "Children[2].FirstName",
-                "Father.FirstName"
-            ],
-            sourcePathProvider, (_, _) => "Hello world!");
+            new Dictionary<string, object?>
+            {
+                { "Children[1].FirstName", "RandomName1" },
+                { "Children[2].FirstName", "RandomName2" },
+                { "Father.FirstName", "RandomName3" }
+            }, sourcePathProvider);
 
         // Assert
         await Verify(partialSubjectUpdate);
@@ -171,15 +171,6 @@ public class SubjectUpdateTests
         public bool IsPropertyIncluded(RegisteredSubjectProperty property)
         {
             return true;
-        }
-
-        public IEnumerable<(string path, bool isAttribute)> ParsePathSegments(string path)
-        {
-            return path
-                .Split(_propertyPathDelimiter)
-                .SelectMany(s => s
-                    .Split(_attributePathDelimiter)
-                    .Select((ss, i) => (ss, i > 0)));
         }
 
         public string? TryGetPropertySegmentName(RegisteredSubjectProperty property)
