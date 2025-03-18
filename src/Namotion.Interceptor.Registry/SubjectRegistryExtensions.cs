@@ -5,35 +5,6 @@ namespace Namotion.Interceptor.Registry;
 
 public static class SubjectRegistryExtensions
 {
-    public static IEnumerable<RegisteredSubjectProperty> GetSubjectAndChildProperties(this IInterceptorSubject subject)
-    {
-        var registry = subject.Context.GetService<ISubjectRegistry>();
-        if (registry.KnownSubjects.TryGetValue(subject, out var registeredSubject))
-        {
-            foreach (var property in registeredSubject.Properties.Values)
-            {
-                yield return property;
-
-                foreach (var child in property.Children
-                    .SelectMany(c => GetSubjectAndChildProperties(c.Subject)))
-                {
-                    yield return child;
-                }
-            }
-        }
-    }
-
-    public static IEnumerable<RegisteredSubjectProperty> GetAllProperties(this ISubjectRegistry registry)
-    {
-        foreach (var pair in registry.KnownSubjects)
-        {
-            foreach (var property in pair.Value.Properties.Values)
-            {
-                yield return property;
-            }
-        }
-    }
-
     public static RegisteredSubjectProperty? TryGetProperty(this IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> properties, PropertyReference property)
     {
         if (properties.TryGetValue(property.Subject, out var metadata))
@@ -46,32 +17,45 @@ public static class SubjectRegistryExtensions
 
         return null;
     }
-
-    public static RegisteredSubjectProperty? TryGetPropertyAttribute(this PropertyReference property, string attributeName)
+    
+    public static RegisteredSubjectProperty GetRegisteredProperty(this PropertyReference propertyReference)
     {
-        // TODO: Also support non-registry scenario
+        var registry = propertyReference.Subject.Context.GetService<ISubjectRegistry>();
+        return registry.KnownSubjects.TryGetProperty(propertyReference) 
+               ?? throw new InvalidOperationException($"Property '{propertyReference.Name}' not found.");
+    }
+    
+    public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName)
+    {
+        var registry = subject.Context.GetService<ISubjectRegistry>();
+        return registry.KnownSubjects.TryGetValue(subject, out var registeredSubject)
+            ? registeredSubject.Properties.GetValueOrDefault(propertyName)
+            : null;
+    }
+    
+    public static RegisteredSubjectProperty GetRegisteredAttribute(this PropertyReference property, string attributeName)
+    {
+        return GetRegisteredAttribute(property.Subject, property.Name, attributeName);
+    }
 
-        var registry = property.Subject.Context.GetService<ISubjectRegistry>() 
-            ?? throw new InvalidOperationException($"The {nameof(ISubjectRegistry)} is missing.");
-        
-        var attribute = registry.KnownSubjects[property.Subject].Properties
-            .SingleOrDefault(p => p.Value.Attributes
+    public static RegisteredSubjectProperty GetRegisteredAttribute(this IInterceptorSubject subject, string propertyName, string attributeName)
+    {
+        var registry = subject.Context.GetService<ISubjectRegistry>();
+        var attribute = registry.KnownSubjects[subject].Properties
+            .Single(p => p.Value.Attributes
                 .OfType<PropertyAttributeAttribute>()
-                .Any(a => a.PropertyName == property.Name && a.AttributeName == attributeName));
+                .Any(a => a.PropertyName == propertyName && a.AttributeName == attributeName));
 
         return attribute.Value;
     }
-
-    public static IEnumerable<KeyValuePair<string, RegisteredSubjectProperty>> GetPropertyAttributes(this PropertyReference property)
+    
+    public static IReadOnlyDictionary<string, RegisteredSubjectProperty> GetRegisteredAttributes(this PropertyReference property)
     {
-        // TODO: Also support non-registry scenario
-
-        var registry = property.Subject.Context.GetService<ISubjectRegistry>() 
-            ?? throw new InvalidOperationException($"The {nameof(ISubjectRegistry)} is missing.");
-
+        var registry = property.Subject.Context.GetService<ISubjectRegistry>();
         return registry.KnownSubjects[property.Subject].Properties
             .Where(p => p.Value.Attributes
                 .OfType<PropertyAttributeAttribute>()
-                .Any(a => a.PropertyName == property.Name));
+                .Any(a => a.PropertyName == property.Name))
+            .ToDictionary();
     }
 }

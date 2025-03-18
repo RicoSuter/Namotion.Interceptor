@@ -1,7 +1,7 @@
 ﻿namespace Namotion.Interceptor.Registry.Attributes;
 
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
-public class PropertyAttributeAttribute : Attribute
+public sealed class PropertyAttributeAttribute : Attribute
 {
     public PropertyAttributeAttribute(string propertyName, string attributeName)
     {

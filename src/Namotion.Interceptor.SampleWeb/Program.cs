@@ -49,10 +49,13 @@ namespace Namotion.Interceptor.SampleWeb
         public partial decimal Pressure { get; set; }
 
         [Unit("bar")]
+        [SourceName("mqtt", "pressure/minimum")]
         [PropertyAttribute(nameof(Pressure), "Minimum")]
         public partial decimal Pressure_Minimum { get; set; }
 
         [Derived]
+        [SourceName("mqtt", "pressure/maximum")]
+        [SourceName("opc", "Pressure_Maximum")]
         [PropertyAttribute(nameof(Pressure), "Maximum")]
         public decimal Pressure_Maximum => 4 * Pressure;
 
@@ -83,7 +86,9 @@ namespace Namotion.Interceptor.SampleWeb
 
         public void InitializeProperty(RegisteredSubjectProperty property, object? index)
         {
-            property.AddAttribute("Unit", typeof(string), () => _unit, null);
+             property.AddAttribute("Unit", typeof(string), 
+                 () => _unit, null,
+                 new SourceNameAttribute("mqtt", "unit"));
         }
     }
 
@@ -116,6 +121,7 @@ namespace Namotion.Interceptor.SampleWeb
 
             // trackable mqtt
             builder.Services.AddMqttSubjectServer<Car>("mqtt");
+            //builder.Services.AddMqttSubjectServer<Tire>(sp => sp.GetRequiredService<Car>().Tires[2], "mqtt");
 
             // trackable GraphQL
             builder.Services

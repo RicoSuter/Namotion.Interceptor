@@ -1,4 +1,4 @@
-﻿namespace Namotion.Interceptor.AspNetCore.Tests
+﻿namespace Namotion.Interceptor.Sources.Tests
 {
     public class VerifyChecksTests
     {
