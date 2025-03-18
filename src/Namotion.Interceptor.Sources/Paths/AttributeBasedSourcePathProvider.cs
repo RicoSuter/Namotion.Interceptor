@@ -22,6 +22,18 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
     
     public IEnumerable<(string path, object? index, bool isAttribute)> ParsePathSegments(string path)
     {
+        // remove prefix
+        if (!string.IsNullOrEmpty(_pathPrefix))
+        {
+            if (!path.StartsWith(_pathPrefix))
+            {
+                // does not start with prefix, ignore this path
+                return [];
+            }
+
+            path = path[_pathPrefix.Length..];
+        }
+        
         return path
             .Split(_propertyPathDelimiter)
             .SelectMany(s => s
@@ -32,7 +44,9 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
                     object? index = segmentParts.Length >= 2 ? 
                         (int.TryParse(segmentParts[1], out var intIndex) ? 
                             intIndex : segmentParts[1]) : null;
-                    return (segmentParts[0], index, i > 0);
+
+                    var currentPath = segmentParts[0];
+                    return (currentPath, index, i > 0);
                 }));
     }
 

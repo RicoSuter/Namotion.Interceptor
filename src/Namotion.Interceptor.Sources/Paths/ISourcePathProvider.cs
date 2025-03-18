@@ -29,6 +29,15 @@ public interface ISourcePathProvider
     
     string? TryGetPropertySegmentName(RegisteredSubjectProperty property);
 
+    public RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment)
+    {
+        // TODO(perf): Improve performance by caching the property name
+        return subject
+            .Properties
+            .SingleOrDefault(p => TryGetPropertySegmentName(p.Value) == segment)
+            .Value;
+    }
+
     string GetPropertyAttributePath(string path, RegisteredSubjectProperty attribute);
     
     string GetPropertyPath(string path, RegisteredSubjectProperty property);

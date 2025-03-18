@@ -85,21 +85,28 @@ public static class SubjectUpdatePathExtensions
 
             for (var i = 0; i < segments.Length; i++)
             {
-                var (propertyName, index, isAttribute) = segments[i];
+                var (segment, index, isAttribute) = segments[i];
                 var isLastSegment = i == segments.Length - 1;
                 
                 var registry = currentSubject.Context.GetService<ISubjectRegistry>();
                 var registeredSubject = registry.KnownSubjects[currentSubject];
 
-                var registeredProperty = isAttribute
-                    ? previousProperty?.Property.GetRegisteredAttribute(propertyName) ?? throw new InvalidOperationException("Attribute segment must have a property path segment before.")
-                    : registeredSubject.Properties[propertyName];
-
-                if (sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
+                if (isAttribute)
+                {
+                    
+                }
+                
+                var registeredProperty = isAttribute ? 
+                    previousProperty?.Property.TryGetRegisteredAttribute(segment) :
+                    sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
+                
+                if (registeredProperty is null || 
+                    sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
                 {
                     break;
                 }
 
+                var propertyName = registeredProperty.Property.Name;
                 if (!isLastSegment && index is not null)
                 {
                     // handle array or dictionary item update
