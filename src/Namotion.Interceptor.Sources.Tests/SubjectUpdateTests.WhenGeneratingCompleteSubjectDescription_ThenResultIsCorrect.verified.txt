@@ -3,7 +3,7 @@
   Properties: {
     children: {
       Type: IReadOnlyCollection`1,
-      Action: UpdateCollection,
+      Kind: Collection,
       Collection: [
         {
           Index: 0,
@@ -12,24 +12,24 @@
             Properties: {
               children: {
                 Type: IReadOnlyCollection`1,
-                Action: UpdateCollection
+                Kind: Collection
               },
               father: {
                 Type: Person,
-                Action: UpdateValue
+                Kind: Value
               },
               firstName: {
                 Type: String,
                 Value: Child1,
-                Action: UpdateValue
+                Kind: Value
               },
               lastName: {
                 Type: String,
-                Action: UpdateValue
+                Kind: Value
               },
               mother: {
                 Type: Person,
-                Action: UpdateValue
+                Kind: Value
               }
             }
           }
@@ -41,24 +41,24 @@
             Properties: {
               children: {
                 Type: IReadOnlyCollection`1,
-                Action: UpdateCollection
+                Kind: Collection
               },
               father: {
                 Type: Person,
-                Action: UpdateValue
+                Kind: Value
               },
               firstName: {
                 Type: String,
                 Value: Child2,
-                Action: UpdateValue
+                Kind: Value
               },
               lastName: {
                 Type: String,
-                Action: UpdateValue
+                Kind: Value
               },
               mother: {
                 Type: Person,
-                Action: UpdateValue
+                Kind: Value
               }
             }
           }
@@ -70,24 +70,24 @@
             Properties: {
               children: {
                 Type: IReadOnlyCollection`1,
-                Action: UpdateCollection
+                Kind: Collection
               },
               father: {
                 Type: Person,
-                Action: UpdateValue
+                Kind: Value
               },
               firstName: {
                 Type: String,
                 Value: Child3,
-                Action: UpdateValue
+                Kind: Value
               },
               lastName: {
                 Type: String,
-                Action: UpdateValue
+                Kind: Value
               },
               mother: {
                 Type: Person,
-                Action: UpdateValue
+                Kind: Value
               }
             }
           }
@@ -96,30 +96,30 @@
     },
     father: {
       Type: Person,
-      Action: UpdateItem,
+      Kind: Item,
       Item: {
         Type: Person,
         Properties: {
           children: {
             Type: IReadOnlyCollection`1,
-            Action: UpdateCollection
+            Kind: Collection
           },
           father: {
             Type: Person,
-            Action: UpdateValue
+            Kind: Value
           },
           firstName: {
             Type: String,
             Value: Father,
-            Action: UpdateValue
+            Kind: Value
           },
           lastName: {
             Type: String,
-            Action: UpdateValue
+            Kind: Value
           },
           mother: {
             Type: Person,
-            Action: UpdateValue
+            Kind: Value
           }
         }
       }
@@ -127,38 +127,38 @@
     firstName: {
       Type: String,
       Value: Child,
-      Action: UpdateValue
+      Kind: Value
     },
     lastName: {
       Type: String,
-      Action: UpdateValue
+      Kind: Value
     },
     mother: {
       Type: Person,
-      Action: UpdateItem,
+      Kind: Item,
       Item: {
         Type: Person,
         Properties: {
           children: {
             Type: IReadOnlyCollection`1,
-            Action: UpdateCollection
+            Kind: Collection
           },
           father: {
             Type: Person,
-            Action: UpdateValue
+            Kind: Value
           },
           firstName: {
             Type: String,
             Value: Mother,
-            Action: UpdateValue
+            Kind: Value
           },
           lastName: {
             Type: String,
-            Action: UpdateValue
+            Kind: Value
           },
           mother: {
             Type: Person,
-            Action: UpdateValue
+            Kind: Value
           }
         }
       }
