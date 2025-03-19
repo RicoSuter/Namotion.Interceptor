@@ -4,7 +4,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Hosting;
 
-public static class InterceptorCollectionExtensions
+public static class InterceptorSubjectContextExtensions
 {
     public static IInterceptorSubjectContext WithHostedServices(this IInterceptorSubjectContext context, IServiceCollection serviceCollection)
     {

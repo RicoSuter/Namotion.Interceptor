@@ -1,12 +1,11 @@
 ﻿using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry;
 
 public static class InterceptorSubjectContextExtensions
 {
     /// <summary>
-    /// Adds support for <see cref="ILifecycleHandler"/> handlers.
+    /// Adds the registry which tracks and extends subjects.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
