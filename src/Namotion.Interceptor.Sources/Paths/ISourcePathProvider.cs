@@ -11,9 +11,32 @@ public interface ISourcePathProvider
     /// </summary>
     /// <param name="path">The path to parse.</param>
     /// <returns>The segments.</returns>
-    IEnumerable<(string path, bool isAttribute)> ParsePathSegments(string path);
+    public IEnumerable<(string path, object? index, bool isAttribute)> ParsePathSegments(string path)
+    {
+        return path
+            .Split('.')
+            .SelectMany(s => s
+                .Split('.')
+                .Select((ss, i) =>
+                {
+                    var segmentParts = ss.Split('[', ']');
+                    object? index = segmentParts.Length >= 2 ? 
+                        (int.TryParse(segmentParts[1], out var intIndex) ? 
+                            intIndex : segmentParts[1]) : null;
+                    return (segmentParts[0], index, i > 0);
+                }));
+    } 
     
     string? TryGetPropertySegmentName(RegisteredSubjectProperty property);
+
+    public RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment)
+    {
+        // TODO(perf): Improve performance by caching the property name
+        return subject
+            .Properties
+            .SingleOrDefault(p => TryGetPropertySegmentName(p.Value) == segment)
+            .Value;
+    }
 
     string GetPropertyAttributePath(string path, RegisteredSubjectProperty attribute);
     

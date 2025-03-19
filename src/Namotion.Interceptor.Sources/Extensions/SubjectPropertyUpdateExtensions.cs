@@ -10,7 +10,7 @@ public static class SubjectPropertyUpdateExtensions
         {
             // TODO: Fix dictionary handling logic (how to detect dict?)
             
-            propertyUpdate.Action = SubjectPropertyUpdateAction.UpdateCollection;
+            propertyUpdate.Kind = SubjectPropertyUpdateKind.Collection;
             propertyUpdate.Collection = dictionary.Keys
                 .OfType<object>()
                 .Select((key) => new SubjectPropertyCollectionUpdate
@@ -22,7 +22,7 @@ public static class SubjectPropertyUpdateExtensions
         }
         else if (value is IEnumerable<IInterceptorSubject> collection)
         {
-            propertyUpdate.Action = SubjectPropertyUpdateAction.UpdateCollection;
+            propertyUpdate.Kind = SubjectPropertyUpdateKind.Collection;
             propertyUpdate.Collection = collection
                 .Select((itemSubject, index) => new SubjectPropertyCollectionUpdate
                 {
@@ -33,12 +33,12 @@ public static class SubjectPropertyUpdateExtensions
         }
         else if (value is IInterceptorSubject itemSubject)
         {
-            propertyUpdate.Action = SubjectPropertyUpdateAction.UpdateItem;
+            propertyUpdate.Kind = SubjectPropertyUpdateKind.Item;
             propertyUpdate.Item = SubjectUpdate.CreateCompleteUpdate(itemSubject);
         }
         else
         {
-            propertyUpdate.Action = SubjectPropertyUpdateAction.UpdateValue;
+            propertyUpdate.Kind = SubjectPropertyUpdateKind.Value;
             propertyUpdate.Value = value;
         }
     }

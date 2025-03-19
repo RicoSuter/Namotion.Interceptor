@@ -9,18 +9,46 @@ public class SubjectPropertyUpdate
     public string? Type { get; init; }
     
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public Dictionary<string, SubjectPropertyUpdate>? Attributes { get; internal set; }
+    public IDictionary<string, SubjectPropertyUpdate>? Attributes { get; internal set; }
 
     public object? Value { get; internal set; }
     
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public SubjectPropertyUpdateAction Action { get; internal set; }
+    public SubjectPropertyUpdateKind Kind { get; internal set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public SubjectUpdate? Item { get; internal set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public List<SubjectPropertyCollectionUpdate>? Collection { get; internal set; }
+
+    public static SubjectPropertyUpdate Create<T>(T value)
+    {
+        return new SubjectPropertyUpdate
+        {
+            Type = typeof(T).Name,
+            Kind = SubjectPropertyUpdateKind.Value,
+            Value = value
+        };
+    }
+    
+    public static SubjectPropertyUpdate Create(SubjectUpdate itemUpdate)
+    {
+        return new SubjectPropertyUpdate
+        {
+            Kind = SubjectPropertyUpdateKind.Item,
+            Item = itemUpdate
+        };
+    }
+    
+    public static SubjectPropertyUpdate Create(params IEnumerable<SubjectPropertyCollectionUpdate> collectionUpdates)
+    {
+        return new SubjectPropertyUpdate
+        {
+            Kind = SubjectPropertyUpdateKind.Collection,
+            Collection = collectionUpdates.ToList()
+        };
+    }
     
     public static SubjectPropertyUpdate Create(RegisteredSubject subject, string propertyName, RegisteredSubjectProperty property)
     {

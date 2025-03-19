@@ -8,7 +8,7 @@ public partial class Person
 {
     public Person()
     {
-        Children = [];
+        Children = new List<Person>();
     }
 
     [MaxLength(4)]

@@ -30,6 +30,12 @@ public record RegisteredSubject
         }
     }
 
+    public RegisteredSubjectProperty? TryGetProperty(string propertyName)
+    {
+        lock (_lock)
+            return _properties.GetValueOrDefault(propertyName);
+    }
+
     internal RegisteredSubject(IInterceptorSubject subject, IEnumerable<RegisteredSubjectProperty> properties)
     {
         Subject = subject;

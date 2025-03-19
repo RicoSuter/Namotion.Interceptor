@@ -10,11 +10,13 @@ public record RegisteredSubjectProperty(PropertyReference Property)
 
     public required Type Type { get; init; }
 
-    public required Attribute[] Attributes { get; init; }
+    public required IReadOnlyCollection<Attribute> Attributes { get; init; }
     
     public bool IsAttribute => Attributes.Any(a => a is PropertyAttributeAttribute);
     
-    // TODO(perf): Cache this
+    public string BrowseName => IsAttribute ? Attribute.AttributeName : Property.Name;
+    
+    // TODO(perf): Cache the attribute property name
     public PropertyAttributeAttribute Attribute => Attributes.OfType<PropertyAttributeAttribute>().Single();
 
 #pragma warning disable CS8618

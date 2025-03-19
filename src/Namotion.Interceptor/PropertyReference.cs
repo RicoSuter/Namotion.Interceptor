@@ -12,7 +12,18 @@ public readonly record struct PropertyReference
     
     public string Name { get; }
     
+    // TODO(perf): Cache the property metadata (?)
     public SubjectPropertyMetadata Metadata => Subject.Properties[Name];
+    
+    public object? GetValue()
+    {
+        return Metadata.GetValue?.Invoke(Subject);
+    }
+    
+    public void SetValue(object? value)
+    {
+        Metadata.SetValue?.Invoke(Subject, value);
+    }
 
     public void SetPropertyData(string key, object? value)
     {

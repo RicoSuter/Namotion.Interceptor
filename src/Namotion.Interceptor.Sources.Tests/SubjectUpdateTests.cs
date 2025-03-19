@@ -1,6 +1,8 @@
 ﻿using System.Text.Json;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Extensions;
+using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -8,8 +10,6 @@ namespace Namotion.Interceptor.Sources.Tests;
 
 public class SubjectUpdateTests
 {
-    // TODO: Move to source tests
-    
     [Fact]
     public async Task WhenGeneratingCompleteSubjectDescription_ThenResultIsCorrect()
     {
@@ -33,12 +33,12 @@ public class SubjectUpdateTests
         };
 
         // Act
-        var partialSubjectDescription = SubjectUpdate
+        var completeSubjectUpdate = SubjectUpdate
             .CreateCompleteUpdate(person)
             .ConvertPropertyNames(CreateJsonSerializerOptions());
 
         // Assert
-        await Verify(partialSubjectDescription);
+        await Verify(completeSubjectUpdate);
     }
 
     [Fact]
@@ -72,14 +72,14 @@ public class SubjectUpdateTests
         };
 
         // Act
-        var partialSubjectDescription = SubjectUpdate
+        var partialSubjectUpdate = SubjectUpdate
             .CreatePartialUpdateFromChanges(person, changes)
             .ConvertPropertyNames(CreateJsonSerializerOptions());
 
         // Assert
-        await Verify(partialSubjectDescription);
+        await Verify(partialSubjectUpdate);
     }
-    
+
     [Fact]
     public async Task WhenGeneratingPartialSubjectDescriptionForNonRoot_ThenResultIsCorrect()
     {
@@ -111,12 +111,71 @@ public class SubjectUpdateTests
         };
 
         // Act
-        var partialSubjectDescription = SubjectUpdate
+        var partialSubjectUpdate = SubjectUpdate
             .CreatePartialUpdateFromChanges(father, changes) // TODO(perf): This method can probably made much faster in case of non-root subjects (no need to create many objects)
             .ConvertPropertyNames(CreateJsonSerializerOptions());
 
         // Assert
-        await Verify(partialSubjectDescription);
+        await Verify(partialSubjectUpdate);
+    }
+
+    [Fact]
+    public async Task WhenCreatingSubjectUpdateFromPath_ThenResultIsCorrect()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var father = new Person { FirstName = "Father" };
+        var mother = new Person { FirstName = "Mother" };
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
+        var child3 = new Person { FirstName = "Child3" };
+
+        var person = new Person(context)
+        {
+            FirstName = "Child",
+            Mother = mother,
+            Father = father,
+            Children = [child1, child2, child3]
+        };
+
+        // Act
+        var sourcePathProvider = new TestSourcePathProvider();
+        var partialSubjectUpdate = person.CreateSubjectUpdateFromPaths(
+            new Dictionary<string, object?>
+            {
+                { "Children[1].FirstName", "RandomName1" },
+                { "Children[2].FirstName", "RandomName2" },
+                { "Father.FirstName", "RandomName3" }
+            }, sourcePathProvider);
+
+        // Assert
+        await Verify(partialSubjectUpdate);
+    }
+
+    public class TestSourcePathProvider : ISourcePathProvider
+    {
+        public bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        {
+            return true;
+        }
+
+        public string? TryGetPropertySegmentName(RegisteredSubjectProperty property)
+        {
+            return property.BrowseName;
+        }
+
+        public string GetPropertyAttributePath(string path, RegisteredSubjectProperty attribute)
+        {
+            return path;
+        }
+
+        public string GetPropertyPath(string path, RegisteredSubjectProperty property)
+        {
+            return path;
+        }
     }
 
     private static JsonSerializerOptions CreateJsonSerializerOptions()
