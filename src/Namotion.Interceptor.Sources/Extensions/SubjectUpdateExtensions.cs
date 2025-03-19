@@ -15,7 +15,8 @@ public static class SubjectUpdateExtensions
                 transform?.Invoke(propertyReference, propertyUpdate);
                 propertyReference.SetValueFromSource(source, propertyUpdate.Value);
             }, 
-            (_, type) => Activator.CreateInstance(type) as IInterceptorSubject);
+            (_, type) => Activator.CreateInstance(type) as IInterceptorSubject 
+                ?? throw new InvalidOperationException("Cannot create subject."));
     }
     
     public static void ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update,
@@ -27,12 +28,13 @@ public static class SubjectUpdateExtensions
                 transform?.Invoke(propertyReference, propertyUpdate);
                 propertyReference.Metadata.SetValue?.Invoke(propertyReference.Subject, propertyUpdate.Value);
             }, 
-            (_, type) => Activator.CreateInstance(type) as IInterceptorSubject);
+            (_, type) => Activator.CreateInstance(type) as IInterceptorSubject 
+                ?? throw new InvalidOperationException("Cannot create subject."));
     }
     
     public static void VisitSubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update,
         Action<PropertyReference, SubjectPropertyUpdate> visitValuePropertyUpdate,
-        Func<RegisteredSubjectProperty, Type, IInterceptorSubject?>? createSubject)
+        Func<RegisteredSubjectProperty, Type, IInterceptorSubject>? createSubject)
     {
         foreach (var (propertyName, propertyUpdate) in update.Properties)
         {
@@ -53,7 +55,7 @@ public static class SubjectUpdateExtensions
         IInterceptorSubject subject, string propertyName,
         SubjectPropertyUpdate propertyUpdate,
         Action<PropertyReference, SubjectPropertyUpdate> visitValuePropertyUpdate,
-        Func<RegisteredSubjectProperty, Type, IInterceptorSubject?>? createSubject)
+        Func<RegisteredSubjectProperty, Type, IInterceptorSubject>? createSubject)
     {
         switch (propertyUpdate.Kind)
         {
@@ -124,6 +126,10 @@ public static class SubjectUpdateExtensions
 
                                     list.Add(newItem);
                                 }
+                                else
+                                {
+                                    throw new InvalidOperationException("Cannot add item to non-list collection.");
+                                }
                             }
                         }
                     }
@@ -134,7 +140,7 @@ public static class SubjectUpdateExtensions
                         
                         var itemType = registeredCollectionProperty.Type.GenericTypeArguments[0];
                         var collectionType = typeof(List<>).MakeGenericType(itemType);
-                        var collection = (IList)Activator.CreateInstance(collectionType)!;
+                        var list = (IList)Activator.CreateInstance(collectionType)!;
                         propertyUpdate.Collection.ForEach(i =>
                         {
                             var item = createSubject?.Invoke(registeredCollectionProperty, itemType);
@@ -142,7 +148,7 @@ public static class SubjectUpdateExtensions
                             {
                                 VisitSubjectUpdate(item, i.Item!, visitValuePropertyUpdate, createSubject);
                             }
-                            collection.Add(item);
+                            list.Add(item);
                         });
                     }
                 }
