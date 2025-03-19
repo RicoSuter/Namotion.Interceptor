@@ -98,7 +98,6 @@ public static class SubjectUpdateExtensions
                     propertyUpdate.Collection is not null)
                 {
                     // TODO: Handle dictionary
-                    // TODO: should we loop first through update.collection
 
                     var value = registeredCollectionProperty.GetValue();
                     if (value is IReadOnlyCollection<IInterceptorSubject> existingCollection)
@@ -136,6 +135,7 @@ public static class SubjectUpdateExtensions
                     else
                     {
                         // create new collection
+                        
                         // TODO(perf): Improve performance of collection creation
                         
                         var itemType = registeredCollectionProperty.Type.GenericTypeArguments[0];
