@@ -9,6 +9,8 @@ public static class SubjectDataExtensions
 
     public static void SetValueFromSource(this PropertyReference property, ISubjectSource source, object? valueFromSource)
     {
+        // TODO: Use async local here instead? Verify correctness of the method
+
         var contexts = property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ISubjectSource>())!;
         lock (contexts)
         {

@@ -20,13 +20,34 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
         _pathPrefix = pathPrefix ?? string.Empty;
     }
     
-    public IEnumerable<(string path, bool isAttribute)> ParsePathSegments(string path)
+    public IEnumerable<(string path, object? index, bool isAttribute)> ParsePathSegments(string path)
     {
+        // remove prefix
+        if (!string.IsNullOrEmpty(_pathPrefix))
+        {
+            if (!path.StartsWith(_pathPrefix))
+            {
+                // does not start with prefix, ignore this path
+                return [];
+            }
+
+            path = path[_pathPrefix.Length..];
+        }
+        
         return path
             .Split(_propertyPathDelimiter)
             .SelectMany(s => s
                 .Split(_attributePathDelimiter)
-                .Select((ss, i) => (ss, i > 0)));
+                .Select((ss, i) =>
+                {
+                    var segmentParts = ss.Split('[', ']');
+                    object? index = segmentParts.Length >= 2 ? 
+                        (int.TryParse(segmentParts[1], out var intIndex) ? 
+                            intIndex : segmentParts[1]) : null;
+
+                    var currentPath = segmentParts[0];
+                    return (currentPath, index, i > 0);
+                }));
     }
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)

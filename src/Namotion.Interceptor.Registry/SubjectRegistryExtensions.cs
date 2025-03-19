@@ -33,6 +33,11 @@ public static class SubjectRegistryExtensions
             : null;
     }
     
+    public static RegisteredSubjectProperty? TryGetRegisteredAttribute(this PropertyReference property, string attributeName)
+    {
+        return TryGetRegisteredSubjectProperty(property.Subject, property.Name, attributeName);
+    }
+
     public static RegisteredSubjectProperty GetRegisteredAttribute(this PropertyReference property, string attributeName)
     {
         return GetRegisteredAttribute(property.Subject, property.Name, attributeName);
@@ -40,15 +45,21 @@ public static class SubjectRegistryExtensions
 
     public static RegisteredSubjectProperty GetRegisteredAttribute(this IInterceptorSubject subject, string propertyName, string attributeName)
     {
+        return TryGetRegisteredSubjectProperty(subject, propertyName, attributeName)
+            ?? throw new InvalidOperationException($"Attribute '{attributeName}' not found on property '{propertyName}'.");
+    }
+
+    private static RegisteredSubjectProperty? TryGetRegisteredSubjectProperty(IInterceptorSubject subject, string propertyName, string attributeName)
+    {
         var registry = subject.Context.GetService<ISubjectRegistry>();
         var attribute = registry.KnownSubjects[subject].Properties
-            .Single(p => p.Value.Attributes
+            .SingleOrDefault(p => p.Value.Attributes
                 .OfType<PropertyAttributeAttribute>()
                 .Any(a => a.PropertyName == propertyName && a.AttributeName == attributeName));
 
         return attribute.Value;
     }
-    
+
     public static IReadOnlyDictionary<string, RegisteredSubjectProperty> GetRegisteredAttributes(this PropertyReference property)
     {
         var registry = property.Subject.Context.GetService<ISubjectRegistry>();

@@ -166,9 +166,10 @@ public static class SubjectRegistryJsonExtensions
 
         if (attribute is not null)
         {
+            // TODO(perf): Use cache to improve performance
             return property.Value
                 .Parent.Properties
-                .Single(p => p.Key == attribute.PropertyName) // TODO: Improve performance??
+                .Single(p => p.Key == attribute.PropertyName)
                 .GetJsonPropertyName(jsonSerializerOptions) + "@" + attribute.AttributeName;
         }
 

@@ -1,29 +1,29 @@
 ﻿{
   Properties: {
-    children: {
+    Children: {
       Kind: Collection,
       Collection: [
         {
           Index: 0,
+          Item: {}
+        },
+        {
+          Index: 1,
           Item: {
             Properties: {
-              firstName: {
-                Value: NewChild1,
+              FirstName: {
+                Value: RandomName1,
                 Kind: Value
               }
             }
           }
         },
         {
-          Index: 1,
-          Item: {}
-        },
-        {
           Index: 2,
           Item: {
             Properties: {
-              firstName: {
-                Value: NewChild3,
+              FirstName: {
+                Value: RandomName2,
                 Kind: Value
               }
             }
@@ -31,20 +31,16 @@
         }
       ]
     },
-    father: {
+    Father: {
       Kind: Item,
       Item: {
         Properties: {
-          firstName: {
-            Value: NewFather,
+          FirstName: {
+            Value: RandomName3,
             Kind: Value
           }
         }
       }
-    },
-    firstName: {
-      Value: NewPerson,
-      Kind: Value
     }
   }
 }

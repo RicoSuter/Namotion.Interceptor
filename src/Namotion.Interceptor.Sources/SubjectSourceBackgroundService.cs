@@ -38,13 +38,16 @@ public class SubjectSourceBackgroundService : BackgroundService
                     _beforeInitializationUpdates = [];
                 }
 
+                // start listening for changes
                 using var disposable = await _source.InitializeAsync(UpdatePropertyValueFromSource, stoppingToken);
+                
+                // read complete data set from source
                 var initialData = await _source.ReadFromSourceAsync(stoppingToken);
-               
                 lock (this)
                 {
                     UpdatePropertyValueFromSource(initialData);
 
+                    // replaying previously buffered updates
                     var beforeInitializationUpdates = _beforeInitializationUpdates;
                     _beforeInitializationUpdates = null;
                     
@@ -54,6 +57,7 @@ public class SubjectSourceBackgroundService : BackgroundService
                     }
                 }
                 
+                // listen for changes by ignoring changes from the source and buffering them into a single update
                 await foreach (var changes in _source
                     .Subject
                     .Context

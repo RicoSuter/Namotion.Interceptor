@@ -31,15 +31,15 @@ public abstract class SubjectControllerBase<TSubject> : ControllerBase
     [HttpGet]
     public ActionResult<TSubject> GetSubject()
     {
-        // TODO: correctly generate OpenAPI schema
+        // TODO: Correctly generate OpenAPI schema
         return Ok(_subject.ToJsonObject(_jsonOptions.Value.JsonSerializerOptions));
     }
 
     /// <summary>
     /// Gets the subject structure with metadata.
     /// </summary>
-    [HttpGet("description")]
-    public ActionResult<SubjectUpdate> GetSubjectDescription()
+    [HttpGet("structure")]
+    public ActionResult<SubjectUpdate> GetSubjectStructure()
     {
         return Ok(SubjectUpdate
             .CreateCompleteUpdate(_subject)
