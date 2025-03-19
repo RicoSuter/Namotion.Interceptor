@@ -60,4 +60,53 @@ public class SubjectUpdateExtensionsTests
         // Assert
         Assert.Equal("John", person.Father?.FirstName);
     }
+    
+    [Fact]
+    public void WhenApplyingCollectionProperty_ThenItWorks()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        
+        // Act
+        person.ApplySubjectUpdate(new SubjectUpdate
+        {
+            Properties = new Dictionary<string, SubjectPropertyUpdate>
+            {
+                {
+                    nameof(Person.Children), SubjectPropertyUpdate.Create(
+                        new SubjectPropertyCollectionUpdate
+                        {
+                            Index = 0, 
+                            Item = new SubjectUpdate
+                            {
+                                Properties = new Dictionary<string, SubjectPropertyUpdate>
+                                {
+                                    {
+                                        nameof(Person.FirstName), SubjectPropertyUpdate.Create("John")
+                                    }
+                                }
+                            }
+                        },
+                        new SubjectPropertyCollectionUpdate
+                        {
+                            Index = 1, 
+                            Item = new SubjectUpdate
+                            {
+                                Properties = new Dictionary<string, SubjectPropertyUpdate>
+                                {
+                                    {
+                                        nameof(Person.FirstName), SubjectPropertyUpdate.Create("Anna")
+                                    }
+                                }
+                            }
+                        })
+                }
+            }
+        });
+        
+        // Assert
+        Assert.Equal("John", person.Children.First().FirstName);
+        Assert.Equal("Anna", person.Children.Last().FirstName);
+    }
 }

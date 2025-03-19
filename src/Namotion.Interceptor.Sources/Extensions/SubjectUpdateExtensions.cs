@@ -1,3 +1,4 @@
+using System.Collections;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -14,7 +15,7 @@ public static class SubjectUpdateExtensions
                 transform?.Invoke(propertyReference, propertyUpdate);
                 propertyReference.SetValueFromSource(source, propertyUpdate.Value);
             }, 
-        property => Activator.CreateInstance(property.Type) as IInterceptorSubject);
+            (_, type) => Activator.CreateInstance(type) as IInterceptorSubject);
     }
     
     public static void ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update,
@@ -26,12 +27,12 @@ public static class SubjectUpdateExtensions
                 transform?.Invoke(propertyReference, propertyUpdate);
                 propertyReference.Metadata.SetValue?.Invoke(propertyReference.Subject, propertyUpdate.Value);
             }, 
-            property => Activator.CreateInstance(property.Type) as IInterceptorSubject);
+            (_, type) => Activator.CreateInstance(type) as IInterceptorSubject);
     }
     
     public static void VisitSubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update,
         Action<PropertyReference, SubjectPropertyUpdate> visitValuePropertyUpdate,
-        Func<RegisteredSubjectProperty, IInterceptorSubject?>? createSubject = null)
+        Func<RegisteredSubjectProperty, Type, IInterceptorSubject?>? createSubject)
     {
         foreach (var (propertyName, propertyUpdate) in update.Properties)
         {
@@ -52,7 +53,7 @@ public static class SubjectUpdateExtensions
         IInterceptorSubject subject, string propertyName,
         SubjectPropertyUpdate propertyUpdate,
         Action<PropertyReference, SubjectPropertyUpdate> visitValuePropertyUpdate,
-        Func<RegisteredSubjectProperty, IInterceptorSubject?>? createSubject)
+        Func<RegisteredSubjectProperty, Type, IInterceptorSubject?>? createSubject)
     {
         switch (propertyUpdate.Kind)
         {
@@ -69,15 +70,15 @@ public static class SubjectUpdateExtensions
                         if (registeredProperty.GetValue() is IInterceptorSubject existingItem)
                         {
                             // update existing item
-                            VisitSubjectUpdate(existingItem, propertyUpdate.Item, visitValuePropertyUpdate);
+                            VisitSubjectUpdate(existingItem, propertyUpdate.Item, visitValuePropertyUpdate, createSubject);
                         }
                         else
                         {
                             // create new item
-                            var item = createSubject?.Invoke(registeredProperty);
+                            var item = createSubject?.Invoke(registeredProperty, registeredProperty.Type);
                             if (item != null)
                             {
-                                VisitSubjectUpdate(item, propertyUpdate.Item, visitValuePropertyUpdate);
+                                VisitSubjectUpdate(item, propertyUpdate.Item, visitValuePropertyUpdate, createSubject);
                                 registeredProperty.SetValue(item);
                             }
                         }
@@ -98,16 +99,51 @@ public static class SubjectUpdateExtensions
                     // TODO: should we loop first through update.collection
 
                     var value = registeredCollectionProperty.GetValue();
-                    if (value is IEnumerable<IInterceptorSubject> existingCollection)
+                    if (value is IReadOnlyCollection<IInterceptorSubject> existingCollection)
                     {
-                        foreach (var (item, index) in existingCollection.Select((item, index) => (item, index)))
+                        foreach (var (item, index) in propertyUpdate
+                            .Collection
+                            .Select((item, index) => (item, index)))
                         {
-                            VisitSubjectUpdate(item, propertyUpdate.Collection[index].Item!, visitValuePropertyUpdate);
+                            if (item.Item is not null)
+                            {
+                                if (existingCollection.Count > index)
+                                {
+                                    // Update existing collection item
+                                    VisitSubjectUpdate(existingCollection.ElementAt(index), item.Item!, visitValuePropertyUpdate, createSubject);
+                                }
+                                else if (existingCollection is IList list)
+                                {
+                                    // Missing index, create new collection item
+                                    var itemType = registeredCollectionProperty.Type.GenericTypeArguments[0];
+                                    var newItem = createSubject?.Invoke(registeredCollectionProperty, itemType);
+                                    if (newItem is not null)
+                                    {
+                                        VisitSubjectUpdate(newItem, item.Item!, visitValuePropertyUpdate, createSubject);
+                                    }
+
+                                    list.Add(newItem);
+                                }
+                            }
                         }
                     }
                     else
                     {
-                        // TODO: Implement add collection
+                        // create new collection
+                        // TODO(perf): Improve performance of collection creation
+                        
+                        var itemType = registeredCollectionProperty.Type.GenericTypeArguments[0];
+                        var collectionType = typeof(List<>).MakeGenericType(itemType);
+                        var collection = (IList)Activator.CreateInstance(collectionType)!;
+                        propertyUpdate.Collection.ForEach(i =>
+                        {
+                            var item = createSubject?.Invoke(registeredCollectionProperty, itemType);
+                            if (item is not null)
+                            {
+                                VisitSubjectUpdate(item, i.Item!, visitValuePropertyUpdate, createSubject);
+                            }
+                            collection.Add(item);
+                        });
                     }
                 }
 
