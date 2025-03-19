@@ -212,7 +212,11 @@ public class SubjectRegistryTests
             }
         };
 
+        var registeredSubject = person.TryGetRegisteredSubject();
+
         // Assert
+        Assert.NotNull(registeredSubject);
+
         var jsonSerializerOptions = new JsonSerializerOptions(JsonSerializerOptions.Default)
         {
             WriteIndented = true,
