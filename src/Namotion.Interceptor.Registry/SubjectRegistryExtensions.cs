@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Registry;
 
 public static class SubjectRegistryExtensions
 {
-    public static RegisteredSubjectProperty? TryGetProperty(this IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> properties, PropertyReference property)
+    public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> properties, PropertyReference property)
     {
         if (properties.TryGetValue(property.Subject, out var metadata))
         {
@@ -18,19 +18,25 @@ public static class SubjectRegistryExtensions
         return null;
     }
     
-    public static RegisteredSubjectProperty GetRegisteredProperty(this PropertyReference propertyReference)
-    {
-        var registry = propertyReference.Subject.Context.GetService<ISubjectRegistry>();
-        return registry.KnownSubjects.TryGetProperty(propertyReference) 
-               ?? throw new InvalidOperationException($"Property '{propertyReference.Name}' not found.");
-    }
-    
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName)
     {
         var registry = subject.Context.GetService<ISubjectRegistry>();
         return registry.KnownSubjects.TryGetValue(subject, out var registeredSubject)
             ? registeredSubject.Properties.GetValueOrDefault(propertyName)
             : null;
+    }
+    
+    public static RegisteredSubjectProperty GetRegisteredProperty(this PropertyReference propertyReference)
+    {
+        var registry = propertyReference.Subject.Context.GetService<ISubjectRegistry>();
+        return registry.KnownSubjects.TryGetRegisteredProperty(propertyReference) 
+            ?? throw new InvalidOperationException($"Property '{propertyReference.Name}' not found.");
+    }
+    
+    public static RegisteredSubject? TryGetRegisteredSubject(this IInterceptorSubject subject)
+    {
+        var registry = subject.Context.GetService<ISubjectRegistry>();
+        return registry.KnownSubjects.GetValueOrDefault(subject);
     }
     
     public static RegisteredSubjectProperty? TryGetRegisteredAttribute(this PropertyReference property, string attributeName)

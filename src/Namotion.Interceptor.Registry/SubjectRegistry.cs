@@ -39,7 +39,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                 }
 
                 var property = _knownSubjects
-                    .TryGetProperty(context.Property.Value) ?? 
+                    .TryGetRegisteredProperty(context.Property.Value) ?? 
                     throw new InvalidOperationException($"Property '{context.Property.Value.Name}' not found.");
                     
                 property
@@ -86,7 +86,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                     metadata.RemoveParent(context.Property.Value);
 
                     _knownSubjects
-                        .TryGetProperty(context.Property.Value)?
+                        .TryGetRegisteredProperty(context.Property.Value)?
                         .RemoveChild(new SubjectPropertyChild
                         {
                             Subject = context.Subject,

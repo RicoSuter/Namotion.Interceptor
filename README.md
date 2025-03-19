@@ -144,3 +144,94 @@ public class LogPropertyChangesHandler : ILifecycleHandler
 ## More samples
 
 For more samples, check out the "Samples" directory in the Visual Studio solution.
+
+## Projects
+
+### Namotion.Interceptor
+
+- Core library for property and method interception.
+
+### Namotion.Interceptor.Generator
+
+- Source generator for the `InterceptorSubject` attribute.
+
+### Namotion.Interceptor.Hosting
+
+- Automatically start and stop subjects which implement `IHostedService`
+  - Based on object graph attachment and detachment
+- Support for attaching and detaching hosted services to subjects
+
+Attach a hosted service to a subject:
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithHostedServices(builder.Services);
+    
+var person = new Person(context);
+
+var hostedService = new PersonBackgroundService(person);
+person.AttachHostedService(hostedService);
+```
+
+Methods:
+
+- WithHostedServices()
+  - Tracking.WithLifecycle()
+
+### Namotion.Interceptor.Registry
+
+- Registry which tracks subjects and child subjects and their properties
+- Support for dynamic properties and property attributes
+  - Attributes are properties which are attached to other properties and marked as attribute
+
+Retrieve registered subject from the registry to access dynamic properties and attributes:
+
+````csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithRegistry();
+
+var person = new Person(context);
+var registeredSubject = person.TryGetRegisteredSubject();
+````
+
+Methods:
+
+- WithRegistry()
+  - Tracking.WithContextInheritance()
+
+### Namotion.Interceptor.Sources
+
+- Support to attach an object branch to an external source
+
+### Namotion.Interceptor.Tracking
+
+- Support for tracking changes of subjects and their properties and derived properties
+
+Methods: 
+
+- WithLifecycle(): Attach and detach callbacks (set or remove from property or collection)
+- WithFullPropertyTracking()
+  - WithEqualityCheck()
+  - WithContextInheritance()
+  - WithDerivedPropertyChangeDetection()
+  - WithPropertyChangedObservable()
+- WithReadPropertyRecorder()
+- WithParents()
+- WithEqualityCheck()
+- WithDerivedPropertyChangeDetection()
+  - WithLifecycle()
+- WithPropertyChangedObservable()
+- WithContextInheritance()
+  - WithLifecycle()
+
+### Namotion.Interceptor.Validation
+
+- Support for validating subjects and their properties
+
+Methods:
+
+- WithPropertyValidation()
+- WithDataAnnotationValidation()
+  - WithPropertyValidation()
