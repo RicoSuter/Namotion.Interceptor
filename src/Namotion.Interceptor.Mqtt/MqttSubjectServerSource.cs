@@ -99,7 +99,7 @@ namespace Namotion.Interceptor.Mqtt
 
         public async Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken)
         {
-            foreach (var (path, value, _) in update.EnumeratePaths(_subject, _sourcePathProvider))
+            foreach (var (path, value, _) in update.ConvertToSourcePaths(_subject, _sourcePathProvider))
             {
                 await PublishPropertyValueAsync(path, value, cancellationToken);
             }
@@ -114,7 +114,7 @@ namespace Namotion.Interceptor.Mqtt
                 await Task.Delay(1000);
                 foreach (var (path, value, _) in SubjectUpdate
                     .CreateCompleteUpdate(_subject)
-                    .EnumeratePaths(_subject, _sourcePathProvider))
+                    .ConvertToSourcePaths(_subject, _sourcePathProvider))
                 {
                     // TODO: Send only to new client
                     await PublishPropertyValueAsync(path, value, CancellationToken.None);
@@ -151,7 +151,7 @@ namespace Namotion.Interceptor.Mqtt
                 var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
                 var document = JsonDocument.Parse(payload);
 
-                var update = _subject.CreateSubjectUpdateFromPath(path, 
+                var update = _subject.CreateUpdateFromSourcePath(path, 
                     _sourcePathProvider,
                     (property, _) => document.Deserialize(property.Type));
 

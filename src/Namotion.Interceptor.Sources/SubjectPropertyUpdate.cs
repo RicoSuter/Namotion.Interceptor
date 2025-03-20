@@ -1,6 +1,6 @@
+using System.Collections;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources.Extensions;
 
 namespace Namotion.Interceptor.Sources;
 
@@ -65,7 +65,50 @@ public class SubjectPropertyUpdate
             Attributes = attributes.Count != 0 ? attributes : null
         };
         
-        propertyUpdate.ApplyPropertyValue(property.GetValue());
+        propertyUpdate.ApplyValue(property.GetValue());
         return propertyUpdate;
+    }
+    
+    /// <summary>
+    /// Adds a complete update of the given value to the property update.
+    /// </summary>
+    /// <param name="value">The value to apply.</param>
+    public void ApplyValue(object? value)
+    {
+        if (value is IDictionary dictionary && dictionary.Values.OfType<IInterceptorSubject>().Any())
+        {
+            // TODO: Fix dictionary handling logic (how to detect dict?)
+            
+            Kind = SubjectPropertyUpdateKind.Collection;
+            Collection = dictionary.Keys
+                .OfType<object>()
+                .Select((key) => new SubjectPropertyCollectionUpdate
+                {
+                    Item = SubjectUpdate.CreateCompleteUpdate((IInterceptorSubject)dictionary[key]!),
+                    Index = key
+                })
+                .ToList();
+        }
+        else if (value is IEnumerable<IInterceptorSubject> collection)
+        {
+            Kind = SubjectPropertyUpdateKind.Collection;
+            Collection = collection
+                .Select((itemSubject, index) => new SubjectPropertyCollectionUpdate
+                {
+                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject),
+                    Index = index
+                })
+                .ToList();
+        }
+        else if (value is IInterceptorSubject itemSubject)
+        {
+            Kind = SubjectPropertyUpdateKind.Item;
+            Item = SubjectUpdate.CreateCompleteUpdate(itemSubject);
+        }
+        else
+        {
+            Kind = SubjectPropertyUpdateKind.Value;
+            Value = value;
+        }
     }
 }

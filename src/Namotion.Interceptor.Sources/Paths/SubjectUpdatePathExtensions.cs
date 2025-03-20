@@ -14,13 +14,13 @@ public static class SubjectUpdatePathExtensions
     /// <param name="value">The value.</param>
     /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreateSubjectUpdateFromPath(
+    public static SubjectUpdate CreateUpdateFromSourcePath(
         this IInterceptorSubject subject,
         string path,
         object? value,
         ISourcePathProvider sourcePathProvider)
     {
-        return subject.CreateSubjectUpdateFromPaths([path], sourcePathProvider, 
+        return subject.CreateUpdateFromSourcePaths([path], sourcePathProvider, 
             (_, _) => value);
     }
 
@@ -32,13 +32,13 @@ public static class SubjectUpdatePathExtensions
     /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
     /// <param name="getPropertyValue">The function to resolve a property value, called per path.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreateSubjectUpdateFromPath(
+    public static SubjectUpdate CreateUpdateFromSourcePath(
         this IInterceptorSubject subject,
         string path,
         ISourcePathProvider sourcePathProvider,
         Func<RegisteredSubjectProperty, string, object?> getPropertyValue)
     {
-        return subject.CreateSubjectUpdateFromPaths([path], sourcePathProvider, getPropertyValue);
+        return subject.CreateUpdateFromSourcePaths([path], sourcePathProvider, getPropertyValue);
     }
 
     /// <summary>
@@ -48,12 +48,12 @@ public static class SubjectUpdatePathExtensions
     /// <param name="pathsWithValues">The dictionary with paths and values.</param>
     /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreateSubjectUpdateFromPaths(
+    public static SubjectUpdate CreateUpdateFromSourcePaths(
         this IInterceptorSubject subject,
         IReadOnlyDictionary<string, object?> pathsWithValues,
         ISourcePathProvider sourcePathProvider)
     {
-        return subject.CreateSubjectUpdateFromPaths(pathsWithValues.Keys, sourcePathProvider, 
+        return subject.CreateUpdateFromSourcePaths(pathsWithValues.Keys, sourcePathProvider, 
             (_, path) => pathsWithValues[path]);
     }
 
@@ -65,7 +65,7 @@ public static class SubjectUpdatePathExtensions
     /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
     /// <param name="getPropertyValue">The function to resolve a property value, called per path.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreateSubjectUpdateFromPaths(
+    public static SubjectUpdate CreateUpdateFromSourcePaths(
         this IInterceptorSubject subject,
         IEnumerable<string> paths,
         ISourcePathProvider sourcePathProvider,
@@ -91,11 +91,6 @@ public static class SubjectUpdatePathExtensions
                 var registry = currentSubject.Context.GetService<ISubjectRegistry>();
                 var registeredSubject = registry.KnownSubjects[currentSubject];
 
-                if (isAttribute)
-                {
-                    
-                }
-                
                 var registeredProperty = isAttribute ? 
                     previousProperty?.Property.TryGetRegisteredAttribute(segment) :
                     sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
@@ -189,7 +184,7 @@ public static class SubjectUpdatePathExtensions
         return collectionProperty;
     }
 
-    public static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePaths(
+    public static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> ConvertToSourcePaths(
         this SubjectUpdate subjectUpdate,
         IInterceptorSubject subject,
         ISourcePathProvider sourcePathProvider,
@@ -198,14 +193,14 @@ public static class SubjectUpdatePathExtensions
         foreach (var property in subjectUpdate.Properties)
         {
             foreach (var (path, value, registeredProperty) in property.Value
-                .EnumeratePropertyPaths(subject, property.Key, sourcePathProvider, pathPrefix))
+                .ConvertToSourcePaths(subject, property.Key, sourcePathProvider, pathPrefix))
             {
                 yield return (path, value, registeredProperty);
             }
         }
     }
 
-    private static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePropertyPaths(
+    private static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> ConvertToSourcePaths(
         this SubjectPropertyUpdate propertyUpdate,
         IInterceptorSubject subject, string propertyName,
         ISourcePathProvider sourcePathProvider,
@@ -217,15 +212,14 @@ public static class SubjectUpdatePathExtensions
             yield break;
         }
 
-        var propertyPath = registeredProperty.IsAttribute ? sourcePathProvider.GetPropertyAttributePath(pathPrefix, registeredProperty) : sourcePathProvider.GetPropertyPath(pathPrefix, registeredProperty);
-
+        var fullPath = sourcePathProvider.GetPropertyFullPath(registeredProperty, pathPrefix);
         if (propertyUpdate.Attributes is not null)
         {
             foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
             {
                 var registeredAttribute = subject.GetRegisteredAttribute(propertyName, attributeName);
                 foreach (var (path, value, property) in attributeUpdate
-                             .EnumeratePropertyPaths(subject, registeredAttribute.Property.Name, sourcePathProvider, propertyPath))
+                             .ConvertToSourcePaths(subject, registeredAttribute.Property.Name, sourcePathProvider, fullPath))
                 {
                     yield return (path, value, property);
                 }
@@ -235,14 +229,14 @@ public static class SubjectUpdatePathExtensions
         switch (propertyUpdate.Kind)
         {
             case SubjectPropertyUpdateKind.Value: // handle value
-                yield return (propertyPath, propertyUpdate.Value, registeredProperty);
+                yield return (fullPath, propertyUpdate.Value, registeredProperty);
                 break;
 
             case SubjectPropertyUpdateKind.Item: // handle item
                 if (registeredProperty.GetValue() is IInterceptorSubject currentItem)
                 {
                     foreach (var (path, value, property) in propertyUpdate.Item!
-                                 .EnumeratePaths(currentItem, sourcePathProvider, propertyPath))
+                                 .ConvertToSourcePaths(currentItem, sourcePathProvider, fullPath))
                     {
                         yield return (path, value, property);
                     }
@@ -267,9 +261,9 @@ public static class SubjectUpdatePathExtensions
 
                     if (currentCollectionItem is not null)
                     {
-                        var itemPropertyPath = $"{propertyPath}[{item.Index}]";
+                        var itemPropertyPath = $"{fullPath}[{item.Index}]";
                         foreach (var (path, value, property) in item.Item
-                                     .EnumeratePaths(currentCollectionItem, sourcePathProvider, itemPropertyPath))
+                                     .ConvertToSourcePaths(currentCollectionItem, sourcePathProvider, itemPropertyPath))
                         {
                             yield return (path, value, property);
                         }

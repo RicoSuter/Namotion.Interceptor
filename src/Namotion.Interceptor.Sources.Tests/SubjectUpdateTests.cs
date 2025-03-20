@@ -35,7 +35,7 @@ public class SubjectUpdateTests
         // Act
         var completeSubjectUpdate = SubjectUpdate
             .CreateCompleteUpdate(person)
-            .ConvertPropertyNames(CreateJsonSerializerOptions());
+            .ConvertToJsonCamelCasePath();
 
         // Assert
         await Verify(completeSubjectUpdate);
@@ -74,7 +74,7 @@ public class SubjectUpdateTests
         // Act
         var partialSubjectUpdate = SubjectUpdate
             .CreatePartialUpdateFromChanges(person, changes)
-            .ConvertPropertyNames(CreateJsonSerializerOptions());
+            .ConvertToJsonCamelCasePath();
 
         // Assert
         await Verify(partialSubjectUpdate);
@@ -113,7 +113,7 @@ public class SubjectUpdateTests
         // Act
         var partialSubjectUpdate = SubjectUpdate
             .CreatePartialUpdateFromChanges(father, changes) // TODO(perf): This method can probably made much faster in case of non-root subjects (no need to create many objects)
-            .ConvertPropertyNames(CreateJsonSerializerOptions());
+            .ConvertToJsonCamelCasePath();
 
         // Assert
         await Verify(partialSubjectUpdate);
@@ -143,7 +143,7 @@ public class SubjectUpdateTests
 
         // Act
         var sourcePathProvider = new TestSourcePathProvider();
-        var partialSubjectUpdate = person.CreateSubjectUpdateFromPaths(
+        var partialSubjectUpdate = person.CreateUpdateFromSourcePaths(
             new Dictionary<string, object?>
             {
                 { "Children[1].FirstName", "RandomName1" },
@@ -162,19 +162,19 @@ public class SubjectUpdateTests
             return true;
         }
 
-        public string? TryGetPropertySegmentName(RegisteredSubjectProperty property)
+        public string? TryGetPropertyName(RegisteredSubjectProperty property)
         {
             return property.BrowseName;
         }
 
-        public string GetPropertyAttributePath(string path, RegisteredSubjectProperty attribute)
+        public string GetPropertyAttributeFullPath(RegisteredSubjectProperty attribute, string pathPrefix)
         {
-            return path;
+            return pathPrefix;
         }
 
-        public string GetPropertyPath(string path, RegisteredSubjectProperty property)
+        public string GetPropertyFullPath(RegisteredSubjectProperty property, string pathPrefix)
         {
-            return path;
+            return pathPrefix;
         }
     }
 
