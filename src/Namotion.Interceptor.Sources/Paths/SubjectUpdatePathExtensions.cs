@@ -198,14 +198,14 @@ public static class SubjectUpdatePathExtensions
         foreach (var property in subjectUpdate.Properties)
         {
             foreach (var (path, value, registeredProperty) in property.Value
-                .EnumeratePaths(subject, property.Key, sourcePathProvider, pathPrefix))
+                .EnumeratePropertyPaths(subject, property.Key, sourcePathProvider, pathPrefix))
             {
                 yield return (path, value, registeredProperty);
             }
         }
     }
 
-    private static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePaths(
+    private static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> EnumeratePropertyPaths(
         this SubjectPropertyUpdate propertyUpdate,
         IInterceptorSubject subject, string propertyName,
         ISourcePathProvider sourcePathProvider,
@@ -225,7 +225,7 @@ public static class SubjectUpdatePathExtensions
             {
                 var registeredAttribute = subject.GetRegisteredAttribute(propertyName, attributeName);
                 foreach (var (path, value, property) in attributeUpdate
-                             .EnumeratePaths(subject, registeredAttribute.Property.Name, sourcePathProvider, propertyPath))
+                             .EnumeratePropertyPaths(subject, registeredAttribute.Property.Name, sourcePathProvider, propertyPath))
                 {
                     yield return (path, value, property);
                 }

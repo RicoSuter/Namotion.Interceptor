@@ -17,7 +17,8 @@ public class DataAnnotationsValidator : IPropertyValidator
 
             Validator.TryValidateProperty(value, validationContext, results);
         }
-
+        
+        // TODO: Check value against nullability
         return results;
     }
 }

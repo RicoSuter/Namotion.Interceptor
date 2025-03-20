@@ -2,14 +2,13 @@
 
 public static class ReadPropertyRecorderExtensions
 {
-    public static ReadPropertyRecorderScope StartRecordingPropertyReadCalls(this ReadPropertyRecorder recorder)
+    public static ReadPropertyRecorderScope StartPropertyAccessRecording(this ReadPropertyRecorder recorder)
     {
-        ReadPropertyRecorder.Scopes.Value =
-            ReadPropertyRecorder.Scopes.Value ??
-            new Dictionary<ReadPropertyRecorder, List<HashSet<PropertyReference>>>();
+        ReadPropertyRecorder.Scopes.Value ??= new Dictionary<ReadPropertyRecorder, List<HashSet<PropertyReference>>>();
 
         var scope = new HashSet<PropertyReference>();
-        ReadPropertyRecorder.Scopes.Value.TryAdd(recorder, new List<HashSet<PropertyReference>>());
+
+        ReadPropertyRecorder.Scopes.Value.TryAdd(recorder, []);
         ReadPropertyRecorder.Scopes.Value[recorder].Add(scope);
 
         return new ReadPropertyRecorderScope(recorder, scope);

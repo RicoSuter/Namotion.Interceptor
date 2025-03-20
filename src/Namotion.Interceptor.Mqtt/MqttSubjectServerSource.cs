@@ -93,7 +93,7 @@ namespace Namotion.Interceptor.Mqtt
 
         public Task<SubjectUpdate> ReadFromSourceAsync(CancellationToken cancellationToken)
         {
-            // As this is an MQTT server, there is initially no data to read.
+            // As this is initially an empty MQTT server, there is initially no data to read.
             return Task.FromResult(new SubjectUpdate());
         }
 

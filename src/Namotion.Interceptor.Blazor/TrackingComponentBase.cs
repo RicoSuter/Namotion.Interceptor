@@ -37,7 +37,7 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
         var result = base.ShouldRender();
         if (result)
         {
-            _recorder = Recorder?.StartRecordingPropertyReadCalls();
+            _recorder = Recorder?.StartPropertyAccessRecording();
         }
 
         return result;
