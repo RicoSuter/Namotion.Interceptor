@@ -53,7 +53,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
     public Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken)
     {
         foreach (var (_, _, property) in update
-             .EnumeratePaths(_subject, SourcePathProvider))
+             .ConvertToSourcePaths(_subject, SourcePathProvider))
         {
             if (property.Property.GetPropertyData(OpcVariableKey) is BaseDataVariableState node)
             {
@@ -120,12 +120,12 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         // TODO: Implement actual correct conversion based on the property type
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
         
-        var update = _subject.CreateSubjectUpdateFromPath(sourcePath, convertedValue, SourcePathProvider);
+        var update = _subject.CreateUpdateFromSourcePath(sourcePath, convertedValue, SourcePathProvider);
         _applySourceChangeAction?.Invoke(update);
     }
 
     public string GetSourcePropertyPath(PropertyReference property)
     {
-        return SourcePathProvider.GetPropertyPath(string.Empty, property.GetRegisteredProperty());
+        return SourcePathProvider.GetPropertyFullPath(property.GetRegisteredProperty(), string.Empty);
     }
 }

@@ -52,10 +52,10 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return TryGetPropertySegmentName(property) is not null;
+        return TryGetPropertyName(property) is not null;
     }
 
-    public string? TryGetPropertySegmentName(RegisteredSubjectProperty property)
+    public string? TryGetPropertyName(RegisteredSubjectProperty property)
     {
         var nameAttribute = property
             .Attributes
@@ -70,15 +70,17 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
         return nameAttribute?.Path ?? pathAttribute?.Path;
     }
     
-    public string GetPropertyAttributePath(string path, RegisteredSubjectProperty attribute)
+    public string GetPropertyFullPath(RegisteredSubjectProperty property, string pathPrefix)
     {
-        return path + _attributePathDelimiter + attribute.Attribute.AttributeName;
-    }
-
-    public string GetPropertyPath(string path, RegisteredSubjectProperty property)
-    {
-        var actualPath = GetAttributeBasedSourcePropertyPath(property, _sourceName);
-        return _pathPrefix + actualPath;
+        if (property.IsAttribute)
+        {
+            return pathPrefix + _attributePathDelimiter + property.Attribute.AttributeName;
+        }
+        else
+        {
+            var actualPath = GetAttributeBasedSourcePropertyPath(property, _sourceName);
+            return _pathPrefix + actualPath;
+        }
     }
 
     private string GetAttributeBasedSourcePropertyPath(RegisteredSubjectProperty property, string sourceName)
