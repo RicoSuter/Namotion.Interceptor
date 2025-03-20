@@ -152,7 +152,7 @@ public class SubjectRegistryTests
     }
 
     [Fact]
-    public void WhenRemovingMiddleElement_ThenChildrensAreAlsoRemoved()
+    public void WhenRemovingMiddleElement_ThenChildrenAreAlsoRemoved()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -211,12 +211,8 @@ public class SubjectRegistryTests
                 }
             }
         };
-
-        var registeredSubject = person.TryGetRegisteredSubject();
-
+        
         // Assert
-        Assert.NotNull(registeredSubject);
-
         var jsonSerializerOptions = new JsonSerializerOptions(JsonSerializerOptions.Default)
         {
             WriteIndented = true,

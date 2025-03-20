@@ -4,7 +4,7 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public record RegisteredSubject
 {
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     private readonly Dictionary<string, RegisteredSubjectProperty> _properties;
     private readonly HashSet<PropertyReference> _parents = new();
@@ -61,19 +61,22 @@ public record RegisteredSubject
             _parents.Remove(parent);
     }
 
-    public void AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params Attribute[] attributes)
+    public RegisteredSubjectProperty AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params Attribute[] attributes)
     {
         lock (_lock)
         {
-            var property = new CustomRegisteredSubjectProperty(new PropertyReference(Subject, name), getValue, setValue)
+            var reference = new PropertyReference(Subject, name);
+            var property = new DynamicRegisteredSubjectProperty(reference, getValue, setValue)
             {
                 Parent = this,
                 Type = type,
                 Attributes = attributes
             };
             
-            _properties!.Add(name, property);
             // TODO: Raise registry changed event
+            
+            _properties.Add(name, property);
+            return property;
         }
     }
 }

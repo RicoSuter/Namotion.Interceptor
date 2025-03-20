@@ -1,11 +1,11 @@
 ﻿namespace Namotion.Interceptor.Registry.Abstractions;
 
-public record CustomRegisteredSubjectProperty : RegisteredSubjectProperty
+internal record DynamicRegisteredSubjectProperty : RegisteredSubjectProperty
 {
     private readonly Func<object?>? _getValue;
     private readonly Action<object?>? _setValue;
 
-    public CustomRegisteredSubjectProperty(PropertyReference property, Func<object?>? getValue, Action<object?>? setValue)
+    public DynamicRegisteredSubjectProperty(PropertyReference property, Func<object?>? getValue, Action<object?>? setValue)
         : base(property)
     {
         _getValue = getValue;

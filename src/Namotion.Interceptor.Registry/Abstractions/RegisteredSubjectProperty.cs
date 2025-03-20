@@ -63,17 +63,29 @@ public record RegisteredSubjectProperty(PropertyReference Property)
             _children.Remove(parent);
     }
 
-    public string AddAttribute(string name, Type type, 
+    public RegisteredSubjectProperty AddAttribute(string name, Type type, 
         Func<object?>? getValue, Action<object?>? setValue, 
         params Attribute[] attributes)
     {
         var propertyName = $"{Property.Name}@{name}";
         
-        Parent.AddProperty(
+        var attribute = Parent.AddProperty(
             propertyName,
             type, getValue, setValue,
-            attributes.Concat([new PropertyAttributeAttribute(Property.Name, name)]).ToArray());
+            attributes
+                .Concat([new PropertyAttributeAttribute(Property.Name, name)])
+                .ToArray());
 
-        return propertyName;
+        return attribute;
     }
+
+    public RegisteredSubjectProperty? TryGetAttribute(string attributeName)
+    {
+        var pair = Parent.Properties
+            .SingleOrDefault(p => p.Value.Attributes
+                .OfType<PropertyAttributeAttribute>()
+                .Any(a => a.PropertyName == Property.Name && a.AttributeName == attributeName));
+
+        return pair.Value;
+    } 
 }

@@ -17,13 +17,18 @@ public class ReadPropertyRecorderTests
         // Act
         var person = new Person(context);
 
-        var recorder = context.GetService<ReadPropertyRecorder>().StartRecordingPropertyReadCalls();
+        var recorder = context
+            .GetService<ReadPropertyRecorder>()
+            .StartPropertyAccessRecording();
+        
         using (recorder)
         {
              var firstName = person.FirstName;
         }
 
         var lastName = person.LastName;
+        
+        // TODO: Check whether recording also works with additional registered properties or attributes (registry)
 
         // Assert
         Assert.Single(recorder.Properties);

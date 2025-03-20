@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Registry.Abstractions;
+﻿using System.Linq.Expressions;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Registry;
@@ -26,6 +27,36 @@ public static class SubjectRegistryExtensions
             : null;
     }
     
+    public static RegisteredSubjectProperty? TryGetRegisteredProperty<T>(this T subject, Expression<Func<T, object?>> propertyExpression)
+        where T : IInterceptorSubject
+    {
+        var actualSubject = subject;
+
+        var bodyMemberExpression = propertyExpression.Body as MemberExpression;
+        var parentExpression = bodyMemberExpression?.Expression;
+        if (parentExpression is not null)
+        {
+            // Extract the parameter from the original lambda expression
+            var originalParameter = propertyExpression.Parameters[0];
+
+            // Create a new lambda using the same parameter
+            var compiledParent = Expression
+                .Lambda<Func<T, object?>>(parentExpression, originalParameter)
+                .Compile()
+                .Invoke(subject);
+            
+            actualSubject = (T?)compiledParent;
+        }
+
+        if (actualSubject is not null)
+        {
+            var propertyName = bodyMemberExpression?.Member.Name;
+            return propertyName is not null ? actualSubject.TryGetRegisteredProperty(propertyName) : null;
+        }
+
+        return null;
+    }
+    
     public static RegisteredSubjectProperty GetRegisteredProperty(this PropertyReference propertyReference)
     {
         var registry = propertyReference.Subject.Context.GetService<ISubjectRegistry>();
@@ -44,11 +75,6 @@ public static class SubjectRegistryExtensions
         return TryGetRegisteredSubjectProperty(property.Subject, property.Name, attributeName);
     }
 
-    public static RegisteredSubjectProperty GetRegisteredAttribute(this PropertyReference property, string attributeName)
-    {
-        return GetRegisteredAttribute(property.Subject, property.Name, attributeName);
-    }
-
     public static RegisteredSubjectProperty GetRegisteredAttribute(this IInterceptorSubject subject, string propertyName, string attributeName)
     {
         return TryGetRegisteredSubjectProperty(subject, propertyName, attributeName)
@@ -58,7 +84,9 @@ public static class SubjectRegistryExtensions
     private static RegisteredSubjectProperty? TryGetRegisteredSubjectProperty(IInterceptorSubject subject, string propertyName, string attributeName)
     {
         var registry = subject.Context.GetService<ISubjectRegistry>();
-        var attribute = registry.KnownSubjects[subject].Properties
+        var attribute = registry
+            .KnownSubjects[subject]
+            .Properties
             .SingleOrDefault(p => p.Value.Attributes
                 .OfType<PropertyAttributeAttribute>()
                 .Any(a => a.PropertyName == propertyName && a.AttributeName == attributeName));
