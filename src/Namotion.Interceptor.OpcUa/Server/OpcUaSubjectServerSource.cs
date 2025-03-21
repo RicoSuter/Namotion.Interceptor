@@ -45,7 +45,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         return Task.FromResult<IDisposable?>(null);
     }
 
-    public Task WriteToSourceAsync(IEnumerable<PropertyChangedContext> updates, CancellationToken cancellationToken)
+    public Task WriteToSourceAsync(IEnumerable<SubjectPropertyUpdate> updates, CancellationToken cancellationToken)
     {
         foreach (var update in updates)
         {

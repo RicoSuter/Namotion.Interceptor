@@ -1,11 +1,9 @@
 ﻿using System.Text.Json;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Sources.Updates;
-using Namotion.Interceptor.Tracking.Change;
+using SubjectPropertyUpdate = Namotion.Interceptor.Tracking.Change.SubjectPropertyUpdate;
 
 namespace Namotion.Interceptor.Sources.Tests;
 
@@ -66,10 +64,10 @@ public class SubjectUpdateTests
 
         var changes = new[]
         {
-            new PropertyChangedContext(new PropertyReference(person, "FirstName"), "Old", "NewPerson"),
-            new PropertyChangedContext(new PropertyReference(father, "FirstName"), "Old", "NewFather"),
-            new PropertyChangedContext(new PropertyReference(child1, "FirstName"), "Old", "NewChild1"),
-            new PropertyChangedContext(new PropertyReference(child3, "FirstName"), "Old", "NewChild3"),
+            new SubjectPropertyUpdate(new PropertyReference(person, "FirstName"), "Old", "NewPerson"),
+            new SubjectPropertyUpdate(new PropertyReference(father, "FirstName"), "Old", "NewFather"),
+            new SubjectPropertyUpdate(new PropertyReference(child1, "FirstName"), "Old", "NewChild1"),
+            new SubjectPropertyUpdate(new PropertyReference(child3, "FirstName"), "Old", "NewChild3"),
         };
 
         // Act
@@ -104,11 +102,11 @@ public class SubjectUpdateTests
 
         var changes = new[]
         {
-            new PropertyChangedContext(new PropertyReference(person, "FirstName"), "Old", "NewPerson"), // ignored
-            new PropertyChangedContext(new PropertyReference(father, "FirstName"), "Old", "NewFather"),
-            new PropertyChangedContext(new PropertyReference(mother, "FirstName"), "Old", "NewMother"), // ignored
-            new PropertyChangedContext(new PropertyReference(child1, "FirstName"), "Old", "NewChild1"),
-            new PropertyChangedContext(new PropertyReference(child3, "FirstName"), "Old", "NewChild3"),
+            new SubjectPropertyUpdate(new PropertyReference(person, "FirstName"), "Old", "NewPerson"), // ignored
+            new SubjectPropertyUpdate(new PropertyReference(father, "FirstName"), "Old", "NewFather"),
+            new SubjectPropertyUpdate(new PropertyReference(mother, "FirstName"), "Old", "NewMother"), // ignored
+            new SubjectPropertyUpdate(new PropertyReference(child1, "FirstName"), "Old", "NewChild1"),
+            new SubjectPropertyUpdate(new PropertyReference(child3, "FirstName"), "Old", "NewChild3"),
         };
 
         // Act

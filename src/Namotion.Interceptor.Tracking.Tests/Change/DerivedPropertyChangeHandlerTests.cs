@@ -9,7 +9,7 @@ public class DerivedPropertyChangeHandlerTests
     public void WhenChangingPropertyWhichIsUsedInDerivedProperty_ThenDerivedPropertyIsChanged()
     {
         // Arrange
-        var changes = new List<PropertyChangedContext>();
+        var changes = new List<SubjectPropertyUpdate>();
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
@@ -46,7 +46,7 @@ public class DerivedPropertyChangeHandlerTests
     public void WhenTrackingDerivedPropertiesUsingPropertiesFromOtherSubjectsAndInheritance_ThenChangesAreTracked()
     {
         // Arrange
-        var changes = new List<PropertyChangedContext>();
+        var changes = new List<SubjectPropertyUpdate>();
         var context = InterceptorSubjectContext
             .Create()
             .WithContextInheritance()

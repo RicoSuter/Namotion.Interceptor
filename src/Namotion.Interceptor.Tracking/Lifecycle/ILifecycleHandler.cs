@@ -2,7 +2,7 @@
 
 public interface ILifecycleHandler
 {
-    public void Attach(LifecycleContext context);
+    public void Attach(SubjectLifecycleUpdate update);
 
-    public void Detach(LifecycleContext context);
+    public void Detach(SubjectLifecycleUpdate update);
 }

@@ -15,5 +15,5 @@ public interface ISubjectSource
     /// <returns>The callback which applies the loaded state to the subject.</returns>
     public Task<Action> LoadCompleteSourceStateAsync(CancellationToken cancellationToken) => Task.FromResult(() => { });
     
-    Task WriteToSourceAsync(IEnumerable<PropertyChangedContext> updates, CancellationToken cancellationToken);
+    Task WriteToSourceAsync(IEnumerable<SubjectPropertyUpdate> updates, CancellationToken cancellationToken);
 }

@@ -169,6 +169,6 @@ public static class SubjectUpdateExtensions
 
     private static void RegisterSubject(ISubjectRegistry registry, IInterceptorSubject subject, RegisteredSubjectProperty property, object? index)
     {
-        (registry as ILifecycleHandler)?.Attach(new LifecycleContext(subject, property.Property, index,1));
+        (registry as ILifecycleHandler)?.Attach(new SubjectLifecycleUpdate(subject, property.Property, index,1));
     }
 }

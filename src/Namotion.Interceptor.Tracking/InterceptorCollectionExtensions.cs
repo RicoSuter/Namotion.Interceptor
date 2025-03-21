@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Tracking;
 
 public static class InterceptorCollectionExtensions
 {
-    public static IObservable<PropertyChangedContext> GetPropertyChangedObservable(this IInterceptorSubjectContext context)
+    public static IObservable<SubjectPropertyUpdate> GetPropertyChangedObservable(this IInterceptorSubjectContext context)
     {
         return context.GetService<PropertyChangedObservable>();
     }
