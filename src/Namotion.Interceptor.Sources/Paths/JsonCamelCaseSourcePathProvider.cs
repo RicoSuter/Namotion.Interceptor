@@ -16,9 +16,9 @@ public class JsonCamelCaseSourcePathProvider : ISourcePathProvider
         return property.BrowseName;
     }
     
-    public string GetPropertyFullPath(RegisteredSubjectProperty property, string pathPrefix)
+    public string GetPropertyFullPath(string path, RegisteredSubjectProperty property)
     {
-        return pathPrefix + ConvertToSourcePath(property.BrowseName);
+        return path + ConvertToSourcePath(property.BrowseName);
     }
     
     public static string ConvertToSourcePath(string path)

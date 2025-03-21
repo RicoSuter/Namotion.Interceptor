@@ -23,15 +23,13 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
     {
         lock (_knownSubjects)
         {
-            if (!_knownSubjects.TryGetValue(context.Subject, out var metadata))
+            if (!_knownSubjects.TryGetValue(context.Subject, out var subject))
             {
-                metadata = RegisterSubject(context.Subject);
+                subject = RegisterSubject(context.Subject);
             }
 
             if (context.Property is not null)
             {
-                metadata.AddParent(context.Property.Value);
-                
                 if (!_knownSubjects.ContainsKey(context.Property.Value.Subject))
                 {
                     // parent of property not yet registered
@@ -42,6 +40,9 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                     .TryGetRegisteredProperty(context.Property.Value) ?? 
                     throw new InvalidOperationException($"Property '{context.Property.Value.Name}' not found.");
                     
+                subject
+                    .AddParent(property);
+                
                 property
                     .AddChild(new SubjectPropertyChild
                     {
@@ -50,7 +51,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                     });
             }
 
-            foreach (var property in metadata.Properties)
+            foreach (var property in subject.Properties)
             {
                 foreach (var attribute in property.Value.Attributes.OfType<ISubjectPropertyInitializer>())
                 {
@@ -82,11 +83,12 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
             {
                 if (context.Property is not null)
                 {
-                    var metadata = _knownSubjects[context.Subject];
-                    metadata.RemoveParent(context.Property.Value);
-
-                    _knownSubjects
-                        .TryGetRegisteredProperty(context.Property.Value)?
+                    var property = _knownSubjects.TryGetRegisteredProperty(context.Property.Value);
+                    property?
+                        .Parent
+                        .RemoveParent(property);
+                    
+                    property?
                         .RemoveChild(new SubjectPropertyChild
                         {
                             Subject = context.Subject,

@@ -81,8 +81,8 @@ public static class SubjectUpdateExtensions
                         var item = createSubject?.Invoke(registeredProperty, registeredProperty.Type);
                         if (item != null)
                         {
-                            ApplySubjectPropertyUpdate(item, propertyUpdate.Item, applyValuePropertyUpdate, createSubject);
                             registeredProperty.SetValue(item);
+                            ApplySubjectPropertyUpdate(item, propertyUpdate.Item, applyValuePropertyUpdate, createSubject);
                         }
                     }
                 }

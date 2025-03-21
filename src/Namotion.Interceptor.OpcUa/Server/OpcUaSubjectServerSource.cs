@@ -20,7 +20,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
     private readonly string? _rootName;
 
     private OpcUaSubjectServer<TSubject>? _server;
-    private Action<SubjectUpdate>? _applySourceChangeAction;
+    private ISubjectSourceManager? _manager;
 
     internal ISourcePathProvider SourcePathProvider { get; }
 
@@ -39,9 +39,9 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
 
     public IInterceptorSubject Subject => _subject;
     
-    public Task<IDisposable?> InitializeAsync(Action<SubjectUpdate> applySourceChangeAction, CancellationToken cancellationToken)
+    public Task<IDisposable?> InitializeAsync(ISubjectSourceManager manager, CancellationToken cancellationToken)
     {
-        _applySourceChangeAction = applySourceChangeAction;
+        _manager = manager;
         return Task.FromResult<IDisposable?>(null);
     }
 
@@ -50,14 +50,13 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         return Task.FromResult(new SubjectUpdate());
     }
 
-    public Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken)
+    public Task WriteToSourceAsync(IEnumerable<PropertyChangedContext> updates, CancellationToken cancellationToken)
     {
-        foreach (var (_, _, property) in update
-             .ConvertToSourcePaths(_subject, SourcePathProvider))
+        foreach (var update in updates)
         {
-            if (property.Property.GetPropertyData(OpcVariableKey) is BaseDataVariableState node)
+            if (update.Property.GetPropertyData(OpcVariableKey) is BaseDataVariableState node)
             {
-                var actualValue = property.GetValue();
+                var actualValue = update.Property.GetValue();
                 if (actualValue is decimal)
                 {
                     actualValue = Convert.ToDouble(actualValue);
@@ -120,12 +119,14 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         // TODO: Implement actual correct conversion based on the property type
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
         
-        var update = _subject.CreateUpdateFromSourcePath(sourcePath, convertedValue, SourcePathProvider);
-        _applySourceChangeAction?.Invoke(update);
+        _manager?.EnqueueSubjectUpdate(() =>
+        {
+            _subject.ApplyValueFromSource(sourcePath, convertedValue, SourcePathProvider);
+        });
     }
 
     public string GetSourcePropertyPath(PropertyReference property)
     {
-        return SourcePathProvider.GetPropertyFullPath(property.GetRegisteredProperty(), string.Empty);
+        return SourcePathProvider.GetPropertyFullPath(string.Empty, property.GetRegisteredProperty());
     }
 }

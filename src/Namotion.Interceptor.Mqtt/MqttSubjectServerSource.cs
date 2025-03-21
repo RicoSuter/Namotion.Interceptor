@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -7,10 +8,9 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Server;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt
 {
@@ -26,7 +26,7 @@ namespace Namotion.Interceptor.Mqtt
         private int _numberOfClients = 0;
         private MqttServer? _mqttServer;
 
-        private Action<SubjectUpdate>? _propertyUpdateAction;
+        private ISubjectSourceManager? _manager;
 
         public int Port { get; set; } = 1883;
 
@@ -85,9 +85,9 @@ namespace Namotion.Interceptor.Mqtt
             }
         }
 
-        public Task<IDisposable?> InitializeAsync(Action<SubjectUpdate> applySourceChangeAction, CancellationToken cancellationToken)
+        public Task<IDisposable?> InitializeAsync(ISubjectSourceManager manager, CancellationToken cancellationToken)
         {
-            _propertyUpdateAction = applySourceChangeAction;
+            _manager = manager;
             return Task.FromResult<IDisposable?>(null);
         }
 
@@ -97,11 +97,11 @@ namespace Namotion.Interceptor.Mqtt
             return Task.FromResult(new SubjectUpdate());
         }
 
-        public async Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken)
+        public async Task WriteToSourceAsync(IEnumerable<PropertyChangedContext> updates, CancellationToken cancellationToken)
         {
-            foreach (var (path, value, _) in update.ConvertToSourcePaths(_subject, _sourcePathProvider))
+            foreach (var (path, change) in updates.ConvertToSourcePaths(_sourcePathProvider, _subject))
             {
-                await PublishPropertyValueAsync(path, value, cancellationToken);
+                await PublishPropertyValueAsync(path, change.NewValue, cancellationToken);
             }
         }
 
@@ -150,12 +150,11 @@ namespace Namotion.Interceptor.Mqtt
 
                 var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
                 var document = JsonDocument.Parse(payload);
-
-                var update = _subject.CreateUpdateFromSourcePath(path, 
-                    _sourcePathProvider,
-                    (property, _) => document.Deserialize(property.Type));
-
-                _propertyUpdateAction?.Invoke(update);
+                
+                _manager?.EnqueueSubjectUpdate(() =>
+                {
+                    _subject.ApplyValueFromSource(path, (property, _) => document.Deserialize(property.Type), _sourcePathProvider);
+                });
             }
             catch (Exception ex)
             {
