@@ -53,7 +53,6 @@ public static class PathExtensions
         var foundPaths = new List<string>();
         foreach (var sourcePath in sourcePaths)
         {
-            RegisteredSubjectProperty? previousProperty = null;
             var currentSubject = subject;
             var segments = sourcePathProvider
                 .ParsePathSegments(sourcePath)
@@ -99,8 +98,6 @@ public static class PathExtensions
                 {
                     break;
                 }
-
-                previousProperty = registeredProperty;
             }
         }
 
