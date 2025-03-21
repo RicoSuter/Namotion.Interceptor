@@ -91,9 +91,9 @@ namespace Namotion.Interceptor.Mqtt
             return Task.FromResult<IDisposable?>(null);
         }
 
-        public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyUpdate> updates, CancellationToken cancellationToken)
+        public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
-            foreach (var (path, change) in updates.GetSourcePaths(_sourcePathProvider, _subject))
+            foreach (var (path, change) in changes.GetSourcePaths(_sourcePathProvider, _subject))
             {
                 await PublishPropertyValueAsync(path, change.NewValue, cancellationToken);
             }

@@ -51,7 +51,7 @@ public class SubjectUpdate
     /// <param name="subject">The root subject.</param>
     /// <param name="propertyChanges">The changes to look up within the object graph.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreatePartialUpdateFromChanges(IInterceptorSubject subject, IEnumerable<Tracking.Change.SubjectPropertyUpdate> propertyChanges)
+    public static SubjectUpdate CreatePartialUpdateFromChanges(IInterceptorSubject subject, IEnumerable<Tracking.Change.SubjectPropertyChange> propertyChanges)
     {
         // TODO: Verify correctness of the CreatePartialUpdateFromChanges method
 

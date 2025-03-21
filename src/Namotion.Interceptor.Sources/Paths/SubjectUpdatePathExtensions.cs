@@ -23,7 +23,7 @@ public static class SubjectUpdatePathExtensions
     // }
     //
     // private static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> ConvertToSourcePaths(
-    //     this SubjectPropertyUpdate propertyUpdate,
+    //     this SubjectPropertyChange propertyUpdate,
     //     IInterceptorSubject subject, string propertyName,
     //     ISourcePathProvider sourcePathProvider,
     //     string pathPrefix = "")
@@ -217,7 +217,7 @@ public static class SubjectUpdatePathExtensions
     //             else 
     //             {
     //                 // handle value update
-    //                 currentUpdate.Properties[propertyName] = new SubjectPropertyUpdate
+    //                 currentUpdate.Properties[propertyName] = new SubjectPropertyChange
     //                 {
     //                     Kind = SubjectPropertyUpdateKind.Value,
     //                     Value = getPropertyValue(registeredProperty, path),
@@ -232,12 +232,12 @@ public static class SubjectUpdatePathExtensions
     //     return update;
     // }
     //
-    // private static SubjectPropertyUpdate? CreateItemSubjectPropertyUpdate(SubjectUpdate currentUpdate, string propertyName)
+    // private static SubjectPropertyChange? CreateItemSubjectPropertyUpdate(SubjectUpdate currentUpdate, string propertyName)
     // {
     //     var exists = currentUpdate.Properties.TryGetValue(propertyName, out var itemProperty);
     //     if (!exists)
     //     {
-    //         itemProperty = new SubjectPropertyUpdate
+    //         itemProperty = new SubjectPropertyChange
     //         {
     //             Kind = SubjectPropertyUpdateKind.Item,
     //             Item = new SubjectUpdate()
@@ -249,7 +249,7 @@ public static class SubjectUpdatePathExtensions
     //     return itemProperty;
     // }
     //
-    // private static SubjectPropertyUpdate? GetOrCreateCollectionSubjectPropertyUpdate(SubjectUpdate currentUpdate, string propertyName, RegisteredSubjectProperty registeredProperty)
+    // private static SubjectPropertyChange? GetOrCreateCollectionSubjectPropertyUpdate(SubjectUpdate currentUpdate, string propertyName, RegisteredSubjectProperty registeredProperty)
     // {
     //     var exists = currentUpdate.Properties.TryGetValue(propertyName, out var collectionProperty);
     //     if (!exists)
@@ -263,7 +263,7 @@ public static class SubjectUpdatePathExtensions
     //             })
     //             .ToList();
     //
-    //         collectionProperty = new SubjectPropertyUpdate
+    //         collectionProperty = new SubjectPropertyChange
     //         {
     //             Kind = SubjectPropertyUpdateKind.Collection,
     //             Collection = childUpdates
