@@ -13,7 +13,7 @@ public interface ISubjectSource
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The callback which applies the loaded state to the subject.</returns>
-    public Task<Action> LoadCompleteSourceStateAsync(CancellationToken cancellationToken) => Task.FromResult(() => { });
+    Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken);
     
     Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken);
 }
