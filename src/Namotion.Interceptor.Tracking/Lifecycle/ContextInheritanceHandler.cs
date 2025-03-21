@@ -4,21 +4,21 @@
 
 public class ContextInheritanceHandler : ILifecycleHandler
 {
-    public void Attach(SubjectLifecycleUpdate update)
+    public void Attach(SubjectLifecycleChange change)
     {
-        if (update.ReferenceCount == 1 && update.Property is not null)
+        if (change.ReferenceCount == 1 && change.Property is not null)
         {
-            var parent = update.Property.Value.Subject;
-            update.Subject.Context.AddFallbackContext(parent.Context);
+            var parent = change.Property.Value.Subject;
+            change.Subject.Context.AddFallbackContext(parent.Context);
         }
     }
 
-    public void Detach(SubjectLifecycleUpdate update)
+    public void Detach(SubjectLifecycleChange change)
     {
-        if (update.Property is not null)
+        if (change.Property is not null)
         {
-            var parent = update.Property.Value.Subject;
-            update.Subject.Context.RemoveFallbackContext(parent.Context);
+            var parent = change.Property.Value.Subject;
+            change.Subject.Context.RemoveFallbackContext(parent.Context);
         }
     }
 

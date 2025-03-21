@@ -7,16 +7,16 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     [ThreadStatic]
     private static Stack<HashSet<PropertyReference>>? _currentTouchedProperties;
     
-    public void Attach(SubjectLifecycleUpdate update)
+    public void Attach(SubjectLifecycleChange change)
     {
-        foreach (var property in update
+        foreach (var property in change
             .Subject.Properties.Where(p => p.Value.IsDerived()))
         {
-            var propertyReference = new PropertyReference(update.Subject, property.Key);
+            var propertyReference = new PropertyReference(change.Subject, property.Key);
 
             TryStartRecordTouchedProperties();
 
-            var result = property.Value.GetValue?.Invoke(update.Subject);
+            var result = property.Value.GetValue?.Invoke(change.Subject);
             propertyReference.SetLastKnownValue(result);
 
             StoreRecordedTouchedProperties(propertyReference);
@@ -24,7 +24,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
     }
 
-    public void Detach(SubjectLifecycleUpdate update)
+    public void Detach(SubjectLifecycleChange change)
     {
     }
 

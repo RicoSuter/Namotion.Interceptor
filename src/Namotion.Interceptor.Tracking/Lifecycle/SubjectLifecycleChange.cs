@@ -1,6 +1,6 @@
 ﻿namespace Namotion.Interceptor.Tracking.Lifecycle;
 
-public record struct SubjectLifecycleUpdate(
+public record struct SubjectLifecycleChange(
     IInterceptorSubject Subject,
     PropertyReference? Property,
     object? Index,

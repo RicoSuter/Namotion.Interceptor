@@ -25,27 +25,27 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
     /// <summary>
     /// Callback which is called when a subject is attached .
     /// </summary>
-    /// <param name="update"></param>
+    /// <param name="change"></param>
     /// <exception cref="InvalidOperationException"></exception>
-    void ILifecycleHandler.Attach(SubjectLifecycleUpdate update)
+    void ILifecycleHandler.Attach(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {
-            if (!_knownSubjects.TryGetValue(update.Subject, out var subject))
+            if (!_knownSubjects.TryGetValue(change.Subject, out var subject))
             {
-                subject = RegisterSubject(update.Subject);
+                subject = RegisterSubject(change.Subject);
             }
 
-            if (update.Property is not null)
+            if (change.Property is not null)
             {
-                if (!_knownSubjects.ContainsKey(update.Property.Value.Subject))
+                if (!_knownSubjects.ContainsKey(change.Property.Value.Subject))
                 {
                     // parent of property not yet registered
-                    RegisterSubject(update.Property.Value.Subject);
+                    RegisterSubject(change.Property.Value.Subject);
                 }
 
-                var property = TryGetRegisteredProperty(update.Property.Value) ?? 
-                    throw new InvalidOperationException($"Property '{update.Property.Value.Name}' not found.");
+                var property = TryGetRegisteredProperty(change.Property.Value) ?? 
+                    throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
                     
                 subject
                     .AddParent(property);
@@ -53,8 +53,8 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                 property
                     .AddChild(new SubjectPropertyChild
                     {
-                        Index = update.Index,
-                        Subject = update.Subject,
+                        Index = change.Index,
+                        Subject = change.Subject,
                     });
             }
 
@@ -62,7 +62,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
             {
                 foreach (var attribute in property.Value.Attributes.OfType<ISubjectPropertyInitializer>())
                 {
-                    attribute.InitializeProperty(property.Value, update.Index);
+                    attribute.InitializeProperty(property.Value, change.Index);
                 }
             }
         }
@@ -82,15 +82,15 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         return registeredSubject;
     }
 
-    void ILifecycleHandler.Detach(SubjectLifecycleUpdate update)
+    void ILifecycleHandler.Detach(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {
-            if (update.ReferenceCount == 0)
+            if (change.ReferenceCount == 0)
             {
-                if (update.Property is not null)
+                if (change.Property is not null)
                 {
-                    var property = TryGetRegisteredProperty(update.Property.Value);
+                    var property = TryGetRegisteredProperty(change.Property.Value);
                     property?
                         .Parent
                         .RemoveParent(property);
@@ -98,12 +98,12 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                     property?
                         .RemoveChild(new SubjectPropertyChild
                         {
-                            Subject = update.Subject,
-                            Index = update.Index
+                            Subject = change.Subject,
+                            Index = change.Index
                         });
                 }
 
-                _knownSubjects.Remove(update.Subject);
+                _knownSubjects.Remove(change.Subject);
             }
         }
     }
