@@ -2,6 +2,7 @@ using System.Collections;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Extensions;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Sources.Updates;
 
@@ -33,7 +34,8 @@ public static class SubjectUpdateExtensions
                 ?? throw new InvalidOperationException("Cannot create subject."));
     }
     
-    public static void ApplySubjectPropertyUpdate(this IInterceptorSubject subject, SubjectUpdate update,
+    public static void ApplySubjectPropertyUpdate(
+        this IInterceptorSubject subject, SubjectUpdate update,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate> applyValuePropertyUpdate,
         Func<RegisteredSubjectProperty, Type, IInterceptorSubject>? createSubject,
         ISubjectRegistry? registry = null)
@@ -85,8 +87,8 @@ public static class SubjectUpdateExtensions
                         if (item != null)
                         {
                             var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
-                            parentRegistry.RegisterSubject(item);
-                            ApplySubjectPropertyUpdate(item, propertyUpdate.Item, applyValuePropertyUpdate, createSubject, parentRegistry);
+                            RegisterSubject(parentRegistry, item, registeredProperty, null);
+                            item.ApplySubjectPropertyUpdate(propertyUpdate.Item, applyValuePropertyUpdate, createSubject, parentRegistry);
                             registeredProperty.SetValue(item);
                         }
                     }
@@ -125,7 +127,7 @@ public static class SubjectUpdateExtensions
                                     if (newItem is not null)
                                     {
                                         var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
-                                        parentRegistry.RegisterSubject(newItem);
+                                        RegisterSubject(parentRegistry, newItem, registeredProperty, list.Count);
                                         ApplySubjectPropertyUpdate(newItem, item.Item!, applyValuePropertyUpdate, createSubject, parentRegistry);
                                     }
 
@@ -153,8 +155,8 @@ public static class SubjectUpdateExtensions
                             if (item is not null)
                             {
                                 var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
-                                parentRegistry.RegisterSubject(item);
-                                ApplySubjectPropertyUpdate(item, i.Item!, applyValuePropertyUpdate, createSubject, parentRegistry);
+                                RegisterSubject(parentRegistry, item, registeredProperty, list.Count);
+                                item.ApplySubjectPropertyUpdate(i.Item!, applyValuePropertyUpdate, createSubject, parentRegistry);
                             }
                             list.Add(item);
                         });
@@ -163,5 +165,10 @@ public static class SubjectUpdateExtensions
 
                 break;
         }
+    }
+
+    private static void RegisterSubject(ISubjectRegistry registry, IInterceptorSubject subject, RegisteredSubjectProperty property, object? index)
+    {
+        (registry as ILifecycleHandler)?.Attach(new LifecycleContext(subject, property.Property, index,1));
     }
 }
