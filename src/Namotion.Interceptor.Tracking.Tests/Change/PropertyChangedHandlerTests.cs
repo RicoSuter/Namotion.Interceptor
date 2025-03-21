@@ -9,7 +9,7 @@ public class PropertyChangedHandlerTests
     public void WhenPropertyIsChanged_ThenChangeHandlerIsTriggered()
     {
         // Arrange
-        var changes = new List<PropertyChangedContext>();
+        var changes = new List<SubjectPropertyChange>();
         var context = InterceptorSubjectContext
             .Create()
             .WithPropertyChangedObservable();

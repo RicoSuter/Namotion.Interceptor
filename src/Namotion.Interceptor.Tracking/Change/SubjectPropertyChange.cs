@@ -1,6 +1,6 @@
 ﻿namespace Namotion.Interceptor.Tracking.Change;
 
-public record struct PropertyChangedContext(
+public record struct SubjectPropertyChange(
     PropertyReference Property,
     object? OldValue,
     object? NewValue)

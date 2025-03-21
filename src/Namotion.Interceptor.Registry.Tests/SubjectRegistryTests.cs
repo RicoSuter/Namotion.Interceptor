@@ -13,8 +13,8 @@ public class SubjectRegistryTests
     public void WhenTwoChildrenAreAttachedSequentially_ThenWeHaveThreeAttaches()
     {
         // Arrange
-        var attaches = new List<LifecycleContext>();
-        var detaches = new List<LifecycleContext>();
+        var attaches = new List<SubjectLifecycleChange>();
+        var detaches = new List<SubjectLifecycleChange>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext
@@ -48,8 +48,8 @@ public class SubjectRegistryTests
     public void WhenTwoChildrenAreAttachedInOneBranch_ThenWeHaveThreeAttaches()
     {
         // Arrange
-        var attaches = new List<LifecycleContext>();
-        var detaches = new List<LifecycleContext>();
+        var attaches = new List<SubjectLifecycleChange>();
+        var detaches = new List<SubjectLifecycleChange>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext
@@ -83,8 +83,8 @@ public class SubjectRegistryTests
     public void WhenProxyWithChildProxyIsRemoved_ThenWeHaveTwoDetaches()
     {
         // Arrange
-        var attaches = new List<LifecycleContext>();
-        var detaches = new List<LifecycleContext>();
+        var attaches = new List<SubjectLifecycleChange>();
+        var detaches = new List<SubjectLifecycleChange>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext

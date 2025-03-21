@@ -1,10 +1,9 @@
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Sources;
+namespace Namotion.Interceptor.Sources.Updates;
 
 public class SubjectUpdate
 {
@@ -52,7 +51,7 @@ public class SubjectUpdate
     /// <param name="subject">The root subject.</param>
     /// <param name="propertyChanges">The changes to look up within the object graph.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreatePartialUpdateFromChanges(IInterceptorSubject subject, IEnumerable<PropertyChangedContext> propertyChanges)
+    public static SubjectUpdate CreatePartialUpdateFromChanges(IInterceptorSubject subject, IEnumerable<Tracking.Change.SubjectPropertyChange> propertyChanges)
     {
         // TODO: Verify correctness of the CreatePartialUpdateFromChanges method
 
@@ -78,7 +77,7 @@ public class SubjectUpdate
                 {
                     // handle attribute changes
                     var attributeUpdate = new SubjectPropertyUpdate();
-                    attributeUpdate.ApplyPropertyValue(change.NewValue);
+                    attributeUpdate.ApplyValue(change.NewValue);
                     
                     PropertyAttributeAttribute attribute;
                     var currentRegisteredProperty = registeredProperty;
@@ -103,18 +102,16 @@ public class SubjectUpdate
                     var propertyName = property.Name;
                  
                     var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredSubject, propertyName, knownSubjectDescriptions);
-                    propertyUpdate.ApplyPropertyValue(change.NewValue);
+                    propertyUpdate.ApplyValue(change.NewValue);
                  
                     subjectUpdate.Properties[propertyName] = propertyUpdate;
                 }
 
-                property = registeredSubject.Parents.FirstOrDefault();
+                property = registeredSubject.Parents.FirstOrDefault()?.Property ?? default;
                 if (property.Subject is not null)
                 {
-                    registry = property.Subject.Context.GetService<ISubjectRegistry>();
                     registeredSubject = registry.KnownSubjects[property.Subject];
-
-                    CreateParentSubjectDescription(property, propertySubject, knownSubjectDescriptions);
+                    CreateParentSubjectUpdate(property, propertySubject, knownSubjectDescriptions);
                 }
             } while (property.Subject is not null && property.Subject != subject && registeredSubject.Parents.Any());
         }
@@ -122,7 +119,7 @@ public class SubjectUpdate
         return update;
     }
 
-    private static void CreateParentSubjectDescription(
+    private static void CreateParentSubjectUpdate(
         PropertyReference parentProperty,
         IInterceptorSubject childSubject,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectDescriptions)

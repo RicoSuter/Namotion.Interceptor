@@ -1,6 +1,7 @@
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Sources.Tests.Models;
+using Namotion.Interceptor.Sources.Updates;
 
 namespace Namotion.Interceptor.Sources.Tests.Extensions;
 
@@ -10,7 +11,8 @@ public class SubjectUpdateExtensionsTests
     public void WhenApplyingSimpleProperty_ThenItWorks()
     {
         // Arrange
-        var person = new Person();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
         
         // Act
         person.ApplySubjectUpdate(new SubjectUpdate
@@ -74,7 +76,8 @@ public class SubjectUpdateExtensionsTests
             Properties = new Dictionary<string, SubjectPropertyUpdate>
             {
                 {
-                    nameof(Person.Children), SubjectPropertyUpdate.Create(
+                    nameof(Person.Children), 
+                    SubjectPropertyUpdate.Create(
                         new SubjectPropertyCollectionUpdate
                         {
                             Index = 0, 

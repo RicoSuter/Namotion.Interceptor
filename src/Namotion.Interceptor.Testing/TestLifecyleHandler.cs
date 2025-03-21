@@ -4,25 +4,25 @@ namespace Namotion.Interceptor.Testing
 {
     public class TestLifecyleHandler : ILifecycleHandler
     {
-        private readonly List<LifecycleContext> _attaches;
-        private readonly List<LifecycleContext> _detaches;
+        private readonly List<SubjectLifecycleChange> _attaches;
+        private readonly List<SubjectLifecycleChange> _detaches;
 
         public TestLifecyleHandler(
-            List<LifecycleContext> attaches,
-            List<LifecycleContext> detaches)
+            List<SubjectLifecycleChange> attaches,
+            List<SubjectLifecycleChange> detaches)
         {
             _attaches = attaches;
             _detaches = detaches;
         }
 
-        public void Attach(LifecycleContext context)
+        public void Attach(SubjectLifecycleChange change)
         {
-            _attaches.Add(context);
+            _attaches.Add(change);
         }
 
-        public void Detach(LifecycleContext context)
+        public void Detach(SubjectLifecycleChange change)
         {
-            _detaches.Add(context);
+            _detaches.Add(change);
         }
     }
 }
