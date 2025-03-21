@@ -6,7 +6,7 @@ public interface ISubjectSource
 {
     IInterceptorSubject Subject { get; }
     
-    Task<IDisposable?> InitializeAsync(ISubjectSourceManager manager, CancellationToken cancellationToken);
+    Task<IDisposable?> InitializeAsync(ISubjectSourceDispatcher dispatcher, CancellationToken cancellationToken);
 
     /// <summary>
     /// Loads the complete state of the source and applies it to the subject in the returned callback.

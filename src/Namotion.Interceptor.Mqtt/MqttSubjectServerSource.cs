@@ -26,7 +26,7 @@ namespace Namotion.Interceptor.Mqtt
         private int _numberOfClients = 0;
         private MqttServer? _mqttServer;
 
-        private ISubjectSourceManager? _manager;
+        private ISubjectSourceDispatcher? _dispatcher;
 
         public int Port { get; set; } = 1883;
 
@@ -85,9 +85,9 @@ namespace Namotion.Interceptor.Mqtt
             }
         }
 
-        public Task<IDisposable?> InitializeAsync(ISubjectSourceManager manager, CancellationToken cancellationToken)
+        public Task<IDisposable?> InitializeAsync(ISubjectSourceDispatcher dispatcher, CancellationToken cancellationToken)
         {
-            _manager = manager;
+            _dispatcher = dispatcher;
             return Task.FromResult<IDisposable?>(null);
         }
 
@@ -143,7 +143,7 @@ namespace Namotion.Interceptor.Mqtt
                 var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
                 var document = JsonDocument.Parse(payload);
                 
-                _manager?.EnqueueSubjectUpdate(() =>
+                _dispatcher?.EnqueueSubjectUpdate(() =>
                 {
                     _subject.ApplyValueFromSource(path, (property, _) => document.Deserialize(property.Type), _sourcePathProvider);
                 });

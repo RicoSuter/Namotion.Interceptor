@@ -6,7 +6,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Sources;
 
-public class SubjectSourceBackgroundService : BackgroundService, ISubjectSourceManager
+public class SubjectSourceBackgroundService : BackgroundService, ISubjectSourceDispatcher
 {
     private readonly ISubjectSource _source;
     private readonly ILogger _logger;

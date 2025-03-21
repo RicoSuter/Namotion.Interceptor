@@ -20,7 +20,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
     private readonly string? _rootName;
 
     private OpcUaSubjectServer<TSubject>? _server;
-    private ISubjectSourceManager? _manager;
+    private ISubjectSourceDispatcher? _dispatcher;
 
     internal ISourcePathProvider SourcePathProvider { get; }
 
@@ -39,9 +39,9 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
 
     public IInterceptorSubject Subject => _subject;
 
-    public Task<IDisposable?> InitializeAsync(ISubjectSourceManager manager, CancellationToken cancellationToken)
+    public Task<IDisposable?> InitializeAsync(ISubjectSourceDispatcher dispatcher, CancellationToken cancellationToken)
     {
-        _manager = manager;
+        _dispatcher = dispatcher;
         return Task.FromResult<IDisposable?>(null);
     }
 
@@ -115,7 +115,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
 
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
 
-        _manager?.EnqueueSubjectUpdate(() => { _subject.ApplyValueFromSource(sourcePath, convertedValue, SourcePathProvider); });
+        _dispatcher?.EnqueueSubjectUpdate(() => { _subject.ApplyValueFromSource(sourcePath, convertedValue, SourcePathProvider); });
     }
 
     public string GetSourcePropertyPath(PropertyReference property)

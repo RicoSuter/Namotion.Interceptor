@@ -1,6 +1,6 @@
 namespace Namotion.Interceptor.Sources;
 
-public interface ISubjectSourceManager
+public interface ISubjectSourceDispatcher
 {
     void EnqueueSubjectUpdate(Action update);
 }
