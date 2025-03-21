@@ -70,11 +70,11 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
         return nameAttribute?.Path ?? pathAttribute?.Path;
     }
     
-    public string GetPropertyFullPath(RegisteredSubjectProperty property, string pathPrefix)
+    public string GetPropertyFullPath(string path, RegisteredSubjectProperty property)
     {
         if (property.IsAttribute)
         {
-            return pathPrefix + _attributePathDelimiter + property.Attribute.AttributeName;
+            return path + _attributePathDelimiter + property.Attribute.AttributeName;
         }
         else
         {

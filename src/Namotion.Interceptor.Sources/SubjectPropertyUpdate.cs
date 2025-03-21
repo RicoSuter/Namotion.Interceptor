@@ -73,7 +73,7 @@ public class SubjectPropertyUpdate
     /// Adds a complete update of the given value to the property update.
     /// </summary>
     /// <param name="value">The value to apply.</param>
-    public void ApplyValue(object? value)
+    internal void ApplyValue(object? value)
     {
         if (value is IDictionary dictionary && dictionary.Values.OfType<IInterceptorSubject>().Any())
         {

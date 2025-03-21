@@ -60,10 +60,15 @@ public static class SubjectRegistryExtensions
     public static RegisteredSubjectProperty GetRegisteredProperty(this PropertyReference propertyReference)
     {
         var registry = propertyReference.Subject.Context.GetService<ISubjectRegistry>();
-        return registry.KnownSubjects.TryGetRegisteredProperty(propertyReference) 
-            ?? throw new InvalidOperationException($"Property '{propertyReference.Name}' not found.");
+        return GetRegisteredProperty(propertyReference, registry);
     }
-    
+
+    public static RegisteredSubjectProperty GetRegisteredProperty(this PropertyReference propertyReference, ISubjectRegistry registry)
+    {
+        return registry.KnownSubjects.TryGetRegisteredProperty(propertyReference) 
+               ?? throw new InvalidOperationException($"Property '{propertyReference.Name}' not found.");
+    }
+
     public static RegisteredSubject? TryGetRegisteredSubject(this IInterceptorSubject subject)
     {
         var registry = subject.Context.GetService<ISubjectRegistry>();

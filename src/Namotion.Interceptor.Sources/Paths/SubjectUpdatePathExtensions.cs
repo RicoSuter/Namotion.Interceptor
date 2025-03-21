@@ -212,7 +212,7 @@ public static class SubjectUpdatePathExtensions
             yield break;
         }
 
-        var fullPath = sourcePathProvider.GetPropertyFullPath(registeredProperty, pathPrefix);
+        var fullPath = sourcePathProvider.GetPropertyFullPath(pathPrefix, registeredProperty);
         if (propertyUpdate.Attributes is not null)
         {
             foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)

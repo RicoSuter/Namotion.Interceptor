@@ -1,7 +1,6 @@
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources;
@@ -108,13 +107,12 @@ public class SubjectUpdate
                     subjectUpdate.Properties[propertyName] = propertyUpdate;
                 }
 
-                property = registeredSubject.Parents.FirstOrDefault();
+                property = registeredSubject.Parents.FirstOrDefault()?.Property ?? default;
                 if (property.Subject is not null)
                 {
-                    registry = property.Subject.Context.GetService<ISubjectRegistry>();
                     registeredSubject = registry.KnownSubjects[property.Subject];
 
-                    CreateParentSubjectDescription(property, propertySubject, knownSubjectDescriptions);
+                    CreateParentSubjectUpdate(property, propertySubject, knownSubjectDescriptions);
                 }
             } while (property.Subject is not null && property.Subject != subject && registeredSubject.Parents.Any());
         }
@@ -122,7 +120,7 @@ public class SubjectUpdate
         return update;
     }
 
-    private static void CreateParentSubjectDescription(
+    private static void CreateParentSubjectUpdate(
         PropertyReference parentProperty,
         IInterceptorSubject childSubject,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectDescriptions)

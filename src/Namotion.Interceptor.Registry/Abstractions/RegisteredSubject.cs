@@ -7,12 +7,12 @@ public record RegisteredSubject
     private readonly Lock _lock = new();
 
     private readonly Dictionary<string, RegisteredSubjectProperty> _properties;
-    private readonly HashSet<PropertyReference> _parents = new();
+    private readonly HashSet<RegisteredSubjectProperty> _parents = new();
 
     [JsonIgnore]
     public IInterceptorSubject Subject { get; }
 
-    public ICollection<PropertyReference> Parents
+    public ICollection<RegisteredSubjectProperty> Parents
     {
         get
         {
@@ -49,13 +49,13 @@ public record RegisteredSubject
                 });
     }
 
-    public void AddParent(PropertyReference parent)
+    public void AddParent(RegisteredSubjectProperty parent)
     {
         lock (_lock)
             _parents.Add(parent);
     }
 
-    public void RemoveParent(PropertyReference parent)
+    public void RemoveParent(RegisteredSubjectProperty parent)
     {
         lock (_lock)
             _parents.Remove(parent);

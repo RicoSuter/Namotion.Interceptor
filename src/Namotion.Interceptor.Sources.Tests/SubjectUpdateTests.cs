@@ -172,9 +172,9 @@ public class SubjectUpdateTests
             return pathPrefix;
         }
 
-        public string GetPropertyFullPath(RegisteredSubjectProperty property, string pathPrefix)
+        public string GetPropertyFullPath(string path, RegisteredSubjectProperty property)
         {
-            return pathPrefix;
+            return path;
         }
     }
 
