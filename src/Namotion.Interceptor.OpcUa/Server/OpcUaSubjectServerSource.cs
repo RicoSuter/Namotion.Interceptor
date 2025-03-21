@@ -45,13 +45,13 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         return Task.FromResult<IDisposable?>(null);
     }
 
-    public Task WriteToSourceAsync(IEnumerable<SubjectPropertyUpdate> updates, CancellationToken cancellationToken)
+    public Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        foreach (var update in updates)
+        foreach (var change in changes)
         {
-            if (update.Property.GetPropertyData(OpcVariableKey) is BaseDataVariableState node)
+            if (change.Property.GetPropertyData(OpcVariableKey) is BaseDataVariableState node)
             {
-                var actualValue = update.Property.GetValue();
+                var actualValue = change.Property.GetValue();
                 if (actualValue is decimal)
                 {
                     actualValue = Convert.ToDouble(actualValue);

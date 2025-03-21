@@ -135,8 +135,8 @@ public static class PathExtensions
         }
     }
 
-    public static IEnumerable<(string path, SubjectPropertyUpdate change)> GetSourcePaths(
-        this IEnumerable<SubjectPropertyUpdate> changes, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
+    public static IEnumerable<(string path, SubjectPropertyChange change)> GetSourcePaths(
+        this IEnumerable<SubjectPropertyChange> changes, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
     {
         foreach (var change in changes)
         {

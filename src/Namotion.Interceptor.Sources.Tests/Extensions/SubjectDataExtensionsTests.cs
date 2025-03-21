@@ -33,7 +33,7 @@ public class SubjectDataExtensionsTests
         var propertyReference = new PropertyReference(subject.Object, propertyName);
 
         // Assert
-        var change = new SubjectPropertyUpdate(propertyReference, null, null);
+        var change = new SubjectPropertyChange(propertyReference, null, null);
         Assert.False(change.IsChangingFromSource(source));
         
         // Act
