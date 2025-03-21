@@ -1,12 +1,13 @@
 using System.Collections;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Sources.Extensions;
 
-namespace Namotion.Interceptor.Sources.Extensions;
+namespace Namotion.Interceptor.Sources.Updates;
 
 public static class SubjectUpdateExtensions
 {
-    public static void ApplySubjectSourceUpdate(this IInterceptorSubject subject, SubjectUpdate update, ISubjectSource source,
+    public static void ApplySubjectUpdateToSource(this IInterceptorSubject subject, SubjectUpdate update, ISubjectSource source,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
         subject.ApplySubjectPropertyUpdate(update, 

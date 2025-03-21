@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Sources.Extensions;
+using Namotion.Interceptor.Sources.Updates;
 
 namespace Namotion.Interceptor.Sources.Paths;
 
