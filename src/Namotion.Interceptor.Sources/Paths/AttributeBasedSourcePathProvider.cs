@@ -19,6 +19,11 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
         _attributePathDelimiter = delimiter;
         _pathPrefix = pathPrefix ?? string.Empty;
     }
+
+    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
+    {
+        return TryGetPropertyName(property) is not null;
+    }
     
     public IEnumerable<(string path, object? index)> ParsePathSegments(string path)
     {
@@ -50,11 +55,6 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
                 }));
     }
 
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
-    {
-        return TryGetPropertyName(property) is not null;
-    }
-
     public string? TryGetPropertyName(RegisteredSubjectProperty property)
     {
         var nameAttribute = property
@@ -78,6 +78,7 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
     public RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment)
     {
         // TODO(perf): Improve performance by caching the property name
+ 
         return subject
             .Properties
             .SingleOrDefault(p => TryGetPropertyName(p.Value) == segment)

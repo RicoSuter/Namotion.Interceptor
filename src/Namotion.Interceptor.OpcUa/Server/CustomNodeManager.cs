@@ -82,25 +82,25 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
 
     private void CreateObjectNode(NodeId parentNodeId, RegisteredSubject subject, string prefix)
     {
-        foreach (var property in subject.Properties)
+        foreach (var (_, property) in subject.Properties)
         {
-            var propertyName = _source.SourcePathProvider.TryGetPropertyName(property.Value);
+            var propertyName = GetPropertyName(property);
             if (propertyName is not null)
             {
-                var children = property.Value.Children;
+                var children = property.Children;
                 if (children.Count >= 1)
                 {
                     if (children.Count == 1 && children.All(c => c.Index is null))
                     {
-                        CreateReferenceObjectNode(propertyName, property.Value, children.Single(), parentNodeId, prefix);
+                        CreateReferenceObjectNode(propertyName, property, children.Single(), parentNodeId, prefix);
                     }
                     else if (children.All(c => c.Index is int))
                     {
-                        CreateArrayObjectNode(propertyName, property.Value, property.Value.Children, parentNodeId, prefix);
+                        CreateArrayObjectNode(propertyName, property, property.Children, parentNodeId, prefix);
                     }
                     else if (children.All(c => c.Index is not null))
                     {
-                        CreateDictionaryObjectNode(propertyName, property.Value, property.Value.Children, parentNodeId, prefix);
+                        CreateDictionaryObjectNode(propertyName, property, property.Children, parentNodeId, prefix);
                     }
                 }
                 else
@@ -109,6 +109,17 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
                 }
             }
         }
+    }
+
+    private string? GetPropertyName(RegisteredSubjectProperty property)
+    {
+        if (property.IsAttribute)
+        {
+            var attributedProperty = property.GetAttributedProperty();
+            return GetPropertyName(attributedProperty) + "__" + _source.SourcePathProvider.TryGetPropertyName(property);
+        }
+        
+        return _source.SourcePathProvider.TryGetPropertyName(property);
     }
 
     private void CreateReferenceObjectNode(string propertyName, RegisteredSubjectProperty property, SubjectPropertyChild child, NodeId parentNodeId, string parentPath)
@@ -160,14 +171,14 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
         }
     }
 
-    private void CreateVariableNode(string propertyName, KeyValuePair<string, RegisteredSubjectProperty> property, NodeId parentNodeId, string parentPath)
+    private void CreateVariableNode(string propertyName, RegisteredSubjectProperty property, NodeId parentNodeId, string parentPath)
     {
-        var isPropertyIncluded = _source.SourcePathProvider.IsPropertyIncluded(property.Value);
+        var isPropertyIncluded = _source.SourcePathProvider.IsPropertyIncluded(property);
         if (isPropertyIncluded)
         {
-            var sourcePath = _source.GetSourcePropertyPath(property.Value.Property);
-            var value = property.Value.GetValue();
-            var type = property.Value.Type;
+            var sourcePath = _source.GetSourcePropertyPath(property.Property);
+            var value = property.GetValue();
+            var type = property.Type;
 
             if (type == typeof(decimal))
             {
@@ -176,9 +187,9 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
             }
 
             var nodeId = new NodeId(parentPath + propertyName, NamespaceIndex);
-            var browseName = GetBrowseName(propertyName, property.Value, null);
+            var browseName = GetBrowseName(propertyName, property, null);
             var dataType = Opc.Ua.TypeInfo.Construct(type);
-            var referenceTypeId = GetReferenceTypeId(property.Value);
+            var referenceTypeId = GetReferenceTypeId(property);
 
             // TODO: Add support for arrays (valueRank >= 0)
             var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataType, -1, referenceTypeId);
@@ -187,11 +198,11 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
             {
                 if (changes.HasFlag(NodeStateChangeMasks.Value))
                 {
-                    _source.UpdateProperty(property.Value.Property, sourcePath, variable.Value);
+                    _source.UpdateProperty(property.Property, sourcePath, variable.Value);
                 }
             };
 
-            property.Value.Property.SetPropertyData(OpcUaSubjectServerSource<TSubject>.OpcVariableKey, variable);
+            property.Property.SetPropertyData(OpcUaSubjectServerSource<TSubject>.OpcVariableKey, variable);
         }
     }
 
