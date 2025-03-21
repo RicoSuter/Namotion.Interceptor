@@ -10,7 +10,8 @@ public class SubjectUpdateExtensionsTests
     public void WhenApplyingSimpleProperty_ThenItWorks()
     {
         // Arrange
-        var person = new Person();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
         
         // Act
         person.ApplySubjectUpdate(new SubjectUpdate
@@ -74,7 +75,8 @@ public class SubjectUpdateExtensionsTests
             Properties = new Dictionary<string, SubjectPropertyUpdate>
             {
                 {
-                    nameof(Person.Children), SubjectPropertyUpdate.Create(
+                    nameof(Person.Children), 
+                    SubjectPropertyUpdate.Create(
                         new SubjectPropertyCollectionUpdate
                         {
                             Index = 0, 

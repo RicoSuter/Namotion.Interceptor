@@ -29,9 +29,9 @@ public static class SubjectRegistryExtensions
         }
     }
     
-    public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName)
+    public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName, ISubjectRegistry? registry = null)
     {
-        var registry = subject.Context.GetService<ISubjectRegistry>();
+        registry = registry ?? subject.Context.GetService<ISubjectRegistry>();
         return registry.KnownSubjects.TryGetValue(subject, out var registeredSubject)
             ? registeredSubject.Properties.GetValueOrDefault(propertyName)
             : null;

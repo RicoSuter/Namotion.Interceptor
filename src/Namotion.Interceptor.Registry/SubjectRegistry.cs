@@ -60,18 +60,21 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         }
     }
 
-    private RegisteredSubject RegisterSubject(IInterceptorSubject subject)
+    public RegisteredSubject RegisterSubject(IInterceptorSubject subject)
     {
-        var registeredSubject = new RegisteredSubject(subject, subject
-            .Properties
-            .Select(p => new RegisteredSubjectProperty(new PropertyReference(subject, p.Key))
-            {
-                Type = p.Value.Type,
-                Attributes = p.Value.Attributes
-            }));
+        lock (_knownSubjects)
+        {
+            var registeredSubject = new RegisteredSubject(subject, subject
+                .Properties
+                .Select(p => new RegisteredSubjectProperty(new PropertyReference(subject, p.Key))
+                {
+                    Type = p.Value.Type,
+                    Attributes = p.Value.Attributes
+                }));
 
-        _knownSubjects[subject] = registeredSubject;
-        return registeredSubject;
+            _knownSubjects[subject] = registeredSubject;
+            return registeredSubject;
+        }
     }
 
     public void Detach(LifecycleContext context)
