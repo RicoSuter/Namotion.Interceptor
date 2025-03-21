@@ -30,7 +30,7 @@ public static class SubjectDataExtensions
         }
     }
 
-    public static bool IsChangingFromSource(this PropertyChangedContext change, ISubjectSource source)
+    public static bool IsChangingFromSource(this SubjectPropertyUpdate change, ISubjectSource source)
     {
         var contexts = change.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ISubjectSource>())!;
         lock (contexts)

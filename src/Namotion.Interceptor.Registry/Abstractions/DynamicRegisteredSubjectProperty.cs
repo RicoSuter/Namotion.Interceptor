@@ -1,5 +1,8 @@
 ﻿namespace Namotion.Interceptor.Registry.Abstractions;
 
+/// <summary>
+/// A dynamic registered subject property which is not part of compilation.
+/// </summary>
 internal record DynamicRegisteredSubjectProperty : RegisteredSubjectProperty
 {
     private readonly Func<object?>? _getValue;
