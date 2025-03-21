@@ -1,6 +1,7 @@
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Sources.Tests.Models;
+using Namotion.Interceptor.Sources.Updates;
 
 namespace Namotion.Interceptor.Sources.Tests.Extensions;
 

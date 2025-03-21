@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Sources.Extensions;
+namespace Namotion.Interceptor.Sources.Updates;
 
 public static class SubjectUpdatePathExtensions
 {

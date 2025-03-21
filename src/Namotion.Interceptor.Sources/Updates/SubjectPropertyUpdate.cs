@@ -2,7 +2,7 @@ using System.Collections;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Registry.Abstractions;
 
-namespace Namotion.Interceptor.Sources;
+namespace Namotion.Interceptor.Sources.Updates;
 
 public class SubjectPropertyUpdate
 {

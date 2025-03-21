@@ -4,6 +4,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Sources.Tests.Models;
+using Namotion.Interceptor.Sources.Updates;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Tests;

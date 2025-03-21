@@ -3,7 +3,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Sources;
+namespace Namotion.Interceptor.Sources.Updates;
 
 public class SubjectUpdate
 {
