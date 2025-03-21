@@ -47,7 +47,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectSourceD
                 var applyAction = await _source.LoadCompleteSourceStateAsync(stoppingToken);
                 lock (this)
                 {
-                    applyAction();
+                    applyAction?.Invoke();
 
                     // replaying previously buffered updates
                     var beforeInitializationUpdates = _beforeInitializationUpdates;

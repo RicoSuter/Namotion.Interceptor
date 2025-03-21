@@ -6,19 +6,13 @@ public class DataAnnotationsValidator : IPropertyValidator
 {
     public IEnumerable<ValidationResult> Validate(PropertyReference property, object? value)
     {
-        var results = new List<ValidationResult>();
-
-        if (value is not null)
+        var validationContext = new ValidationContext(property.Subject)
         {
-            var validationContext = new ValidationContext(property.Subject)
-            {
-                MemberName = property.Name
-            };
+            MemberName = property.Name
+        };
 
-            Validator.TryValidateProperty(value, validationContext, results);
-        }
-        
-        // TODO: Check value against nullability
+        var results = new List<ValidationResult>();
+        Validator.TryValidateProperty(value, validationContext, results);
         return results;
     }
 }
