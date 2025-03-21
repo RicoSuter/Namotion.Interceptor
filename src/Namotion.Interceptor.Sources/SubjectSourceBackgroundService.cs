@@ -42,7 +42,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectSourceM
                 using var disposable = await _source.InitializeAsync(this, stoppingToken);
                 
                 // read complete data set from source
-                var applyAction = await _source.LoadFullSourceStateAsync(stoppingToken);
+                var applyAction = await _source.LoadCompleteSourceStateAsync(stoppingToken);
                 lock (this)
                 {
                     applyAction();
