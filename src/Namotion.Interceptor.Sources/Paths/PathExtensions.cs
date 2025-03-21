@@ -10,7 +10,7 @@ public static class PathExtensions
     {
         return subject
             .TryGetRegisteredSubject()?
-            .GetRegisteredProperties()
+            .GetAllProperties()
             .GetSourcePaths(sourcePathProvider, subject)
             .ToArray() ?? [];
     }

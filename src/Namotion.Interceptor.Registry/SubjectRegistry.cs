@@ -10,6 +10,9 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     
+    /// <summary>
+    /// Gets all known registered subjects.
+    /// </summary>
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
     {
         get
@@ -19,7 +22,12 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         }
     }
 
-    public void Attach(LifecycleContext context)
+    /// <summary>
+    /// Callback which is called when a subject is attached .
+    /// </summary>
+    /// <param name="context"></param>
+    /// <exception cref="InvalidOperationException"></exception>
+    void ILifecycleHandler.Attach(LifecycleContext context)
     {
         lock (_knownSubjects)
         {
@@ -60,24 +68,21 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         }
     }
 
-    public RegisteredSubject RegisterSubject(IInterceptorSubject subject)
+    private RegisteredSubject RegisterSubject(IInterceptorSubject subject)
     {
-        lock (_knownSubjects)
-        {
-            var registeredSubject = new RegisteredSubject(subject, subject
-                .Properties
-                .Select(p => new RegisteredSubjectProperty(new PropertyReference(subject, p.Key))
-                {
-                    Type = p.Value.Type,
-                    Attributes = p.Value.Attributes
-                }));
+        var registeredSubject = new RegisteredSubject(subject, subject
+            .Properties
+            .Select(p => new RegisteredSubjectProperty(new PropertyReference(subject, p.Key))
+            {
+                Type = p.Value.Type,
+                Attributes = p.Value.Attributes
+            }));
 
-            _knownSubjects[subject] = registeredSubject;
-            return registeredSubject;
-        }
+        _knownSubjects[subject] = registeredSubject;
+        return registeredSubject;
     }
 
-    public void Detach(LifecycleContext context)
+    void ILifecycleHandler.Detach(LifecycleContext context)
     {
         lock (_knownSubjects)
         {
