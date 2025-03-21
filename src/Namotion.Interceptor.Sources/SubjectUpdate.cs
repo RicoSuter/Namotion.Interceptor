@@ -111,7 +111,6 @@ public class SubjectUpdate
                 if (property.Subject is not null)
                 {
                     registeredSubject = registry.KnownSubjects[property.Subject];
-
                     CreateParentSubjectUpdate(property, propertySubject, knownSubjectDescriptions);
                 }
             } while (property.Subject is not null && property.Subject != subject && registeredSubject.Parents.Any());

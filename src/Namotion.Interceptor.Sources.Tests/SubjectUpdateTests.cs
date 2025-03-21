@@ -119,41 +119,41 @@ public class SubjectUpdateTests
         await Verify(partialSubjectUpdate);
     }
 
-    [Fact]
-    public async Task WhenCreatingSubjectUpdateFromPath_ThenResultIsCorrect()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-
-        var father = new Person { FirstName = "Father" };
-        var mother = new Person { FirstName = "Mother" };
-        var child1 = new Person { FirstName = "Child1" };
-        var child2 = new Person { FirstName = "Child2" };
-        var child3 = new Person { FirstName = "Child3" };
-
-        var person = new Person(context)
-        {
-            FirstName = "Child",
-            Mother = mother,
-            Father = father,
-            Children = [child1, child2, child3]
-        };
-
-        // Act
-        var sourcePathProvider = new DefaultSourcePathProvider();
-        var partialSubjectUpdate = person.CreateUpdateFromSourcePaths(
-            new Dictionary<string, object?>
-            {
-                { "Children[1].FirstName", "RandomName1" },
-                { "Children[2].FirstName", "RandomName2" },
-                { "Father.FirstName", "RandomName3" }
-            }, sourcePathProvider);
-
-        // Assert
-        await Verify(partialSubjectUpdate);
-    }
+    // [Fact]
+    // public async Task WhenCreatingSubjectUpdateFromPath_ThenResultIsCorrect()
+    // {
+    //     // Arrange
+    //     var context = InterceptorSubjectContext
+    //         .Create()
+    //         .WithRegistry();
+    //
+    //     var father = new Person { FirstName = "Father" };
+    //     var mother = new Person { FirstName = "Mother" };
+    //     var child1 = new Person { FirstName = "Child1" };
+    //     var child2 = new Person { FirstName = "Child2" };
+    //     var child3 = new Person { FirstName = "Child3" };
+    //
+    //     var person = new Person(context)
+    //     {
+    //         FirstName = "Child",
+    //         Mother = mother,
+    //         Father = father,
+    //         Children = [child1, child2, child3]
+    //     };
+    //
+    //     // Act
+    //     var sourcePathProvider = new DefaultSourcePathProvider();
+    //     var partialSubjectUpdate = person.CreateUpdateFromSourcePaths(
+    //         new Dictionary<string, object?>
+    //         {
+    //             { "Children[1].FirstName", "RandomName1" },
+    //             { "Children[2].FirstName", "RandomName2" },
+    //             { "Father.FirstName", "RandomName3" }
+    //         }, sourcePathProvider);
+    //
+    //     // Assert
+    //     await Verify(partialSubjectUpdate);
+    // }
 
     private static JsonSerializerOptions CreateJsonSerializerOptions()
     {

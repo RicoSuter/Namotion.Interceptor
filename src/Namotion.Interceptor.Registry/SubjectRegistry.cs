@@ -36,8 +36,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                     RegisterSubject(context.Property.Value.Subject);
                 }
 
-                var property = _knownSubjects
-                    .TryGetRegisteredProperty(context.Property.Value) ?? 
+                var property = TryGetRegisteredProperty(context.Property.Value) ?? 
                     throw new InvalidOperationException($"Property '{context.Property.Value.Name}' not found.");
                     
                 subject
@@ -83,7 +82,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
             {
                 if (context.Property is not null)
                 {
-                    var property = _knownSubjects.TryGetRegisteredProperty(context.Property.Value);
+                    var property = TryGetRegisteredProperty(context.Property.Value);
                     property?
                         .Parent
                         .RemoveParent(property);
@@ -99,5 +98,16 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                 _knownSubjects.Remove(context.Subject);
             }
         }
+    }
+    
+    private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)
+    {
+        if (_knownSubjects.TryGetValue(property.Subject, out var registeredSubject) &&
+            registeredSubject.Properties.TryGetValue(property.Name, out var result))
+        {
+            return result;
+        }
+
+        return null;
     }
 }
