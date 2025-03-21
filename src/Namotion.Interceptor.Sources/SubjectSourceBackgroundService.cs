@@ -42,10 +42,10 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectSourceM
                 using var disposable = await _source.InitializeAsync(this, stoppingToken);
                 
                 // read complete data set from source
-                var initialData = await _source.ReadFromSourceAsync(stoppingToken);
+                var applyAction = await _source.LoadFullSourceStateAsync(stoppingToken);
                 lock (this)
                 {
-                    EnqueueSubjectUpdate(() => _source.Subject.ApplySubjectSourceUpdate(initialData, _source));
+                    applyAction();
 
                     // replaying previously buffered updates
                     var beforeInitializationUpdates = _beforeInitializationUpdates;

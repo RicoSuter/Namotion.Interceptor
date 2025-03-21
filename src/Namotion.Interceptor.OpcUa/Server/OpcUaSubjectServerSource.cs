@@ -38,16 +38,11 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
     }
 
     public IInterceptorSubject Subject => _subject;
-    
+
     public Task<IDisposable?> InitializeAsync(ISubjectSourceManager manager, CancellationToken cancellationToken)
     {
         _manager = manager;
         return Task.FromResult<IDisposable?>(null);
-    }
-
-    public Task<SubjectUpdate> ReadFromSourceAsync(CancellationToken cancellationToken)
-    {
-        return Task.FromResult(new SubjectUpdate());
     }
 
     public Task WriteToSourceAsync(IEnumerable<PropertyChangedContext> updates, CancellationToken cancellationToken)
@@ -61,24 +56,24 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
                 {
                     actualValue = Convert.ToDouble(actualValue);
                 }
-    
+
                 node.Value = actualValue;
                 node.ClearChangeMasks(_server?.CurrentInstance.DefaultSystemContext, false);
             }
         }
-    
+
         return Task.CompletedTask;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _subject.Context.WithRegistry();
-        
+
         while (!stoppingToken.IsCancellationRequested)
         {
             using var stream = typeof(OpcUaSubjectServerSourceExtensions).Assembly
-                .GetManifestResourceStream("Namotion.Interceptor.OpcUa.MyOpcUaServer.Config.xml") ??
-                throw new InvalidOperationException("Config.xml not found.");
+                .GetManifestResourceStream("Namotion.Interceptor.OpcUa.MyOpcUaServer.Config.xml") 
+                ?? throw new InvalidOperationException("Config.xml not found.");
 
             var application = new ApplicationInstance
             {
@@ -103,7 +98,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
                 {
                     _logger.LogError(ex, "Failed to start OPC UA server.");
                 }
-                
+
                 application.Stop();
 
                 if (ex is not TaskCanceledException)
@@ -119,11 +114,8 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         // TODO: Implement actual correct conversion based on the property type
 
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
-        
-        _manager?.EnqueueSubjectUpdate(() =>
-        {
-            _subject.ApplyValueFromSource(sourcePath, convertedValue, SourcePathProvider);
-        });
+
+        _manager?.EnqueueSubjectUpdate(() => { _subject.ApplyValueFromSource(sourcePath, convertedValue, SourcePathProvider); });
     }
 
     public string GetSourcePropertyPath(PropertyReference property)

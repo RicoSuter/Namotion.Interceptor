@@ -6,6 +6,17 @@ namespace Namotion.Interceptor.Sources.Paths;
 
 public static class PathExtensions
 {
+    public static IEnumerable<string> GetAllKnownPaths(this IInterceptorSubject subject, ISourcePathProvider sourcePathProvider)
+    {
+        // TODO(perf): Do not use subject update but scan directly
+        
+        return SubjectUpdate
+            .CreateCompleteUpdate(subject)
+            .ConvertToSourcePaths(subject, sourcePathProvider)
+            .Select(tuple => tuple.path)
+            .ToArray();
+    }
+    
     public static bool ApplyValueFromSource(this IInterceptorSubject subject, string sourcePath, object? value, ISourcePathProvider sourcePathProvider)
     {
         return subject
@@ -50,16 +61,13 @@ public static class PathExtensions
 
             for (var i = 0; i < segments.Length; i++)
             {
-                var (segment, index, isAttribute) = segments[i];
+                var (segment, index) = segments[i];
                 var isLastSegment = i == segments.Length - 1;
 
                 var registry = currentSubject.Context.GetService<ISubjectRegistry>();
                 var registeredSubject = registry.KnownSubjects[currentSubject];
 
-                var registeredProperty = isAttribute ? 
-                    previousProperty?.Property.TryGetRegisteredAttribute(segment) : 
-                    sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
-            
+                var registeredProperty = sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
                 if (registeredProperty is null ||
                     sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
                 {
@@ -104,11 +112,16 @@ public static class PathExtensions
     {
         foreach (var change in changes)
         {
-            yield return (change
+            var propertiesInPath = change
                 .Property
                 .GetRegisteredProperty()
                 .GetPropertiesInPath(rootSubject)
-                .Aggregate("", sourcePathProvider.GetPropertyFullPath), change);
+                .ToArray();
+            
+            if (propertiesInPath.Length > 0 && sourcePathProvider.IsPropertyIncluded(propertiesInPath.Last()))
+            {
+                yield return (propertiesInPath.Aggregate("", sourcePathProvider.GetPropertyFullPath), change);
+            }
         }
     }
 
@@ -125,6 +138,6 @@ public static class PathExtensions
         {
             yield return registeredProperty ?? throw new InvalidOperationException("Property is null.");
             registeredProperty = registeredProperty?.Parent?.Parents?.FirstOrDefault();
-        } while (registeredProperty is null && registeredProperty?.Parent.Subject != rootSubject);
+        } while (registeredProperty is not null && registeredProperty?.Parent.Subject != rootSubject);
     }
 }

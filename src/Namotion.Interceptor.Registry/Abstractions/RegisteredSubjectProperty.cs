@@ -88,4 +88,11 @@ public record RegisteredSubjectProperty(PropertyReference Property)
 
         return pair.Value;
     } 
+
+    public RegisteredSubjectProperty GetAttributedProperty()
+    {
+        return Parent.Properties
+            .Single(p => p.Key == Attribute.PropertyName)
+            .Value;
+    } 
 }
