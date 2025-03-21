@@ -1,7 +1,9 @@
 ﻿using System.Reactive.Linq;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources.Extensions;
+using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Sources;
@@ -60,9 +62,20 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectSourceD
                 // listen for changes by ignoring changes from the source and buffering them into a single update
                 await foreach (var changes in _source
                     .Subject
-                    .Context
+                    .Context 
                     .GetPropertyChangedObservable()
-                    .Where(change => !change.IsChangingFromSource(_source))
+                    .Where(change =>
+                    {
+                        var registeredProperty = change.Property.GetRegisteredProperty();
+                        
+                        // TODO(perf): Find better way or a way to subscribe only to changes of the subject and its children
+
+                        var isIncluded = registeredProperty
+                            .GetPropertiesInPath(_source.Subject)
+                            .Contains(registeredProperty);
+                        
+                        return isIncluded && !change.IsChangingFromSource(_source);
+                    })
                     .BufferChanges(_bufferTime)
                     .Where(changes => changes.Any())
                     .ToAsyncEnumerable()
