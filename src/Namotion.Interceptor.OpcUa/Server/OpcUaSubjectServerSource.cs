@@ -117,6 +117,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
     internal void UpdateProperty(PropertyReference property, string sourcePath, object? value)
     {
         // TODO: Implement actual correct conversion based on the property type
+
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
         
         _manager?.EnqueueSubjectUpdate(() =>

@@ -107,18 +107,18 @@ public static class PathExtensions
             yield return (change
                 .Property
                 .GetRegisteredProperty()
-                .EnumerateProperties(rootSubject)
+                .GetPropertiesInPath(rootSubject)
                 .Aggregate("", sourcePathProvider.GetPropertyFullPath), change);
         }
     }
 
-    public static IEnumerable<RegisteredSubjectProperty> EnumerateProperties(this RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
+    public static IEnumerable<RegisteredSubjectProperty> GetPropertiesInPath(this RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
     {
-        return EnumeratePropertiesReverse(property, rootSubject)
+        return GetPropertiesInPathReverse(property, rootSubject)
             .Reverse();
     }
 
-    private static IEnumerable<RegisteredSubjectProperty> EnumeratePropertiesReverse(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
+    private static IEnumerable<RegisteredSubjectProperty> GetPropertiesInPathReverse(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
     {
         var registeredProperty = property;
         do
