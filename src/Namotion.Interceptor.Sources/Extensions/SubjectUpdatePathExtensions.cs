@@ -1,5 +1,3 @@
-using Namotion.Interceptor.Sources.Paths;
-
 namespace Namotion.Interceptor.Sources.Extensions;
 
 public static class SubjectUpdatePathExtensions
