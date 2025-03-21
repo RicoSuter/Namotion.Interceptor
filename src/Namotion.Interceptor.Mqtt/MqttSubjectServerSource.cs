@@ -93,7 +93,7 @@ namespace Namotion.Interceptor.Mqtt
 
         public async Task WriteToSourceAsync(IEnumerable<PropertyChangedContext> updates, CancellationToken cancellationToken)
         {
-            foreach (var (path, change) in updates.ConvertToSourcePaths(_sourcePathProvider, _subject))
+            foreach (var (path, change) in updates.GetSourcePaths(_sourcePathProvider, _subject))
             {
                 await PublishPropertyValueAsync(path, change.NewValue, cancellationToken);
             }
@@ -106,12 +106,10 @@ namespace Namotion.Interceptor.Mqtt
             Task.Run(async () =>
             {
                 await Task.Delay(1000);
-                foreach (var (path, value, _) in SubjectUpdate
-                    .CreateCompleteUpdate(_subject)
-                    .ConvertToSourcePaths(_subject, _sourcePathProvider))
+                foreach (var (path, property) in _subject.GetRegisteredPropertiesWithSourcePaths(_sourcePathProvider))
                 {
                     // TODO: Send only to new client
-                    await PublishPropertyValueAsync(path, value, CancellationToken.None);
+                    await PublishPropertyValueAsync(path, property.GetValue(), CancellationToken.None);
                 }
             });
 

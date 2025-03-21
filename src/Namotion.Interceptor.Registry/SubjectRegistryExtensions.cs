@@ -6,17 +6,27 @@ namespace Namotion.Interceptor.Registry;
 
 public static class SubjectRegistryExtensions
 {
-    public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> properties, PropertyReference property)
+    /// <summary>
+    /// Gets all registered properties of the subject and child subjects.
+    /// </summary>
+    /// <param name="subject">The root subject.</param>
+    /// <returns>The update.</returns>
+    public static IEnumerable<RegisteredSubjectProperty> GetRegisteredProperties(this RegisteredSubject subject)
     {
-        if (properties.TryGetValue(property.Subject, out var metadata))
+        // TODO: Avoid endless recursion
+        
+        foreach (var (_, property) in subject.Properties)
         {
-            if (metadata.Properties.TryGetValue(property.Name, out var result))
+            yield return property;
+                
+            foreach (var childProperty in property.Children
+                         .Select(c => c.Subject.TryGetRegisteredSubject())
+                         .Where(s => s is not null)
+                         .SelectMany(s => s!.GetRegisteredProperties()))
             {
-                return result;
+                yield return childProperty;
             }
         }
-
-        return null;
     }
     
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName)
@@ -59,14 +69,10 @@ public static class SubjectRegistryExtensions
     
     public static RegisteredSubjectProperty GetRegisteredProperty(this PropertyReference propertyReference)
     {
-        var registry = propertyReference.Subject.Context.GetService<ISubjectRegistry>();
-        return GetRegisteredProperty(propertyReference, registry);
-    }
-
-    public static RegisteredSubjectProperty GetRegisteredProperty(this PropertyReference propertyReference, ISubjectRegistry registry)
-    {
-        return registry.KnownSubjects.TryGetRegisteredProperty(propertyReference) 
-               ?? throw new InvalidOperationException($"Property '{propertyReference.Name}' not found.");
+        return propertyReference.Subject
+            .TryGetRegisteredSubject()?
+            .TryGetProperty(propertyReference.Name) 
+            ?? throw new InvalidOperationException($"Property '{propertyReference.Name}' not found.");
     }
 
     public static RegisteredSubject? TryGetRegisteredSubject(this IInterceptorSubject subject)
