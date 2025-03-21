@@ -34,7 +34,8 @@ public static class SubjectUpdateExtensions
     
     public static void ApplySubjectPropertyUpdate(this IInterceptorSubject subject, SubjectUpdate update,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate> applyValuePropertyUpdate,
-        Func<RegisteredSubjectProperty, Type, IInterceptorSubject>? createSubject)
+        Func<RegisteredSubjectProperty, Type, IInterceptorSubject>? createSubject,
+        ISubjectRegistry? registry = null)
     {
         foreach (var (propertyName, propertyUpdate) in update.Properties)
         {
@@ -43,11 +44,11 @@ public static class SubjectUpdateExtensions
                 foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
                 {
                     var registeredAttribute = subject.GetRegisteredAttribute(propertyName, attributeName);
-                    ApplySubjectPropertyUpdate(subject, registeredAttribute.Property.Name, attributeUpdate, applyValuePropertyUpdate, createSubject);
+                    ApplySubjectPropertyUpdate(subject, registeredAttribute.Property.Name, attributeUpdate, applyValuePropertyUpdate, createSubject, registry);
                 }
             }
 
-            ApplySubjectPropertyUpdate(subject, propertyName, propertyUpdate, applyValuePropertyUpdate, createSubject);
+            ApplySubjectPropertyUpdate(subject, propertyName, propertyUpdate, applyValuePropertyUpdate, createSubject, registry);
         }
     }
 
@@ -55,9 +56,10 @@ public static class SubjectUpdateExtensions
         IInterceptorSubject subject, string propertyName,
         SubjectPropertyUpdate propertyUpdate,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate> applyValuePropertyUpdate,
-        Func<RegisteredSubjectProperty, Type, IInterceptorSubject>? createSubject)
+        Func<RegisteredSubjectProperty, Type, IInterceptorSubject>? createSubject,
+        ISubjectRegistry? registry)
     {
-        var registeredProperty = subject.TryGetRegisteredProperty(propertyName);
+        var registeredProperty = subject.TryGetRegisteredProperty(propertyName, registry);
         if (registeredProperty is null)
             return;
         
@@ -81,8 +83,10 @@ public static class SubjectUpdateExtensions
                         var item = createSubject?.Invoke(registeredProperty, registeredProperty.Type);
                         if (item != null)
                         {
+                            var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
+                            parentRegistry.RegisterSubject(item);
+                            ApplySubjectPropertyUpdate(item, propertyUpdate.Item, applyValuePropertyUpdate, createSubject, parentRegistry);
                             registeredProperty.SetValue(item);
-                            ApplySubjectPropertyUpdate(item, propertyUpdate.Item, applyValuePropertyUpdate, createSubject);
                         }
                     }
                 }
@@ -119,7 +123,9 @@ public static class SubjectUpdateExtensions
                                     var newItem = createSubject?.Invoke(registeredProperty, itemType);
                                     if (newItem is not null)
                                     {
-                                        ApplySubjectPropertyUpdate(newItem, item.Item!, applyValuePropertyUpdate, createSubject);
+                                        var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
+                                        parentRegistry.RegisterSubject(newItem);
+                                        ApplySubjectPropertyUpdate(newItem, item.Item!, applyValuePropertyUpdate, createSubject, parentRegistry);
                                     }
 
                                     list.Add(newItem);
@@ -145,7 +151,9 @@ public static class SubjectUpdateExtensions
                             var item = createSubject?.Invoke(registeredProperty, itemType);
                             if (item is not null)
                             {
-                                ApplySubjectPropertyUpdate(item, i.Item!, applyValuePropertyUpdate, createSubject);
+                                var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
+                                parentRegistry.RegisterSubject(item);
+                                ApplySubjectPropertyUpdate(item, i.Item!, applyValuePropertyUpdate, createSubject, parentRegistry);
                             }
                             list.Add(item);
                         });
