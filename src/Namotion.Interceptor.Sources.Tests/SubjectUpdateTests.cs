@@ -142,7 +142,7 @@ public class SubjectUpdateTests
         };
 
         // Act
-        var sourcePathProvider = new TestSourcePathProvider();
+        var sourcePathProvider = new DefaultSourcePathProvider();
         var partialSubjectUpdate = person.CreateUpdateFromSourcePaths(
             new Dictionary<string, object?>
             {
@@ -153,29 +153,6 @@ public class SubjectUpdateTests
 
         // Assert
         await Verify(partialSubjectUpdate);
-    }
-
-    public class TestSourcePathProvider : ISourcePathProvider
-    {
-        public bool IsPropertyIncluded(RegisteredSubjectProperty property)
-        {
-            return true;
-        }
-
-        public string? TryGetPropertyName(RegisteredSubjectProperty property)
-        {
-            return property.BrowseName;
-        }
-
-        public string GetPropertyAttributeFullPath(RegisteredSubjectProperty attribute, string pathPrefix)
-        {
-            return pathPrefix;
-        }
-
-        public string GetPropertyFullPath(string path, RegisteredSubjectProperty property)
-        {
-            return path;
-        }
     }
 
     private static JsonSerializerOptions CreateJsonSerializerOptions()
