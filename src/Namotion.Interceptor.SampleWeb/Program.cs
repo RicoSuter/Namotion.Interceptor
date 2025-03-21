@@ -49,13 +49,13 @@ namespace Namotion.Interceptor.SampleWeb
         public partial decimal Pressure { get; set; }
 
         [Unit("bar")]
-        [SourceName("mqtt", "pressure/minimum")]
+        [SourceName("mqtt", "minimum")]
         [PropertyAttribute(nameof(Pressure), "Minimum")]
         public partial decimal Pressure_Minimum { get; set; }
 
         [Derived]
-        [SourceName("mqtt", "pressure/maximum")]
-        [SourceName("opc", "Pressure_Maximum")]
+        [SourceName("mqtt", "maximum")]
+        [SourceName("opc", "Maximum")]
         [PropertyAttribute(nameof(Pressure), "Maximum")]
         public decimal Pressure_Maximum => 4 * Pressure;
 

@@ -8,7 +8,7 @@ public interface ISubjectSource
     
     Task<IDisposable?> InitializeAsync(ISubjectSourceManager manager, CancellationToken cancellationToken);
 
-    Task<SubjectUpdate> ReadFromSourceAsync(CancellationToken cancellationToken);
+    public Task<Action> LoadFullSourceStateAsync(CancellationToken cancellationToken) => Task.FromResult(() => { });
     
     Task WriteToSourceAsync(IEnumerable<PropertyChangedContext> updates, CancellationToken cancellationToken);
 }

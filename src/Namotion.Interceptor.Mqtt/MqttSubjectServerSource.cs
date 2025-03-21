@@ -91,12 +91,6 @@ namespace Namotion.Interceptor.Mqtt
             return Task.FromResult<IDisposable?>(null);
         }
 
-        public Task<SubjectUpdate> ReadFromSourceAsync(CancellationToken cancellationToken)
-        {
-            // As this is initially an empty MQTT server, there is initially no data to read.
-            return Task.FromResult(new SubjectUpdate());
-        }
-
         public async Task WriteToSourceAsync(IEnumerable<PropertyChangedContext> updates, CancellationToken cancellationToken)
         {
             foreach (var (path, change) in updates.ConvertToSourcePaths(_sourcePathProvider, _subject))

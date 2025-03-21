@@ -85,16 +85,13 @@ public static class SubjectUpdatePathExtensions
 
             for (var i = 0; i < segments.Length; i++)
             {
-                var (segment, index, isAttribute) = segments[i];
+                var (segment, index) = segments[i];
                 var isLastSegment = i == segments.Length - 1;
                 
                 var registry = currentSubject.Context.GetService<ISubjectRegistry>();
                 var registeredSubject = registry.KnownSubjects[currentSubject];
 
-                var registeredProperty = isAttribute ? 
-                    previousProperty?.Property.TryGetRegisteredAttribute(segment) :
-                    sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
-                
+                var registeredProperty = sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
                 if (registeredProperty is null || 
                     sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
                 {
