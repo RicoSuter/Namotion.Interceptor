@@ -33,17 +33,17 @@ public class SubjectDataExtensionsTests
         var propertyReference = new PropertyReference(subject.Object, propertyName);
 
         // Assert
-        var changedContext = new PropertyChangedContext(propertyReference, null, null);
-        Assert.False(changedContext.IsChangingFromSource(source));
+        var change = new SubjectPropertyChange(propertyReference, null, null);
+        Assert.False(change.IsChangingFromSource(source));
         
         // Act
         Task.Run(() => propertyReference.SetValueFromSource(source, "John"));
 
         // Assert
         Thread.Sleep(100); // during write
-        Assert.True(changedContext.IsChangingFromSource(source));
+        Assert.True(change.IsChangingFromSource(source));
         
         Thread.Sleep(500); // after write
-        Assert.False(changedContext.IsChangingFromSource(source));
+        Assert.False(change.IsChangingFromSource(source));
     }
 }

@@ -1,12 +1,19 @@
-﻿namespace Namotion.Interceptor.Sources;
+﻿using Namotion.Interceptor.Tracking.Change;
+
+namespace Namotion.Interceptor.Sources;
 
 public interface ISubjectSource
 {
     IInterceptorSubject Subject { get; }
     
-    Task<IDisposable?> InitializeAsync(Action<SubjectUpdate> applySourceChangeAction, CancellationToken cancellationToken);
+    Task<IDisposable?> InitializeAsync(ISubjectSourceDispatcher dispatcher, CancellationToken cancellationToken);
 
-    Task<SubjectUpdate> ReadFromSourceAsync(CancellationToken cancellationToken);
+    /// <summary>
+    /// Loads the complete state of the source and applies it to the subject in the returned callback.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The callback which applies the loaded state to the subject.</returns>
+    public Task<Action> LoadCompleteSourceStateAsync(CancellationToken cancellationToken) => Task.FromResult(() => { });
     
-    Task WriteToSourceAsync(SubjectUpdate update, CancellationToken cancellationToken);
+    Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken);
 }

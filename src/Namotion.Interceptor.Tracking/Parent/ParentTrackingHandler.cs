@@ -4,19 +4,19 @@ namespace Namotion.Interceptor.Tracking.Parent;
 
 public class ParentTrackingHandler : ILifecycleHandler
 {
-    public void Attach(LifecycleContext context)
+    public void Attach(SubjectLifecycleChange change)
     {
-        if (context.Property.HasValue)
+        if (change.Property.HasValue)
         {
-            context.Subject.AddParent(context.Property.Value, context.Index);
+            change.Subject.AddParent(change.Property.Value, change.Index);
         }
     }
 
-    public void Detach(LifecycleContext context)
+    public void Detach(SubjectLifecycleChange change)
     {
-        if (context.Property.HasValue)
+        if (change.Property.HasValue)
         {
-            context.Subject.RemoveParent(context.Property.Value, context.Index);
+            change.Subject.RemoveParent(change.Property.Value, change.Index);
         }
     }
 }

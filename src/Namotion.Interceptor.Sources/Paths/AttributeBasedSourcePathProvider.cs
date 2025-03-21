@@ -1,6 +1,6 @@
 ﻿using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources.Attributes;
+using Namotion.Interceptor.Sources.Paths.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Sources.Paths;
@@ -19,8 +19,13 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
         _attributePathDelimiter = delimiter;
         _pathPrefix = pathPrefix ?? string.Empty;
     }
+
+    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
+    {
+        return TryGetPropertyName(property) is not null;
+    }
     
-    public IEnumerable<(string path, object? index, bool isAttribute)> ParsePathSegments(string path)
+    public IEnumerable<(string path, object? index)> ParsePathSegments(string path)
     {
         // remove prefix
         if (!string.IsNullOrEmpty(_pathPrefix))
@@ -46,16 +51,11 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
                             intIndex : segmentParts[1]) : null;
 
                     var currentPath = segmentParts[0];
-                    return (currentPath, index, i > 0);
+                    return (currentPath, index);
                 }));
     }
 
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
-    {
-        return TryGetPropertySegmentName(property) is not null;
-    }
-
-    public string? TryGetPropertySegmentName(RegisteredSubjectProperty property)
+    public string? TryGetPropertyName(RegisteredSubjectProperty property)
     {
         var nameAttribute = property
             .Attributes
@@ -70,23 +70,33 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
         return nameAttribute?.Path ?? pathAttribute?.Path;
     }
     
-    public string GetPropertyAttributePath(string path, RegisteredSubjectProperty attribute)
+    public string GetPropertyFullPath(string path, RegisteredSubjectProperty property)
     {
-        return path + _attributePathDelimiter + attribute.Attribute.AttributeName;
+        return _pathPrefix + GetAttributeBasedSourcePropertyPath(property);
+    }
+    
+    public RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment)
+    {
+        // TODO(perf): Improve performance by caching the property name
+ 
+        return subject
+            .Properties
+            .SingleOrDefault(p => TryGetPropertyName(p.Value) == segment)
+            .Value;
     }
 
-    public string GetPropertyPath(string path, RegisteredSubjectProperty property)
+    private string GetAttributeBasedSourcePropertyPath(RegisteredSubjectProperty property)
     {
-        var actualPath = GetAttributeBasedSourcePropertyPath(property, _sourceName);
-        return _pathPrefix + actualPath;
-    }
-
-    private string GetAttributeBasedSourcePropertyPath(RegisteredSubjectProperty property, string sourceName)
-    {
+        if (property.IsAttribute)
+        {
+            var attributedProperty = property.GetAttributedProperty();
+            return GetAttributeBasedSourcePropertyPath(attributedProperty) + _attributePathDelimiter + TryGetPropertyName(property);
+        }
+        
         var sourcePath = property
             .Attributes
             .OfType<SourceNameAttribute>()
-            .FirstOrDefault(a => a.SourceName == sourceName)?
+            .FirstOrDefault(a => a.SourceName == _sourceName)?
             .Path;
 
         if (sourcePath is null)
@@ -94,28 +104,28 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
             sourcePath = property
                 .Attributes
                 .OfType<SourcePathAttribute>()
-                .First(a => a.SourceName == sourceName)?
+                .First(a => a.SourceName == _sourceName)?
                 .Path;
         }
 
-        var prefix = TryGetAttributeBasedSourcePathPrefix(property.Property, sourceName);
+        var prefix = TryGetAttributeBasedSourcePathPrefix(property.Property);
         return (prefix is not null ? prefix + _propertyPathDelimiter : "") + sourcePath;
     }
 
-    private string? TryGetAttributeBasedSourcePathPrefix(PropertyReference property, string sourceName)
+    private string? TryGetAttributeBasedSourcePathPrefix(PropertyReference property)
     {
         var attribute = property.Subject
             .GetParents()
             .SelectMany(p => p.Property.Metadata
                 .Attributes
                 .OfType<SourcePathAttribute>()
-                .Where(a => a.SourceName == sourceName)
+                .Where(a => a.SourceName == _sourceName)
                 .Select(a => new { p, a }) ?? [])
             .FirstOrDefault();
 
         if (attribute is not null)
         {
-            var prefix = TryGetAttributeBasedSourcePathPrefix(attribute.p.Property, sourceName);
+            var prefix = TryGetAttributeBasedSourcePathPrefix(attribute.p.Property);
             return 
                 (prefix is not null ? prefix + _propertyPathDelimiter : "") + 
                 attribute.a.Path + 

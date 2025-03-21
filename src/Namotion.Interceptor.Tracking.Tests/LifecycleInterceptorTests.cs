@@ -10,8 +10,8 @@ public class LifecycleInterceptorTests
     public void WhenAssigningArray_ThenAllSubjectsAreAttached()
     {
         // Arrange
-        var attaches = new List<LifecycleContext>();
-        var detaches = new List<LifecycleContext>();
+        var attaches = new List<SubjectLifecycleChange>();
+        var detaches = new List<SubjectLifecycleChange>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext
@@ -36,8 +36,8 @@ public class LifecycleInterceptorTests
     public void WhenAddingInterceptorCollection_ThenArrayItemsAndParentAreAttached()
     {
         // Arrange
-        var attaches = new List<LifecycleContext>();
-        var detaches = new List<LifecycleContext>();
+        var attaches = new List<SubjectLifecycleChange>();
+        var detaches = new List<SubjectLifecycleChange>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext
@@ -62,8 +62,8 @@ public class LifecycleInterceptorTests
     public void WhenAssigningSubject_ThenAllSubjectsAreAttached()
     {
         // Arrange
-        var attaches = new List<LifecycleContext>();
-        var detaches = new List<LifecycleContext>();
+        var attaches = new List<SubjectLifecycleChange>();
+        var detaches = new List<SubjectLifecycleChange>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext
@@ -92,8 +92,8 @@ public class LifecycleInterceptorTests
     public void WhenAddingInterceptorCollection_ThenAllChildrenAreAlsoAttached()
     {
         // Arrange
-        var attaches = new List<LifecycleContext>();
-        var detaches = new List<LifecycleContext>();
+        var attaches = new List<SubjectLifecycleChange>();
+        var detaches = new List<SubjectLifecycleChange>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext
@@ -120,8 +120,8 @@ public class LifecycleInterceptorTests
     public void WhenRemovingInterceptors_ThenAllArrayChildrenAreDetached()
     {
         // Arrange
-        var attaches = new List<LifecycleContext>();
-        var detaches = new List<LifecycleContext>();
+        var attaches = new List<SubjectLifecycleChange>();
+        var detaches = new List<SubjectLifecycleChange>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext
@@ -145,8 +145,8 @@ public class LifecycleInterceptorTests
     public void WhenRemovingInterceptors_ThenAllChildrenAreDetached()
     {
         // Arrange
-        var attaches = new List<LifecycleContext>();
-        var detaches = new List<LifecycleContext>();
+        var attaches = new List<SubjectLifecycleChange>();
+        var detaches = new List<SubjectLifecycleChange>();
 
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext

@@ -6,14 +6,14 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Sources;
 
-public class SubjectSourceBackgroundService : BackgroundService
+public class SubjectSourceBackgroundService : BackgroundService, ISubjectSourceDispatcher
 {
     private readonly ISubjectSource _source;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
 
-    private List<SubjectUpdate>? _beforeInitializationUpdates = [];
+    private List<Action>? _beforeInitializationUpdates = [];
 
     public SubjectSourceBackgroundService(
         ISubjectSource source,
@@ -39,13 +39,13 @@ public class SubjectSourceBackgroundService : BackgroundService
                 }
 
                 // start listening for changes
-                using var disposable = await _source.InitializeAsync(UpdatePropertyValueFromSource, stoppingToken);
+                using var disposable = await _source.InitializeAsync(this, stoppingToken);
                 
                 // read complete data set from source
-                var initialData = await _source.ReadFromSourceAsync(stoppingToken);
+                var applyAction = await _source.LoadCompleteSourceStateAsync(stoppingToken);
                 lock (this)
                 {
-                    UpdatePropertyValueFromSource(initialData);
+                    applyAction();
 
                     // replaying previously buffered updates
                     var beforeInitializationUpdates = _beforeInitializationUpdates;
@@ -53,7 +53,7 @@ public class SubjectSourceBackgroundService : BackgroundService
                     
                     foreach (var data in beforeInitializationUpdates!)
                     {
-                        UpdatePropertyValueFromSource(data);
+                        EnqueueSubjectUpdate(data);
                     }
                 }
                 
@@ -68,8 +68,7 @@ public class SubjectSourceBackgroundService : BackgroundService
                     .ToAsyncEnumerable()
                     .WithCancellation(stoppingToken))
                 {
-                    var update = SubjectUpdate.CreatePartialUpdateFromChanges(_source.Subject, changes);
-                    await _source.WriteToSourceAsync(update, stoppingToken);
+                    await _source.WriteToSourceAsync(changes, stoppingToken);
                 }
             }
             catch (Exception ex)
@@ -82,7 +81,7 @@ public class SubjectSourceBackgroundService : BackgroundService
         }
     }
     
-    private void UpdatePropertyValueFromSource(SubjectUpdate update)
+    public void EnqueueSubjectUpdate(Action update)
     {
         lock (this)
         {
@@ -92,7 +91,7 @@ public class SubjectSourceBackgroundService : BackgroundService
             }
             else
             {
-                _source.Subject.ApplySubjectSourceUpdate(update, _source);
+                update.Invoke();
             }
         }
     }

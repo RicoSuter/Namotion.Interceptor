@@ -21,36 +21,36 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         _loggerResolver = loggerResolver;
     }
 
-    public void Attach(LifecycleContext context)
+    public void Attach(SubjectLifecycleChange change)
     {
         _logger ??= _loggerResolver();
         
-        if (context.ReferenceCount == 1)
+        if (change.ReferenceCount == 1)
         {
-            if (context.Subject is IHostedService hostedService)
+            if (change.Subject is IHostedService hostedService)
             {
                 AttachHostedService(hostedService);
             }
 
-            foreach (var hostedService2 in context.Subject.GetAttachedHostedServices())
+            foreach (var hostedService2 in change.Subject.GetAttachedHostedServices())
             {
                 AttachHostedService(hostedService2);
             }
         }
     }
 
-    public void Detach(LifecycleContext context)
+    public void Detach(SubjectLifecycleChange change)
     {
         _logger ??= _loggerResolver();
 
-        if (context.ReferenceCount == 0)
+        if (change.ReferenceCount == 0)
         {
-            if (context.Subject is IHostedService hostedService)
+            if (change.Subject is IHostedService hostedService)
             {
                 DetachHostedService(hostedService);
             }
 
-            foreach (var hostedService2 in context.Subject.GetAttachedHostedServices())
+            foreach (var hostedService2 in change.Subject.GetAttachedHostedServices())
             {
                 DetachHostedService(hostedService2);
             }

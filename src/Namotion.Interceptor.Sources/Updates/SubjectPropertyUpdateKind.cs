@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Sources;
+namespace Namotion.Interceptor.Sources.Updates;
 
 public enum SubjectPropertyUpdateKind
 {

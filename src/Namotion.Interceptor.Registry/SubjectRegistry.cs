@@ -10,6 +10,9 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     
+    /// <summary>
+    /// Gets all known registered subjects.
+    /// </summary>
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
     {
         get
@@ -19,42 +22,47 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         }
     }
 
-    public void Attach(LifecycleContext context)
+    /// <summary>
+    /// Callback which is called when a subject is attached .
+    /// </summary>
+    /// <param name="change"></param>
+    /// <exception cref="InvalidOperationException"></exception>
+    void ILifecycleHandler.Attach(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {
-            if (!_knownSubjects.TryGetValue(context.Subject, out var metadata))
+            if (!_knownSubjects.TryGetValue(change.Subject, out var subject))
             {
-                metadata = RegisterSubject(context.Subject);
+                subject = RegisterSubject(change.Subject);
             }
 
-            if (context.Property is not null)
+            if (change.Property is not null)
             {
-                metadata.AddParent(context.Property.Value);
-                
-                if (!_knownSubjects.ContainsKey(context.Property.Value.Subject))
+                if (!_knownSubjects.ContainsKey(change.Property.Value.Subject))
                 {
                     // parent of property not yet registered
-                    RegisterSubject(context.Property.Value.Subject);
+                    RegisterSubject(change.Property.Value.Subject);
                 }
 
-                var property = _knownSubjects
-                    .TryGetRegisteredProperty(context.Property.Value) ?? 
-                    throw new InvalidOperationException($"Property '{context.Property.Value.Name}' not found.");
+                var property = TryGetRegisteredProperty(change.Property.Value) ?? 
+                    throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
                     
+                subject
+                    .AddParent(property);
+                
                 property
                     .AddChild(new SubjectPropertyChild
                     {
-                        Index = context.Index,
-                        Subject = context.Subject,
+                        Index = change.Index,
+                        Subject = change.Subject,
                     });
             }
 
-            foreach (var property in metadata.Properties)
+            foreach (var property in subject.Properties)
             {
                 foreach (var attribute in property.Value.Attributes.OfType<ISubjectPropertyInitializer>())
                 {
-                    attribute.InitializeProperty(property.Value, context.Index);
+                    attribute.InitializeProperty(property.Value, change.Index);
                 }
             }
         }
@@ -74,28 +82,40 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         return registeredSubject;
     }
 
-    public void Detach(LifecycleContext context)
+    void ILifecycleHandler.Detach(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {
-            if (context.ReferenceCount == 0)
+            if (change.ReferenceCount == 0)
             {
-                if (context.Property is not null)
+                if (change.Property is not null)
                 {
-                    var metadata = _knownSubjects[context.Subject];
-                    metadata.RemoveParent(context.Property.Value);
-
-                    _knownSubjects
-                        .TryGetRegisteredProperty(context.Property.Value)?
+                    var property = TryGetRegisteredProperty(change.Property.Value);
+                    property?
+                        .Parent
+                        .RemoveParent(property);
+                    
+                    property?
                         .RemoveChild(new SubjectPropertyChild
                         {
-                            Subject = context.Subject,
-                            Index = context.Index
+                            Subject = change.Subject,
+                            Index = change.Index
                         });
                 }
 
-                _knownSubjects.Remove(context.Subject);
+                _knownSubjects.Remove(change.Subject);
             }
         }
+    }
+    
+    private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)
+    {
+        if (_knownSubjects.TryGetValue(property.Subject, out var registeredSubject) &&
+            registeredSubject.Properties.TryGetValue(property.Name, out var result))
+        {
+            return result;
+        }
+
+        return null;
     }
 }
