@@ -6,7 +6,7 @@ using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Sources.Attributes;
+using Namotion.Interceptor.Sources.Paths.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 using NSwag.Annotations;

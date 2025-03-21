@@ -1,4 +1,4 @@
-﻿namespace Namotion.Interceptor.Sources.Attributes;
+﻿namespace Namotion.Interceptor.Sources.Paths.Attributes;
 
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
 public class SourceNameAttribute : Attribute
