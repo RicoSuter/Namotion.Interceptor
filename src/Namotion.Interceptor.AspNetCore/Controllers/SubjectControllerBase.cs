@@ -8,7 +8,6 @@ using Namotion.Interceptor.AspNetCore.Extensions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Sources.Updates;
 using Namotion.Interceptor.Validation;
