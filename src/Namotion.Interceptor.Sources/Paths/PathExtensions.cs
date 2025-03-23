@@ -24,14 +24,14 @@ public static class PathExtensions
     public static bool ApplyValueFromSource(this IInterceptorSubject subject, string sourcePath, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider)
     {
         return subject
-            .VisitPropertiesFromSource([sourcePath], (property, path) => property.SetValue(getPropertyValue(property, path)), sourcePathProvider)
+            .VisitPropertiesFromSourcePaths([sourcePath], (property, path) => property.SetValue(getPropertyValue(property, path)), sourcePathProvider)
             .Count == 1;
     }
 
     public static IEnumerable<string> ApplyValuesFromSource(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider)
     {
         return subject
-            .VisitPropertiesFromSource(sourcePaths, (property, path) => property.SetValue(getPropertyValue(property, path)), sourcePathProvider);
+            .VisitPropertiesFromSourcePaths(sourcePaths, (property, path) => property.SetValue(getPropertyValue(property, path)), sourcePathProvider);
     }
 
     /// <summary>
@@ -44,7 +44,7 @@ public static class PathExtensions
     public static IEnumerable<string> ApplyValuesFromSource(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, ISourcePathProvider sourcePathProvider)
     {
         return subject
-            .VisitPropertiesFromSource(pathsAndValues.Keys, (property, path) => property.SetValue(pathsAndValues[path]), sourcePathProvider);
+            .VisitPropertiesFromSourcePaths(pathsAndValues.Keys, (property, path) => property.SetValue(pathsAndValues[path]), sourcePathProvider);
     }
 
     public static string? TryGetSourcePath(this RegisteredSubjectProperty property, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
@@ -118,9 +118,9 @@ public static class PathExtensions
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="subjectFactory">The subject factory.</param>
     /// <returns>The list of visited paths.</returns>
-    public static IReadOnlyCollection<string> VisitPropertiesFromSource(this IInterceptorSubject subject, IEnumerable<string> sourcePaths,
-        Action<RegisteredSubjectProperty, string> visitProperty, ISourcePathProvider sourcePathProvider,
-        ISubjectFactory? subjectFactory = null)
+    public static IReadOnlyCollection<string> VisitPropertiesFromSourcePaths(this IInterceptorSubject subject, 
+        IEnumerable<string> sourcePaths, Action<RegisteredSubjectProperty, string> visitProperty, 
+        ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
         // TODO(perf): Optimize for multiple paths (group by)
 
@@ -165,8 +165,8 @@ public static class PathExtensions
                         if (currentSubject is null && subjectFactory is not null)
                         {
                             // create missing item collection or item dictionary
+                            
                             throw new InvalidOperationException("Missing collection items cannot be created.");
-
                             // TODO: Implement collection or dictionary creation from paths (need to know all paths).
 
                             // currentSubject = subjectFactory.CreateSubject(registeredProperty, null);

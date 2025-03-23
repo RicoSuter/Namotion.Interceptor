@@ -21,5 +21,5 @@ public interface ISubjectFactory
     /// <param name="property">The property.</param>
     /// <param name="children">The initial list of child subjects.</param>
     /// <returns>The created subject collection.</returns>
-    ICollection<IInterceptorSubject?> CreateSubjectCollection(RegisteredSubjectProperty property, params IEnumerable<IInterceptorSubject?> children);
+    IEnumerable<IInterceptorSubject?> CreateSubjectCollection(RegisteredSubjectProperty property, params IEnumerable<IInterceptorSubject?> children);
 }
