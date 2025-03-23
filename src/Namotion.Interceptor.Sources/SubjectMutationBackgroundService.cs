@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Sources;
 
-public class SubjectSourceBackgroundService : BackgroundService, ISubjectSourceDispatcher
+public class SubjectMutationBackgroundService : BackgroundService, ISubjectMutationDispatcher
 {
     private readonly ISubjectSource _source;
     private readonly ILogger _logger;
@@ -16,7 +16,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectSourceD
 
     private List<Action>? _beforeInitializationUpdates = [];
 
-    public SubjectSourceBackgroundService(
+    public SubjectMutationBackgroundService(
         ISubjectSource source,
         ILogger logger,
         TimeSpan? bufferTime = null,
@@ -26,6 +26,21 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectSourceD
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
+    }
+    
+    public void EnqueueSubjectUpdate(Action update)
+    {
+        lock (this)
+        {
+            if (_beforeInitializationUpdates is not null)
+            {
+                _beforeInitializationUpdates.Add(update);
+            }
+            else
+            {
+                update.Invoke();
+            }
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -40,7 +55,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectSourceD
                 }
 
                 // start listening for changes
-                using var disposable = await _source.InitializeAsync(this, stoppingToken);
+                using var disposable = await _source.StartListeningAsync(this, stoppingToken);
                 
                 // read complete data set from source
                 var applyAction = await _source.LoadCompleteSourceStateAsync(stoppingToken);
@@ -89,21 +104,6 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectSourceD
                 
                 _logger.LogError(ex, "Failed to listen for changes.");
                 await Task.Delay(_retryTime, stoppingToken);
-            }
-        }
-    }
-    
-    public void EnqueueSubjectUpdate(Action update)
-    {
-        lock (this)
-        {
-            if (_beforeInitializationUpdates is not null)
-            {
-                _beforeInitializationUpdates.Add(update);
-            }
-            else
-            {
-                update.Invoke();
             }
         }
     }
