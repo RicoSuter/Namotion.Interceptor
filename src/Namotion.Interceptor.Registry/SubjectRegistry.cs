@@ -26,7 +26,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
     /// Callback which is called when a subject is attached .
     /// </summary>
     /// <param name="change"></param>
-    /// <exception cref="InvalidOperationException"></exception>
+    /// <exception cref="InvalidOperationException">Changed property not found.</exception>
     void ILifecycleHandler.Attach(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
