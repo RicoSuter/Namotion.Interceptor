@@ -1,11 +1,10 @@
-﻿using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
+﻿using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Paths.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Sources.Paths;
 
-public class AttributeBasedSourcePathProvider : ISourcePathProvider
+public class AttributeBasedSourcePathProvider : SourcePathProviderBase
 {
     private readonly string _sourceName;
     private readonly string? _pathPrefix;
@@ -20,12 +19,12 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
         _pathPrefix = pathPrefix ?? string.Empty;
     }
 
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
+    public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
         return TryGetPropertyName(property) is not null;
     }
     
-    public IEnumerable<(string path, object? index)> ParsePathSegments(string path)
+    public override IEnumerable<(string path, object? index)> ParsePathSegments(string path)
     {
         // remove prefix
         if (!string.IsNullOrEmpty(_pathPrefix))
@@ -55,7 +54,7 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
                 }));
     }
 
-    public string? TryGetPropertyName(RegisteredSubjectProperty property)
+    public override string? TryGetPropertyName(RegisteredSubjectProperty property)
     {
         var nameAttribute = property
             .Attributes
@@ -70,19 +69,9 @@ public class AttributeBasedSourcePathProvider : ISourcePathProvider
         return nameAttribute?.Path ?? pathAttribute?.Path;
     }
     
-    public string GetPropertyFullPath(string path, RegisteredSubjectProperty property)
+    public override string GetPropertyFullPath(string path, RegisteredSubjectProperty property)
     {
         return _pathPrefix + GetAttributeBasedSourcePropertyPath(property);
-    }
-    
-    public RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment)
-    {
-        // TODO(perf): Improve performance by caching the property name
- 
-        return subject
-            .Properties
-            .SingleOrDefault(p => TryGetPropertyName(p.Value) == segment)
-            .Value;
     }
 
     private string GetAttributeBasedSourcePropertyPath(RegisteredSubjectProperty property)

@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Sources.Paths;
 
@@ -34,8 +35,17 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
                             intIndex : segmentParts[1]) : null;
                     return (segmentParts[0], index);
                 }));
-    } 
-    
+    }
+
+    public RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string segment)
+    {
+        return property.Parent.Properties
+            .SingleOrDefault(p => p.Value.Attributes
+                .OfType<PropertyAttributeAttribute>()
+                .Any(a => a.PropertyName == property.Property.Name && a.AttributeName == segment))
+            .Value;
+    }
+
     /// <inheritdoc />
     public virtual RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment)
     {

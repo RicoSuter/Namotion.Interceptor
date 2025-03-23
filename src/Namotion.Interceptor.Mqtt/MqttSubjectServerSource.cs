@@ -111,7 +111,7 @@ namespace Namotion.Interceptor.Mqtt
             Task.Run(async () =>
             {
                 await Task.Delay(1000);
-                foreach (var (path, property) in _subject.GetRegisteredPropertiesWithSourcePaths(_sourcePathProvider))
+                foreach (var (path, property) in _subject.GetAllRegisteredPropertiesWithSourcePaths(_sourcePathProvider))
                 {
                     // TODO: Send only to new client
                     await PublishPropertyValueAsync(path, property.GetValue(), CancellationToken.None);
