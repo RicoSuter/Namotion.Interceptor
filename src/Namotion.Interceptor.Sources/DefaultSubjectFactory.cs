@@ -10,6 +10,7 @@ public class DefaultSubjectFactory : ISubjectFactory
 {
     public static DefaultSubjectFactory Instance { get; } = new();
 
+    /// <inheritdoc />
     public virtual IInterceptorSubject CreateSubject(RegisteredSubjectProperty property, object? index)
     {
         var itemType = index is not null ? property.Type.GenericTypeArguments[0] : property.Type;
@@ -21,6 +22,7 @@ public class DefaultSubjectFactory : ISubjectFactory
         return item as IInterceptorSubject ?? throw new InvalidOperationException("Could not create subject.");
     }
 
+    /// <inheritdoc />
     public ICollection<IInterceptorSubject?> CreateSubjectCollection(RegisteredSubjectProperty property, params IEnumerable<IInterceptorSubject?> children)
     {
         var itemType = property.Type.GenericTypeArguments[0];

@@ -20,7 +20,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
     private readonly string? _rootName;
 
     private OpcUaSubjectServer<TSubject>? _server;
-    private ISubjectSourceDispatcher? _dispatcher;
+    private ISubjectMutationDispatcher? _dispatcher;
 
     internal ISourcePathProvider SourcePathProvider { get; }
 
@@ -39,7 +39,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
 
     public IInterceptorSubject Subject => _subject;
 
-    public Task<IDisposable?> InitializeAsync(ISubjectSourceDispatcher dispatcher, CancellationToken cancellationToken)
+    public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
     {
         _dispatcher = dispatcher;
         return Task.FromResult<IDisposable?>(null);

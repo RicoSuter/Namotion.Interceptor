@@ -47,9 +47,9 @@ public static class OpcUaSubjectServerSourceExtensions
             .AddSingleton<IHostedService>(sp =>
             {
                 var subject = subjectSelector(sp);
-                return new SubjectSourceBackgroundService(
+                return new SubjectMutationBackgroundService(
                     sp.GetRequiredService<OpcUaSubjectServerSource<TSubject>>(),
-                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>());
+                    sp.GetRequiredService<ILogger<SubjectMutationBackgroundService>>());
             });
     }
 
@@ -102,10 +102,10 @@ public static class OpcUaSubjectServerSourceExtensions
     //            var context = interceptable.Context ??
     //                throw new InvalidOperationException($"Context is not set on {nameof(TProxy)}.");
 
-    //            return new SubjectSourceBackgroundService<TProxy>(
+    //            return new SubjectMutationBackgroundService<TProxy>(
     //                sp.GetRequiredService<OpcUaClientTrackableSource<TProxy>>(),
     //                context,
-    //                sp.GetRequiredService<ILogger<SubjectSourceBackgroundService<TProxy>>>());
+    //                sp.GetRequiredService<ILogger<SubjectMutationBackgroundService<TProxy>>>());
     //        });
     //}
 }

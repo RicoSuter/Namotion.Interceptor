@@ -26,7 +26,7 @@ namespace Namotion.Interceptor.Mqtt
         private int _numberOfClients = 0;
         private MqttServer? _mqttServer;
 
-        private ISubjectSourceDispatcher? _dispatcher;
+        private ISubjectMutationDispatcher? _dispatcher;
 
         public int Port { get; set; } = 1883;
 
@@ -85,7 +85,7 @@ namespace Namotion.Interceptor.Mqtt
             }
         }
 
-        public Task<IDisposable?> InitializeAsync(ISubjectSourceDispatcher dispatcher, CancellationToken cancellationToken)
+        public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
         {
             _dispatcher = dispatcher;
             return Task.FromResult<IDisposable?>(null);
