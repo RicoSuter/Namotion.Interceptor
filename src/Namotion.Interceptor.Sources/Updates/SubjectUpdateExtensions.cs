@@ -8,7 +8,17 @@ namespace Namotion.Interceptor.Sources.Updates;
 
 public static class SubjectUpdateExtensions
 {
-    public static void ApplySubjectUpdateToSource(this IInterceptorSubject subject, SubjectUpdate update, ISubjectSource source,
+    /// <summary>
+    /// Applies all values of the source update data to a subject and optionally creates missing child subjects (e.g. using DefaultSubjectFactory.Instance).
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="update">The update data.</param>
+    /// <param name="source">The source the update data is coming from.</param>
+    /// <param name="subjectFactory">The subject factory to create missing subjects, null to ignore updates on missing subjects.</param>
+    /// <param name="transformValueBeforeApply">The function to transform the update before applying it.</param>
+    public static void ApplySubjectUpdateFromSource(
+        this IInterceptorSubject subject, SubjectUpdate update, ISubjectSource source,
+        ISubjectFactory? subjectFactory,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
         subject.ApplySubjectPropertyUpdate(update, 
@@ -17,11 +27,18 @@ public static class SubjectUpdateExtensions
                 transformValueBeforeApply?.Invoke(registeredProperty, propertyUpdate);
                 registeredProperty.Property.SetValueFromSource(source, propertyUpdate.Value);
             }, 
-            (_, type) => Activator.CreateInstance(type) as IInterceptorSubject 
-                ?? throw new InvalidOperationException("Cannot create subject."));
+            subjectFactory);
     }
     
+    /// <summary>
+    /// Applies all values of the update data to a subject and optionally creates missing child subjects (e.g. using DefaultSubjectFactory.Instance).
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="update">The update data.</param>
+    /// <param name="subjectFactory">The subject factory to create missing subjects, null to ignore updates on missing subjects.</param>
+    /// <param name="transformValueBeforeApply">The function to transform the update before applying it.</param>
     public static void ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update,
+        ISubjectFactory? subjectFactory,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
         subject.ApplySubjectPropertyUpdate(update, 
@@ -30,14 +47,21 @@ public static class SubjectUpdateExtensions
                 transformValueBeforeApply?.Invoke(registeredProperty, propertyUpdate);
                 registeredProperty.SetValue(propertyUpdate.Value);
             }, 
-            (_, type) => Activator.CreateInstance(type) as IInterceptorSubject 
-                ?? throw new InvalidOperationException("Cannot create subject."));
+            subjectFactory ?? DefaultSubjectFactory.Instance);
     }
     
+    /// <summary>
+    /// Applies all values of the update data to a subject property and optionally creates missing child subjects (e.g. using DefaultSubjectFactory.Instance).
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="update">The update data.</param>
+    /// <param name="applyValuePropertyUpdate">The action to apply a given update to the property value.</param>
+    /// <param name="subjectFactory">The subject factory to create missing subjects, null to ignore updates on missing subjects.</param>
+    /// <param name="registry">The optional registry. Might need to be passed because it is not yet accessible via subject.</param>
     public static void ApplySubjectPropertyUpdate(
         this IInterceptorSubject subject, SubjectUpdate update,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate> applyValuePropertyUpdate,
-        Func<RegisteredSubjectProperty, Type, IInterceptorSubject>? createSubject,
+        ISubjectFactory? subjectFactory,
         ISubjectRegistry? registry = null)
     {
         foreach (var (propertyName, propertyUpdate) in update.Properties)
@@ -47,11 +71,11 @@ public static class SubjectUpdateExtensions
                 foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
                 {
                     var registeredAttribute = subject.GetRegisteredAttribute(propertyName, attributeName);
-                    ApplySubjectPropertyUpdate(subject, registeredAttribute.Property.Name, attributeUpdate, applyValuePropertyUpdate, createSubject, registry);
+                    ApplySubjectPropertyUpdate(subject, registeredAttribute.Property.Name, attributeUpdate, applyValuePropertyUpdate, subjectFactory, registry);
                 }
             }
 
-            ApplySubjectPropertyUpdate(subject, propertyName, propertyUpdate, applyValuePropertyUpdate, createSubject, registry);
+            ApplySubjectPropertyUpdate(subject, propertyName, propertyUpdate, applyValuePropertyUpdate, subjectFactory, registry);
         }
     }
 
@@ -59,7 +83,7 @@ public static class SubjectUpdateExtensions
         IInterceptorSubject subject, string propertyName,
         SubjectPropertyUpdate propertyUpdate,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate> applyValuePropertyUpdate,
-        Func<RegisteredSubjectProperty, Type, IInterceptorSubject>? createSubject,
+        ISubjectFactory? subjectFactory,
         ISubjectRegistry? registry)
     {
         var registeredProperty = subject.TryGetRegisteredProperty(propertyName, registry);
@@ -78,17 +102,17 @@ public static class SubjectUpdateExtensions
                     if (registeredProperty.GetValue() is IInterceptorSubject existingItem)
                     {
                         // update existing item
-                        ApplySubjectPropertyUpdate(existingItem, propertyUpdate.Item, applyValuePropertyUpdate, createSubject);
+                        ApplySubjectPropertyUpdate(existingItem, propertyUpdate.Item, applyValuePropertyUpdate, subjectFactory);
                     }
                     else
                     {
                         // create new item
-                        var item = createSubject?.Invoke(registeredProperty, registeredProperty.Type);
+                        var item = subjectFactory?.CreateSubject(registeredProperty, null);
                         if (item != null)
                         {
                             var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
                             RegisterSubject(parentRegistry, item, registeredProperty, null);
-                            item.ApplySubjectPropertyUpdate(propertyUpdate.Item, applyValuePropertyUpdate, createSubject, parentRegistry);
+                            item.ApplySubjectPropertyUpdate(propertyUpdate.Item, applyValuePropertyUpdate, subjectFactory, parentRegistry);
                             registeredProperty.SetValue(item);
                         }
                     }
@@ -117,18 +141,17 @@ public static class SubjectUpdateExtensions
                                 if (existingCollection.Count > index)
                                 {
                                     // Update existing collection item
-                                    ApplySubjectPropertyUpdate(existingCollection.ElementAt(index), item.Item!, applyValuePropertyUpdate, createSubject);
+                                    ApplySubjectPropertyUpdate(existingCollection.ElementAt(index), item.Item!, applyValuePropertyUpdate, subjectFactory);
                                 }
                                 else if (existingCollection is IList list)
                                 {
                                     // Missing index, create new collection item
-                                    var itemType = registeredProperty.Type.GenericTypeArguments[0];
-                                    var newItem = createSubject?.Invoke(registeredProperty, itemType);
+                                    var newItem = subjectFactory?.CreateSubject(registeredProperty, index);
                                     if (newItem is not null)
                                     {
                                         var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
                                         RegisterSubject(parentRegistry, newItem, registeredProperty, list.Count);
-                                        ApplySubjectPropertyUpdate(newItem, item.Item!, applyValuePropertyUpdate, createSubject, parentRegistry);
+                                        ApplySubjectPropertyUpdate(newItem, item.Item!, applyValuePropertyUpdate, subjectFactory, parentRegistry);
                                     }
 
                                     list.Add(newItem);
@@ -140,26 +163,27 @@ public static class SubjectUpdateExtensions
                             }
                         }
                     }
-                    else
+                    else if (subjectFactory is not null)
                     {
                         // create new collection
-                        
-                        // TODO(perf): Improve performance of collection creation
-                        
-                        var itemType = registeredProperty.Type.GenericTypeArguments[0];
-                        var collectionType = typeof(List<>).MakeGenericType(itemType);
-                        var list = (IList)Activator.CreateInstance(collectionType)!;
-                        propertyUpdate.Collection.ForEach(i =>
-                        {
-                            var item = createSubject?.Invoke(registeredProperty, itemType);
-                            if (item is not null)
+                        var items = propertyUpdate
+                            .Collection?
+                            .Select(i =>
                             {
-                                var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
-                                RegisterSubject(parentRegistry, item, registeredProperty, list.Count);
-                                item.ApplySubjectPropertyUpdate(i.Item!, applyValuePropertyUpdate, createSubject, parentRegistry);
-                            }
-                            list.Add(item);
-                        });
+                                var item = subjectFactory?.CreateSubject(registeredProperty, i.Index);
+                                if (item is not null)
+                                {
+                                    var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
+                                    RegisterSubject(parentRegistry, item, registeredProperty, i.Index);
+                                    item.ApplySubjectPropertyUpdate(i.Item!, applyValuePropertyUpdate, subjectFactory, parentRegistry);
+                                }
+                                return item;
+                            }) ?? [];
+                        
+                        var collection = subjectFactory
+                            .CreateSubjectCollection(registeredProperty, items);
+                        
+                        registeredProperty.SetValue(collection);
                     }
                 }
 

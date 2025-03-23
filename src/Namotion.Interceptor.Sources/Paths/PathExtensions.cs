@@ -14,32 +14,32 @@ public static class PathExtensions
             .GetSourcePaths(sourcePathProvider, subject)
             .ToArray() ?? [];
     }
-    
+
     public static bool ApplyValueFromSource(this IInterceptorSubject subject, string sourcePath, object? value, ISourcePathProvider sourcePathProvider)
     {
         return subject
             .ApplyValueFromSource(sourcePath, (_, _) => value, sourcePathProvider);
     }
-    
+
     public static bool ApplyValueFromSource(this IInterceptorSubject subject, string sourcePath, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider)
     {
         return subject
             .VisitValuesFromSource([sourcePath], (property, path) => property.SetValue(getPropertyValue(property, path)), sourcePathProvider)
             .Length == 1;
     }
-    
+
     public static IEnumerable<string> ApplyValuesFromSource(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider)
     {
         return subject
             .VisitValuesFromSource(sourcePaths, (property, path) => property.SetValue(getPropertyValue(property, path)), sourcePathProvider);
     }
-    
+
     public static IEnumerable<string> ApplyValuesFromSource(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, ISourcePathProvider sourcePathProvider)
     {
         return subject
             .VisitValuesFromSource(pathsAndValues.Keys, (property, path) => property.SetValue(pathsAndValues[path]), sourcePathProvider);
     }
-    
+
     /// <summary>
     /// Visits all path leaf properties using source paths and returns the paths which have been found and visited.
     /// </summary>
@@ -48,12 +48,12 @@ public static class PathExtensions
     /// <param name="visitPropertyValue"></param>
     /// <param name="sourcePathProvider"></param>
     /// <returns></returns>
-    public static string[] VisitValuesFromSource(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, 
+    public static string[] VisitValuesFromSource(this IInterceptorSubject subject, IEnumerable<string> sourcePaths,
         Action<RegisteredSubjectProperty, string> visitPropertyValue, ISourcePathProvider sourcePathProvider)
     {
         // TODO(perf): Optimize for multiple paths
         // TODO: Add support to create missing items/collections
-        
+
         var foundPaths = new List<string>();
         foreach (var sourcePath in sourcePaths)
         {
@@ -84,9 +84,8 @@ public static class PathExtensions
                         .Children
                         .SingleOrDefault(c => Equals(c.Index, index))
                         .Subject;
-
                 }
-                else if (!isLastSegment && 
+                else if (!isLastSegment &&
                          registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
                 {
                     currentSubject = registeredProperty.Children.SingleOrDefault().Subject;
@@ -121,7 +120,7 @@ public static class PathExtensions
 
         return null;
     }
-    
+
     public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetSourcePaths(
         this IEnumerable<RegisteredSubjectProperty> properties, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
     {
