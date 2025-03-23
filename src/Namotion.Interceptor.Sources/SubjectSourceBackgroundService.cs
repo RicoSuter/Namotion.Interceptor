@@ -2,7 +2,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking;
 
