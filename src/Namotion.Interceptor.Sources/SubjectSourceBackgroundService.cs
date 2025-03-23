@@ -28,6 +28,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
     }
     
+    /// <inheritdoc />
     public void EnqueueSubjectUpdate(Action update)
     {
         lock (this)
@@ -43,6 +44,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
+    /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
