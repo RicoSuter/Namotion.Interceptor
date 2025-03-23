@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Sources;
 
-public class SubjectMutationBackgroundService : BackgroundService, ISubjectMutationDispatcher
+public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutationDispatcher
 {
     private readonly ISubjectSource _source;
     private readonly ILogger _logger;
@@ -16,7 +16,7 @@ public class SubjectMutationBackgroundService : BackgroundService, ISubjectMutat
 
     private List<Action>? _beforeInitializationUpdates = [];
 
-    public SubjectMutationBackgroundService(
+    public SubjectSourceBackgroundService(
         ISubjectSource source,
         ILogger logger,
         TimeSpan? bufferTime = null,

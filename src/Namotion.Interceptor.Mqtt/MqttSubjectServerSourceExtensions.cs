@@ -33,9 +33,9 @@ public static class MqttSubjectServerSourceExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredService<MqttSubjectServerSource<TSubject>>())
             .AddSingleton<IHostedService>(sp =>
             {
-                return new SubjectMutationBackgroundService(
+                return new SubjectSourceBackgroundService(
                     sp.GetRequiredService<MqttSubjectServerSource<TSubject>>(),
-                    sp.GetRequiredService<ILogger<SubjectMutationBackgroundService>>());
+                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>());
             });
     }
 }
