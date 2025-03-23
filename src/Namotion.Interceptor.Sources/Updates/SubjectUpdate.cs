@@ -31,8 +31,8 @@ public class SubjectUpdate
             Type = subject.GetType().Name
         };
 
-        var registry = subject.Context.GetService<ISubjectRegistry>();
-        if (registry.KnownSubjects.TryGetValue(subject, out var registeredSubject))
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is not null)
         {
             foreach (var property in registeredSubject.Properties
                 .Where(p => p.Value is { HasGetter: true, IsAttribute: false }))

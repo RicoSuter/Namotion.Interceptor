@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using Namotion.Interceptor.OpcUa.Annotations;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
 using Opc.Ua.Export;
@@ -65,18 +66,20 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
     {
         base.CreateAddressSpace(externalReferences);
 
-        var metadata = _subject.Context
-            .GetService<ISubjectRegistry>()
-            .KnownSubjects[_subject];
+        var registeredSubject = _subject.TryGetRegisteredSubject();
+        if (registeredSubject is not null)
+        {
+            if (_rootName is not null)
+            {
+                var node = CreateFolder(ObjectIds.ObjectsFolder, 
+                    new NodeId(_rootName, NamespaceIndex), _rootName, null, null);
 
-        if (_rootName is not null)
-        {
-            var node = CreateFolder(ObjectIds.ObjectsFolder, new NodeId(_rootName, NamespaceIndex), _rootName, null, null);
-            CreateObjectNode(node.NodeId, metadata, _rootName + PathDelimiter);
-        }
-        else
-        {
-            CreateObjectNode(ObjectIds.ObjectsFolder, metadata, string.Empty);
+                CreateObjectNode(node.NodeId, registeredSubject, _rootName + PathDelimiter);
+            }
+            else
+            {
+                CreateObjectNode(ObjectIds.ObjectsFolder, registeredSubject, string.Empty);
+            }
         }
     }
 
