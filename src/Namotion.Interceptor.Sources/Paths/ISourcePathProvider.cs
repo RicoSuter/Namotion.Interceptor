@@ -17,5 +17,7 @@ public interface ISourcePathProvider
     /// <returns>The segments.</returns>
     IEnumerable<(string path, object? index)> ParsePathSegments(string path);
 
+    RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string segment);
+    
     RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment);
 }
