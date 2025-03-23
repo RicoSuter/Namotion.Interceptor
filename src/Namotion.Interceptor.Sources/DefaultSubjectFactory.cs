@@ -1,3 +1,4 @@
+using System.Collections;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -23,17 +24,17 @@ public class DefaultSubjectFactory : ISubjectFactory
     }
 
     /// <inheritdoc />
-    public ICollection<IInterceptorSubject?> CreateSubjectCollection(RegisteredSubjectProperty property, params IEnumerable<IInterceptorSubject?> children)
+    public IEnumerable<IInterceptorSubject?> CreateSubjectCollection(RegisteredSubjectProperty property, params IEnumerable<IInterceptorSubject?> children)
     {
         var itemType = property.Type.GenericTypeArguments[0];
         var collectionType = typeof(List<>).MakeGenericType(itemType);
      
-        var collection = (ICollection<IInterceptorSubject?>)Activator.CreateInstance(collectionType)!;
+        var collection = (IList)Activator.CreateInstance(collectionType)!;
         foreach (var subject in children)
         {
             collection.Add(subject);
         }
 
-        return collection;
+        return (IEnumerable<IInterceptorSubject?>)collection;
     }
 }
