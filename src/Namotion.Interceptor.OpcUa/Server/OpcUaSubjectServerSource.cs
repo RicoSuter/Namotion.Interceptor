@@ -119,7 +119,6 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         // TODO: Implement actual correct conversion based on the property type
 
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
-
-        _dispatcher?.EnqueueSubjectUpdate(() => { _subject.ApplyValueFromSourcePath(sourcePath, convertedValue, SourcePathProvider); });
+        _dispatcher?.EnqueueSubjectUpdate(() => { _subject.ApplyValueFromSourcePath(sourcePath, convertedValue, SourcePathProvider, this); });
     }
 }
