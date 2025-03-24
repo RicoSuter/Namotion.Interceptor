@@ -9,9 +9,9 @@ public static class PathExtensions
     /// <summary>
     /// Gets a list of all properties of the subject and child subjects with their source paths.
     /// </summary>
-    /// <param name="subject"></param>
+    /// <param name="subject">The subject.</param>
     /// <param name="sourcePathProvider">The source path provider.</param>
-    /// <returns></returns>
+    /// <returns>The paths.</returns>
     public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetAllRegisteredPropertiesWithSourcePaths(this RegisteredSubject subject, ISourcePathProvider sourcePathProvider)
     {
         return subject
@@ -25,29 +25,34 @@ public static class PathExtensions
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="sourcePath">The path to the property from the source's perspective.</param>
-    /// <param name="value"></param>
+    /// <param name="value">The value to set.</param>
+    /// <param name="timestamp">The timestamp.</param>
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
-    /// <returns></returns>
-    public static bool ApplyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, object? value, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    /// <returns>The result specifying whether the path could be found and the value has been applied.</returns>
+    public static bool UpdatePropertyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, object? value, DateTimeOffset timestamp, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
-            .ApplyValueFromSourcePath(sourcePath, (_, _) => value, sourcePathProvider, source);
+            .UpdatePropertyValueFromSourcePath(sourcePath, timestamp, (_, _) => value, sourcePathProvider, source);
     }
 
     /// <summary>
     /// Sets the value of the property and marks the assignment as applied by the specified source (optional).
     /// </summary>
-    /// <param name="subject"></param>
+    /// <param name="subject">The subject.</param>
     /// <param name="sourcePath">The path to the property from the source's perspective.</param>
-    /// <param name="getPropertyValue"></param>
+    /// <param name="timestamp">The timestamp.</param>
+    /// <param name="getPropertyValue">The function to retrieve the property value to set.</param>
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
-    /// <returns></returns>
-    public static bool ApplyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    /// <returns>The result specifying whether the path could be found and the value has been applied.</returns>
+    public static bool UpdatePropertyValueFromSourcePath(this IInterceptorSubject subject, 
+        string sourcePath, DateTimeOffset timestamp,
+        Func<RegisteredSubjectProperty, string, object?> getPropertyValue, 
+        ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
-            .VisitPropertiesFromSourcePaths([sourcePath], (property, path) => SetPropertyValue(property, getPropertyValue(property, path), source), sourcePathProvider)
+            .VisitPropertiesFromSourcePathsWithTimestamp([sourcePath], timestamp, (property, path) => SetPropertyValue(property, getPropertyValue(property, path), timestamp, source), sourcePathProvider)
             .Count == 1;
     }
 
@@ -56,14 +61,15 @@ public static class PathExtensions
     /// </summary>
     /// <param name="subject"></param>
     /// <param name="sourcePaths">The paths to the properties from the source's perspective.</param>
-    /// <param name="getPropertyValue"></param>
+    /// <param name="timestamp">The timestamp.</param>
+    /// <param name="getPropertyValue">The function to retrieve the property value.</param>
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
     /// <returns></returns>
-    public static IEnumerable<string> ApplyValuesFromSourcePaths(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
-            .VisitPropertiesFromSourcePaths(sourcePaths, (property, path) => SetPropertyValue(property, getPropertyValue(property, path), source), sourcePathProvider);
+            .VisitPropertiesFromSourcePathsWithTimestamp(sourcePaths, timestamp, (property, path) => SetPropertyValue(property, getPropertyValue(property, path), timestamp, source), sourcePathProvider);
     }
 
     /// <summary>
@@ -71,16 +77,32 @@ public static class PathExtensions
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="pathsAndValues">The source paths and values to apply.</param>
+    /// <param name="timestamp">The timestamp.</param>
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
     /// <returns>The list of visited paths.</returns>
-    public static IEnumerable<string> ApplyValuesFromSourcePaths(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, DateTimeOffset timestamp, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
-            .VisitPropertiesFromSourcePaths(pathsAndValues.Keys, (property, path) => SetPropertyValue(property, pathsAndValues[path], source), sourcePathProvider);
+            .VisitPropertiesFromSourcePathsWithTimestamp(pathsAndValues.Keys, timestamp, (property, path) => SetPropertyValue(property, pathsAndValues[path], timestamp, source), sourcePathProvider);
     }
 
-    private static void SetPropertyValue(RegisteredSubjectProperty property, object? value, ISubjectSource? source)
+    private static IReadOnlyCollection<string> VisitPropertiesFromSourcePathsWithTimestamp(this IInterceptorSubject subject,
+        IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Action<RegisteredSubjectProperty, string> visitProperty,
+        ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
+    {
+        PropertyChangedObservable.SetCurrentTimestamp(timestamp);
+        try
+        {
+            return VisitPropertiesFromSourcePaths(subject, sourcePaths, visitProperty, sourcePathProvider, subjectFactory);
+        }
+        finally
+        {
+            PropertyChangedObservable.ResetCurrentTimestamp();
+        }
+    }
+
+    private static void SetPropertyValue(RegisteredSubjectProperty property, object? value, DateTimeOffset timestamp, ISubjectSource? source)
     {
         if (source is not null)
         {

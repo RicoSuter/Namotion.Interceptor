@@ -64,10 +64,10 @@ public class SubjectUpdateTests
 
         var changes = new[]
         {
-            new SubjectPropertyChange(new PropertyReference(person, "FirstName"), "Old", "NewPerson"),
-            new SubjectPropertyChange(new PropertyReference(father, "FirstName"), "Old", "NewFather"),
-            new SubjectPropertyChange(new PropertyReference(child1, "FirstName"), "Old", "NewChild1"),
-            new SubjectPropertyChange(new PropertyReference(child3, "FirstName"), "Old", "NewChild3"),
+            new SubjectPropertyChange(new PropertyReference(person, "FirstName"), DateTimeOffset.Now, "Old", "NewPerson"),
+            new SubjectPropertyChange(new PropertyReference(father, "FirstName"), DateTimeOffset.Now, "Old", "NewFather"),
+            new SubjectPropertyChange(new PropertyReference(child1, "FirstName"), DateTimeOffset.Now, "Old", "NewChild1"),
+            new SubjectPropertyChange(new PropertyReference(child3, "FirstName"), DateTimeOffset.Now, "Old", "NewChild3"),
         };
 
         // Act
@@ -102,11 +102,11 @@ public class SubjectUpdateTests
 
         var changes = new[]
         {
-            new SubjectPropertyChange(new PropertyReference(person, "FirstName"), "Old", "NewPerson"), // ignored
-            new SubjectPropertyChange(new PropertyReference(father, "FirstName"), "Old", "NewFather"),
-            new SubjectPropertyChange(new PropertyReference(mother, "FirstName"), "Old", "NewMother"), // ignored
-            new SubjectPropertyChange(new PropertyReference(child1, "FirstName"), "Old", "NewChild1"),
-            new SubjectPropertyChange(new PropertyReference(child3, "FirstName"), "Old", "NewChild3"),
+            new SubjectPropertyChange(new PropertyReference(person, "FirstName"), DateTimeOffset.Now, "Old", "NewPerson"), // ignored
+            new SubjectPropertyChange(new PropertyReference(father, "FirstName"), DateTimeOffset.Now, "Old", "NewFather"),
+            new SubjectPropertyChange(new PropertyReference(mother, "FirstName"), DateTimeOffset.Now, "Old", "NewMother"), // ignored
+            new SubjectPropertyChange(new PropertyReference(child1, "FirstName"), DateTimeOffset.Now, "Old", "NewChild1"),
+            new SubjectPropertyChange(new PropertyReference(child3, "FirstName"), DateTimeOffset.Now, "Old", "NewChild3"),
         };
 
         // Act

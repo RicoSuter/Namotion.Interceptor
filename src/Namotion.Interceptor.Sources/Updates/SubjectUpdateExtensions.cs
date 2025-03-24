@@ -1,6 +1,7 @@
 using System.Collections;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Sources.Updates;
@@ -12,15 +13,17 @@ public static class SubjectUpdateExtensions
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="update">The update data.</param>
+    /// <param name="timestamp">The timestamp.</param>
     /// <param name="source">The source the update data is coming from.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects, null to ignore updates on missing subjects.</param>
     /// <param name="transformValueBeforeApply">The function to transform the update before applying it.</param>
     public static void ApplySubjectUpdateFromSource(
-        this IInterceptorSubject subject, SubjectUpdate update, ISubjectSource source,
-        ISubjectFactory? subjectFactory,
+        this IInterceptorSubject subject, 
+        SubjectUpdate update, DateTimeOffset timestamp,
+        ISubjectSource source, ISubjectFactory? subjectFactory,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
-        subject.ApplySubjectPropertyUpdate(update, 
+        subject.ApplySubjectPropertyUpdate(update, timestamp,
             (registeredProperty, propertyUpdate) =>
             {
                 transformValueBeforeApply?.Invoke(registeredProperty, propertyUpdate);
@@ -28,19 +31,22 @@ public static class SubjectUpdateExtensions
             }, 
             subjectFactory);
     }
-    
+
     /// <summary>
     /// Applies all values of the update data to a subject and optionally creates missing child subjects (e.g. using DefaultSubjectFactory.Instance).
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="update">The update data.</param>
+    /// <param name="timestamp">The timestamp.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects, null to ignore updates on missing subjects.</param>
     /// <param name="transformValueBeforeApply">The function to transform the update before applying it.</param>
-    public static void ApplySubjectUpdate(this IInterceptorSubject subject, SubjectUpdate update,
+    public static void ApplySubjectUpdate(
+        this IInterceptorSubject subject, 
+        SubjectUpdate update, DateTimeOffset timestamp,
         ISubjectFactory? subjectFactory,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
-        subject.ApplySubjectPropertyUpdate(update, 
+        subject.ApplySubjectPropertyUpdate(update, timestamp,
             (registeredProperty, propertyUpdate) =>
             {
                 transformValueBeforeApply?.Invoke(registeredProperty, propertyUpdate);
@@ -48,38 +54,48 @@ public static class SubjectUpdateExtensions
             }, 
             subjectFactory ?? DefaultSubjectFactory.Instance);
     }
-    
+
     /// <summary>
     /// Applies all values of the update data to a subject property and optionally creates missing child subjects (e.g. using DefaultSubjectFactory.Instance).
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="update">The update data.</param>
+    /// <param name="timestamp">The timestamp.</param>
     /// <param name="applyValuePropertyUpdate">The action to apply a given update to the property value.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects, null to ignore updates on missing subjects.</param>
     /// <param name="registry">The optional registry. Might need to be passed because it is not yet accessible via subject.</param>
     public static void ApplySubjectPropertyUpdate(
-        this IInterceptorSubject subject, SubjectUpdate update,
+        this IInterceptorSubject subject, 
+        SubjectUpdate update, DateTimeOffset timestamp,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate> applyValuePropertyUpdate,
         ISubjectFactory? subjectFactory,
         ISubjectRegistry? registry = null)
     {
-        foreach (var (propertyName, propertyUpdate) in update.Properties)
+        PropertyChangedObservable.SetCurrentTimestamp(timestamp);
+        try
         {
-            if (propertyUpdate.Attributes is not null)
+            foreach (var (propertyName, propertyUpdate) in update.Properties)
             {
-                foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
+                if (propertyUpdate.Attributes is not null)
                 {
-                    var registeredAttribute = subject.GetRegisteredAttribute(propertyName, attributeName);
-                    ApplySubjectPropertyUpdate(subject, registeredAttribute.Property.Name, attributeUpdate, applyValuePropertyUpdate, subjectFactory, registry);
+                    foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
+                    {
+                        var registeredAttribute = subject.GetRegisteredAttribute(propertyName, attributeName);
+                        ApplySubjectPropertyUpdate(subject, registeredAttribute.Property.Name, timestamp, attributeUpdate, applyValuePropertyUpdate, subjectFactory, registry);
+                    }
                 }
-            }
 
-            ApplySubjectPropertyUpdate(subject, propertyName, propertyUpdate, applyValuePropertyUpdate, subjectFactory, registry);
+                ApplySubjectPropertyUpdate(subject, propertyName, timestamp, propertyUpdate, applyValuePropertyUpdate, subjectFactory, registry);
+            }
+        }
+        finally
+        {
+            PropertyChangedObservable.ResetCurrentTimestamp();
         }
     }
 
     private static void ApplySubjectPropertyUpdate(
-        IInterceptorSubject subject, string propertyName,
+        IInterceptorSubject subject, string propertyName, DateTimeOffset timestamp,
         SubjectPropertyUpdate propertyUpdate,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate> applyValuePropertyUpdate,
         ISubjectFactory? subjectFactory,
@@ -101,7 +117,7 @@ public static class SubjectUpdateExtensions
                     if (registeredProperty.GetValue() is IInterceptorSubject existingItem)
                     {
                         // update existing item
-                        ApplySubjectPropertyUpdate(existingItem, propertyUpdate.Item, applyValuePropertyUpdate, subjectFactory);
+                        ApplySubjectPropertyUpdate(existingItem, propertyUpdate.Item, timestamp, applyValuePropertyUpdate, subjectFactory);
                     }
                     else
                     {
@@ -111,7 +127,7 @@ public static class SubjectUpdateExtensions
                         {
                             var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
                             RegisterSubject(parentRegistry, item, registeredProperty, null);
-                            item.ApplySubjectPropertyUpdate(propertyUpdate.Item, applyValuePropertyUpdate, subjectFactory, parentRegistry);
+                            item.ApplySubjectPropertyUpdate(propertyUpdate.Item, timestamp, applyValuePropertyUpdate, subjectFactory, parentRegistry);
                             registeredProperty.SetValue(item);
                         }
                     }
@@ -140,7 +156,7 @@ public static class SubjectUpdateExtensions
                                 if (existingCollection.Count > index)
                                 {
                                     // Update existing collection item
-                                    ApplySubjectPropertyUpdate(existingCollection.ElementAt(index), item.Item!, applyValuePropertyUpdate, subjectFactory);
+                                    ApplySubjectPropertyUpdate(existingCollection.ElementAt(index), item.Item!, timestamp, applyValuePropertyUpdate, subjectFactory);
                                 }
                                 else if (existingCollection is IList list)
                                 {
@@ -150,7 +166,7 @@ public static class SubjectUpdateExtensions
                                     {
                                         var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
                                         RegisterSubject(parentRegistry, newItem, registeredProperty, list.Count);
-                                        ApplySubjectPropertyUpdate(newItem, item.Item!, applyValuePropertyUpdate, subjectFactory, parentRegistry);
+                                        ApplySubjectPropertyUpdate(newItem, item.Item!, timestamp, applyValuePropertyUpdate, subjectFactory, parentRegistry);
                                     }
 
                                     list.Add(newItem);
@@ -174,7 +190,7 @@ public static class SubjectUpdateExtensions
                                 {
                                     var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
                                     RegisterSubject(parentRegistry, item, registeredProperty, i.Index);
-                                    item.ApplySubjectPropertyUpdate(i.Item!, applyValuePropertyUpdate, subjectFactory, parentRegistry);
+                                    item.ApplySubjectPropertyUpdate(i.Item!, timestamp, applyValuePropertyUpdate, subjectFactory, parentRegistry);
                                 }
                                 return item;
                             }) ?? [];

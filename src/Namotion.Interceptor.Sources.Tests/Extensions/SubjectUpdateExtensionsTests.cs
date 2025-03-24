@@ -25,7 +25,7 @@ public class SubjectUpdateExtensionsTests
                     nameof(Person.LastName), SubjectPropertyUpdate.Create("Doe")
                 }
             }
-        }, DefaultSubjectFactory.Instance);
+        }, DateTimeOffset.Now, DefaultSubjectFactory.Instance);
         
         // Assert
         Assert.Equal("John", person.FirstName);
@@ -56,7 +56,7 @@ public class SubjectUpdateExtensionsTests
                     })
                 }
             }
-        }, DefaultSubjectFactory.Instance);
+        }, DateTimeOffset.Now, DefaultSubjectFactory.Instance);
         
         // Assert
         Assert.Equal("John", person.Father?.FirstName);
@@ -105,7 +105,7 @@ public class SubjectUpdateExtensionsTests
                         })
                 }
             }
-        }, DefaultSubjectFactory.Instance);
+        }, DateTimeOffset.Now, DefaultSubjectFactory.Instance);
         
         // Assert
         Assert.Equal("John", person.Children.First().FirstName);
