@@ -3,8 +3,8 @@ namespace Namotion.Interceptor.Sources.Updates;
 public static class SubjectUpdatePathExtensions
 {
     public static SubjectUpdate ConvertPathSegments(this SubjectUpdate update, 
-        Func<string, string> convertPropertyName, 
-        Func<string, string> convertAttributeName)
+        Func<string, string?> convertPropertyName, 
+        Func<string, string?> convertAttributeName)
     {
         return new SubjectUpdate
         {
@@ -16,8 +16,8 @@ public static class SubjectUpdatePathExtensions
     }
 
     public static SubjectPropertyUpdate ConvertPathSegments(this SubjectPropertyUpdate update, 
-        Func<string, string> convertPropertyName, 
-        Func<string, string> convertAttributeName)
+        Func<string, string?> convertPropertyName, 
+        Func<string, string?> convertAttributeName)
     {
         return new SubjectPropertyUpdate
         {

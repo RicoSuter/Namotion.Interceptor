@@ -5,19 +5,17 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Benchmark;
 
-[MemoryDiagnoser]
-public class Benchmark
-{
 #pragma warning disable CS8618
 
+[MemoryDiagnoser]
+public class RegistryBenchmark
+{
     private Car _object;
     private IInterceptorSubjectContext? _context;
-
-#pragma warning restore CS8618
-
+    
     [Params(
         "regular",
-        "interceptable"
+        "interceptor"
     )]
     public string? Type;
 
@@ -30,7 +28,7 @@ public class Benchmark
                 _object = new Car();
                 break;
             
-            case "interceptable":
+            case "interceptor":
                 _context = InterceptorSubjectContext
                     .Create()
                     .WithFullPropertyTracking()
@@ -42,7 +40,7 @@ public class Benchmark
         }
     }
 
-    [Benchmark]
+    //[Benchmark]
     public void AddLotsOfPreviousCars()
     {
         _object.PreviousCars = Enumerable.Range(0, 10000)
@@ -50,7 +48,7 @@ public class Benchmark
             .ToArray();
     }
 
-    [Benchmark]
+    //[Benchmark]
     public void IncrementDerivedAverage()
     {
         _object.Tires[0].Pressure += 5;
@@ -88,7 +86,7 @@ public class Benchmark
     //    var average = _object.AveragePressure;
     //}
 
-    [Benchmark]
+    //[Benchmark]
     public void ChangeAllTires()
     {
         var newTires = new Tire[]

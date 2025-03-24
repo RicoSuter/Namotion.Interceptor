@@ -6,122 +6,121 @@ namespace Namotion.Interceptor.Sources.Paths;
 
 public static class PathExtensions
 {
-    public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetRegisteredPropertiesWithSourcePaths(this IInterceptorSubject subject, ISourcePathProvider sourcePathProvider)
-    {
-        return subject
-            .TryGetRegisteredSubject()?
-            .GetAllProperties()
-            .GetSourcePaths(sourcePathProvider, subject)
-            .ToArray() ?? [];
-    }
-    
-    public static bool ApplyValueFromSource(this IInterceptorSubject subject, string sourcePath, object? value, ISourcePathProvider sourcePathProvider)
-    {
-        return subject
-            .ApplyValueFromSource(sourcePath, (_, _) => value, sourcePathProvider);
-    }
-    
-    public static bool ApplyValueFromSource(this IInterceptorSubject subject, string sourcePath, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider)
-    {
-        return subject
-            .VisitValuesFromSource([sourcePath], (property, path) => property.SetValue(getPropertyValue(property, path)), sourcePathProvider)
-            .Length == 1;
-    }
-    
-    public static IEnumerable<string> ApplyValuesFromSource(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider)
-    {
-        return subject
-            .VisitValuesFromSource(sourcePaths, (property, path) => property.SetValue(getPropertyValue(property, path)), sourcePathProvider);
-    }
-    
-    public static IEnumerable<string> ApplyValuesFromSource(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, ISourcePathProvider sourcePathProvider)
-    {
-        return subject
-            .VisitValuesFromSource(pathsAndValues.Keys, (property, path) => property.SetValue(pathsAndValues[path]), sourcePathProvider);
-    }
-    
     /// <summary>
-    /// Visits all path leaf properties using source paths and returns the paths which have been found and visited.
+    /// Gets a list of all properties of the subject and child subjects with their source paths.
     /// </summary>
     /// <param name="subject"></param>
-    /// <param name="sourcePaths"></param>
-    /// <param name="visitPropertyValue"></param>
-    /// <param name="sourcePathProvider"></param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
     /// <returns></returns>
-    public static string[] VisitValuesFromSource(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, 
-        Action<RegisteredSubjectProperty, string> visitPropertyValue, ISourcePathProvider sourcePathProvider)
+    public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetAllRegisteredPropertiesWithSourcePaths(this RegisteredSubject subject, ISourcePathProvider sourcePathProvider)
     {
-        // TODO(perf): Optimize for multiple paths
-        // TODO: Add support to create missing items/collections
-        
-        var foundPaths = new List<string>();
-        foreach (var sourcePath in sourcePaths)
-        {
-            var currentSubject = subject;
-            var segments = sourcePathProvider
-                .ParsePathSegments(sourcePath)
-                .ToArray();
-
-            for (var i = 0; i < segments.Length; i++)
-            {
-                var (segment, index) = segments[i];
-                var isLastSegment = i == segments.Length - 1;
-
-                var registry = currentSubject.Context.GetService<ISubjectRegistry>();
-                var registeredSubject = registry.KnownSubjects[currentSubject];
-
-                var registeredProperty = sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
-                if (registeredProperty is null ||
-                    sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
-                {
-                    break;
-                }
-
-                if (!isLastSegment && index is not null)
-                {
-                    // handle array or dictionary item update
-                    currentSubject = registeredProperty
-                        .Children
-                        .SingleOrDefault(c => Equals(c.Index, index))
-                        .Subject;
-
-                }
-                else if (!isLastSegment && 
-                         registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
-                {
-                    currentSubject = registeredProperty.Children.SingleOrDefault().Subject;
-                }
-                else if (isLastSegment)
-                {
-                    visitPropertyValue(registeredProperty, sourcePath);
-                    foundPaths.Add(sourcePath);
-                    break;
-                }
-
-                if (currentSubject is null)
-                {
-                    break;
-                }
-            }
-        }
-
-        return foundPaths.ToArray();
+        return subject
+            .GetAllProperties()
+            .GetSourcePaths(sourcePathProvider, subject.Subject)
+            .ToArray() ?? [];
     }
 
+    /// <summary>
+    /// Sets the value of the property and marks the assignment as applied by the specified source (optional).
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="sourcePath">The path to the property from the source's perspective.</param>
+    /// <param name="value"></param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
+    /// <returns></returns>
+    public static bool ApplyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, object? value, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    {
+        return subject
+            .ApplyValueFromSourcePath(sourcePath, (_, _) => value, sourcePathProvider, source);
+    }
+
+    /// <summary>
+    /// Sets the value of the property and marks the assignment as applied by the specified source (optional).
+    /// </summary>
+    /// <param name="subject"></param>
+    /// <param name="sourcePath">The path to the property from the source's perspective.</param>
+    /// <param name="getPropertyValue"></param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
+    /// <returns></returns>
+    public static bool ApplyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    {
+        return subject
+            .VisitPropertiesFromSourcePaths([sourcePath], (property, path) => SetPropertyValue(property, getPropertyValue(property, path), source), sourcePathProvider)
+            .Count == 1;
+    }
+
+    /// <summary>
+    /// Sets the value of multiple properties and marks the assignment as applied by the specified source (optional).
+    /// </summary>
+    /// <param name="subject"></param>
+    /// <param name="sourcePaths">The paths to the properties from the source's perspective.</param>
+    /// <param name="getPropertyValue"></param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
+    /// <returns></returns>
+    public static IEnumerable<string> ApplyValuesFromSourcePaths(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    {
+        return subject
+            .VisitPropertiesFromSourcePaths(sourcePaths, (property, path) => SetPropertyValue(property, getPropertyValue(property, path), source), sourcePathProvider);
+    }
+
+    /// <summary>
+    /// Sets the value of multiple properties and marks the assignment as applied by the specified source (optional).
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="pathsAndValues">The source paths and values to apply.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
+    /// <returns>The list of visited paths.</returns>
+    public static IEnumerable<string> ApplyValuesFromSourcePaths(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    {
+        return subject
+            .VisitPropertiesFromSourcePaths(pathsAndValues.Keys, (property, path) => SetPropertyValue(property, pathsAndValues[path], source), sourcePathProvider);
+    }
+
+    private static void SetPropertyValue(RegisteredSubjectProperty property, object? value, ISubjectSource? source)
+    {
+        if (source is not null)
+        {
+            property.SetValueFromSource(source, value);
+        }
+        else
+        {
+            property.SetValue(value);
+        }
+    }
+
+    /// <summary>
+    /// Gets the complete source path of the given property.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="rootSubject">The root subject or null.</param>
+    /// <returns>The path.</returns>
     public static string? TryGetSourcePath(this RegisteredSubjectProperty property, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
     {
         var propertiesInPath = property
             .GetPropertiesInPath(rootSubject)
             .ToArray();
 
-        if (propertiesInPath.Length > 0 && sourcePathProvider.IsPropertyIncluded(propertiesInPath.Last()))
+        if (propertiesInPath.Length > 0 && 
+            sourcePathProvider.IsPropertyIncluded(propertiesInPath.Last().property))
         {
-            return propertiesInPath.Aggregate("", sourcePathProvider.GetPropertyFullPath);
+            return sourcePathProvider.GetPropertyFullPath(propertiesInPath);
         }
 
         return null;
     }
-    
+
+    /// <summary>
+    /// Gets all complete source paths of the given properties.
+    /// </summary>
+    /// <param name="properties">The properties.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="rootSubject">The root subject or null.</param>
+    /// <returns>The paths.</returns>
     public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetSourcePaths(
         this IEnumerable<RegisteredSubjectProperty> properties, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
     {
@@ -135,6 +134,13 @@ public static class PathExtensions
         }
     }
 
+    /// <summary>
+    /// Gets all complete source paths of the given property changes.
+    /// </summary>
+    /// <param name="changes">The changes.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="rootSubject">The root subject or null.</param>
+    /// <returns>The paths.</returns>
     public static IEnumerable<(string path, SubjectPropertyChange change)> GetSourcePaths(
         this IEnumerable<SubjectPropertyChange> changes, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
     {
@@ -148,19 +154,124 @@ public static class PathExtensions
         }
     }
 
-    public static IEnumerable<RegisteredSubjectProperty> GetPropertiesInPath(this RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
+    /// <summary>
+    /// Get bread crumb properties in path (i.e. reverse list of parents).
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="rootSubject">The root subject.</param>
+    /// <returns>The list of properties between the root subject and the property.</returns>
+    public static IEnumerable<(RegisteredSubjectProperty property, object? index)> GetPropertiesInPath(this RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
     {
         return GetPropertiesInPathReverse(property, rootSubject)
             .Reverse();
     }
 
-    private static IEnumerable<RegisteredSubjectProperty> GetPropertiesInPathReverse(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
+    private static IEnumerable<(RegisteredSubjectProperty property, object? index)> GetPropertiesInPathReverse(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
     {
-        var registeredProperty = property;
+        SubjectPropertyParent? pathWithProperty = new SubjectPropertyParent { Property = property };
         do
         {
-            yield return registeredProperty ?? throw new InvalidOperationException("Property is null.");
-            registeredProperty = registeredProperty?.Parent?.Parents?.FirstOrDefault();
-        } while (registeredProperty is not null && registeredProperty?.Parent.Subject != rootSubject);
+            property = pathWithProperty.Value.Property;
+            yield return (property ?? throw new InvalidOperationException("Property is null."), pathWithProperty.Value.Index);
+            pathWithProperty = property?.Parent?.Subject != rootSubject 
+                ? property?.Parent?.Parents?.FirstOrDefault()
+                : null;
+        } while (pathWithProperty?.Property is not null);
+    }
+
+    /// <summary>
+    /// Visits all path leaf properties using source paths and returns the paths which have been found and visited.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="sourcePaths">The source paths to apply values.</param>
+    /// <param name="visitProperty">The callback to visit a property.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="subjectFactory">The subject factory.</param>
+    /// <returns>The list of visited paths.</returns>
+    public static IReadOnlyCollection<string> VisitPropertiesFromSourcePaths(this IInterceptorSubject subject, 
+        IEnumerable<string> sourcePaths, Action<RegisteredSubjectProperty, string> visitProperty, 
+        ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
+    {
+        // TODO(perf): Optimize for multiple paths (group by)
+
+        var foundPaths = new List<string>();
+        foreach (var sourcePath in sourcePaths)
+        {
+            var currentSubject = subject;
+            var segments = sourcePathProvider
+                .ParsePathSegments(sourcePath)
+                .ToArray();
+
+            RegisteredSubjectProperty? parentProperty = null!;
+            for (var i = 0; i < segments.Length; i++)
+            {
+                var (segment, index) = segments[i];
+                var isLastSegment = i == segments.Length - 1;
+
+                var registeredSubject = currentSubject.TryGetRegisteredSubject()
+                    ?? throw new InvalidOperationException("Registered subject not found.");
+
+                var registeredProperty = parentProperty?.IsAttribute == true
+                    ? sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment)
+                    : sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
+
+                if (registeredProperty is null ||
+                    sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
+                {
+                    break;
+                }
+
+                if (!isLastSegment)
+                {
+                    if (index is not null)
+                    {
+                        // handle array or dictionary item update
+                        currentSubject = registeredProperty
+                            .Children
+                            .SingleOrDefault(c => Equals(c.Index, index))
+                            .Subject;
+
+                        if (currentSubject is null && subjectFactory is not null)
+                        {
+                            // create missing item collection or item dictionary
+                            
+                            throw new InvalidOperationException("Missing collection items cannot be created.");
+                            // TODO: Implement collection or dictionary creation from paths (need to know all paths).
+
+                            // currentSubject = subjectFactory.CreateSubject(registeredProperty, null);
+                            // var collection  = subjectFactory.CreateSubjectCollection(registeredProperty, currentSubject);
+                            // registeredProperty.SetValue(collection);
+                        }
+                    }
+                    else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
+                    {
+                        // handle item update
+                        currentSubject = registeredProperty.Children.SingleOrDefault().Subject;
+
+                        if (currentSubject is null && subjectFactory is not null)
+                        {
+                            // create missing item
+                            currentSubject = subjectFactory.CreateSubject(registeredProperty, null);
+                            registeredProperty.SetValue(currentSubject);
+                        }
+                    }
+                }
+                else if (index is null) // paths to collection items are ignored, e.g. "foo/bar[0]"
+                {
+                    visitProperty(registeredProperty, sourcePath);
+                    foundPaths.Add(sourcePath);
+                    break;
+                }
+
+                if (currentSubject is null)
+                {
+                    break;
+                }
+
+                parentProperty = registeredProperty;
+            }
+        }
+
+        return foundPaths.AsReadOnly();
     }
 }

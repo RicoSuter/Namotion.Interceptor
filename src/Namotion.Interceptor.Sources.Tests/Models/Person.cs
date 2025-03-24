@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Sources.Paths.Attributes;
 
 namespace Namotion.Interceptor.Sources.Tests.Models;
 
@@ -12,6 +13,7 @@ public partial class Person
     }
 
     [MaxLength(4)]
+    [SourceName("test", "FirstName")]
     public partial string? FirstName { get; set; }
 
     public partial string? LastName { get; set; }
@@ -20,5 +22,5 @@ public partial class Person
 
     public partial Person? Mother { get; set; }
 
-    public partial IReadOnlyCollection<Person> Children { get; set; }
+    public partial List<Person> Children { get; set; }
 }

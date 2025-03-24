@@ -131,7 +131,7 @@
 //        }
 //    }
 
-//    public Task<IDisposable?> InitializeAsync(IEnumerable<PropertyPathReference> properties, Action<PropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
+//    public Task<IDisposable?> StartListeningAsync(IEnumerable<PropertyPathReference> properties, Action<PropertyPathReference> propertyUpdateAction, CancellationToken cancellationToken)
 //    {
 //        return Task.FromResult<IDisposable?>(null);
 //    }

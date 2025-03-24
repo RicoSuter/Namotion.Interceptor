@@ -31,8 +31,8 @@ public class SubjectUpdate
             Type = subject.GetType().Name
         };
 
-        var registry = subject.Context.GetService<ISubjectRegistry>();
-        if (registry.KnownSubjects.TryGetValue(subject, out var registeredSubject))
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is not null)
         {
             foreach (var property in registeredSubject.Properties
                 .Where(p => p.Value is { HasGetter: true, IsAttribute: false }))
@@ -64,8 +64,8 @@ public class SubjectUpdate
         foreach (var change in propertyChanges)
         {
             var property = change.Property;
-            var registry = property.Subject.Context.GetService<ISubjectRegistry>();
-            var registeredSubject = registry.KnownSubjects[property.Subject];
+            var registeredSubject = property.Subject.TryGetRegisteredSubject() 
+                ?? throw new InvalidOperationException("Registered subject not found.");
 
             do
             {
@@ -107,10 +107,13 @@ public class SubjectUpdate
                     subjectUpdate.Properties[propertyName] = propertyUpdate;
                 }
 
-                property = registeredSubject.Parents.FirstOrDefault()?.Property ?? default;
+                property = registeredSubject.Parents.FirstOrDefault().Property?.Property ?? default;
+              
                 if (property.Subject is not null)
                 {
-                    registeredSubject = registry.KnownSubjects[property.Subject];
+                    registeredSubject = property.Subject.TryGetRegisteredSubject()
+                        ?? throw new InvalidOperationException("Registered subject not found.");;
+                    
                     CreateParentSubjectUpdate(property, propertySubject, knownSubjectDescriptions);
                 }
             } while (property.Subject is not null && property.Subject != subject && registeredSubject.Parents.Any());
@@ -127,8 +130,8 @@ public class SubjectUpdate
         var parentSubjectDescription = GetOrCreateSubjectUpdate(parentProperty.Subject, knownSubjectDescriptions);
         var property = GetOrCreateProperty(parentSubjectDescription, parentProperty.Name);
 
-        var registry = parentProperty.Subject.Context.GetService<ISubjectRegistry>();
-        var parentRegisteredSubject = registry.KnownSubjects[parentProperty.Subject];
+        var parentRegisteredSubject = parentProperty.Subject.TryGetRegisteredSubject()
+            ?? throw new InvalidOperationException("Registered subject not found.");;
 
         var children = parentRegisteredSubject.Properties[parentProperty.Name].Children;
         if (children.Any(c => c.Index is not null))

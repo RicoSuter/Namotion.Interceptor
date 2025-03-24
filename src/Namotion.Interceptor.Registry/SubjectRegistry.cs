@@ -8,6 +8,7 @@ namespace Namotion.Interceptor.Registry;
 
 internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
 {
+    private readonly Lock _lock = new();
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     
     /// <summary>
@@ -22,11 +23,17 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         }
     }
 
+    public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
+    {
+        lock (_knownSubjects)
+            return _knownSubjects.GetValueOrDefault(subject);
+    }
+
     /// <summary>
     /// Callback which is called when a subject is attached .
     /// </summary>
     /// <param name="change"></param>
-    /// <exception cref="InvalidOperationException"></exception>
+    /// <exception cref="InvalidOperationException">Changed property not found.</exception>
     void ILifecycleHandler.Attach(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
@@ -48,7 +55,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                     throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
                     
                 subject
-                    .AddParent(property);
+                    .AddParent(property, change.Index);
                 
                 property
                     .AddChild(new SubjectPropertyChild
@@ -93,7 +100,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                     var property = TryGetRegisteredProperty(change.Property.Value);
                     property?
                         .Parent
-                        .RemoveParent(property);
+                        .RemoveParent(property, change.Index);
                     
                     property?
                         .RemoveChild(new SubjectPropertyChild
@@ -117,5 +124,15 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         }
 
         return null;
+    }
+
+    public void EnqueueSubjectUpdate(Action update)
+    {
+        // TODO: Use this method in every property read/write to ensure thread safety
+        
+        lock (_lock)
+        {
+            update();
+        }
     }
 }

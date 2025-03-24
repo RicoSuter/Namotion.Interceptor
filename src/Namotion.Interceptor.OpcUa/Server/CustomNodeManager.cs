@@ -1,6 +1,8 @@
 ﻿using System.Reflection;
 using Namotion.Interceptor.OpcUa.Annotations;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Sources.Paths;
 using Opc.Ua;
 using Opc.Ua.Export;
 using Opc.Ua.Server;
@@ -16,7 +18,7 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
     private readonly OpcUaSubjectServerSource<TSubject> _source;
     private readonly string? _rootName;
 
-    private readonly Dictionary<RegisteredSubject, FolderState> _proxies = new();
+    private readonly Dictionary<RegisteredSubject, FolderState> _subjects = new();
 
     public CustomNodeManager(
         TSubject subject,
@@ -65,18 +67,20 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
     {
         base.CreateAddressSpace(externalReferences);
 
-        var metadata = _subject.Context
-            .GetService<ISubjectRegistry>()
-            .KnownSubjects[_subject];
+        var registeredSubject = _subject.TryGetRegisteredSubject();
+        if (registeredSubject is not null)
+        {
+            if (_rootName is not null)
+            {
+                var node = CreateFolder(ObjectIds.ObjectsFolder, 
+                    new NodeId(_rootName, NamespaceIndex), _rootName, null, null);
 
-        if (_rootName is not null)
-        {
-            var node = CreateFolder(ObjectIds.ObjectsFolder, new NodeId(_rootName, NamespaceIndex), _rootName, null, null);
-            CreateObjectNode(node.NodeId, metadata, _rootName + PathDelimiter);
-        }
-        else
-        {
-            CreateObjectNode(ObjectIds.ObjectsFolder, metadata, string.Empty);
+                CreateObjectNode(node.NodeId, registeredSubject, _rootName + PathDelimiter);
+            }
+            else
+            {
+                CreateObjectNode(ObjectIds.ObjectsFolder, registeredSubject, string.Empty);
+            }
         }
     }
 
@@ -173,10 +177,9 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
 
     private void CreateVariableNode(string propertyName, RegisteredSubjectProperty property, NodeId parentNodeId, string parentPath)
     {
-        var isPropertyIncluded = _source.SourcePathProvider.IsPropertyIncluded(property);
-        if (isPropertyIncluded)
+        var sourcePath = property.TryGetSourcePath(_source.SourcePathProvider, _source.Subject);
+        if (sourcePath is not null)
         {
-            var sourcePath = _source.GetSourcePropertyPath(property.Property);
             var value = property.GetValue();
             var type = property.Type;
 
@@ -213,12 +216,8 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
         NodeId parentNodeId,
         NodeId? referenceTypeId)
     {
-        var registeredProxy = subject
-            .Context
-            .GetService<ISubjectRegistry>()
-            .KnownSubjects[subject];
-
-        if (_proxies.TryGetValue(registeredProxy, out var objectNode))
+        var registeredSubject = subject.TryGetRegisteredSubject() ?? throw new InvalidOperationException("Registered subject not found.");
+        if (_subjects.TryGetValue(registeredSubject, out var objectNode))
         {
             var parentNode = FindNodeInAddressSpace(parentNodeId);
             parentNode.AddReference(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, objectNode.NodeId);
@@ -229,9 +228,9 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
             var typeDefinitionId = GetTypeDefinitionId(subject);
 
             var node = CreateFolder(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
-            CreateObjectNode(node.NodeId, registeredProxy, path + PathDelimiter);
+            CreateObjectNode(node.NodeId, registeredSubject, path + PathDelimiter);
 
-            _proxies[registeredProxy] = node;
+            _subjects[registeredSubject] = node;
         }
     }
 

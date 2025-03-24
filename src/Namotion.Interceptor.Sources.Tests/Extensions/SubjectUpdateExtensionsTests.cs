@@ -1,5 +1,4 @@
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Sources.Extensions;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Sources.Updates;
 
@@ -26,7 +25,7 @@ public class SubjectUpdateExtensionsTests
                     nameof(Person.LastName), SubjectPropertyUpdate.Create("Doe")
                 }
             }
-        });
+        }, DefaultSubjectFactory.Instance);
         
         // Assert
         Assert.Equal("John", person.FirstName);
@@ -57,7 +56,7 @@ public class SubjectUpdateExtensionsTests
                     })
                 }
             }
-        });
+        }, DefaultSubjectFactory.Instance);
         
         // Assert
         Assert.Equal("John", person.Father?.FirstName);
@@ -106,7 +105,7 @@ public class SubjectUpdateExtensionsTests
                         })
                 }
             }
-        });
+        }, DefaultSubjectFactory.Instance);
         
         // Assert
         Assert.Equal("John", person.Children.First().FirstName);

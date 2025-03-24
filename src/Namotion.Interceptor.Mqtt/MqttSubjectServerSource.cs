@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Server;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
@@ -26,7 +27,7 @@ namespace Namotion.Interceptor.Mqtt
         private int _numberOfClients = 0;
         private MqttServer? _mqttServer;
 
-        private ISubjectSourceDispatcher? _dispatcher;
+        private ISubjectMutationDispatcher? _dispatcher;
 
         public int Port { get; set; } = 1883;
 
@@ -85,7 +86,7 @@ namespace Namotion.Interceptor.Mqtt
             }
         }
 
-        public Task<IDisposable?> InitializeAsync(ISubjectSourceDispatcher dispatcher, CancellationToken cancellationToken)
+        public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
         {
             _dispatcher = dispatcher;
             return Task.FromResult<IDisposable?>(null);
@@ -93,7 +94,7 @@ namespace Namotion.Interceptor.Mqtt
 
         public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
         {
-            return new Task<Action?>(null!);
+            return Task.FromResult<Action?>(null);
         }
 
         public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
@@ -111,7 +112,9 @@ namespace Namotion.Interceptor.Mqtt
             Task.Run(async () =>
             {
                 await Task.Delay(1000);
-                foreach (var (path, property) in _subject.GetRegisteredPropertiesWithSourcePaths(_sourcePathProvider))
+                foreach (var (path, property) in _subject
+                    .TryGetRegisteredSubject()?
+                    .GetAllRegisteredPropertiesWithSourcePaths(_sourcePathProvider) ?? [])
                 {
                     // TODO: Send only to new client
                     await PublishPropertyValueAsync(path, property.GetValue(), CancellationToken.None);
@@ -150,7 +153,7 @@ namespace Namotion.Interceptor.Mqtt
                 
                 _dispatcher?.EnqueueSubjectUpdate(() =>
                 {
-                    _subject.ApplyValueFromSource(path, (property, _) => document.Deserialize(property.Type), _sourcePathProvider);
+                    _subject.ApplyValueFromSourcePath(path, (property, _) => document.Deserialize(property.Type), _sourcePathProvider, this);
                 });
             }
             catch (Exception ex)
