@@ -18,7 +18,7 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
     private readonly OpcUaSubjectServerSource<TSubject> _source;
     private readonly string? _rootName;
 
-    private readonly Dictionary<RegisteredSubject, FolderState> _proxies = new();
+    private readonly Dictionary<RegisteredSubject, FolderState> _subjects = new();
 
     public CustomNodeManager(
         TSubject subject,
@@ -216,12 +216,8 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
         NodeId parentNodeId,
         NodeId? referenceTypeId)
     {
-        var registeredProxy = subject
-            .Context
-            .GetService<ISubjectRegistry>()
-            .KnownSubjects[subject];
-
-        if (_proxies.TryGetValue(registeredProxy, out var objectNode))
+        var registeredSubject = subject.TryGetRegisteredSubject() ?? throw new InvalidOperationException("Registered subject not found.");
+        if (_subjects.TryGetValue(registeredSubject, out var objectNode))
         {
             var parentNode = FindNodeInAddressSpace(parentNodeId);
             parentNode.AddReference(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, objectNode.NodeId);
@@ -232,9 +228,9 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
             var typeDefinitionId = GetTypeDefinitionId(subject);
 
             var node = CreateFolder(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
-            CreateObjectNode(node.NodeId, registeredProxy, path + PathDelimiter);
+            CreateObjectNode(node.NodeId, registeredSubject, path + PathDelimiter);
 
-            _proxies[registeredProxy] = node;
+            _subjects[registeredSubject] = node;
         }
     }
 

@@ -3,4 +3,6 @@
 public interface ISubjectRegistry : ISubjectMutationDispatcher
 {
     IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects { get; }
+    
+    RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject);
 }

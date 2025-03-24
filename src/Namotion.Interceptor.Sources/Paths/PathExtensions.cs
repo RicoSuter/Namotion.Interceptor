@@ -208,8 +208,8 @@ public static class PathExtensions
                 var (segment, index) = segments[i];
                 var isLastSegment = i == segments.Length - 1;
 
-                var registry = currentSubject.Context.GetService<ISubjectRegistry>();
-                var registeredSubject = registry.KnownSubjects[currentSubject];
+                var registeredSubject = currentSubject.TryGetRegisteredSubject()
+                    ?? throw new InvalidOperationException("Registered subject not found.");
 
                 var registeredProperty = parentProperty?.IsAttribute == true
                     ? sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment)

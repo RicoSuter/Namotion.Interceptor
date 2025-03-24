@@ -22,7 +22,7 @@ public static class SubjectRegistryJsonExtensions
             do
             {
                 var attribute = registry
-                    .KnownSubjects[parent.Property.Subject]
+                    .TryGetRegisteredSubject(parent.Property.Subject)?
                     .Properties[parent.Property.Name]
                     .Attributes
                     .OfType<PropertyAttributeAttribute>()
@@ -108,9 +108,10 @@ public static class SubjectRegistryJsonExtensions
             }
         }
 
-        if (registry?.KnownSubjects.TryGetValue(subject, out var metadata) == true)
+        var registeredSubject = registry?.TryGetRegisteredSubject(subject);
+        if (registeredSubject is not null)
         {
-            foreach (var property in metadata
+            foreach (var property in registeredSubject
                 .Properties
                 .Where(p => p.Value.HasGetter && 
                             subject.Properties.ContainsKey(p.Key) == false))
