@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Tracking.Change;
+﻿using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources;
 
@@ -12,17 +13,17 @@ public static class SubjectDataExtensions
     /// <param name="property">The property.</param>
     /// <param name="source">The source.</param>
     /// <param name="valueFromSource">The value</param>
-    public static void SetValueFromSource(this PropertyReference property, ISubjectSource source, object? valueFromSource)
+    public static void SetValueFromSource(this RegisteredSubjectProperty property, ISubjectSource source, object? valueFromSource)
     {
         // TODO: Use async local here instead? Verify correctness of the method
 
-        var contexts = property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ISubjectSource>())!;
+        var contexts = property.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ISubjectSource>())!;
         lock (contexts)
             contexts.Add(source);
 
         try
         {
-            property.Metadata.SetValue?.Invoke(property.Subject, valueFromSource);
+            property.SetValue(valueFromSource);
         }
         finally
         {

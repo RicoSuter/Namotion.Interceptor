@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Moq;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -28,15 +29,19 @@ public class SubjectDataExtensionsTests
             });
 
         var source = Mock.Of<ISubjectSource>();
-         
         var propertyReference = new PropertyReference(subject.Object, propertyName);
+        var property = new RegisteredSubjectProperty(propertyReference)
+        {
+            Type = typeof(Person),
+            Attributes = Array.Empty<Attribute>()
+        };
 
         // Assert
         var change = new SubjectPropertyChange(propertyReference, null, null);
         Assert.False(change.IsChangingFromSource(source));
         
         // Act
-        Task.Run(() => propertyReference.SetValueFromSource(source, "John"));
+        Task.Run(() => property.SetValueFromSource(source, "John"));
 
         // Assert
         Thread.Sleep(100); // during write

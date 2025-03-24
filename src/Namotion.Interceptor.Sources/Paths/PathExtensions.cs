@@ -84,7 +84,7 @@ public static class PathExtensions
     {
         if (source is not null)
         {
-            property.Property.SetValueFromSource(source, value);
+            property.SetValueFromSource(source, value);
         }
         else
         {

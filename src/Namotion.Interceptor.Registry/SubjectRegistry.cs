@@ -8,6 +8,7 @@ namespace Namotion.Interceptor.Registry;
 
 internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
 {
+    private readonly Lock _lock = new();
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     
     /// <summary>
@@ -117,5 +118,15 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         }
 
         return null;
+    }
+
+    public void EnqueueSubjectUpdate(Action update)
+    {
+        // TODO: Use this method in every property read/write to ensure thread safety
+        
+        lock (_lock)
+        {
+            update();
+        }
     }
 }
