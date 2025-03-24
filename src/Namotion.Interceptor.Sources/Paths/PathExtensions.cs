@@ -53,11 +53,9 @@ public static class PathExtensions
             .ToArray();
 
         if (propertiesInPath.Length > 0 && 
-            propertiesInPath.All(p => sourcePathProvider.IsPropertyIncluded(p.property)))
+            sourcePathProvider.IsPropertyIncluded(propertiesInPath.Last().property))
         {
-            return propertiesInPath.Aggregate("", 
-                (pathPrefix, path) => 
-                    sourcePathProvider.GetPropertyFullPath(pathPrefix, path.property, path.index));
+            return sourcePathProvider.GetPropertyFullPath(propertiesInPath);
         }
 
         return null;
@@ -103,15 +101,15 @@ public static class PathExtensions
 
     private static IEnumerable<(RegisteredSubjectProperty property, object? index)> GetPropertiesInPathReverse(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
     {
-        (RegisteredSubjectProperty property, object? index)? pathWithProperty = (property, null);
+        SubjectPropertyParent? pathWithProperty = new SubjectPropertyParent { Property = property };
         do
         {
-            property = pathWithProperty.Value.property;
-            yield return (property ?? throw new InvalidOperationException("Property is null."), pathWithProperty.Value.index);
+            property = pathWithProperty.Value.Property;
+            yield return (property ?? throw new InvalidOperationException("Property is null."), pathWithProperty.Value.Index);
             pathWithProperty = property?.Parent?.Subject != rootSubject 
                 ? property?.Parent?.Parents?.FirstOrDefault()
                 : null;
-        } while (pathWithProperty?.property is not null);
+        } while (pathWithProperty?.Property is not null);
     }
 
     /// <summary>
