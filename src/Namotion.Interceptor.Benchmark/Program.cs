@@ -19,7 +19,7 @@ public static class Program
     {
         var benchmark = new SourcePathProviderBenchmark()
         {
-            Type = "interceptable"
+            // Type = "interceptable"
         };
         benchmark.Setup();
         RunCode(benchmark);
