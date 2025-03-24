@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Sources;
+namespace Namotion.Interceptor.Registry;
 
 /// <summary>
 /// Registers, manages and dispatches mutation actions on subjects.
