@@ -23,6 +23,12 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         }
     }
 
+    public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
+    {
+        lock (_knownSubjects)
+            return _knownSubjects.GetValueOrDefault(subject);
+    }
+
     /// <summary>
     /// Callback which is called when a subject is attached .
     /// </summary>

@@ -46,11 +46,12 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
                 .Any(a => a.PropertyName == property.Property.Name && a.AttributeName == segment))
             .Value;
     }
-
+    
     /// <inheritdoc />
     public virtual RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment)
     {
-        // TODO(perf): Improve performance by caching the property name
+        // TODO(1, perf): Improve performance by caching the property name
+
         return subject
             .Properties
             .SingleOrDefault(p => TryGetPropertyName(p.Value) == segment)

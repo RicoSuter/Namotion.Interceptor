@@ -6,7 +6,7 @@ public class LifecycleInterceptor : IWriteInterceptor
 {
     // TODO(perf): Profile and improve this class, high potential to improve
 
-    private const string ReferenceCountKey = "Namotion.ReferenceCount";
+    private const string ReferenceCountKey = "Namotion.Interceptor.Tracking.ReferenceCount";
     
     private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference?>> _attachedSubjects = [];
 
