@@ -1,0 +1,126 @@
+﻿using System.Text.Json;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Sources.Tests.Models;
+using Namotion.Interceptor.Sources.Updates;
+using Namotion.Interceptor.Tracking.Change;
+
+namespace Namotion.Interceptor.Sources.Tests;
+
+public class PathExtensionsTests
+{
+    public static IEnumerable<object[]> GetProviders()
+    {
+        yield return ["default", DefaultSourcePathProvider.Instance];
+        yield return ["attribute", new AttributeBasedSourcePathProvider("test", ".", null)];
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public async Task WhenRetrievingAllPaths_ThenListIsCorrect(string name, ISourcePathProvider sourcePathProvider)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var father = new Person { FirstName = "Father" };
+        var mother = new Person { FirstName = "Mother" };
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
+        var child3 = new Person { FirstName = "Child3" };
+
+        var person = new Person(context)
+        {
+            FirstName = "Child",
+            Mother = mother,
+            Father = father,
+            Children = [child1, child2, child3]
+        };
+
+        // Act
+        var allPaths = person
+            .TryGetRegisteredSubject()?
+            .GetAllRegisteredPropertiesWithSourcePaths(sourcePathProvider);
+
+        // Assert
+        await Verify(allPaths?.Select(p => p.path))
+            .UseMethodName($"{nameof(WhenRetrievingPropertyPath_ThenItIsCorrect)}_{name}");
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public async Task WhenApplyValuesFromSourceAndPaths_ThenSubjectAndChildrenShouldBeUpdated(string name, ISourcePathProvider sourcePathProvider)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var father = new Person { FirstName = "Father" };
+        var mother = new Person { FirstName = "Mother" };
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
+        var child3 = new Person { FirstName = "Child3" };
+
+        var person = new Person(context)
+        {
+            FirstName = "Child",
+            Mother = mother,
+            Father = father,
+            Children = [child1, child2, child3]
+        };
+
+        // Act
+        person.ApplyValuesFromSourcePaths(new Dictionary<string, object?>
+        {
+            { "FirstName", "NewPerson" },
+            { "Children[0].FirstName", "NewChild1" },
+            { "Children[2].FirstName", "NewChild3" }
+        }, sourcePathProvider);
+        
+        person.ApplyValuesFromSourcePaths(["LastName"], (_, _) => "NewLn", sourcePathProvider);
+
+        person.ApplyValueFromSourcePath(
+            "Father.FirstName", "NewFather", sourcePathProvider);
+        
+        var completeUpdate = SubjectUpdate
+            .CreateCompleteUpdate(person)
+            .ConvertToJsonCamelCasePath();
+
+        // Assert
+        await Verify(completeUpdate)
+            .UseMethodName($"{nameof(WhenApplyValuesFromSourceAndPaths_ThenSubjectAndChildrenShouldBeUpdated)}_{name}");
+    }
+    
+    [Fact]
+    public void WhenRetrievingPropertyPath_ThenItIsCorrect()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var father = new Person { FirstName = "Father" };
+        var mother = new Person { FirstName = "Mother" };
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
+        var child3 = new Person { FirstName = "Child3" };
+
+        var person = new Person(context)
+        {
+            FirstName = "Child",
+            Mother = mother,
+            Father = father,
+            Children = [child1, child2, child3]
+        };
+
+        // Act
+        var path = person
+            .TryGetRegisteredProperty(p => p.Children[2].FirstName)?
+            .TryGetSourcePath(DefaultSourcePathProvider.Instance, null);
+
+        // Assert
+        Assert.Equal("Children[2].FirstName", path);
+    }
+}

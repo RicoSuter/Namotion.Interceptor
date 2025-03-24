@@ -15,9 +15,9 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
         return property.BrowseName;
     }
 
-    public virtual string GetPropertyFullPath(string path, RegisteredSubjectProperty property)
+    public virtual string GetPropertyFullPath(string path, RegisteredSubjectProperty property, object? index)
     {
-        return path + property.BrowseName;
+        return (string.IsNullOrEmpty(path) ? "" : path + ".") + property.BrowseName + (index is not null ? $"[{index}]" : "");
     }
 
     /// <inheritdoc />

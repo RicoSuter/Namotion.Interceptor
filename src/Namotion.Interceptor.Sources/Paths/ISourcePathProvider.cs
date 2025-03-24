@@ -8,7 +8,7 @@ public interface ISourcePathProvider
     
     string? TryGetPropertyName(RegisteredSubjectProperty property);
     
-    string GetPropertyFullPath(string path, RegisteredSubjectProperty property);
+    string GetPropertyFullPath(string path, RegisteredSubjectProperty property, object? index);
 
     /// <summary>
     /// Parses the full path into property segments.

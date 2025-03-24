@@ -20,7 +20,7 @@
               },
               firstName: {
                 Type: String,
-                Value: Child1,
+                Value: NewChild1,
                 Kind: Value
               },
               lastName: {
@@ -78,7 +78,7 @@
               },
               firstName: {
                 Type: String,
-                Value: Child3,
+                Value: NewChild3,
                 Kind: Value
               },
               lastName: {
@@ -110,7 +110,7 @@
           },
           firstName: {
             Type: String,
-            Value: Father,
+            Value: NewFather,
             Kind: Value
           },
           lastName: {
@@ -126,11 +126,12 @@
     },
     firstName: {
       Type: String,
-      Value: Child,
+      Value: NewPerson,
       Kind: Value
     },
     lastName: {
       Type: String,
+      Value: NewLn,
       Kind: Value
     },
     mother: {
