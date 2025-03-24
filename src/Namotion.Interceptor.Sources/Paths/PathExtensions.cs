@@ -6,6 +6,12 @@ namespace Namotion.Interceptor.Sources.Paths;
 
 public static class PathExtensions
 {
+    /// <summary>
+    /// Gets a list of all properties of the subject and child subjects with their source paths.
+    /// </summary>
+    /// <param name="subject"></param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <returns></returns>
     public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetAllRegisteredPropertiesWithSourcePaths(this RegisteredSubject subject, ISourcePathProvider sourcePathProvider)
     {
         return subject
@@ -14,38 +20,85 @@ public static class PathExtensions
             .ToArray() ?? [];
     }
 
-    public static bool ApplyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, object? value, ISourcePathProvider sourcePathProvider)
+    /// <summary>
+    /// Sets the value of the property and marks the assignment as applied by the specified source (optional).
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="sourcePath">The path to the property from the source's perspective.</param>
+    /// <param name="value"></param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
+    /// <returns></returns>
+    public static bool ApplyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, object? value, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
-            .ApplyValueFromSourcePath(sourcePath, (_, _) => value, sourcePathProvider);
-    }
-
-    public static bool ApplyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider)
-    {
-        return subject
-            .VisitPropertiesFromSourcePaths([sourcePath], (property, path) => property.SetValue(getPropertyValue(property, path)), sourcePathProvider)
-            .Count == 1;
-    }
-
-    public static IEnumerable<string> ApplyValuesFromSourcePaths(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider)
-    {
-        return subject
-            .VisitPropertiesFromSourcePaths(sourcePaths, (property, path) => property.SetValue(getPropertyValue(property, path)), sourcePathProvider);
+            .ApplyValueFromSourcePath(sourcePath, (_, _) => value, sourcePathProvider, source);
     }
 
     /// <summary>
-    /// 
+    /// Sets the value of the property and marks the assignment as applied by the specified source (optional).
+    /// </summary>
+    /// <param name="subject"></param>
+    /// <param name="sourcePath">The path to the property from the source's perspective.</param>
+    /// <param name="getPropertyValue"></param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
+    /// <returns></returns>
+    public static bool ApplyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    {
+        return subject
+            .VisitPropertiesFromSourcePaths([sourcePath], (property, path) => SetPropertyValue(property, getPropertyValue(property, path), source), sourcePathProvider)
+            .Count == 1;
+    }
+
+    /// <summary>
+    /// Sets the value of multiple properties and marks the assignment as applied by the specified source (optional).
+    /// </summary>
+    /// <param name="subject"></param>
+    /// <param name="sourcePaths">The paths to the properties from the source's perspective.</param>
+    /// <param name="getPropertyValue"></param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
+    /// <returns></returns>
+    public static IEnumerable<string> ApplyValuesFromSourcePaths(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    {
+        return subject
+            .VisitPropertiesFromSourcePaths(sourcePaths, (property, path) => SetPropertyValue(property, getPropertyValue(property, path), source), sourcePathProvider);
+    }
+
+    /// <summary>
+    /// Sets the value of multiple properties and marks the assignment as applied by the specified source (optional).
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="pathsAndValues">The source paths and values to apply.</param>
     /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
     /// <returns>The list of visited paths.</returns>
-    public static IEnumerable<string> ApplyValuesFromSourcePaths(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, ISourcePathProvider sourcePathProvider)
+    public static IEnumerable<string> ApplyValuesFromSourcePaths(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
-            .VisitPropertiesFromSourcePaths(pathsAndValues.Keys, (property, path) => property.SetValue(pathsAndValues[path]), sourcePathProvider);
+            .VisitPropertiesFromSourcePaths(pathsAndValues.Keys, (property, path) => SetPropertyValue(property, pathsAndValues[path], source), sourcePathProvider);
     }
 
+    private static void SetPropertyValue(RegisteredSubjectProperty property, object? value, ISubjectSource? source)
+    {
+        if (source is not null)
+        {
+            property.Property.SetValueFromSource(source, value);
+        }
+        else
+        {
+            property.SetValue(value);
+        }
+    }
+
+    /// <summary>
+    /// Gets the complete source path of the given property.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="rootSubject">The root subject or null.</param>
+    /// <returns>The path.</returns>
     public static string? TryGetSourcePath(this RegisteredSubjectProperty property, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
     {
         var propertiesInPath = property
@@ -61,6 +114,13 @@ public static class PathExtensions
         return null;
     }
 
+    /// <summary>
+    /// Gets all complete source paths of the given properties.
+    /// </summary>
+    /// <param name="properties">The properties.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="rootSubject">The root subject or null.</param>
+    /// <returns>The paths.</returns>
     public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetSourcePaths(
         this IEnumerable<RegisteredSubjectProperty> properties, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
     {
@@ -74,6 +134,13 @@ public static class PathExtensions
         }
     }
 
+    /// <summary>
+    /// Gets all complete source paths of the given property changes.
+    /// </summary>
+    /// <param name="changes">The changes.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="rootSubject">The root subject or null.</param>
+    /// <returns>The paths.</returns>
     public static IEnumerable<(string path, SubjectPropertyChange change)> GetSourcePaths(
         this IEnumerable<SubjectPropertyChange> changes, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
     {

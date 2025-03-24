@@ -77,12 +77,12 @@ public class PathExtensionsTests
             { "FirstName", "NewPerson" },
             { "Children[0].FirstName", "NewChild1" },
             { "Children[2].FirstName", "NewChild3" }
-        }, sourcePathProvider);
+        }, sourcePathProvider, null);
         
-        person.ApplyValuesFromSourcePaths(["LastName"], (_, _) => "NewLn", sourcePathProvider);
+        person.ApplyValuesFromSourcePaths(["LastName"], (_, _) => "NewLn", sourcePathProvider, null);
 
         person.ApplyValueFromSourcePath(
-            "Father.FirstName", "NewFather", sourcePathProvider);
+            "Father.FirstName", "NewFather", sourcePathProvider, null);
         
         var completeUpdate = SubjectUpdate
             .CreateCompleteUpdate(person)

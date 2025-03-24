@@ -153,7 +153,7 @@ namespace Namotion.Interceptor.Mqtt
                 
                 _dispatcher?.EnqueueSubjectUpdate(() =>
                 {
-                    _subject.ApplyValueFromSourcePath(path, (property, _) => document.Deserialize(property.Type), _sourcePathProvider);
+                    _subject.ApplyValueFromSourcePath(path, (property, _) => document.Deserialize(property.Type), _sourcePathProvider, this);
                 });
             }
             catch (Exception ex)
