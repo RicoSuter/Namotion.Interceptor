@@ -11,39 +11,23 @@ namespace Namotion.Interceptor.Benchmark;
 [MemoryDiagnoser]
 public class SourcePathProviderBenchmark
 {
-    private Car _object;
-    private IInterceptorSubjectContext? _context;
-    
-    [Params(
-        "regular",
-        "interceptor"
-    )]
-    public string? Type;
+    private Car _car;
 
     [GlobalSetup]
     public void Setup()
     {
-        switch (Type)
-        {
-            case "regular":
-                _object = new Car();
-                break;
-            
-            case "interceptor":
-                _context = InterceptorSubjectContext
-                    .Create()
-                    .WithFullPropertyTracking()
-                    .WithRegistry();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
 
-                _object = new Car(_context);
-                break;
-        }
+        _car = new Car(context);
     }
 
     [Benchmark]
     public void TryGetPropertyFromSegment()
     {
-        var subject = _object.TryGetRegisteredSubject();
+        var subject = _car.TryGetRegisteredSubject();
         var property = DefaultSourcePathProvider
             .Instance
             .TryGetPropertyFromSegment(subject ?? throw new InvalidOperationException(), "Name");
@@ -57,7 +41,7 @@ public class SourcePathProviderBenchmark
     [Benchmark]
     public void TryGetSourcePath()
     {
-        var property = _object.Tires[1].TryGetRegisteredSubject()?.TryGetProperty("Pressure");
+        var property = _car.Tires[1].TryGetRegisteredSubject()?.TryGetProperty("Pressure");
         var path = property!.TryGetSourcePath(DefaultSourcePathProvider.Instance, null);
         if (path is null)
         {
