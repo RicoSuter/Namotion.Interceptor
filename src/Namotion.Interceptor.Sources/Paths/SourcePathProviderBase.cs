@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Sources.Paths;
 
@@ -14,9 +15,10 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
         return property.BrowseName;
     }
 
-    public virtual string GetPropertyFullPath(string path, RegisteredSubjectProperty property)
+    public virtual string GetPropertyFullPath(IEnumerable<(RegisteredSubjectProperty property, object? index)> propertiesInPath)
     {
-        return path + property.BrowseName;
+        return propertiesInPath.Aggregate("", 
+            (path, tuple) => (string.IsNullOrEmpty(path) ? "" : path + ".") + tuple.property.BrowseName + (tuple.index is not null ? $"[{tuple.index}]" : ""));
     }
 
     /// <inheritdoc />
@@ -34,12 +36,22 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
                             intIndex : segmentParts[1]) : null;
                     return (segmentParts[0], index);
                 }));
-    } 
+    }
+
+    public RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string segment)
+    {
+        return property.Parent.Properties
+            .SingleOrDefault(p => p.Value.Attributes
+                .OfType<PropertyAttributeAttribute>()
+                .Any(a => a.PropertyName == property.Property.Name && a.AttributeName == segment))
+            .Value;
+    }
     
     /// <inheritdoc />
     public virtual RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment)
     {
-        // TODO(perf): Improve performance by caching the property name
+        // TODO(1, perf): Improve performance by caching the property name
+
         return subject
             .Properties
             .SingleOrDefault(p => TryGetPropertyName(p.Value) == segment)

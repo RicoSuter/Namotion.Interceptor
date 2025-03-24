@@ -20,7 +20,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
     private readonly string? _rootName;
 
     private OpcUaSubjectServer<TSubject>? _server;
-    private ISubjectSourceDispatcher? _dispatcher;
+    private ISubjectMutationDispatcher? _dispatcher;
 
     internal ISourcePathProvider SourcePathProvider { get; }
 
@@ -39,7 +39,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
 
     public IInterceptorSubject Subject => _subject;
 
-    public Task<IDisposable?> InitializeAsync(ISubjectSourceDispatcher dispatcher, CancellationToken cancellationToken)
+    public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
     {
         _dispatcher = dispatcher;
         return Task.FromResult<IDisposable?>(null);
@@ -47,7 +47,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
 
     public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
     {
-        return new Task<Action?>(null!);
+        return Task.FromResult<Action?>(null);
     }
 
     public Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
@@ -119,12 +119,6 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         // TODO: Implement actual correct conversion based on the property type
 
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
-
-        _dispatcher?.EnqueueSubjectUpdate(() => { _subject.ApplyValueFromSource(sourcePath, convertedValue, SourcePathProvider); });
-    }
-
-    public string GetSourcePropertyPath(PropertyReference property)
-    {
-        return SourcePathProvider.GetPropertyFullPath(string.Empty, property.GetRegisteredProperty());
+        _dispatcher?.EnqueueSubjectUpdate(() => { _subject.ApplyValueFromSourcePath(sourcePath, convertedValue, SourcePathProvider, this); });
     }
 }

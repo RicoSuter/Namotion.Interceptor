@@ -49,9 +49,10 @@ public static class SubjectRegistryExtensions
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName, ISubjectRegistry? registry = null)
     {
         registry = registry ?? subject.Context.GetService<ISubjectRegistry>();
-        return registry.KnownSubjects.TryGetValue(subject, out var registeredSubject)
-            ? registeredSubject.Properties.GetValueOrDefault(propertyName)
-            : null;
+        return registry
+            .TryGetRegisteredSubject(subject)?
+            .Properties
+            .GetValueOrDefault(propertyName);
     }
     
     /// <summary>
@@ -75,7 +76,7 @@ public static class SubjectRegistryExtensions
     public static RegisteredSubject? TryGetRegisteredSubject(this IInterceptorSubject subject)
     {
         var registry = subject.Context.GetService<ISubjectRegistry>();
-        return registry.KnownSubjects.GetValueOrDefault(subject);
+        return registry.TryGetRegisteredSubject(subject);
     }
     
     /// <summary>
@@ -122,12 +123,16 @@ public static class SubjectRegistryExtensions
     /// <returns>The dictionary with the attribute names and their registered properties.</returns>
     public static IReadOnlyDictionary<string, RegisteredSubjectProperty> GetRegisteredAttributes(this PropertyReference property)
     {
+        // TODO(perf): Cache the property attributes
+
         var registry = property.Subject.Context.GetService<ISubjectRegistry>();
-        return registry.KnownSubjects[property.Subject].Properties
+        return registry
+            .TryGetRegisteredSubject(property.Subject)?
+            .Properties
             .Where(p => p.Value.Attributes
                 .OfType<PropertyAttributeAttribute>()
                 .Any(a => a.PropertyName == property.Name))
-            .ToDictionary();
+            .ToDictionary()?? [];
     }
     
     /// <summary>
@@ -158,12 +163,12 @@ public static class SubjectRegistryExtensions
     {
         var registry = subject.Context.GetService<ISubjectRegistry>();
         var attribute = registry
-            .KnownSubjects[subject]
+            .TryGetRegisteredSubject(subject)?
             .Properties
             .SingleOrDefault(p => p.Value.Attributes
                 .OfType<PropertyAttributeAttribute>()
                 .Any(a => a.PropertyName == propertyName && a.AttributeName == attributeName));
 
-        return attribute.Value;
+        return attribute?.Value;
     }
 }

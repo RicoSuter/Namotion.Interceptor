@@ -1,7 +1,9 @@
 ﻿namespace Namotion.Interceptor;
 
-public readonly record struct PropertyReference
+public record struct PropertyReference
 {
+    private SubjectPropertyMetadata? _metadata = null;
+
     public PropertyReference(IInterceptorSubject subject, string name)
     {
         Subject = subject;
@@ -12,8 +14,7 @@ public readonly record struct PropertyReference
     
     public string Name { get; }
     
-    // TODO(perf): Cache the property metadata (?)
-    public SubjectPropertyMetadata Metadata => Subject.Properties[Name];
+    public SubjectPropertyMetadata Metadata => _metadata ?? (_metadata = Subject.Properties[Name]).Value;
     
     public object? GetValue()
     {

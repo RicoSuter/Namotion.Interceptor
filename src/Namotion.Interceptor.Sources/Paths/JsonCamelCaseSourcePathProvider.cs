@@ -6,9 +6,10 @@ public class JsonCamelCaseSourcePathProvider : SourcePathProviderBase
 {
     public static JsonCamelCaseSourcePathProvider Instance { get; } = new();
 
-    public override string GetPropertyFullPath(string path, RegisteredSubjectProperty property)
+    public override string GetPropertyFullPath(IEnumerable<(RegisteredSubjectProperty property, object? index)> propertiesInPath)
     {
-        return path + ConvertToSourcePath(property.BrowseName);
+        return propertiesInPath.Aggregate("", 
+            (path, tuple) => (string.IsNullOrEmpty(path) ? "" : path + ".") + ConvertToSourcePath(tuple.property.BrowseName) + (tuple.index is not null ? $"[{tuple.index}]" : ""));
     }
 
     /// <inheritdoc />
