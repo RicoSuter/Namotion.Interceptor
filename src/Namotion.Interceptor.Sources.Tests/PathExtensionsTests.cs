@@ -72,17 +72,17 @@ public class PathExtensionsTests
         };
 
         // Act
-        person.ApplyValuesFromSourcePaths(new Dictionary<string, object?>
+        person.UpdatePropertyValuesFromSourcePaths(new Dictionary<string, object?>
         {
             { "FirstName", "NewPerson" },
             { "Children[0].FirstName", "NewChild1" },
             { "Children[2].FirstName", "NewChild3" }
-        }, sourcePathProvider, null);
+        }, DateTimeOffset.Now, sourcePathProvider, null);
         
-        person.ApplyValuesFromSourcePaths(["LastName"], (_, _) => "NewLn", sourcePathProvider, null);
+        person.UpdatePropertyValuesFromSourcePaths(["LastName"], DateTimeOffset.Now, (_, _) => "NewLn", sourcePathProvider, null);
 
-        person.ApplyValueFromSourcePath(
-            "Father.FirstName", "NewFather", sourcePathProvider, null);
+        person.UpdatePropertyValueFromSourcePath(
+            "Father.FirstName", "NewFather", DateTimeOffset.Now, sourcePathProvider, null);
         
         var completeUpdate = SubjectUpdate
             .CreateCompleteUpdate(person)

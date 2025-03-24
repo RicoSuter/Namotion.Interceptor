@@ -63,6 +63,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
                 }
 
                 node.Value = actualValue;
+                node.Timestamp = change.Timestamp.UtcDateTime;
                 node.ClearChangeMasks(_server?.CurrentInstance.DefaultSystemContext, false);
             }
         }
@@ -77,7 +78,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         while (!stoppingToken.IsCancellationRequested)
         {
             using var stream = typeof(OpcUaSubjectServerSourceExtensions).Assembly
-                .GetManifestResourceStream("Namotion.Interceptor.OpcUa.MyOpcUaServer.Config.xml") 
+                .GetManifestResourceStream("Namotion.Interceptor.OpcUa.MyOpcUaServer.Config.xml")
                 ?? throw new InvalidOperationException("Config.xml not found.");
 
             var application = new ApplicationInstance
@@ -114,11 +115,15 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         }
     }
 
-    internal void UpdateProperty(PropertyReference property, string sourcePath, object? value)
+    internal void UpdateProperty(PropertyReference property, string sourcePath, object? value, DateTimeOffset timestamp)
     {
         // TODO: Implement actual correct conversion based on the property type
 
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
-        _dispatcher?.EnqueueSubjectUpdate(() => { _subject.ApplyValueFromSourcePath(sourcePath, convertedValue, SourcePathProvider, this); });
+        _dispatcher?.EnqueueSubjectUpdate(() =>
+        {
+            _subject.UpdatePropertyValueFromSourcePath(
+                sourcePath, convertedValue, timestamp, SourcePathProvider, this);
+        });
     }
 }
