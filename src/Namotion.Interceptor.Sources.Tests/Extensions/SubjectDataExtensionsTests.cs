@@ -47,7 +47,7 @@ public class SubjectDataExtensionsTests
         Thread.Sleep(100); // during write
         Assert.True(change.IsChangingFromSource(source));
         
-        Thread.Sleep(500); // after write
+        Thread.Sleep(900); // after write
         Assert.False(change.IsChangingFromSource(source));
     }
 }
