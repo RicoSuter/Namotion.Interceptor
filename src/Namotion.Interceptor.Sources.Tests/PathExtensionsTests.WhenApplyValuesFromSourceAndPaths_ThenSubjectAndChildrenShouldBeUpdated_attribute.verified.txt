@@ -126,7 +126,7 @@
     },
     firstName: {
       Type: String,
-      Value: Child,
+      Value: NewPerson,
       Kind: Value
     },
     lastName: {

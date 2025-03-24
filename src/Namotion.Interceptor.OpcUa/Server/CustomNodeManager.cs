@@ -2,6 +2,7 @@
 using Namotion.Interceptor.OpcUa.Annotations;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Sources.Paths;
 using Opc.Ua;
 using Opc.Ua.Export;
 using Opc.Ua.Server;
@@ -176,10 +177,9 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
 
     private void CreateVariableNode(string propertyName, RegisteredSubjectProperty property, NodeId parentNodeId, string parentPath)
     {
-        var isPropertyIncluded = _source.SourcePathProvider.IsPropertyIncluded(property);
-        if (isPropertyIncluded)
+        var sourcePath = property.TryGetSourcePath(_source.SourcePathProvider, _source.Subject);
+        if (sourcePath is not null)
         {
-            var sourcePath = _source.GetSourcePropertyPath(property.Property);
             var value = property.GetValue();
             var type = property.Type;
 

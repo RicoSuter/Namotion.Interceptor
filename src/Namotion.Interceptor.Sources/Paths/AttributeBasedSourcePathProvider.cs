@@ -69,9 +69,9 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
         return nameAttribute?.Path ?? pathAttribute?.Path;
     }
     
-    public override string GetPropertyFullPath(string path, RegisteredSubjectProperty property)
+    public override string GetPropertyFullPath(string path, RegisteredSubjectProperty property, object? index)
     {
-        return _pathPrefix + GetAttributeBasedSourcePropertyPath(property);
+        return _pathPrefix + GetAttributeBasedSourcePropertyPath(property) + (index is not null ? $"[{index}]" : "");
     }
 
     private string GetAttributeBasedSourcePropertyPath(RegisteredSubjectProperty property)

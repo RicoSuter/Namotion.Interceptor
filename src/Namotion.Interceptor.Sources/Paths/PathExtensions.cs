@@ -6,29 +6,28 @@ namespace Namotion.Interceptor.Sources.Paths;
 
 public static class PathExtensions
 {
-    public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetAllRegisteredPropertiesWithSourcePaths(this IInterceptorSubject subject, ISourcePathProvider sourcePathProvider)
+    public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetAllRegisteredPropertiesWithSourcePaths(this RegisteredSubject subject, ISourcePathProvider sourcePathProvider)
     {
         return subject
-            .TryGetRegisteredSubject()?
             .GetAllProperties()
-            .GetSourcePaths(sourcePathProvider, subject)
+            .GetSourcePaths(sourcePathProvider, subject.Subject)
             .ToArray() ?? [];
     }
 
-    public static bool ApplyValueFromSource(this IInterceptorSubject subject, string sourcePath, object? value, ISourcePathProvider sourcePathProvider)
+    public static bool ApplyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, object? value, ISourcePathProvider sourcePathProvider)
     {
         return subject
-            .ApplyValueFromSource(sourcePath, (_, _) => value, sourcePathProvider);
+            .ApplyValueFromSourcePath(sourcePath, (_, _) => value, sourcePathProvider);
     }
 
-    public static bool ApplyValueFromSource(this IInterceptorSubject subject, string sourcePath, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider)
+    public static bool ApplyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider)
     {
         return subject
             .VisitPropertiesFromSourcePaths([sourcePath], (property, path) => property.SetValue(getPropertyValue(property, path)), sourcePathProvider)
             .Count == 1;
     }
 
-    public static IEnumerable<string> ApplyValuesFromSource(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider)
+    public static IEnumerable<string> ApplyValuesFromSourcePaths(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider)
     {
         return subject
             .VisitPropertiesFromSourcePaths(sourcePaths, (property, path) => property.SetValue(getPropertyValue(property, path)), sourcePathProvider);
@@ -41,7 +40,7 @@ public static class PathExtensions
     /// <param name="pathsAndValues">The source paths and values to apply.</param>
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <returns>The list of visited paths.</returns>
-    public static IEnumerable<string> ApplyValuesFromSource(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, ISourcePathProvider sourcePathProvider)
+    public static IEnumerable<string> ApplyValuesFromSourcePaths(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, ISourcePathProvider sourcePathProvider)
     {
         return subject
             .VisitPropertiesFromSourcePaths(pathsAndValues.Keys, (property, path) => property.SetValue(pathsAndValues[path]), sourcePathProvider);
@@ -53,9 +52,12 @@ public static class PathExtensions
             .GetPropertiesInPath(rootSubject)
             .ToArray();
 
-        if (propertiesInPath.Length > 0 && sourcePathProvider.IsPropertyIncluded(propertiesInPath.Last()))
+        if (propertiesInPath.Length > 0 && 
+            propertiesInPath.All(p => sourcePathProvider.IsPropertyIncluded(p.property)))
         {
-            return propertiesInPath.Aggregate("", sourcePathProvider.GetPropertyFullPath);
+            return propertiesInPath.Aggregate("", 
+                (pathPrefix, path) => 
+                    sourcePathProvider.GetPropertyFullPath(pathPrefix, path.property, path.index));
         }
 
         return null;
@@ -93,20 +95,23 @@ public static class PathExtensions
     /// <param name="property">The property.</param>
     /// <param name="rootSubject">The root subject.</param>
     /// <returns>The list of properties between the root subject and the property.</returns>
-    public static IEnumerable<RegisteredSubjectProperty> GetPropertiesInPath(this RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
+    public static IEnumerable<(RegisteredSubjectProperty property, object? index)> GetPropertiesInPath(this RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
     {
         return GetPropertiesInPathReverse(property, rootSubject)
             .Reverse();
     }
 
-    private static IEnumerable<RegisteredSubjectProperty> GetPropertiesInPathReverse(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
+    private static IEnumerable<(RegisteredSubjectProperty property, object? index)> GetPropertiesInPathReverse(RegisteredSubjectProperty property, IInterceptorSubject? rootSubject)
     {
-        var registeredProperty = property;
+        (RegisteredSubjectProperty property, object? index)? pathWithProperty = (property, null);
         do
         {
-            yield return registeredProperty ?? throw new InvalidOperationException("Property is null.");
-            registeredProperty = registeredProperty?.Parent?.Parents?.FirstOrDefault();
-        } while (registeredProperty is not null && registeredProperty?.Parent.Subject != rootSubject);
+            property = pathWithProperty.Value.property;
+            yield return (property ?? throw new InvalidOperationException("Property is null."), pathWithProperty.Value.index);
+            pathWithProperty = property?.Parent?.Subject != rootSubject 
+                ? property?.Parent?.Parents?.FirstOrDefault()
+                : null;
+        } while (pathWithProperty?.property is not null);
     }
 
     /// <summary>
@@ -133,7 +138,6 @@ public static class PathExtensions
                 .ToArray();
 
             RegisteredSubjectProperty? parentProperty = null!;
-
             for (var i = 0; i < segments.Length; i++)
             {
                 var (segment, index) = segments[i];
@@ -187,7 +191,7 @@ public static class PathExtensions
                         }
                     }
                 }
-                else
+                else if (index is null) // paths to collection items are ignored, e.g. "foo/bar[0]"
                 {
                     visitProperty(registeredProperty, sourcePath);
                     foundPaths.Add(sourcePath);

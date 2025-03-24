@@ -88,7 +88,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
                         var isIncluded = registeredProperty
                             .GetPropertiesInPath(_source.Subject)
-                            .Contains(registeredProperty);
+                            .Any(p => p.property == registeredProperty);
                         
                         return isIncluded && !change.IsChangingFromSource(_source);
                     })

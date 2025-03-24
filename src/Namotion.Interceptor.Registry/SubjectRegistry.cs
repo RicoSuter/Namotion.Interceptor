@@ -48,7 +48,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                     throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
                     
                 subject
-                    .AddParent(property);
+                    .AddParent(property, change.Index);
                 
                 property
                     .AddChild(new SubjectPropertyChild
@@ -93,7 +93,7 @@ internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                     var property = TryGetRegisteredProperty(change.Property.Value);
                     property?
                         .Parent
-                        .RemoveParent(property);
+                        .RemoveParent(property, change.Index);
                     
                     property?
                         .RemoveChild(new SubjectPropertyChild

@@ -47,7 +47,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
 
     public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
     {
-        return new Task<Action?>(null!);
+        return Task.FromResult<Action?>(null);
     }
 
     public Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
@@ -120,11 +120,6 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
 
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
 
-        _dispatcher?.EnqueueSubjectUpdate(() => { _subject.ApplyValueFromSource(sourcePath, convertedValue, SourcePathProvider); });
-    }
-
-    public string GetSourcePropertyPath(PropertyReference property)
-    {
-        return SourcePathProvider.GetPropertyFullPath(string.Empty, property.GetRegisteredProperty());
+        _dispatcher?.EnqueueSubjectUpdate(() => { _subject.ApplyValueFromSourcePath(sourcePath, convertedValue, SourcePathProvider); });
     }
 }

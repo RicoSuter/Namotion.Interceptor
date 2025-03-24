@@ -107,7 +107,7 @@ public class SubjectUpdate
                     subjectUpdate.Properties[propertyName] = propertyUpdate;
                 }
 
-                property = registeredSubject.Parents.FirstOrDefault()?.Property ?? default;
+                property = registeredSubject.Parents.FirstOrDefault().property?.Property ?? default;
                 if (property.Subject is not null)
                 {
                     registeredSubject = registry.KnownSubjects[property.Subject];
