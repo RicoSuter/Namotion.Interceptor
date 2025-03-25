@@ -27,18 +27,19 @@ public class TimestampTests
         var timestamp = DateTimeOffset.Now.AddDays(-200);
 
         // Act
-        try
+        using (SubjectMutationContext.BeginTimestampScope(timestamp))
         {
-            SubjectMutationContext.SetCurrentTimestamp(timestamp);            
             mother.FirstName = "Mother";
         }
-        finally
-        {
-            SubjectMutationContext.ResetCurrentTimestamp();            
-        }
+
+        var currentTimestamp = SubjectMutationContext.GetCurrentTimestamp();
         
         // Assert
         Assert.Equal(3, changes.Count); // backed, derived, derived
+        Assert.NotEqual(currentTimestamp, timestamp);
         Assert.True(changes.All(c => c.Timestamp == timestamp));
+
+        mother.LastName = "Mu"; // should use now not timestamp
+        Assert.NotEqual(timestamp, changes.Last().Timestamp);
     }
 }

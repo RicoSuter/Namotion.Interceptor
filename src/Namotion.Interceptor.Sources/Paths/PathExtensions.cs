@@ -91,14 +91,9 @@ public static class PathExtensions
         IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Action<RegisteredSubjectProperty, string> visitProperty,
         ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
-        SubjectMutationContext.SetCurrentTimestamp(timestamp);
-        try
+        using (SubjectMutationContext.BeginTimestampScope(timestamp))
         {
             return VisitPropertiesFromSourcePaths(subject, sourcePaths, visitProperty, sourcePathProvider, subjectFactory);
-        }
-        finally
-        {
-            SubjectMutationContext.ResetCurrentTimestamp();
         }
     }
 
