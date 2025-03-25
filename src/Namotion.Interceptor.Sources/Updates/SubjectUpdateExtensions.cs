@@ -71,8 +71,7 @@ public static class SubjectUpdateExtensions
         ISubjectFactory? subjectFactory,
         ISubjectRegistry? registry = null)
     {
-        SubjectMutationContext.SetCurrentTimestamp(timestamp);
-        try
+        using (SubjectMutationContext.BeginTimestampScope(timestamp))
         {
             foreach (var (propertyName, propertyUpdate) in update.Properties)
             {
@@ -87,10 +86,6 @@ public static class SubjectUpdateExtensions
 
                 ApplySubjectPropertyUpdate(subject, propertyName, timestamp, propertyUpdate, applyValuePropertyUpdate, subjectFactory, registry);
             }
-        }
-        finally
-        {
-            SubjectMutationContext.ResetCurrentTimestamp();
         }
     }
 
