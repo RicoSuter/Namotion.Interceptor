@@ -5,7 +5,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Sources.Updates;
 
-public class SubjectPropertyUpdate
+public record SubjectPropertyUpdate
 {
     /// <summary>
     /// Gets the kind of entity which is updated.
@@ -70,14 +70,14 @@ public class SubjectPropertyUpdate
         };
     }
     
-    public static SubjectPropertyUpdate Create(RegisteredSubject subject, string propertyName, RegisteredSubjectProperty property)
+    public static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubject subject, string propertyName, RegisteredSubjectProperty property)
     {
         var attributes = subject.Properties
             .Where(p => 
                 p.Value.HasGetter && p.Value.HasPropertyAttributes(propertyName))
             .ToDictionary(
                 p => p.Value.Attribute.AttributeName,
-                p => Create(subject, p.Key, p.Value));
+                p => CreateCompleteUpdate(subject, p.Key, p.Value));
 
         var propertyUpdate = new SubjectPropertyUpdate
         {
@@ -86,7 +86,6 @@ public class SubjectPropertyUpdate
         };
         
         propertyUpdate.ApplyValue(property.Property.TryGetWriteTimestamp(), property.GetValue());
-
         return propertyUpdate;
     }
 
