@@ -2,8 +2,9 @@
   Type: Person,
   Properties: {
     children: {
-      Type: List`1,
       Kind: Collection,
+      Type: List`1,
+      Timestamp: {Scrubbed},
       Collection: [
         {
           Index: 0,
@@ -11,25 +12,25 @@
             Type: Person,
             Properties: {
               children: {
-                Type: List`1,
-                Kind: Collection
+                Kind: Collection,
+                Type: List`1
               },
               father: {
-                Type: Person,
-                Kind: Value
+                Kind: Value,
+                Type: Person
               },
               firstName: {
+                Kind: Value,
                 Type: String,
-                Value: Child1,
-                Kind: Value
+                Value: Child1
               },
               lastName: {
-                Type: String,
-                Kind: Value
+                Kind: Value,
+                Type: String
               },
               mother: {
-                Type: Person,
-                Kind: Value
+                Kind: Value,
+                Type: Person
               }
             }
           }
@@ -40,25 +41,25 @@
             Type: Person,
             Properties: {
               children: {
-                Type: List`1,
-                Kind: Collection
+                Kind: Collection,
+                Type: List`1
               },
               father: {
-                Type: Person,
-                Kind: Value
+                Kind: Value,
+                Type: Person
               },
               firstName: {
+                Kind: Value,
                 Type: String,
-                Value: Child2,
-                Kind: Value
+                Value: Child2
               },
               lastName: {
-                Type: String,
-                Kind: Value
+                Kind: Value,
+                Type: String
               },
               mother: {
-                Type: Person,
-                Kind: Value
+                Kind: Value,
+                Type: Person
               }
             }
           }
@@ -69,25 +70,25 @@
             Type: Person,
             Properties: {
               children: {
-                Type: List`1,
-                Kind: Collection
+                Kind: Collection,
+                Type: List`1
               },
               father: {
-                Type: Person,
-                Kind: Value
+                Kind: Value,
+                Type: Person
               },
               firstName: {
+                Kind: Value,
                 Type: String,
-                Value: Child3,
-                Kind: Value
+                Value: Child3
               },
               lastName: {
-                Type: String,
-                Kind: Value
+                Kind: Value,
+                Type: String
               },
               mother: {
-                Type: Person,
-                Kind: Value
+                Kind: Value,
+                Type: Person
               }
             }
           }
@@ -95,70 +96,73 @@
       ]
     },
     father: {
-      Type: Person,
       Kind: Item,
+      Type: Person,
+      Timestamp: {Scrubbed},
       Item: {
         Type: Person,
         Properties: {
           children: {
-            Type: List`1,
-            Kind: Collection
+            Kind: Collection,
+            Type: List`1
           },
           father: {
-            Type: Person,
-            Kind: Value
+            Kind: Value,
+            Type: Person
           },
           firstName: {
+            Kind: Value,
             Type: String,
-            Value: Father,
-            Kind: Value
+            Value: Father
           },
           lastName: {
-            Type: String,
-            Kind: Value
+            Kind: Value,
+            Type: String
           },
           mother: {
-            Type: Person,
-            Kind: Value
+            Kind: Value,
+            Type: Person
           }
         }
       }
     },
     firstName: {
+      Kind: Value,
       Type: String,
       Value: Child,
-      Kind: Value
+      Timestamp: {Scrubbed}
     },
     lastName: {
-      Type: String,
-      Kind: Value
+      Kind: Value,
+      Type: String
     },
     mother: {
-      Type: Person,
       Kind: Item,
+      Type: Person,
+      Timestamp: {Scrubbed},
       Item: {
         Type: Person,
         Properties: {
           children: {
-            Type: List`1,
-            Kind: Collection
+            Kind: Collection,
+            Type: List`1
           },
           father: {
-            Type: Person,
-            Kind: Value
+            Kind: Value,
+            Type: Person
           },
           firstName: {
+            Kind: Value,
             Type: String,
-            Value: Mother,
-            Kind: Value
+            Value: Mother
           },
           lastName: {
-            Type: String,
-            Kind: Value
+            Kind: Value,
+            Type: String
           },
           mother: {
-            Type: Person,
-            Kind: Value
+            Kind: Value,
+            Type: Person
           }
         }
       }

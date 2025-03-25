@@ -46,7 +46,8 @@ public class PathExtensionsTests
 
         // Assert
         await Verify(allPaths?.Select(p => p.path))
-            .UseMethodName($"{nameof(WhenRetrievingPropertyPath_ThenItIsCorrect)}_{name}");
+            .UseMethodName($"{nameof(WhenRetrievingPropertyPath_ThenItIsCorrect)}_{name}")
+            .DisableDateCounting();
     }
 
     [Theory]
@@ -97,7 +98,8 @@ public class PathExtensionsTests
             .TryGetWriteTimestamp());
      
         await Verify(completeUpdate)
-            .UseMethodName($"{nameof(WhenApplyValuesFromSourceAndPaths_ThenSubjectAndChildrenShouldBeUpdated)}_{name}");
+            .UseMethodName($"{nameof(WhenApplyValuesFromSourceAndPaths_ThenSubjectAndChildrenShouldBeUpdated)}_{name}")
+            .DisableDateCounting();
     }
     
     [Fact]
