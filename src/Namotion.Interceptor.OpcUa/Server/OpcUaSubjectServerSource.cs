@@ -123,7 +123,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         _dispatcher?.EnqueueSubjectUpdate(() =>
         {
             _subject.UpdatePropertyValueFromSourcePath(
-                sourcePath, convertedValue, timestamp, SourcePathProvider, this);
+                sourcePath, timestamp, convertedValue, SourcePathProvider, this);
         });
     }
 }

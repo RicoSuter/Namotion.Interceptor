@@ -25,12 +25,12 @@ public static class PathExtensions
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="sourcePath">The path to the property from the source's perspective.</param>
-    /// <param name="value">The value to set.</param>
     /// <param name="timestamp">The timestamp.</param>
+    /// <param name="value">The value to set.</param>
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
     /// <returns>The result specifying whether the path could be found and the value has been applied.</returns>
-    public static bool UpdatePropertyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, object? value, DateTimeOffset timestamp, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    public static bool UpdatePropertyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, DateTimeOffset timestamp, object? value, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
             .UpdatePropertyValueFromSourcePath(sourcePath, timestamp, (_, _) => value, sourcePathProvider, source);
