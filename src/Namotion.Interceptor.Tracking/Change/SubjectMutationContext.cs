@@ -14,7 +14,7 @@ public static class SubjectMutationContext
     /// Changes the current timestamp in the async local context until the scope is disposed.
     /// </summary>
     /// <param name="timestamp">The timestamp to set in the context.</param>
-    public static IDisposable BeginTimestampScope(DateTimeOffset timestamp)
+    public static IDisposable BeginTimestampScope(DateTimeOffset? timestamp)
     {
         CurrentTimestamp.Value = timestamp;
         return ResetDisposableInstance;

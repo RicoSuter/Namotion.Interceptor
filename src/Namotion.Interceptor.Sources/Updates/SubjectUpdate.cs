@@ -77,7 +77,7 @@ public class SubjectUpdate
                 {
                     // handle attribute changes
                     var attributeUpdate = new SubjectPropertyUpdate();
-                    attributeUpdate.ApplyValue(change.NewValue);
+                    attributeUpdate.ApplyValue(change.Timestamp, change.NewValue);
                     
                     PropertyAttributeAttribute attribute;
                     var currentRegisteredProperty = registeredProperty;
@@ -102,7 +102,7 @@ public class SubjectUpdate
                     var propertyName = property.Name;
                  
                     var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredSubject, propertyName, knownSubjectDescriptions);
-                    propertyUpdate.ApplyValue(change.NewValue);
+                    propertyUpdate.ApplyValue(change.Timestamp, change.NewValue);
                  
                     subjectUpdate.Properties[propertyName] = propertyUpdate;
                 }

@@ -1,43 +1,63 @@
 using System.Collections;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Sources.Updates;
 
 public class SubjectPropertyUpdate
 {
-    public string? Type { get; init; }
+    /// <summary>
+    /// Gets the kind of entity which is updated.
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public SubjectPropertyUpdateKind Kind { get; internal set; }
     
+    /// <summary>
+    /// Gets the updated attributes.
+    /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public IDictionary<string, SubjectPropertyUpdate>? Attributes { get; internal set; }
 
+    /// <summary>
+    /// Gets the type of the property value.
+    /// </summary>
+    public string? Type { get; init; }
+
+    /// <summary>
+    /// Gets the value of the property update.
+    /// </summary>
     public object? Value { get; internal set; }
     
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public SubjectPropertyUpdateKind Kind { get; internal set; }
+    /// <summary>
+    /// Gets the timestamp of the property update or null if unknown.
+    /// </summary>
+    public DateTimeOffset? Timestamp { get; internal set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public SubjectUpdate? Item { get; internal set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public List<SubjectPropertyCollectionUpdate>? Collection { get; internal set; }
-
-    public static SubjectPropertyUpdate Create<T>(T value)
+    
+    public static SubjectPropertyUpdate Create<T>(T value, DateTimeOffset? timestamp = null)
     {
         return new SubjectPropertyUpdate
         {
             Type = typeof(T).Name,
             Kind = SubjectPropertyUpdateKind.Value,
-            Value = value
+            Value = value,
+            Timestamp = timestamp
         };
     }
     
-    public static SubjectPropertyUpdate Create(SubjectUpdate itemUpdate)
+    public static SubjectPropertyUpdate Create(SubjectUpdate itemUpdate, DateTimeOffset? timestamp = null)
     {
         return new SubjectPropertyUpdate
         {
             Kind = SubjectPropertyUpdateKind.Item,
-            Item = itemUpdate
+            Item = itemUpdate,
+            Timestamp = timestamp
         };
     }
     
@@ -65,16 +85,20 @@ public class SubjectPropertyUpdate
             Attributes = attributes.Count != 0 ? attributes : null
         };
         
-        propertyUpdate.ApplyValue(property.GetValue());
+        propertyUpdate.ApplyValue(property.Property.TryGetWriteTimestamp(), property.GetValue());
+
         return propertyUpdate;
     }
-    
+
     /// <summary>
     /// Adds a complete update of the given value to the property update.
     /// </summary>
+    /// <param name="timestamp">The timestamp of the value change.</param>
     /// <param name="value">The value to apply.</param>
-    internal void ApplyValue(object? value)
+    internal void ApplyValue(DateTimeOffset? timestamp, object? value)
     {
+        Timestamp = timestamp;
+        
         if (value is IDictionary dictionary && dictionary.Values.OfType<IInterceptorSubject>().Any())
         {
             // TODO: Fix dictionary handling logic (how to detect dict?)

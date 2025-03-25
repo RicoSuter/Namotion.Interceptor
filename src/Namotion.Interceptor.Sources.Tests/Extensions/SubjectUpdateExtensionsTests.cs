@@ -27,7 +27,7 @@ public class SubjectUpdateExtensionsTests
                     nameof(Person.LastName), SubjectPropertyUpdate.Create("Doe")
                 }
             }
-        }, DateTimeOffset.Now, DefaultSubjectFactory.Instance);
+        }, DefaultSubjectFactory.Instance);
         
         // Assert
         Assert.Equal("John", person.FirstName);
@@ -49,13 +49,13 @@ public class SubjectUpdateExtensionsTests
             Properties = new Dictionary<string, SubjectPropertyUpdate>
             {
                 {
-                    nameof(Person.FirstName), SubjectPropertyUpdate.Create("John")
+                    nameof(Person.FirstName), SubjectPropertyUpdate.Create("John", timestamp)
                 },
                 {
-                    nameof(Person.LastName), SubjectPropertyUpdate.Create("Doe")
+                    nameof(Person.LastName), SubjectPropertyUpdate.Create("Doe", timestamp)
                 }
             }
-        }, timestamp, DefaultSubjectFactory.Instance);
+        }, DefaultSubjectFactory.Instance);
         
         // Assert
         Assert.Equal(timestamp, person
@@ -87,7 +87,7 @@ public class SubjectUpdateExtensionsTests
                     })
                 }
             }
-        }, DateTimeOffset.Now, DefaultSubjectFactory.Instance);
+        }, DefaultSubjectFactory.Instance);
         
         // Assert
         Assert.Equal("John", person.Father?.FirstName);
@@ -136,7 +136,7 @@ public class SubjectUpdateExtensionsTests
                         })
                 }
             }
-        }, DateTimeOffset.Now, DefaultSubjectFactory.Instance);
+        }, DefaultSubjectFactory.Instance);
         
         // Assert
         Assert.Equal("John", person.Children.First().FirstName);
