@@ -115,7 +115,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
         }
     }
 
-    internal void UpdateProperty(PropertyReference property, string sourcePath, object? value, DateTimeOffset timestamp)
+    internal void UpdateProperty(PropertyReference property, string sourcePath, DateTimeOffset timestamp, object? value)
     {
         // TODO: Implement actual correct conversion based on the property type
 
