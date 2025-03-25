@@ -41,6 +41,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
         
         return path
             .Split(_propertyPathDelimiter)
+            .Where(p => !string.IsNullOrEmpty(p))
             .SelectMany(s => s
                 .Split(_attributePathDelimiter)
                 .Select((ss, i) =>
