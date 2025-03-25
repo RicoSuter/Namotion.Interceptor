@@ -6,9 +6,8 @@ public static class SubjectUpdatePathExtensions
         Func<string, string?> convertPropertyName, 
         Func<string, string?> convertAttributeName)
     {
-        return new SubjectUpdate
+        return update with
         {
-            Type = update.Type,
             Properties = update.Properties.ToDictionary(
                 p => convertPropertyName(p.Key) ?? p.Key,
                 p => p.Value.ConvertPathSegments(convertPropertyName, convertAttributeName))
@@ -19,17 +18,12 @@ public static class SubjectUpdatePathExtensions
         Func<string, string?> convertPropertyName, 
         Func<string, string?> convertAttributeName)
     {
-        return new SubjectPropertyUpdate
+        return update with
         {
-            Type = update.Type,
+            Item = update.Item?.ConvertPathSegments(convertPropertyName, convertAttributeName),
             Attributes = update.Attributes?.ToDictionary(
                 a => convertAttributeName(a.Key) ?? a.Key,
                 a => a.Value.ConvertPathSegments(convertPropertyName, convertAttributeName)),
-
-            Kind = update.Kind,
-
-            Value = update.Value,
-            Item = update.Item?.ConvertPathSegments(convertPropertyName, convertAttributeName),
             Collection = update.Collection?
                 .Select(i => new SubjectPropertyCollectionUpdate
                 {

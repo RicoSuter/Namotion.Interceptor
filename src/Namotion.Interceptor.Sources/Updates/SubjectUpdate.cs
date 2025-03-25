@@ -5,7 +5,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Updates;
 
-public class SubjectUpdate
+public record SubjectUpdate
 {
     /// <summary>
     /// Gets the type of the subject.
@@ -37,7 +37,7 @@ public class SubjectUpdate
             foreach (var property in registeredSubject.Properties
                 .Where(p => p.Value is { HasGetter: true, IsAttribute: false }))
             {
-                subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.Create(registeredSubject, property.Key, property.Value);
+                subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.CreateCompleteUpdate(registeredSubject, property.Key, property.Value);
             }
         }
 
