@@ -1,6 +1,8 @@
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Sources.Updates;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Tests.Extensions;
 
@@ -30,6 +32,35 @@ public class SubjectUpdateExtensionsTests
         // Assert
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
+    }
+    
+    [Fact]
+    public void WhenApplyingSimplePropertyWithTimestamp_ThenTimestampIsPreserved()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+
+        var timestamp = DateTimeOffset.Now.AddDays(-200);
+        
+        // Act
+        person.ApplySubjectUpdate(new SubjectUpdate
+        {
+            Properties = new Dictionary<string, SubjectPropertyUpdate>
+            {
+                {
+                    nameof(Person.FirstName), SubjectPropertyUpdate.Create("John")
+                },
+                {
+                    nameof(Person.LastName), SubjectPropertyUpdate.Create("Doe")
+                }
+            }
+        }, timestamp, DefaultSubjectFactory.Instance);
+        
+        // Assert
+        Assert.Equal(timestamp, person
+            .GetPropertyReference("FirstName")
+            .TryGetWriteTimestamp());
     }
     
     [Fact]

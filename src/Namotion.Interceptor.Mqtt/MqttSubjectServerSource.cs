@@ -154,7 +154,7 @@ namespace Namotion.Interceptor.Mqtt
                 _dispatcher?.EnqueueSubjectUpdate(() =>
                 {
                     _subject.UpdatePropertyValueFromSourcePath(path,
-                        DateTimeOffset.Now,
+                        DateTimeOffset.Now, // TODO: What timestamp to use here?
                         (property, _) => document.Deserialize(property.Type),
                         _sourcePathProvider, this);
                 });

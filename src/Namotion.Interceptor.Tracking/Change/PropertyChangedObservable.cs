@@ -6,27 +6,17 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
 {
     private readonly Subject<SubjectPropertyChange> _subject = new();
 
-    private static readonly AsyncLocal<DateTimeOffset?> CurrentTimestamp = new();
-    
-    public static void SetCurrentTimestamp(DateTimeOffset timestamp)
-    {
-        CurrentTimestamp.Value = timestamp;
-    }
-    
-    public static void ResetCurrentTimestamp()
-    {
-        CurrentTimestamp.Value = null;
-    }
-    
     public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
     {
         var currentValue = context.CurrentValue;
-        var result = next(context); 
+        var result = next(context);
 
-        var timestamp = CurrentTimestamp.Value ?? DateTimeOffset.Now;
-        var changedContext = new SubjectPropertyChange(context.Property, timestamp, currentValue, result);
+        var changedContext = new SubjectPropertyChange(
+            context.Property, SubjectMutationContext.GetCurrentTimestamp(),
+            currentValue, result);
+
         _subject.OnNext(changedContext);
-     
+
         return result;
     }
 
@@ -34,7 +24,7 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
     {
         return _subject.Subscribe(observer);
     }
-    
+
     public void AttachTo(IInterceptorSubject subject)
     {
     }
