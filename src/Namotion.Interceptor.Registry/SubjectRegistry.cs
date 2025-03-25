@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Registry;
 
 // TODO: Add lots of tests!
 
-internal class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
+public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
 {
     private readonly Lock _lock = new();
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
