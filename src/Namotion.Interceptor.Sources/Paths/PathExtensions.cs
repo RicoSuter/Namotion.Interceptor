@@ -52,7 +52,7 @@ public static class PathExtensions
         ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
-            .VisitPropertiesFromSourcePathsWithTimestamp([sourcePath], timestamp, (property, path) => SetPropertyValue(property, getPropertyValue(property, path), timestamp, source), sourcePathProvider)
+            .VisitPropertiesFromSourcePathsWithTimestamp([sourcePath], timestamp, (property, path) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), sourcePathProvider)
             .Count == 1;
     }
 
@@ -69,7 +69,7 @@ public static class PathExtensions
     public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
-            .VisitPropertiesFromSourcePathsWithTimestamp(sourcePaths, timestamp, (property, path) => SetPropertyValue(property, getPropertyValue(property, path), timestamp, source), sourcePathProvider);
+            .VisitPropertiesFromSourcePathsWithTimestamp(sourcePaths, timestamp, (property, path) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), sourcePathProvider);
     }
 
     /// <summary>
@@ -84,25 +84,25 @@ public static class PathExtensions
     public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, DateTimeOffset timestamp, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
-            .VisitPropertiesFromSourcePathsWithTimestamp(pathsAndValues.Keys, timestamp, (property, path) => SetPropertyValue(property, pathsAndValues[path], timestamp, source), sourcePathProvider);
+            .VisitPropertiesFromSourcePathsWithTimestamp(pathsAndValues.Keys, timestamp, (property, path) => SetPropertyValue(property, timestamp, pathsAndValues[path], source), sourcePathProvider);
     }
 
     private static IReadOnlyCollection<string> VisitPropertiesFromSourcePathsWithTimestamp(this IInterceptorSubject subject,
         IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Action<RegisteredSubjectProperty, string> visitProperty,
         ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
-        PropertyChangedObservable.SetCurrentTimestamp(timestamp);
+        SubjectMutationContext.SetCurrentTimestamp(timestamp);
         try
         {
             return VisitPropertiesFromSourcePaths(subject, sourcePaths, visitProperty, sourcePathProvider, subjectFactory);
         }
         finally
         {
-            PropertyChangedObservable.ResetCurrentTimestamp();
+            SubjectMutationContext.ResetCurrentTimestamp();
         }
     }
 
-    private static void SetPropertyValue(RegisteredSubjectProperty property, object? value, DateTimeOffset timestamp, ISubjectSource? source)
+    private static void SetPropertyValue(RegisteredSubjectProperty property, DateTimeOffset timestamp, object? value, ISubjectSource? source)
     {
         if (source is not null)
         {
