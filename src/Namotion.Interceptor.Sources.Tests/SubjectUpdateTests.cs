@@ -37,7 +37,7 @@ public class SubjectUpdateTests
             .ConvertToJsonCamelCasePath();
 
         // Assert
-        await Verify(completeSubjectUpdate);
+        await Verify(completeSubjectUpdate).DisableDateCounting();
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class SubjectUpdateTests
             .ConvertToJsonCamelCasePath();
 
         // Assert
-        await Verify(partialSubjectUpdate);
+        await Verify(partialSubjectUpdate).DisableDateCounting();
     }
 
     [Fact]
@@ -115,7 +115,7 @@ public class SubjectUpdateTests
             .ConvertToJsonCamelCasePath();
 
         // Assert
-        await Verify(partialSubjectUpdate);
+        await Verify(partialSubjectUpdate).DisableDateCounting();
     }
 
     // [Fact]
@@ -153,14 +153,4 @@ public class SubjectUpdateTests
     //     // Assert
     //     await Verify(partialSubjectUpdate);
     // }
-
-    private static JsonSerializerOptions CreateJsonSerializerOptions()
-    {
-        var jsonSerializerOptions = new JsonSerializerOptions(JsonSerializerOptions.Default)
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
-        return jsonSerializerOptions;
-    }
 }
