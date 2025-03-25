@@ -60,21 +60,11 @@ public class LifecycleInterceptor : IWriteInterceptor
             {
                 handler.Attach(registryContext);
             }
-            
-            // bool newHandlersFound;
-            // var handlers = new HashSet<ILifecycleHandler>();
-            // do
-            // {
-            //     newHandlersFound = false;
-            //     foreach (var handler in context
-            //          .GetServices<ILifecycleHandler>()
-            //          .Where(h => !handlers.Contains(h)))
-            //     {
-            //         handlers.Add(handler);
-            //         handler.Attach(registryContext);
-            //         newHandlersFound = true;
-            //     }
-            // } while (newHandlersFound);
+
+            if (subject is ILifecycleHandler lifecycleHandler)
+            {
+                lifecycleHandler.Attach(registryContext);
+            }
         }
     }
 
@@ -86,29 +76,19 @@ public class LifecycleInterceptor : IWriteInterceptor
             {
                 _attachedSubjects.Remove(subject);
             }
-
+            
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
-           
             var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
+
+            if (subject is ILifecycleHandler lifecycleHandler)
+            {
+                lifecycleHandler.Detach(registryContext);
+            }
+
             foreach (var handler in context.GetServices<ILifecycleHandler>())
             {
                 handler.Detach(registryContext);
             }
-            
-            // bool newHandlersFound;
-            // var handlers = new HashSet<ILifecycleHandler>();
-            // do
-            // {
-            //     newHandlersFound = false;
-            //     foreach (var handler in context
-            //          .GetServices<ILifecycleHandler>()
-            //          .Where(h => !handlers.Contains(h)))
-            //     {
-            //         handlers.Add(handler);
-            //         handler.Detach(registryContext);
-            //         newHandlersFound = true;
-            //     }
-            // } while (newHandlersFound);
         }
     }
 

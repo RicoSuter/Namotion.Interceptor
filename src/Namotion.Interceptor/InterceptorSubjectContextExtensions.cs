@@ -1,6 +1,6 @@
 ﻿namespace Namotion.Interceptor;
 
-public static class InterceptorCollectionExtensions
+public static class InterceptorSubjectContextExtensions
 {
     public static IInterceptorSubjectContext WithInterceptor<TService>(this IInterceptorSubjectContext context, Func<TService> factory)
         where TService : IInterceptor

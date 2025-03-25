@@ -1,6 +1,6 @@
 ﻿namespace Namotion.Interceptor.Validation;
 
-public static class InterceptorCollectionExtensions
+public static class InterceptorSubjectContextExtensions
 {
     /// <summary>
     /// Registers support for <see cref="IPropertyValidator"/> handlers.

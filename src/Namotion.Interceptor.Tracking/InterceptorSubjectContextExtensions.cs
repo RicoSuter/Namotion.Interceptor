@@ -5,7 +5,7 @@ using Namotion.Interceptor.Tracking.Recorder;
 
 namespace Namotion.Interceptor.Tracking;
 
-public static class InterceptorCollectionExtensions
+public static class InterceptorSubjectContextExtensions
 {
     public static IObservable<SubjectPropertyChange> GetPropertyChangedObservable(this IInterceptorSubjectContext context)
     {
