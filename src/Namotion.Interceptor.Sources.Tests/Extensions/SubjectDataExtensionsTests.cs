@@ -37,7 +37,7 @@ public class SubjectDataExtensionsTests
         };
 
         // Assert
-        var change = new SubjectPropertyChange(propertyReference, null, null);
+        var change = new SubjectPropertyChange(propertyReference, DateTimeOffset.Now, null, null);
         Assert.False(change.IsChangingFromSource(source));
         
         // Act

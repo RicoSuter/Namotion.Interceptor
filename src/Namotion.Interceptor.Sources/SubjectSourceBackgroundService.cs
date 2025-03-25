@@ -71,9 +71,9 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                     var beforeInitializationUpdates = _beforeInitializationUpdates;
                     _beforeInitializationUpdates = null;
                     
-                    foreach (var data in beforeInitializationUpdates!)
+                    foreach (var action in beforeInitializationUpdates!)
                     {
-                        EnqueueSubjectUpdate(data);
+                        EnqueueSubjectUpdate(action);
                     }
                 }
                 

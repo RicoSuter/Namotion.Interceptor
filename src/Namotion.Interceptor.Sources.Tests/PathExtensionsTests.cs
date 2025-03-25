@@ -3,6 +3,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Sources.Updates;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Tests;
@@ -45,7 +46,8 @@ public class PathExtensionsTests
 
         // Assert
         await Verify(allPaths?.Select(p => p.path))
-            .UseMethodName($"{nameof(WhenRetrievingPropertyPath_ThenItIsCorrect)}_{name}");
+            .UseMethodName($"{nameof(WhenRetrievingPropertyPath_ThenItIsCorrect)}_{name}")
+            .DisableDateCounting();
     }
 
     [Theory]
@@ -71,26 +73,33 @@ public class PathExtensionsTests
             Children = [child1, child2, child3]
         };
 
+        var timestamp = DateTimeOffset.Now.AddDays(-200);
+
         // Act
-        person.ApplyValuesFromSourcePaths(new Dictionary<string, object?>
+        person.UpdatePropertyValuesFromSourcePaths(new Dictionary<string, object?>
         {
             { "FirstName", "NewPerson" },
             { "Children[0].FirstName", "NewChild1" },
             { "Children[2].FirstName", "NewChild3" }
-        }, sourcePathProvider, null);
+        }, timestamp, sourcePathProvider, null);
         
-        person.ApplyValuesFromSourcePaths(["LastName"], (_, _) => "NewLn", sourcePathProvider, null);
+        person.UpdatePropertyValuesFromSourcePaths(["LastName"], timestamp, (_, _) => "NewLn", sourcePathProvider, null);
 
-        person.ApplyValueFromSourcePath(
-            "Father.FirstName", "NewFather", sourcePathProvider, null);
+        person.UpdatePropertyValueFromSourcePath(
+            "Father.FirstName", timestamp, "NewFather", sourcePathProvider, null);
         
         var completeUpdate = SubjectUpdate
             .CreateCompleteUpdate(person)
             .ConvertToJsonCamelCasePath();
 
         // Assert
+        Assert.Equal(timestamp, person
+            .GetPropertyReference("FirstName")
+            .TryGetWriteTimestamp());
+     
         await Verify(completeUpdate)
-            .UseMethodName($"{nameof(WhenApplyValuesFromSourceAndPaths_ThenSubjectAndChildrenShouldBeUpdated)}_{name}");
+            .UseMethodName($"{nameof(WhenApplyValuesFromSourceAndPaths_ThenSubjectAndChildrenShouldBeUpdated)}_{name}")
+            .DisableDateCounting();
     }
     
     [Fact]

@@ -150,10 +150,13 @@ namespace Namotion.Interceptor.Mqtt
 
                 var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
                 var document = JsonDocument.Parse(payload);
-                
+
                 _dispatcher?.EnqueueSubjectUpdate(() =>
                 {
-                    _subject.ApplyValueFromSourcePath(path, (property, _) => document.Deserialize(property.Type), _sourcePathProvider, this);
+                    _subject.UpdatePropertyValueFromSourcePath(path,
+                        DateTimeOffset.Now, // TODO: What timestamp to use here?
+                        (property, _) => document.Deserialize(property.Type),
+                        _sourcePathProvider, this);
                 });
             }
             catch (Exception ex)

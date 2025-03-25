@@ -1,4 +1,5 @@
 ﻿using System.Collections;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -116,7 +117,9 @@ public class LifecycleInterceptor : IWriteInterceptor
         var currentValue = context.CurrentValue;
         var result = next(context);
         var newValue = context.NewValue;
-
+        
+        context.Property.SetWriteTimestamp(SubjectMutationContext.GetCurrentTimestamp());
+        
         if (!Equals(currentValue, newValue))
         {
             lock (_attachedSubjects)

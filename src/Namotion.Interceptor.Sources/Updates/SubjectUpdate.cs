@@ -5,7 +5,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Updates;
 
-public class SubjectUpdate
+public record SubjectUpdate
 {
     /// <summary>
     /// Gets the type of the subject.
@@ -37,7 +37,7 @@ public class SubjectUpdate
             foreach (var property in registeredSubject.Properties
                 .Where(p => p.Value is { HasGetter: true, IsAttribute: false }))
             {
-                subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.Create(registeredSubject, property.Key, property.Value);
+                subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.CreateCompleteUpdate(registeredSubject, property.Key, property.Value);
             }
         }
 
@@ -51,7 +51,7 @@ public class SubjectUpdate
     /// <param name="subject">The root subject.</param>
     /// <param name="propertyChanges">The changes to look up within the object graph.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreatePartialUpdateFromChanges(IInterceptorSubject subject, IEnumerable<Tracking.Change.SubjectPropertyChange> propertyChanges)
+    public static SubjectUpdate CreatePartialUpdateFromChanges(IInterceptorSubject subject, IEnumerable<SubjectPropertyChange> propertyChanges)
     {
         // TODO: Verify correctness of the CreatePartialUpdateFromChanges method
 
@@ -77,7 +77,7 @@ public class SubjectUpdate
                 {
                     // handle attribute changes
                     var attributeUpdate = new SubjectPropertyUpdate();
-                    attributeUpdate.ApplyValue(change.NewValue);
+                    attributeUpdate.ApplyValue(change.Timestamp, change.NewValue);
                     
                     PropertyAttributeAttribute attribute;
                     var currentRegisteredProperty = registeredProperty;
@@ -102,7 +102,7 @@ public class SubjectUpdate
                     var propertyName = property.Name;
                  
                     var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredSubject, propertyName, knownSubjectDescriptions);
-                    propertyUpdate.ApplyValue(change.NewValue);
+                    propertyUpdate.ApplyValue(change.Timestamp, change.NewValue);
                  
                     subjectUpdate.Properties[propertyName] = propertyUpdate;
                 }
