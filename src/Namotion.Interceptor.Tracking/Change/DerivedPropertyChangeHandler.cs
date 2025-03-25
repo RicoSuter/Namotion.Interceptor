@@ -2,6 +2,9 @@
 
 namespace Namotion.Interceptor.Tracking.Change;
 
+/// <summary>
+/// Handles derived properties and triggers change events and recalculations when dependent properties are changed.
+/// </summary>
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, ILifecycleHandler
 {
     [ThreadStatic]
