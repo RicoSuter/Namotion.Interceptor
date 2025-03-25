@@ -85,7 +85,7 @@ public class PathExtensionsTests
         person.UpdatePropertyValuesFromSourcePaths(["LastName"], timestamp, (_, _) => "NewLn", sourcePathProvider, null);
 
         person.UpdatePropertyValueFromSourcePath(
-            "Father.FirstName", "NewFather", timestamp, sourcePathProvider, null);
+            "Father.FirstName", timestamp, "NewFather", sourcePathProvider, null);
         
         var completeUpdate = SubjectUpdate
             .CreateCompleteUpdate(person)
