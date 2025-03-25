@@ -16,7 +16,9 @@ public static class SubjectMutationContext
     /// <param name="timestamp">The timestamp to set in the context.</param>
     public static IDisposable BeginTimestampScope(DateTimeOffset? timestamp)
     {
-        CurrentTimestamp.Value = timestamp;
+        if (timestamp is not null)
+            CurrentTimestamp.Value = timestamp;
+
         return ResetDisposableInstance;
     }
     
