@@ -8,8 +8,9 @@
           Item: {
             Properties: {
               firstName: {
+                Kind: Value,
                 Value: NewChild1,
-                Kind: Value
+                Timestamp: {Scrubbed}
               }
             }
           }
@@ -23,8 +24,9 @@
           Item: {
             Properties: {
               firstName: {
+                Kind: Value,
                 Value: NewChild3,
-                Kind: Value
+                Timestamp: {Scrubbed}
               }
             }
           }
@@ -36,15 +38,17 @@
       Item: {
         Properties: {
           firstName: {
+            Kind: Value,
             Value: NewFather,
-            Kind: Value
+            Timestamp: {Scrubbed}
           }
         }
       }
     },
     firstName: {
+      Kind: Value,
       Value: NewPerson,
-      Kind: Value
+      Timestamp: {Scrubbed}
     }
   }
 }

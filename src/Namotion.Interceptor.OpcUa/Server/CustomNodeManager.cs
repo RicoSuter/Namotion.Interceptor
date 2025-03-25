@@ -201,7 +201,7 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
             {
                 if (changes.HasFlag(NodeStateChangeMasks.Value))
                 {
-                    _source.UpdateProperty(property.Property, sourcePath, variable.Value);
+                    _source.UpdateProperty(property.Property, sourcePath, variable.Timestamp, variable.Value);
                 }
             };
 

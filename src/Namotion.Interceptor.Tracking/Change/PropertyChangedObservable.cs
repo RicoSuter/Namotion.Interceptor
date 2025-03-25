@@ -5,15 +5,18 @@ namespace Namotion.Interceptor.Tracking.Change;
 public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWriteInterceptor
 {
     private readonly Subject<SubjectPropertyChange> _subject = new();
-    
+
     public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
     {
         var currentValue = context.CurrentValue;
-        var result = next(context); 
+        var result = next(context);
 
-        var changedContext = new SubjectPropertyChange(context.Property, currentValue, result);
+        var changedContext = new SubjectPropertyChange(
+            context.Property, SubjectMutationContext.GetCurrentTimestamp(),
+            currentValue, result);
+
         _subject.OnNext(changedContext);
-     
+
         return result;
     }
 
@@ -21,7 +24,7 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
     {
         return _subject.Subscribe(observer);
     }
-    
+
     public void AttachTo(IInterceptorSubject subject)
     {
     }
