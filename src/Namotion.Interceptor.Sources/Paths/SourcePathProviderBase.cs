@@ -26,16 +26,15 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
     {
         return path
             .Split('.')
-            .SelectMany(s => s
-                .Split('.')
-                .Select((ss, i) =>
-                {
-                    var segmentParts = ss.Split('[', ']');
-                    object? index = segmentParts.Length >= 2 ? 
-                        (int.TryParse(segmentParts[1], out var intIndex) ? 
-                            intIndex : segmentParts[1]) : null;
-                    return (segmentParts[0], index);
-                }));
+            .Where(p => !string.IsNullOrEmpty(p))
+            .Select((ss, i) =>
+            {
+                var segmentParts = ss.Split('[', ']');
+                object? index = segmentParts.Length >= 2 ? 
+                    (int.TryParse(segmentParts[1], out var intIndex) ? 
+                        intIndex : segmentParts[1]) : null;
+                return (segmentParts[0], index);
+            });
     }
 
     public RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string segment)
