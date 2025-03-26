@@ -2,6 +2,9 @@
 
 public readonly record struct SubjectPropertyChild
 {
+    /// <summary>
+    /// Gets the subject which is referenced by the property.
+    /// </summary>
     public IInterceptorSubject Subject { get; init; }
 
     /// <summary>
