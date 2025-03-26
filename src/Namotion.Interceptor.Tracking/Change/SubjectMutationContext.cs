@@ -2,29 +2,30 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 public static class SubjectMutationContext
 {
-    [ThreadStatic]
-    private static object? _currentChangingSource;
-    
+    [ThreadStatic] private static object? _currentChangingSource;
+
     private static readonly ResetDisposableDisposable ResetDisposableInstance = new();
     private static readonly AsyncLocal<DateTimeOffset?> CurrentTimestamp = new();
-    
+
     /// <summary>
     /// Gets or sets a function which retrieves the current timestamp (default is <see cref="DateTimeOffset.Now"/>).
     /// </summary>
     public static Func<DateTimeOffset> GetTimestampFunction { get; set; } = () => DateTimeOffset.Now;
-    
+
     /// <summary>
     /// Changes the current timestamp in the async local context until the scope is disposed.
     /// </summary>
     /// <param name="timestamp">The timestamp to set in the context.</param>
     public static IDisposable BeginTimestampScope(DateTimeOffset? timestamp)
     {
+        // TODO: Also use thread local and action instead of async local?
+
         if (timestamp is not null)
             CurrentTimestamp.Value = timestamp;
 
         return ResetDisposableInstance;
     }
-    
+
     /// <summary>
     /// Gets the current timestamp from the async local context or fallback to calling <see cref="GetTimestampFunction"/>.
     /// </summary>
@@ -33,7 +34,7 @@ public static class SubjectMutationContext
     {
         return CurrentTimestamp.Value ?? GetTimestampFunction();
     }
-    
+
     /// <summary>
     /// Gets the current source which is doing the mutation.
     /// </summary>
@@ -53,7 +54,7 @@ public static class SubjectMutationContext
     {
         return change.Source == source;
     }
-    
+
     /// <summary>
     /// Sets the value of the property and marks the assignment as applied by the specified source.
     /// </summary>
