@@ -8,7 +8,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Tests.Extensions;
 
-public class SubjectDataExtensionsTests
+public class SubjectMutationContextTests
 {
     [Fact]
     public void WhenSetValueFromSource_ThenIsChangingFromSourceShouldReturnTrue()
