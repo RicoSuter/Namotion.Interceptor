@@ -12,7 +12,10 @@ public class SubjectUpdateExtensionsTests
     public void WhenApplyingSimpleProperty_ThenItWorks()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+        
         var person = new Person(context);
         
         // Act

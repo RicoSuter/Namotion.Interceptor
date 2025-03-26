@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using Moq;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Tests.Models;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Tests.Extensions;
@@ -12,42 +14,29 @@ public class SubjectDataExtensionsTests
     public void WhenSetValueFromSource_ThenIsChangingFromSourceShouldReturnTrue()
     {
         // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangedObservable();
+        
+        var person = new Person(context);
         var propertyName = nameof(Person.FirstName);
         
-        var subject = new Mock<IInterceptorSubject>();
-        subject
-            .Setup(s => s.Data)
-            .Returns(new ConcurrentDictionary<string, object?>());
-        subject
-            .Setup(s => s.Properties)
-            .Returns(new Dictionary<string, SubjectPropertyMetadata>
-            {
-                {
-                    propertyName, new SubjectPropertyMetadata(propertyName, 
-                        typeof(string), [], null,  (_, _) => Thread.Sleep(500))
-                }
-            });
-
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangedObservable().Subscribe(c => changes.Add(c));
+        
         var source = Mock.Of<ISubjectSource>();
-        var propertyReference = new PropertyReference(subject.Object, propertyName);
-        var property = new RegisteredSubjectProperty(propertyReference)
-        {
-            Type = typeof(Person),
-            Attributes = Array.Empty<Attribute>()
-        };
-
-        // Assert
-        var change = new SubjectPropertyChange(propertyReference, propertyReference.GetDataSnapshot(), DateTimeOffset.Now, null, null);
-        Assert.False(change.IsChangingFromSource(source));
-        
+        var propertyReference = new PropertyReference(person, propertyName);
+        var registeredProperty = propertyReference.GetRegisteredProperty();
+   
         // Act
-        Task.Run(() => property.SetValueFromSource(source, "John"));
+        person.FirstName = "A";
+        registeredProperty.SetValueFromSource(source, "B");
+        person.FirstName = "C";
 
         // Assert
-        Thread.Sleep(100); // during write
-        Assert.True(change.IsChangingFromSource(source));
-        
-        Thread.Sleep(900); // after write
-        Assert.False(change.IsChangingFromSource(source));
+        Assert.False(changes.ElementAt(0).IsChangingFromSource(source));
+        Assert.True(changes.ElementAt(1).IsChangingFromSource(source));
+        Assert.False(changes.ElementAt(2).IsChangingFromSource(source));
     }
 }
