@@ -45,4 +45,9 @@ public record struct PropertyReference
     {
         return (T)Subject.Data.GetOrAdd($"{Name}:{key}", _ => valueFactory())!;
     }
+    
+    public IReadOnlyDictionary<string, object?> GetDataSnapshot()
+    {
+        return Subject.Data.ToDictionary(p => p.Key, p => p.Value);
+    }
 }

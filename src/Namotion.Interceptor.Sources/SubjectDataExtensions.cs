@@ -17,9 +17,9 @@ public static class SubjectDataExtensions
     {
         // TODO: Use async local here instead? Verify correctness of the method
 
-        var contexts = property.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ISubjectSource>())!;
-        lock (contexts)
-            contexts.Add(source);
+        var sources = property.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ISubjectSource>())!;
+        lock (sources)
+            sources.Add(source);
 
         try
         {
@@ -27,8 +27,8 @@ public static class SubjectDataExtensions
         }
         finally
         {
-            lock (contexts)
-                contexts.Remove(source);
+            lock (sources)
+                sources.Remove(source);
         }
     }
 
@@ -40,10 +40,8 @@ public static class SubjectDataExtensions
     /// <returns>The result.</returns>
     public static bool IsChangingFromSource(this SubjectPropertyChange change, ISubjectSource source)
     {
-        var contexts = change.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ISubjectSource>())!;
-        lock (contexts)
-        {
-            return contexts.Contains(source);
-        }
+        return change.PropertyDataSnapshot.TryGetValue(IsChangingFromSourceKey, out var value)
+           && value is HashSet<ISubjectSource> sources 
+           && sources.Contains(source);
     }
 }
