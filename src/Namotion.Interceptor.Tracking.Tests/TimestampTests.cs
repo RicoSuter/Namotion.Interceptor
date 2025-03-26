@@ -27,10 +27,10 @@ public class TimestampTests
         var timestamp = DateTimeOffset.Now.AddDays(-200);
 
         // Act
-        using (SubjectMutationContext.BeginTimestampScope(timestamp))
+        SubjectMutationContext.ApplyChangesWithTimestamp(timestamp, () =>
         {
             mother.FirstName = "Mother";
-        }
+        });
 
         var currentTimestamp = SubjectMutationContext.GetCurrentTimestamp();
         
