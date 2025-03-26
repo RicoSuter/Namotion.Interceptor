@@ -94,5 +94,10 @@ public record RegisteredSubjectProperty(PropertyReference Property)
         return Parent.Properties
             .Single(p => p.Key == Attribute.PropertyName)
             .Value;
-    } 
+    }
+
+    public static implicit operator PropertyReference(RegisteredSubjectProperty property)
+    {
+        return property.Property;
+    }
 }

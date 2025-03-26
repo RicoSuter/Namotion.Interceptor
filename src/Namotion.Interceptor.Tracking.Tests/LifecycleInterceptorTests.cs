@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Testing;
+﻿using Castle.Components.DictionaryAdapter.Xml;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -166,5 +167,34 @@ public class LifecycleInterceptorTests
 
         // Assert
         Assert.Equal(3, detaches.Count);
+    }
+    
+    [Fact]
+    public void WhenChangingProperty_ThenSubjectAttachAndDetachAreCalled()
+    {
+        // Arrange
+        var attaches = new List<SubjectLifecycleChange>();
+        var detaches = new List<SubjectLifecycleChange>();
+
+        var handler = new TestLifecyleHandler(attaches, detaches);
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithLifecycle()
+            .WithService(() => handler);
+
+        // Act & Assert
+        var car = new Car(context)
+        {
+            Name = "Test"
+        };
+        
+        Assert.Single(car.Attachements);
+        Assert.Empty(car.Detachements);
+
+        var subject = (IInterceptorSubject)car;
+        subject.Context.RemoveFallbackContext(context);
+        Assert.Single(car.Attachements);
+        Assert.Single(car.Detachements);
     }
 }
