@@ -52,9 +52,4 @@ public record struct PropertyReference
             _ => valueFactory(default), 
             (_, value) => valueFactory((T?)value));
     }
-    
-    public IReadOnlyDictionary<string, object?> GetDataSnapshot()
-    {
-        return Subject.Data.ToDictionary(p => p.Key, p => p.Value);
-    }
 }
