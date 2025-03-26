@@ -2,11 +2,9 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 public static class SubjectMutationContext
 {
-    [ThreadStatic] private static object? _currentChangingSource;
-
-    private static readonly ResetDisposableDisposable ResetDisposableInstance = new();
-    private static readonly AsyncLocal<DateTimeOffset?> CurrentTimestamp = new();
-
+    [ThreadStatic] private static object? _currentSource;
+    [ThreadStatic] private static DateTimeOffset? _currentTimestamp;
+    
     /// <summary>
     /// Gets or sets a function which retrieves the current timestamp (default is <see cref="DateTimeOffset.Now"/>).
     /// </summary>
@@ -16,14 +14,54 @@ public static class SubjectMutationContext
     /// Changes the current timestamp in the async local context until the scope is disposed.
     /// </summary>
     /// <param name="timestamp">The timestamp to set in the context.</param>
-    public static IDisposable BeginTimestampScope(DateTimeOffset? timestamp)
+    /// <param name="action">The action.</param>
+    public static T ApplyChangesWithTimestamp<T>(DateTimeOffset? timestamp, Func<T> action)
     {
-        // TODO: Also use thread local and action instead of async local?
+        _currentTimestamp = timestamp;
+        try
+        {
+            return action();
+        }
+        finally
+        {
+            _currentTimestamp = null;
+        }
+    }
+    
+    /// <summary>
+    /// Changes the current timestamp in the async local context until the scope is disposed.
+    /// </summary>
+    /// <param name="timestamp">The timestamp to set in the context.</param>
+    /// <param name="action">The action.</param>
+    public static void ApplyChangesWithTimestamp(DateTimeOffset? timestamp, Action action)
+    {
+        _currentTimestamp = timestamp;
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _currentTimestamp = null;
+        }
+    }
 
-        if (timestamp is not null)
-            CurrentTimestamp.Value = timestamp;
-
-        return ResetDisposableInstance;
+    /// <summary>
+    /// Executes the action and marks the assignment as applied by the specified source.
+    /// </summary>
+    /// <param name="source">The source.</param>
+    /// <param name="action">The action</param>
+    public static void ApplyChangesWithSource(object source, Action action)
+    {
+        _currentSource = source;
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _currentSource = null;
+        }
     }
 
     /// <summary>
@@ -32,7 +70,7 @@ public static class SubjectMutationContext
     /// <returns>The current timestamp.</returns>
     public static DateTimeOffset GetCurrentTimestamp()
     {
-        return CurrentTimestamp.Value ?? GetTimestampFunction();
+        return _currentTimestamp ?? GetTimestampFunction();
     }
 
     /// <summary>
@@ -41,7 +79,7 @@ public static class SubjectMutationContext
     /// <returns>The source or null (unknown).</returns>
     internal static object? GetCurrentSource()
     {
-        return _currentChangingSource;
+        return _currentSource;
     }
 
     /// <summary>
@@ -63,40 +101,14 @@ public static class SubjectMutationContext
     /// <param name="valueFromSource">The value</param>
     public static void SetValueFromSource(this PropertyReference property, object source, object? valueFromSource)
     {
-        _currentChangingSource = source;
+        _currentSource = source;
         try
         {
             property.SetValue(valueFromSource);
         }
         finally
         {
-            _currentChangingSource = null;
-        }
-    }
-
-    /// <summary>
-    /// Executes the action and marks the assignment as applied by the specified source.
-    /// </summary>
-    /// <param name="source">The source.</param>
-    /// <param name="action">The action</param>
-    public static void ApplyChangesFromSource(object source, Action action)
-    {
-        _currentChangingSource = source;
-        try
-        {
-            action();
-        }
-        finally
-        {
-            _currentChangingSource = null;
-        }
-    }
-
-    private class ResetDisposableDisposable : IDisposable
-    {
-        public void Dispose()
-        {
-            CurrentTimestamp.Value = null;
+            _currentSource = null;
         }
     }
 }

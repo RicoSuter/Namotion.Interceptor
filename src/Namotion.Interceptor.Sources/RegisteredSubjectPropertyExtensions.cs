@@ -7,7 +7,7 @@ public static class RegisteredSubjectPropertyExtensions
 {
     public static void SetValueFromSource(this RegisteredSubjectProperty property, ISubjectSource source, object? value)
     {
-        SubjectMutationContext.ApplyChangesFromSource(source, () =>
+        SubjectMutationContext.ApplyChangesWithSource(source, () =>
         {
             property.SetValue(value);
         });
