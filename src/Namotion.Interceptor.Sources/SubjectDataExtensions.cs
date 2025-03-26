@@ -15,11 +15,8 @@ public static class SubjectDataExtensions
     /// <param name="valueFromSource">The value</param>
     public static void SetValueFromSource(this RegisteredSubjectProperty property, ISubjectSource source, object? valueFromSource)
     {
-        // TODO: Use async local here instead? Verify correctness of the method
-
-        var sources = property.Property.GetOrAddPropertyData(IsChangingFromSourceKey, () => new HashSet<ISubjectSource>())!;
-        lock (sources)
-            sources.Add(source);
+        property.Property.AddOrUpdatePropertyData<ISubjectSource[]?>(IsChangingFromSourceKey, 
+            list => list is not null ? list.Concat([source]).ToArray() : [source]);
 
         try
         {
@@ -27,8 +24,8 @@ public static class SubjectDataExtensions
         }
         finally
         {
-            lock (sources)
-                sources.Remove(source);
+            property.Property.AddOrUpdatePropertyData<ISubjectSource[]?>(IsChangingFromSourceKey, 
+                list => list?.Where(p => p != source).ToArray());
         }
     }
 
@@ -40,8 +37,8 @@ public static class SubjectDataExtensions
     /// <returns>The result.</returns>
     public static bool IsChangingFromSource(this SubjectPropertyChange change, ISubjectSource source)
     {
-        return change.PropertyDataSnapshot.TryGetValue(IsChangingFromSourceKey, out var value)
-           && value is HashSet<ISubjectSource> sources 
+        return change.TryGetPropertySnapshotData(IsChangingFromSourceKey, out var value)
+           && value is ISubjectSource[] sources 
            && sources.Contains(source);
     }
 }
