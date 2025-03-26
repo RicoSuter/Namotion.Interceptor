@@ -45,9 +45,4 @@ public record struct PropertyReference
     {
         return (T)Subject.Data.GetOrAdd($"{Name}:{key}", _ => valueFactory())!;
     }
-    
-    public void UpdatePropertyData<T>(string key, T value)
-    {
-        Subject.Data[$"{Name}:{key}"] = value;
-    }
 }
