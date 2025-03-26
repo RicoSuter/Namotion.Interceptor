@@ -27,12 +27,12 @@ public record SubjectPropertyUpdate
     /// <summary>
     /// Gets the value of the property update.
     /// </summary>
-    public object? Value { get; internal set; }
+    public object? Value { get; private set; }
     
     /// <summary>
     /// Gets the timestamp of the property update or null if unknown.
     /// </summary>
-    public DateTimeOffset? Timestamp { get; internal set; }
+    public DateTimeOffset? Timestamp { get; private set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public SubjectUpdate? Item { get; internal set; }
@@ -74,7 +74,7 @@ public record SubjectPropertyUpdate
     {
         var attributes = subject.Properties
             .Where(p => 
-                p.Value.HasGetter && p.Value.HasPropertyAttributes(propertyName))
+                p.Value.HasGetter && p.Value.IsAttributeForProperty(propertyName))
             .ToDictionary(
                 p => p.Value.Attribute.AttributeName,
                 p => CreateCompleteUpdate(subject, p.Key, p.Value));

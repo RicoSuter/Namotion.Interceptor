@@ -2,6 +2,11 @@
 
 public static class ReadPropertyRecorderExtensions
 {
+    /// <summary>
+    /// Starts the recording of property read accesses.
+    /// </summary>
+    /// <param name="recorder">The recorder.</param>
+    /// <returns>The recording scope.</returns>
     public static ReadPropertyRecorderScope StartPropertyAccessRecording(this ReadPropertyRecorder recorder)
     {
         ReadPropertyRecorder.Scopes.Value ??= new Dictionary<ReadPropertyRecorder, List<HashSet<PropertyReference>>>();

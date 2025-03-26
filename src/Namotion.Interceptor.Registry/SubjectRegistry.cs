@@ -11,9 +11,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
     private readonly Lock _lock = new();
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     
-    /// <summary>
-    /// Gets all known registered subjects.
-    /// </summary>
+    /// <inheritdoc />
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
     {
         get
@@ -23,17 +21,25 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         }
     }
 
+    /// <inheritdoc />
     public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
     {
         lock (_knownSubjects)
             return _knownSubjects.GetValueOrDefault(subject);
     }
 
-    /// <summary>
-    /// Callback which is called when a subject is attached .
-    /// </summary>
-    /// <param name="change"></param>
-    /// <exception cref="InvalidOperationException">Changed property not found.</exception>
+    /// <inheritdoc />
+    public void EnqueueSubjectUpdate(Action update)
+    {
+        // TODO: Use this method in every property read/write to ensure thread safety
+        
+        lock (_lock)
+        {
+            update();
+        }
+    }
+
+    /// <inheritdoc />
     void ILifecycleHandler.Attach(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
@@ -124,15 +130,5 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         }
 
         return null;
-    }
-
-    public void EnqueueSubjectUpdate(Action update)
-    {
-        // TODO: Use this method in every property read/write to ensure thread safety
-        
-        lock (_lock)
-        {
-            update();
-        }
     }
 }

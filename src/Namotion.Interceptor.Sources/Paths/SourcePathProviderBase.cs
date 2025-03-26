@@ -5,16 +5,19 @@ namespace Namotion.Interceptor.Sources.Paths;
 
 public abstract class SourcePathProviderBase : ISourcePathProvider
 {
+    /// <inheritdoc />
     public virtual bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
         return true;
     }
 
+    /// <inheritdoc />
     public virtual string? TryGetPropertyName(RegisteredSubjectProperty property)
     {
         return property.BrowseName;
     }
 
+    /// <inheritdoc />
     public virtual string GetPropertyFullPath(IEnumerable<(RegisteredSubjectProperty property, object? index)> propertiesInPath)
     {
         return propertiesInPath.Aggregate("", 
@@ -37,6 +40,7 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
             });
     }
 
+    /// <inheritdoc />
     public RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string segment)
     {
         return property.Parent.Properties
