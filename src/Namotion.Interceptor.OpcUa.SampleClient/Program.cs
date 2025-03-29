@@ -22,9 +22,19 @@ var context = InterceptorSubjectContext
 
 Utils.SetTraceMask(Utils.TraceMasks.All);
 
-builder.Services.AddSingleton(new Root(context) { Person = new Person() });
+builder.Services.AddSingleton(new Root(context));
 builder.Services.AddOpcUaSubjectClient<Root>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 builder.Services.AddHostedService<Worker>();
+
+context.GetPropertyChangedObservable().Subscribe(x =>
+{
+    if (x.Property.Name == "FirstName")
+    {
+        var y = DateTimeOffset.Parse(x.NewValue?.ToString() ?? "");
+        var z = DateTimeOffset.Now - y;
+        Console.WriteLine($"DIFF {z.TotalMilliseconds} ms");
+    }
+});
 
 var host = builder.Build();
 host.Run();

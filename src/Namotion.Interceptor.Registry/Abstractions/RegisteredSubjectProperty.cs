@@ -28,6 +28,12 @@ public record RegisteredSubjectProperty(PropertyReference Property)
     /// </summary>
     public bool IsAttribute => Attributes.Any(a => a is PropertyAttributeAttribute);
 
+    public bool IsSubjectReference => Type.IsAssignableTo(typeof(IInterceptorSubject));
+
+    public bool IsSubjectCollection => Type.IsAssignableTo(typeof(IEnumerable<IInterceptorSubject>));
+
+    public bool IsSubjectDictionary => Type.IsAssignableTo(typeof(IReadOnlyDictionary<string, IInterceptorSubject>));
+
     /// <summary>
     /// Gets the attribute with information about this attribute property.
     /// </summary>
