@@ -121,7 +121,7 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                         MinLifetimeInterval = 60_000,
                     };
 
-                    ProcessSubject(_subject, rootNode, session, subscription, _rootName + PathDelimiter);
+                    ProcessSubject(_subject, rootNode, session, subscription, _rootName ?? string.Empty);
 
                     session.AddSubscription(subscription);
                     await subscription.CreateAsync(stoppingToken); // Subscribes to all added items
@@ -162,7 +162,7 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                     if (property.Type.IsAssignableTo(typeof(IInterceptorSubject)))
                     {
                         if (children.Any())
-                            ProcessSubject(children.Single().Subject, rootNode, session, subscription, prefix + propertyName);
+                            ProcessSubject(children.Single().Subject, rootNode, session, subscription, prefix + PathDelimiter + propertyName);
                     }
                     else if (property.Type.IsAssignableTo(typeof(IEnumerable<IInterceptorSubject>)))
                     {
@@ -174,7 +174,7 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                     }
                     else
                     {
-                        CreateVariableNode(prefix + propertyName, property, rootNode, subscription);
+                        CreateVariableNode(prefix + PathDelimiter + propertyName, property, rootNode, subscription, session);
                     }
                 }
             }
@@ -192,11 +192,11 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
         }
     }
 
-    private void CreateVariableNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription rootNode, Subscription subscription)
+    private void CreateVariableNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription rootNode, Subscription subscription, Session session)
     {
         // var sourcePath = property.TryGetSourcePath(_sourcePathProvider, _subject);
         var nodeId = new NodeId(fullPath, rootNode.NodeId.NamespaceIndex);
-        // var node = session.ReadNode(nodeId);
+        var node = session.ReadNode(nodeId);
         
         if (property.HasSetter)
         {
@@ -226,7 +226,7 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                 }
             };
         
-            _logger.LogInformation("Subscribed to {Path}", fullPath);
+            _logger.LogInformation("Subscribed to '{Path}'", nodeId);
     
             subscription.AddItem(monitoredItem);
         }
