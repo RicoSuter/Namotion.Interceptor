@@ -120,7 +120,11 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
         if (property.IsAttribute)
         {
             var attributedProperty = property.GetAttributedProperty();
-            return GetPropertyName(attributedProperty) + "__" + _source.SourcePathProvider.TryGetPropertyName(property);
+            var propertyName = _source.SourcePathProvider.TryGetPropertyName(property);
+            if (propertyName is null)
+                return null;
+            
+            return GetPropertyName(attributedProperty) + "__" + propertyName;
         }
         
         return _source.SourcePathProvider.TryGetPropertyName(property);

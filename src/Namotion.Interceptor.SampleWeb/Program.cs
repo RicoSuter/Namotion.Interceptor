@@ -86,9 +86,9 @@ namespace Namotion.Interceptor.SampleWeb
 
         public void InitializeProperty(RegisteredSubjectProperty property, object? index)
         {
-             property.AddAttribute("Unit", typeof(string), 
-                 () => _unit, null,
-                 new SourceNameAttribute("mqtt", "unit"));
+            property.AddAttribute("Unit", typeof(string),
+                () => _unit, null,
+                new SourceNameAttribute("mqtt", "unit"));
         }
     }
 
@@ -117,10 +117,11 @@ namespace Namotion.Interceptor.SampleWeb
             builder.Services.AddSubjectController<Car, SubjectController<Car>>();
 
             // trackable UPC UA
-            builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
+            // builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
+            builder.Services.AddOpcUaSubjectClient<Car>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 
             // trackable mqtt
-            builder.Services.AddMqttSubjectServer<Car>("mqtt");
+            // builder.Services.AddMqttSubjectServer<Car>("mqtt");
             //builder.Services.AddMqttSubjectServer<Tire>(sp => sp.GetRequiredService<Car>().Tires[2], "mqtt");
 
             // trackable GraphQL
@@ -153,7 +154,7 @@ namespace Namotion.Interceptor.SampleWeb
         [Route("/api/car")]
         public class SubjectController<TProxy> : SubjectControllerBase<TProxy> where TProxy : IInterceptorSubject
         {
-            public SubjectController(TProxy subject, IOptions<JsonOptions> jsonOptions) 
+            public SubjectController(TProxy subject, IOptions<JsonOptions> jsonOptions)
                 : base(subject, jsonOptions)
             {
             }
