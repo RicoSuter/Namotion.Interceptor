@@ -95,7 +95,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                         
                         return isIncluded && !change.IsChangingFromSource(_source);
                     })
-                    .BufferChanges(_bufferTime)
+                    //.BufferChanges(_bufferTime)
+                    .Select(change => new [] { change })
                     .Where(changes => changes.Any())
                     .ToAsyncEnumerable()
                     .WithCancellation(stoppingToken))
