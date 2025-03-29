@@ -16,14 +16,14 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
     where TSubject : IInterceptorSubject
 {
     private const string PathDelimiter = ".";
-
-    internal const string OpcVariableKey = "OpcVariable";
+    private const string OpcVariableKey = "OpcVariable";
 
     private readonly TSubject _subject;
     private readonly string _serverUrl;
     private readonly ISourcePathProvider _sourcePathProvider;
     private readonly ILogger _logger;
     private readonly string? _rootName;
+    private readonly Dictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
 
     private ISubjectMutationDispatcher? _dispatcher;
     private Session? _session;
@@ -54,7 +54,7 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            using var stream = typeof(OpcUaSubjectServerSourceExtensions).Assembly
+            await using var stream = typeof(OpcUaSubjectServerSourceExtensions).Assembly
                 .GetManifestResourceStream("Namotion.Interceptor.OpcUa.MyOpcUaServer.Config.xml");
 
             var application = new ApplicationInstance
@@ -71,15 +71,8 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
             {
                 await application.CheckApplicationInstanceCertificate(true, CertificateFactory.DefaultKeySize);
 
-                // Create the OPC UA client
                 var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
-
-                var endpointDescription = CoreClientUtils.SelectEndpoint(application.ApplicationConfiguration, 
-                    _serverUrl, false);
-
-                // var endpointConfiguration = EndpointConfiguration.Create(applicationConfiguration);
-
-                // var endpoint2 = CoreClientUtils.SelectEndpoint(_serverUrl, false);
+                var endpointDescription = CoreClientUtils.SelectEndpoint(application.ApplicationConfiguration, _serverUrl, false);
                 var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
 
                 using var session = await Session.Create(
@@ -90,27 +83,22 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                     60000,
                     new UserIdentity(), // Use anonymous authentication; adjust if needed
                     null, stoppingToken);
-             
-                Console.WriteLine("Session created and connected.");
-
+                
                 _session = session;
 
                 // Browse the Root folder
-                ReferenceDescriptionCollection references;
-                Byte[] continuationPoint;
-                session.Browse(
+                var (_, _, references, _) = await session.BrowseAsync(
                     null,
                     null,
-                    ObjectIds.ObjectsFolder,
+                    [ObjectIds.ObjectsFolder],
                     0u,
                     BrowseDirection.Forward,
                     ReferenceTypeIds.HierarchicalReferences,
                     true,
                     (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
-                    out continuationPoint,
-                    out references);
+                    stoppingToken);
 
-                var rootNode = references.FirstOrDefault(r => r.BrowseName == _rootName);
+                var rootNode = references.SelectMany(c => c).FirstOrDefault(r => r.BrowseName == _rootName);
                 if (rootNode is not null)
                 {
                     var subscription = new Subscription(session.DefaultSubscription)
@@ -121,33 +109,75 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                         MinLifetimeInterval = 60_000,
                     };
 
-                    ProcessSubject(_subject, rootNode, session, subscription, _rootName ?? string.Empty);
+                    if (session.AddSubscription(subscription))
+                    {
+                        await subscription.CreateAsync(stoppingToken); // Subscribes to all added items
+                        
+                        subscription.FastDataChangeCallback += FastDataChangeCallback;
+                        subscription.FastEventCallback += FastEventCallback;
 
-                    session.AddSubscription(subscription);
-                    await subscription.CreateAsync(stoppingToken); // Subscribes to all added items
+                        await ProcessSubjectAsync(_subject, rootNode, session, subscription, _rootName ?? string.Empty);
+
+                        await subscription.ApplyChangesAsync(stoppingToken);
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("Failed to add subscription.");
+                    }
                 }
 
-                await Task.Delay(-1, stoppingToken); // Keep the session alive
-                //
-                // Console.WriteLine("Browsing nodes:");
-                // foreach (var rd in references)
-                // {
-                //     Console.WriteLine($"{rd.DisplayName}: {rd.BrowseName}");
-                // }
-                //
-                // // Reading a specific node
-                // NodeId nodeId = new NodeId("YourVariableNodeID", 2); // Adjust as needed
-                // DataValue value = session.ReadValue(nodeId);
-                // Console.WriteLine($"Value of {nodeId}: {value.Value}");
+                await Task.Delay(-1, stoppingToken);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Exception: {ex.Message}");
+                await Task.Delay(1000, stoppingToken);
             }
         }
     }
 
-    private void ProcessSubject(IInterceptorSubject subject, ReferenceDescription rootNode, Session session, Subscription subscription, string prefix)
+    private void FastEventCallback(Subscription subscription, EventNotificationList notification, IList<string> stringtable)
+    {
+        
+    }
+
+    private void FastDataChangeCallback(Subscription subscription, DataChangeNotification notification, IList<string> stringtable)
+    {
+        var changes = notification
+            .MonitoredItems
+            .Select(i =>
+            {
+                var property = _monitoredItems[i.ClientHandle];
+                
+                var value = i.Value.Value;
+                if (typeof(decimal).IsAssignableTo(property.Type))
+                {
+                    value = Convert.ToDecimal(value);
+                }
+                
+                return new SubjectPropertyChange
+                {
+                    Property = property,
+                    NewValue = value,
+                    OldValue = null,
+                    Timestamp = i.Value.SourceTimestamp
+                };
+            })
+            .ToList();
+        
+        _dispatcher?.EnqueueSubjectUpdate(() =>
+        {
+            foreach (var change in changes)
+            {
+                _logger.LogInformation("Received notification for {Path} with value {Value}", change.Property.Name, change.NewValue);
+                
+                SubjectMutationContext.ApplyChangesWithTimestamp(change.Timestamp,
+                    () => change.Property.SetValueFromSource(this, change.NewValue));
+            }
+        });
+    }
+
+    private async Task ProcessSubjectAsync(IInterceptorSubject subject, ReferenceDescription node, Session session, Subscription subscription, string prefix)
     {
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is not null)
@@ -158,50 +188,73 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                 if (propertyName is not null)
                 {
                     // TODO: Do the same in the server
-                    var children = property.Children;
-                    if (property.Type.IsAssignableTo(typeof(IInterceptorSubject)))
+                    if (property.IsSubjectReference)
                     {
+                        var collectionPath = prefix + PathDelimiter + propertyName;
+                        var children = property.Children;
                         if (children.Any())
-                            ProcessSubject(children.Single().Subject, rootNode, session, subscription, prefix + PathDelimiter + propertyName);
+                        {
+                            await ProcessSubjectAsync(children.Single().Subject, node, session, subscription, collectionPath);
+                        }
+                        else
+                        {
+                            var (_, _ , nodeProperties, _) = await session.BrowseAsync(
+                                null,
+                                null,
+                                [new NodeId(node.NodeId.Identifier, node.NodeId.NamespaceIndex)],
+                                0u,
+                                BrowseDirection.Forward,
+                                ReferenceTypeIds.HierarchicalReferences,
+                                true,
+                                (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method);
+                            
+                            var nodeProperty = nodeProperties
+                                .SelectMany(p => p)
+                                .SingleOrDefault(p => (string)p.NodeId.Identifier == collectionPath && p.NodeId.NamespaceIndex == node.NodeId.NamespaceIndex);
+
+                            if (nodeProperty is not null)
+                            {
+                                var newSubject = DefaultSubjectFactory.Instance.CreateSubject(property, null);
+                                newSubject.Context.AddFallbackContext(subject.Context);
+                                await ProcessSubjectAsync(newSubject, nodeProperty, session, subscription, collectionPath);
+                                property.SetValueFromSource(this, newSubject);
+                            }
+                        }
                     }
-                    else if (property.Type.IsAssignableTo(typeof(IEnumerable<IInterceptorSubject>)))
+                    else if (property.IsSubjectCollection)
                     {
-                        CreateArrayObjectNode(children, rootNode, session, subscription, prefix + propertyName + PathDelimiter + propertyName);
+                        var children = property.Children;
+                        await CreateArrayObjectNode(children, node, session, subscription, prefix + propertyName + PathDelimiter + propertyName);
                     }
-                    else if (property.Type.IsAssignableTo(typeof(IReadOnlyDictionary<string, IInterceptorSubject>)))
+                    else if (property.IsSubjectDictionary)
                     {
-                        
+                        // TODO: Implement dictionary support
                     }
                     else
                     {
-                        CreateVariableNode(prefix + PathDelimiter + propertyName, property, rootNode, subscription, session);
+                        CreateVariableNode(prefix + PathDelimiter + propertyName, property, node, subscription, session);
                     }
                 }
             }
         }
     }
 
-    private void CreateArrayObjectNode(ICollection<SubjectPropertyChild> children, ReferenceDescription rootNode, 
+    private async Task CreateArrayObjectNode(ICollection<SubjectPropertyChild> children, ReferenceDescription collectionNode, 
         Session session, Subscription subscription, string prefix)
     {
         var i = 0;
         foreach (var child in children)
         {
-            ProcessSubject(child.Subject, rootNode, session, subscription, prefix + $"[{i}]" + PathDelimiter);
+            await ProcessSubjectAsync(child.Subject, collectionNode, session, subscription, prefix + $"[{i}]" + PathDelimiter);
             i++;
         }
     }
-
-    private void CreateVariableNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription rootNode, Subscription subscription, Session session)
+    
+    private void CreateVariableNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription node, Subscription subscription, Session session)
     {
-        // var sourcePath = property.TryGetSourcePath(_sourcePathProvider, _subject);
-        var nodeId = new NodeId(fullPath, rootNode.NodeId.NamespaceIndex);
-        var node = session.ReadNode(nodeId);
-        
         if (property.HasSetter)
         {
-            property.Property.SetPropertyData(OpcVariableKey, nodeId);
-
+            var nodeId = new NodeId(fullPath, node.NodeId.NamespaceIndex);
             var monitoredItem = new MonitoredItem
             {
                 StartNodeId = nodeId,
@@ -212,23 +265,13 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                 // QueueSize = 10,
                 // DiscardOldest = true
             };
-        
-            monitoredItem.Notification += (_, args) =>
-            {
-                if (args.NotificationValue is MonitoredItemNotification notification)
-                {
-                    _dispatcher?.EnqueueSubjectUpdate(() =>
-                    { 
-                        _logger.LogInformation("Received notification for {Path} with value {Value}", fullPath, notification.Value.Value);
-                        SubjectMutationContext.ApplyChangesWithTimestamp(notification.Value.SourceTimestamp,
-                            () => property.SetValueFromSource(this, notification.Value.Value));
-                    });
-                }
-            };
-        
-            _logger.LogInformation("Subscribed to '{Path}'", nodeId);
-    
+            
+            _monitoredItems[monitoredItem.ClientHandle] = property;
+            
+            property.Property.SetPropertyData(OpcVariableKey, nodeId);
             subscription.AddItem(monitoredItem);
+
+            _logger.LogInformation("Subscribed to '{Path}'", nodeId);
         }
     }
 
@@ -287,11 +330,11 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                 
                 if (writeResponse.Results.Any(StatusCode.IsBad))
                 {
+                    _logger.LogError("Failed to write some variables.");
+
                     // var badVariableStatusCodes = writeResponse.Results
                     //     .Where(StatusCode.IsBad)
                     //     .ToDictionary(wr => , wr => wr.Code);
-                    //
-                    // _logger.LogError("Failed to write variables: {@Variables}", badVariableStatusCodes);
                     //
                     // throw new ConnectionException(_connectionOptions,
                     //     $"Unexpected Error during writing variables. Variables: {badVariableStatusCodes.Keys.Join(Environment.NewLine)}")

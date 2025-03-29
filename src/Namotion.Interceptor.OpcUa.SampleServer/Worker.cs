@@ -18,10 +18,8 @@ public class Worker : BackgroundService
         {
             if (_root.Person != null)
             {
-                _root.Person.FirstName = Guid.NewGuid().ToString();
+                _root.Person.FirstName = DateTimeOffset.Now.ToString("O");
             }
-
-            _root.Number++;
             
             await Task.Delay(1000);
         }
