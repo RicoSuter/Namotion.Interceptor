@@ -75,16 +75,21 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                 var endpointDescription = CoreClientUtils.SelectEndpoint(application.ApplicationConfiguration, _serverUrl, false);
                 var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
 
+                var cancellationTokenSource = new CancellationTokenSource();
                 using var session = await Session.Create(
                     application.ApplicationConfiguration,
                     endpoint,
                     false,
-                    "MyOpcUaClient2",
+                    "MyOpcUaClient",
                     60000,
                     new UserIdentity(), // Use anonymous authentication; adjust if needed
                     null, stoppingToken);
                 
                 _session = session;
+                _session.SessionClosing += (sender, args) =>
+                {
+                    cancellationTokenSource.Cancel();
+                };
 
                 // Browse the Root folder
                 var (_, _, references, _) = await session.BrowseAsync(
@@ -104,20 +109,18 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                     var subscription = new Subscription(session.DefaultSubscription)
                     {
                         PublishingEnabled = true,
-                        PublishingInterval = 250,
+                        PublishingInterval = 0, // TODO: Set to a reasonable value
                         DisableMonitoredItemCache = true,
                         MinLifetimeInterval = 60_000,
                     };
 
                     if (session.AddSubscription(subscription))
                     {
-                        await subscription.CreateAsync(stoppingToken); // Subscribes to all added items
-                        
+                        await subscription.CreateAsync(stoppingToken);
                         subscription.FastDataChangeCallback += FastDataChangeCallback;
                         subscription.FastEventCallback += FastEventCallback;
 
-                        await ProcessSubjectAsync(_subject, rootNode, session, subscription, _rootName ?? string.Empty);
-
+                        await LoadSubjectAsync(_subject, rootNode, subscription, _rootName ?? string.Empty, stoppingToken);
                         await subscription.ApplyChangesAsync(stoppingToken);
                     }
                     else
@@ -126,10 +129,13 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                     }
                 }
 
-                await Task.Delay(-1, stoppingToken);
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, cancellationTokenSource.Token);
+                await Task.Delay(-1, linked.Token);
+                _session = null;
             }
             catch (Exception ex)
             {
+                _session = null;
                 Console.WriteLine($"Exception: {ex.Message}");
                 await Task.Delay(1000, stoppingToken);
             }
@@ -177,10 +183,10 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
         });
     }
 
-    private async Task ProcessSubjectAsync(IInterceptorSubject subject, ReferenceDescription node, Session session, Subscription subscription, string prefix)
+    private async Task LoadSubjectAsync(IInterceptorSubject subject, ReferenceDescription node, Subscription subscription, string prefix, CancellationToken cancellationToken)
     {
         var registeredSubject = subject.TryGetRegisteredSubject();
-        if (registeredSubject is not null)
+        if (registeredSubject is not null && _session is not null)
         {
             foreach (var (_, property) in registeredSubject.Properties)
             {
@@ -194,11 +200,11 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                         var children = property.Children;
                         if (children.Any())
                         {
-                            await ProcessSubjectAsync(children.Single().Subject, node, session, subscription, collectionPath);
+                            await LoadSubjectAsync(children.Single().Subject, node, subscription, collectionPath, cancellationToken);
                         }
                         else
                         {
-                            var (_, _ , nodeProperties, _) = await session.BrowseAsync(
+                            var (_, _ , nodeProperties, _) = await _session.BrowseAsync(
                                 null,
                                 null,
                                 [new NodeId(node.NodeId.Identifier, node.NodeId.NamespaceIndex)],
@@ -206,25 +212,28 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                                 BrowseDirection.Forward,
                                 ReferenceTypeIds.HierarchicalReferences,
                                 true,
-                                (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method);
+                                (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method, 
+                                cancellationToken);
                             
                             var nodeProperty = nodeProperties
                                 .SelectMany(p => p)
-                                .SingleOrDefault(p => (string)p.NodeId.Identifier == collectionPath && p.NodeId.NamespaceIndex == node.NodeId.NamespaceIndex);
+                                .SingleOrDefault(p => 
+                                    (string)p.NodeId.Identifier == collectionPath && p.NodeId.NamespaceIndex == node.NodeId.NamespaceIndex);
 
                             if (nodeProperty is not null)
                             {
                                 var newSubject = DefaultSubjectFactory.Instance.CreateSubject(property, null);
                                 newSubject.Context.AddFallbackContext(subject.Context);
-                                await ProcessSubjectAsync(newSubject, nodeProperty, session, subscription, collectionPath);
+                                await LoadSubjectAsync(newSubject, nodeProperty, 
+                                    subscription, collectionPath, cancellationToken);
                                 property.SetValueFromSource(this, newSubject);
                             }
                         }
                     }
                     else if (property.IsSubjectCollection)
                     {
-                        var children = property.Children;
-                        await CreateArrayObjectNode(children, node, session, subscription, prefix + propertyName + PathDelimiter + propertyName);
+                        await LoadSubjectCollectionAsync(property.Children, node, subscription, 
+                            prefix + propertyName + PathDelimiter + propertyName, cancellationToken);
                     }
                     else if (property.IsSubjectDictionary)
                     {
@@ -232,25 +241,25 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                     }
                     else
                     {
-                        CreateVariableNode(prefix + PathDelimiter + propertyName, property, node, subscription, session);
+                        MonitorValueNode(prefix + PathDelimiter + propertyName, property, node, subscription);
                     }
                 }
             }
         }
     }
 
-    private async Task CreateArrayObjectNode(ICollection<SubjectPropertyChild> children, ReferenceDescription collectionNode, 
-        Session session, Subscription subscription, string prefix)
+    private async Task LoadSubjectCollectionAsync(ICollection<SubjectPropertyChild> children, ReferenceDescription collectionNode, 
+        Subscription subscription, string fullPath, CancellationToken cancellationToken)
     {
         var i = 0;
         foreach (var child in children)
         {
-            await ProcessSubjectAsync(child.Subject, collectionNode, session, subscription, prefix + $"[{i}]" + PathDelimiter);
+            await LoadSubjectAsync(child.Subject, collectionNode, subscription, fullPath + $"[{i}]" + PathDelimiter, cancellationToken);
             i++;
         }
     }
     
-    private void CreateVariableNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription node, Subscription subscription, Session session)
+    private void MonitorValueNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription node, Subscription subscription)
     {
         if (property.HasSetter)
         {
@@ -261,7 +270,7 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                 MonitoringMode = MonitoringMode.Reporting,
                 AttributeId = Opc.Ua.Attributes.Value,
                 DisplayName = fullPath,
-                // SamplingInterval = 1000,
+                SamplingInterval = 0, // TODO: Set to a reasonable value
                 // QueueSize = 10,
                 // DiscardOldest = true
             };
@@ -297,10 +306,12 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
 
     public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
+        if (_session is null)
+            return;
+            
         foreach (var change in changes)
         {
-            if (_session is not null &&
-                change.Property.TryGetPropertyData(OpcVariableKey, out var value) && 
+            if (change.Property.TryGetPropertyData(OpcVariableKey, out var value) && 
                 value is NodeId nodeId)
             {
 
