@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
@@ -30,9 +31,13 @@ context.GetPropertyChangedObservable().Subscribe(x =>
 {
     if (x.Property.Name == "FirstName")
     {
-        var y = DateTimeOffset.Parse(x.NewValue?.ToString() ?? "");
-        var z = DateTimeOffset.Now - y;
-        Console.WriteLine($"DIFF {z.TotalMilliseconds} ms");
+        long laterTimestamp = Stopwatch.GetTimestamp();
+        long beforeTimestamp = long.Parse(x.NewValue?.ToString() ?? "0");
+
+        long ticksElapsed = laterTimestamp - beforeTimestamp;
+        double secondsElapsed = (double)ticksElapsed / Stopwatch.Frequency;
+
+        Console.WriteLine($"Elapsed time: {secondsElapsed * 1000} ms");
     }
 });
 

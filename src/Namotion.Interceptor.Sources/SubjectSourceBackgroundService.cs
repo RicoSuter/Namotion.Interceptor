@@ -95,20 +95,27 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                         
                         return isIncluded && !change.IsChangingFromSource(_source);
                     })
-                    //.BufferChanges(_bufferTime)
-                    .Select(change => new [] { change })
+                    .BufferChanges(_bufferTime)
                     .Where(changes => changes.Any())
                     .ToAsyncEnumerable()
                     .WithCancellation(stoppingToken))
                 {
-                    await _source.WriteToSourceAsync(changes, stoppingToken);
+                    try
+                    {
+                        await _source.WriteToSourceAsync(changes, stoppingToken);
+                    }
+                    catch (Exception e)
+                    {
+                        // TODO: What do to here?
+                        _logger.LogError(e, "Failed to write changes to source.");
+                    }
                 }
             }
             catch (Exception ex)
             {
                 if (ex is TaskCanceledException) return;
                 
-                _logger.LogError(ex, "Failed to listen for changes.");
+                _logger.LogError(ex, "Failed to listen for changes in source.");
                 await Task.Delay(_retryTime, stoppingToken);
             }
         }

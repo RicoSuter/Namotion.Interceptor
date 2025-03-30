@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.OpcUa.SampleModel;
 
@@ -18,7 +19,7 @@ public class Worker : BackgroundService
         {
             if (_root.Person != null)
             {
-                _root.Person.FirstName = DateTimeOffset.Now.ToString("O");
+                _root.Person.FirstName = Stopwatch.GetTimestamp().ToString();
             }
             
             await Task.Delay(1000);
