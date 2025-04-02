@@ -144,26 +144,25 @@ namespace Namotion.Interceptor.Mqtt
                 return Task.CompletedTask;
             }
 
-            try
+            var path = args.ApplicationMessage.Topic;
+            var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
+
+            _dispatcher?.EnqueueSubjectUpdate(() =>
             {
-                var path = args.ApplicationMessage.Topic;
-
-                var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
-                var document = JsonDocument.Parse(payload);
-
-                _dispatcher?.EnqueueSubjectUpdate(() =>
+                try
                 {
+                    var document = JsonDocument.Parse(payload);
                     _subject.UpdatePropertyValueFromSourcePath(path,
                         DateTimeOffset.Now, // TODO: What timestamp to use here?
                         (property, _) => document.Deserialize(property.Type),
                         _sourcePathProvider, this);
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to deserialize MQTT payload.");
-            }
-
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to deserialize MQTT payload.");
+                }
+            });
+            
             return Task.CompletedTask;
         }
 

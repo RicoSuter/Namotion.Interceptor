@@ -16,10 +16,10 @@ public class Worker : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (_root.Person != null)
-            {
-                _root.Person.FirstName = Guid.NewGuid().ToString();
-            }
+            // if (_root.Person != null)
+            // {
+            //     _root.Person.FirstName = Guid.NewGuid().ToString();
+            // }
 
             _root.Number++;
             

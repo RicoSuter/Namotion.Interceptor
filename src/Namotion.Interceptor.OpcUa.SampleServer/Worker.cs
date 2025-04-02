@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.OpcUa.SampleModel;
 
@@ -18,10 +19,8 @@ public class Worker : BackgroundService
         {
             if (_root.Person != null)
             {
-                _root.Person.FirstName = Guid.NewGuid().ToString();
+                _root.Person.FirstName = Stopwatch.GetTimestamp().ToString();
             }
-
-            _root.Number++;
             
             await Task.Delay(1000);
         }

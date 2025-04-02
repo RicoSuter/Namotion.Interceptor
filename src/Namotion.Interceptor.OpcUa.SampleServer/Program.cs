@@ -30,7 +30,7 @@ var root = new Root(context)
 
 builder.Services.AddSingleton(root);
 builder.Services.AddOpcUaSubjectServer<Root>("opc", rootName: "Root");
-// builder.Services.AddHostedService<Worker>();
+builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();
 host.Run();

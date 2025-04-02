@@ -91,21 +91,21 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
             var propertyName = GetPropertyName(property);
             if (propertyName is not null)
             {
-                var children = property.Children;
-                if (children.Count >= 1)
+                if (property.IsSubjectReference)
                 {
-                    if (children.Count == 1 && children.All(c => c.Index is null))
+                    var referencedSubject = property.Children.SingleOrDefault();
+                    if (referencedSubject.Subject is not null)
                     {
-                        CreateReferenceObjectNode(propertyName, property, children.Single(), parentNodeId, prefix);
+                        CreateReferenceObjectNode(propertyName, property, referencedSubject, parentNodeId, prefix);
                     }
-                    else if (children.All(c => c.Index is int))
-                    {
-                        CreateArrayObjectNode(propertyName, property, property.Children, parentNodeId, prefix);
-                    }
-                    else if (children.All(c => c.Index is not null))
-                    {
-                        CreateDictionaryObjectNode(propertyName, property, property.Children, parentNodeId, prefix);
-                    }
+                }
+                else if (property.IsSubjectCollection)
+                {
+                    CreateArrayObjectNode(propertyName, property, property.Children, parentNodeId, prefix);
+                }
+                else if (property.IsSubjectDictionary)
+                {
+                    CreateDictionaryObjectNode(propertyName, property, property.Children, parentNodeId, prefix);
                 }
                 else
                 {
@@ -240,7 +240,7 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
 
     private static NodeId? GetReferenceTypeId(RegisteredSubjectProperty property)
     {
-        var referenceTypeAttribute = property.Attributes
+        var referenceTypeAttribute = property.ReflectionAttributes
             .OfType<OpcUaNodeReferenceTypeAttribute>()
             .FirstOrDefault();
 
@@ -249,7 +249,7 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
 
     private static NodeId? GetChildReferenceTypeId(RegisteredSubjectProperty property)
     {
-        var referenceTypeAttribute = property.Attributes
+        var referenceTypeAttribute = property.ReflectionAttributes
             .OfType<OpcUaNodeItemReferenceTypeAttribute>()
             .FirstOrDefault();
 
@@ -258,7 +258,7 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
 
     private NodeId? GetTypeDefinitionId(RegisteredSubjectProperty property)
     {
-        var typeDefinitionAttribute = property.Attributes
+        var typeDefinitionAttribute = property.ReflectionAttributes
             .OfType<OpcUaTypeDefinitionAttribute>()
             .FirstOrDefault();
 
@@ -296,7 +296,7 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
 
     private QualifiedName GetBrowseName(string propertyName, RegisteredSubjectProperty property, object? index)
     {
-        var browseNameProvider = property.Attributes.OfType<IOpcUaBrowseNameProvider>().SingleOrDefault();
+        var browseNameProvider = property.ReflectionAttributes.OfType<IOpcUaBrowseNameProvider>().SingleOrDefault();
         if (browseNameProvider is null)
         {
             return new QualifiedName(propertyName + (index is not null ? $"[{index}]" : string.Empty), NamespaceIndex);

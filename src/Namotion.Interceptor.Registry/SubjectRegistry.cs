@@ -29,10 +29,9 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
     }
 
     /// <inheritdoc />
-    public void EnqueueSubjectUpdate(Action update)
+    public void ExecuteSubjectUpdate(Action update)
     {
         // TODO: Use this method in every property read/write to ensure thread safety
-        
         lock (_lock)
         {
             update();
@@ -73,7 +72,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
 
             foreach (var property in subject.Properties)
             {
-                foreach (var attribute in property.Value.Attributes.OfType<ISubjectPropertyInitializer>())
+                foreach (var attribute in property.Value.ReflectionAttributes.OfType<ISubjectPropertyInitializer>())
                 {
                     attribute.InitializeProperty(property.Value, change.Index);
                 }
@@ -85,10 +84,9 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
     {
         var registeredSubject = new RegisteredSubject(subject, subject
             .Properties
-            .Select(p => new RegisteredSubjectProperty(new PropertyReference(subject, p.Key))
+            .Select(p => new RegisteredSubjectProperty(new PropertyReference(subject, p.Key), p.Value.Attributes)
             {
                 Type = p.Value.Type,
-                Attributes = p.Value.Attributes
             }));
 
         _knownSubjects[subject] = registeredSubject;

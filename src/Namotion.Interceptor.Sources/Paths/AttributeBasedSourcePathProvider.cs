@@ -108,7 +108,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
     private SourceNameAttribute? TryGetSourceNameAttribute(RegisteredSubjectProperty property)
     {
         return property
-            .Attributes
+            .ReflectionAttributes
             .OfType<SourceNameAttribute>()
             .FirstOrDefault(a => a.SourceName == _sourceName);
     }
@@ -116,7 +116,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
     private SourcePathAttribute? TryGetSourcePathAttribute(RegisteredSubjectProperty property)
     {
         return property
-            .Attributes
+            .ReflectionAttributes
             .OfType<SourcePathAttribute>()
             .FirstOrDefault(a => a.SourceName == _sourceName);
     }

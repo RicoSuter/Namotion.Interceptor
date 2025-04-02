@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
@@ -76,7 +75,7 @@ public record SubjectPropertyUpdate
             .Where(p => 
                 p.Value.HasGetter && p.Value.IsAttributeForProperty(propertyName))
             .ToDictionary(
-                p => p.Value.Attribute.AttributeName,
+                p => p.Value.AttributeMetadata.AttributeName,
                 p => CreateCompleteUpdate(subject, p.Key, p.Value));
 
         var propertyUpdate = new SubjectPropertyUpdate
@@ -98,17 +97,18 @@ public record SubjectPropertyUpdate
     {
         Timestamp = timestamp;
         
-        if (value is IDictionary dictionary && dictionary.Values.OfType<IInterceptorSubject>().Any())
+        if (value is IReadOnlyDictionary<string, IInterceptorSubject?> dictionary)
         {
-            // TODO: Fix dictionary handling logic (how to detect dict?)
-            
             Kind = SubjectPropertyUpdateKind.Collection;
             Collection = dictionary.Keys
-                .OfType<object>()
-                .Select((key) => new SubjectPropertyCollectionUpdate
+                .Select(key =>
                 {
-                    Item = SubjectUpdate.CreateCompleteUpdate((IInterceptorSubject)dictionary[key]!),
-                    Index = key
+                    var item = dictionary[key];
+                    return new SubjectPropertyCollectionUpdate
+                    {
+                        Item = item is not null ? SubjectUpdate.CreateCompleteUpdate(item) : null,
+                        Index = key
+                    };
                 })
                 .ToList();
         }

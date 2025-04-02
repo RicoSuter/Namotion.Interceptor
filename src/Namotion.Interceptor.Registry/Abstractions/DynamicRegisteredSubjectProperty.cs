@@ -8,8 +8,8 @@ internal record DynamicRegisteredSubjectProperty : RegisteredSubjectProperty
     private readonly Func<object?>? _getValue;
     private readonly Action<object?>? _setValue;
 
-    public DynamicRegisteredSubjectProperty(PropertyReference property, Func<object?>? getValue, Action<object?>? setValue)
-        : base(property)
+    public DynamicRegisteredSubjectProperty(PropertyReference property, Func<object?>? getValue, Action<object?>? setValue, IReadOnlyCollection<Attribute> reflectionAttributes)
+        : base(property, reflectionAttributes)
     {
         _getValue = getValue;
         _setValue = setValue;

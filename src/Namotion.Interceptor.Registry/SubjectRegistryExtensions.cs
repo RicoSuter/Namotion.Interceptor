@@ -115,6 +115,17 @@ public static class SubjectRegistryExtensions
 
         return null;
     }
+    
+    /// <summary>
+    /// Gets all registered attributes of a property.
+    /// </summary>
+    /// <param name="subject">The subject with the property with attributes.</param>
+    /// <param name="propertyName">The property with the attributes.</param>
+    /// <returns>The dictionary with the attribute names and their registered properties.</returns>
+    public static IReadOnlyDictionary<string, RegisteredSubjectProperty> GetRegisteredAttributes(this IInterceptorSubject subject, string propertyName)
+    {
+        return GetRegisteredAttributes(new PropertyReference(subject, propertyName));
+    }
 
     /// <summary>
     /// Gets all registered attributes of a property.
@@ -129,7 +140,7 @@ public static class SubjectRegistryExtensions
         return registry
             .TryGetRegisteredSubject(property.Subject)?
             .Properties
-            .Where(p => p.Value.Attributes
+            .Where(p => p.Value.ReflectionAttributes
                 .OfType<PropertyAttributeAttribute>()
                 .Any(a => a.PropertyName == property.Name))
             .ToDictionary()?? [];
@@ -165,7 +176,7 @@ public static class SubjectRegistryExtensions
         var attribute = registry
             .TryGetRegisteredSubject(subject)?
             .Properties
-            .SingleOrDefault(p => p.Value.Attributes
+            .SingleOrDefault(p => p.Value.ReflectionAttributes
                 .OfType<PropertyAttributeAttribute>()
                 .Any(a => a.PropertyName == propertyName && a.AttributeName == attributeName));
 
