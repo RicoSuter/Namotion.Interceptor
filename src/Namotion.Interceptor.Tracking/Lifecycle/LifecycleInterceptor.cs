@@ -50,6 +50,7 @@ public class LifecycleInterceptor : IWriteInterceptor
 
     private void AttachTo(IInterceptorSubject subject, IInterceptorSubjectContext context, PropertyReference? property, object? index)
     {
+        // TODO(perf): Can maybe be improved
         _attachedSubjects.TryAdd(subject, []);
         if (_attachedSubjects[subject].Add(property))
         {
@@ -152,13 +153,13 @@ public class LifecycleInterceptor : IWriteInterceptor
         HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject> touchedSubjects)
     {
-        if (value is IDictionary dictionary)
+        if (value is IReadOnlyDictionary<string, IInterceptorSubject?> dictionary)
         {
-            foreach (DictionaryEntry entry in dictionary)
+            foreach (var (key, item) in dictionary)
             {
-                if (entry.Value is IInterceptorSubject proxy)
+                if (item is not null)
                 {
-                    FindSubjectsInProperty(property, proxy, entry.Key, collectedSubjects, touchedSubjects);
+                    FindSubjectsInProperty(property, item, key, collectedSubjects, touchedSubjects);
                 }
             }
         }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
@@ -22,9 +23,23 @@ var context = InterceptorSubjectContext
 
 Utils.SetTraceMask(Utils.TraceMasks.All);
 
-builder.Services.AddSingleton(new Root(context) { Person = new Person() });
+builder.Services.AddSingleton(new Root(context));
 builder.Services.AddOpcUaSubjectClient<Root>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 builder.Services.AddHostedService<Worker>();
+
+context.GetPropertyChangedObservable().Subscribe(x =>
+{
+    if (x.Property.Name == "FirstName")
+    {
+        long laterTimestamp = Stopwatch.GetTimestamp();
+        long beforeTimestamp = long.Parse(x.NewValue?.ToString() ?? "0");
+
+        long ticksElapsed = laterTimestamp - beforeTimestamp;
+        double secondsElapsed = (double)ticksElapsed / Stopwatch.Frequency;
+
+        Console.WriteLine($"Elapsed time: {secondsElapsed * 1000} ms");
+    }
+});
 
 var host = builder.Build();
 host.Run();

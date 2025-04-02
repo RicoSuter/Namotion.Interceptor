@@ -83,7 +83,7 @@ public record SubjectUpdate
                     var currentRegisteredProperty = registeredProperty;
                     do
                     {
-                        attribute = currentRegisteredProperty.Attribute;
+                        attribute = currentRegisteredProperty.AttributeMetadata;
 
                         var childAttributeUpdate = attributeUpdate;
                         attributeUpdate = GetOrCreateSubjectPropertyUpdate(registeredSubject, attribute.PropertyName, knownSubjectDescriptions);

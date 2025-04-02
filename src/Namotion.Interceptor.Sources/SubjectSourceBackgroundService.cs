@@ -41,8 +41,15 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
             }
             else
             {
-                var registry = _source.Subject.Context.GetService<ISubjectRegistry>();
-                registry.EnqueueSubjectUpdate(update);
+                try
+                {
+                    var registry = _source.Subject.Context.GetService<ISubjectRegistry>();
+                    registry.ExecuteSubjectUpdate(update);
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Failed to execute subject update.");
+                }
             }
         }
     }
@@ -100,14 +107,22 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                     .ToAsyncEnumerable()
                     .WithCancellation(stoppingToken))
                 {
-                    await _source.WriteToSourceAsync(changes, stoppingToken);
+                    try
+                    {
+                        await _source.WriteToSourceAsync(changes, stoppingToken);
+                    }
+                    catch (Exception e)
+                    {
+                        // TODO: What do to here?
+                        _logger.LogError(e, "Failed to write changes to source.");
+                    }
                 }
             }
             catch (Exception ex)
             {
                 if (ex is TaskCanceledException) return;
                 
-                _logger.LogError(ex, "Failed to listen for changes.");
+                _logger.LogError(ex, "Failed to listen for changes in source.");
                 await Task.Delay(_retryTime, stoppingToken);
             }
         }
