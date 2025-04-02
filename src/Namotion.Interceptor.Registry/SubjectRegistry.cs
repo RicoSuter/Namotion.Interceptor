@@ -29,10 +29,9 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
     }
 
     /// <inheritdoc />
-    public void EnqueueSubjectUpdate(Action update)
+    public void ExecuteSubjectUpdate(Action update)
     {
         // TODO: Use this method in every property read/write to ensure thread safety
-        
         lock (_lock)
         {
             update();
