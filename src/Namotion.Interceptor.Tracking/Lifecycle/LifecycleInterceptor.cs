@@ -50,6 +50,7 @@ public class LifecycleInterceptor : IWriteInterceptor
 
     private void AttachTo(IInterceptorSubject subject, IInterceptorSubjectContext context, PropertyReference? property, object? index)
     {
+        // TODO(perf): Can maybe be improved
         _attachedSubjects.TryAdd(subject, []);
         if (_attachedSubjects[subject].Add(property))
         {
