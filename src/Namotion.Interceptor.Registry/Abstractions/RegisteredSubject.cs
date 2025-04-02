@@ -66,11 +66,10 @@ public record RegisteredSubject
         lock (_lock)
         {
             var reference = new PropertyReference(Subject, name);
-            var property = new DynamicRegisteredSubjectProperty(reference, getValue, setValue)
+            var property = new DynamicRegisteredSubjectProperty(reference, getValue, setValue, attributes)
             {
                 Parent = this,
                 Type = type,
-                Attributes = attributes
             };
             
             // TODO: Raise registry changed event
