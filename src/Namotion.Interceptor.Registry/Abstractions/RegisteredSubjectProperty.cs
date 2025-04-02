@@ -2,50 +2,67 @@
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
-#pragma warning disable CS8618
-public record RegisteredSubjectProperty(PropertyReference Property)
-#pragma warning restore CS8618
-{
-    private readonly HashSet<SubjectPropertyChild> _children = new();
+#pragma warning disable CS8618, CS9264
 
+public record RegisteredSubjectProperty
+{
+    private readonly HashSet<SubjectPropertyChild> _children = [];
+    private readonly PropertyAttributeAttribute? _attributeMetadata;
+
+    public RegisteredSubjectProperty(PropertyReference property, IReadOnlyCollection<Attribute> reflectionAttributes)
+    {
+        Property = property;
+        ReflectionAttributes = reflectionAttributes;
+        _attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
+    }
+    
     /// <summary>
     /// Gets the type of the property.
     /// </summary>
     public required Type Type { get; init; }
+    
+    public PropertyReference Property { get; }
 
     /// <summary>
     /// Gets a list of all .NET reflection attributes.
     /// </summary>
-    public required IReadOnlyCollection<Attribute> Attributes { get; init; }
+    public IReadOnlyCollection<Attribute> ReflectionAttributes { get; }
     
     /// <summary>
     /// Gets the browse name of the property (either the property or attribute name).
     /// </summary>
-    public string BrowseName => IsAttribute ? Attribute.AttributeName : Property.Name;
+    public string BrowseName => IsAttribute ? AttributeMetadata.AttributeName : Property.Name;
     
     /// <summary>
     /// Specifies whether the property is an attribute property (property attached to another property).
     /// </summary>
-    public bool IsAttribute => Attributes.Any(a => a is PropertyAttributeAttribute);
-
-    public bool IsSubjectReference => Type.IsAssignableTo(typeof(IInterceptorSubject));
-
-    public bool IsSubjectCollection => Type.IsAssignableTo(typeof(IEnumerable<IInterceptorSubject>));
-
-    public bool IsSubjectDictionary => Type.IsAssignableTo(typeof(IReadOnlyDictionary<string, IInterceptorSubject>));
-
+    public bool IsAttribute => ReflectionAttributes.Any(a => a is PropertyAttributeAttribute);
+    
     /// <summary>
     /// Gets the attribute with information about this attribute property.
     /// </summary>
-    public PropertyAttributeAttribute Attribute => Attributes.OfType<PropertyAttributeAttribute>().Single();
-    // TODO(perf): Cache the attribute property name
+    public PropertyAttributeAttribute AttributeMetadata => _attributeMetadata 
+        ?? throw new InvalidOperationException("The property is not an attribute.");
+
+    /// <summary>
+    /// Gets a value indicating whether this property references another subject.
+    /// </summary>
+    public bool IsSubjectReference => Type.IsAssignableTo(typeof(IInterceptorSubject));
+
+    /// <summary>
+    /// Gets a value indicating whether this property references multiple subject with a collection.
+    /// </summary>
+    public bool IsSubjectCollection => Type.IsAssignableTo(typeof(IEnumerable<IInterceptorSubject>));
+
+    /// <summary>
+    /// Gets a value indicating whether this property references multiple subject with a dictionary.
+    /// </summary>
+    public bool IsSubjectDictionary => Type.IsAssignableTo(typeof(IReadOnlyDictionary<string, IInterceptorSubject?>));
 
     /// <summary>
     /// Gets the parent subject which contains the property.
     /// </summary>
-#pragma warning disable CS8618
     public RegisteredSubject Parent { get; internal set; }
-#pragma warning restore CS8618
 
     /// <summary>
     /// Gets a value indicating whether the property has a getter.
@@ -63,7 +80,7 @@ public record RegisteredSubjectProperty(PropertyReference Property)
     /// <param name="propertyName">The property name.</param>
     /// <returns>The result.</returns>
     public bool IsAttributeForProperty(string propertyName) 
-        => Attributes.OfType<PropertyAttributeAttribute>().Any(a => a.PropertyName == propertyName);
+        => ReflectionAttributes.OfType<PropertyAttributeAttribute>().Any(a => a.PropertyName == propertyName);
 
     /// <summary>
     /// Gets the current value of the property.
@@ -130,7 +147,7 @@ public record RegisteredSubjectProperty(PropertyReference Property)
     public RegisteredSubjectProperty? TryGetAttribute(string attributeName)
     {
         var pair = Parent.Properties
-            .SingleOrDefault(p => p.Value.Attributes
+            .SingleOrDefault(p => p.Value.ReflectionAttributes
                 .OfType<PropertyAttributeAttribute>()
                 .Any(a => a.PropertyName == Property.Name && a.AttributeName == attributeName));
 
@@ -144,7 +161,7 @@ public record RegisteredSubjectProperty(PropertyReference Property)
     public RegisteredSubjectProperty GetAttributedProperty()
     {
         return Parent.Properties
-            .Single(p => p.Key == Attribute.PropertyName)
+            .Single(p => p.Key == AttributeMetadata.PropertyName)
             .Value;
     }
 

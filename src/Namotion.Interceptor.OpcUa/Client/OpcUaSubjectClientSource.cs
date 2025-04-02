@@ -118,7 +118,6 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                     {
                         await subscription.CreateAsync(stoppingToken);
                         subscription.FastDataChangeCallback += FastDataChangeCallback;
-                        subscription.FastEventCallback += FastEventCallback;
 
                         await LoadSubjectAsync(_subject, rootNode, subscription, _rootName ?? string.Empty, stoppingToken);
                         await subscription.ApplyChangesAsync(stoppingToken);
@@ -140,11 +139,6 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                 await Task.Delay(1000, stoppingToken);
             }
         }
-    }
-
-    private void FastEventCallback(Subscription subscription, EventNotificationList notification, IList<string> stringtable)
-    {
-        
     }
 
     private void FastDataChangeCallback(Subscription subscription, DataChangeNotification notification, IList<string> stringtable)
@@ -175,10 +169,17 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
         {
             foreach (var change in changes)
             {
-                _logger.LogInformation("Received notification for {Path} with value {Value}", change.Property.Name, change.NewValue);
-                
-                SubjectMutationContext.ApplyChangesWithTimestamp(change.Timestamp,
-                    () => change.Property.SetValueFromSource(this, change.NewValue));
+                _logger.LogInformation("Received notification for {Path} with value {Value}.", change.Property.Name, change.NewValue);
+
+                try
+                {
+                    SubjectMutationContext.ApplyChangesWithTimestamp(change.Timestamp,
+                        () => change.Property.SetValueFromSource(this, change.NewValue));
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Failed to apply changes for {Path}.", change.Property.Name);
+                }
             }
         });
     }
@@ -224,8 +225,7 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
                             {
                                 var newSubject = DefaultSubjectFactory.Instance.CreateSubject(property, null);
                                 newSubject.Context.AddFallbackContext(subject.Context);
-                                await LoadSubjectAsync(newSubject, nodeProperty, 
-                                    subscription, collectionPath, cancellationToken);
+                                await LoadSubjectAsync(newSubject, nodeProperty, subscription, collectionPath, cancellationToken);
                                 property.SetValueFromSource(this, newSubject);
                             }
                         }
