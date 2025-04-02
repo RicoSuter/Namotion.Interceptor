@@ -41,8 +41,15 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
             }
             else
             {
-                var registry = _source.Subject.Context.GetService<ISubjectRegistry>();
-                registry.EnqueueSubjectUpdate(update);
+                try
+                {
+                    var registry = _source.Subject.Context.GetService<ISubjectRegistry>();
+                    registry.ExecuteSubjectUpdate(update);
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Failed to execute subject update.");
+                }
             }
         }
     }
