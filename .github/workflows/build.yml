@@ -39,9 +39,10 @@ jobs:
             /p:CoverletOutputFormat=cobertura \
             /p:CoverletOutput=./TestResults/coverage.xml
 
-      - name: Upload coverage to GitHub
-        uses: actions/upload-coverage-artifact@v1
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
         with:
+          name: code-coverage
           path: ./TestResults/coverage.xml
 
   pack:
