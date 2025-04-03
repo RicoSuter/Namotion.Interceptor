@@ -33,17 +33,33 @@ jobs:
 
       - name: Run tests with coverage (Cobertura format)
         run: |
-          dotnet test src/Namotion.Interceptor.sln \
-            --configuration Release \
-            /p:CollectCoverage=true \
-            /p:CoverletOutputFormat=cobertura \
+          dotnet test src/Namotion.Interceptor.sln `
+            --configuration Release `
+            /p:CollectCoverage=true `
+            /p:CoverletOutputFormat=cobertura `
             /p:CoverletOutput=./TestResults/coverage.xml
 
-      - name: Upload coverage artifact
+      - name: Install ReportGenerator
+        run: dotnet tool install --global dotnet-reportgenerator-globaltool
+
+      - name: Generate HTML coverage report
+        run: |
+          reportgenerator `
+            -reports:./TestResults/coverage.xml `
+            -targetdir:./coverage-report `
+            -reporttypes:Html
+
+      - name: Upload raw coverage file (Cobertura XML)
         uses: actions/upload-artifact@v4
         with:
-          name: code-coverage
+          name: coverage-xml
           path: ./TestResults/coverage.xml
+
+      - name: Upload HTML coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-coverage-report
+          path: ./coverage-report
 
   pack:
     if: github.event_name == 'release'
