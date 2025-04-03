@@ -37,7 +37,7 @@ jobs:
             --configuration Release `
             /p:CollectCoverage=true `
             /p:CoverletOutputFormat=cobertura `
-            /p:CoverletOutput=TestResults/ `
+            /p:CoverletOutput=./TestResults/ `
             /p:MergeWith=""
 
       - name: Install ReportGenerator
@@ -46,15 +46,15 @@ jobs:
       - name: Generate HTML coverage report
         run: |
           reportgenerator `
-            -reports:**/TestResults/coverage.cobertura.xml `
-            -targetdir:coverage-report `
+            -reports:"./TestResults/coverage.xml" `
+            -targetdir:"coverage-report" `
             -reporttypes:Html
 
       - name: Upload raw coverage file (Cobertura XML)
         uses: actions/upload-artifact@v4
         with:
           name: coverage-xml
-          path: '**/TestResults/coverage.cobertura.xml'
+          path: ./TestResults/coverage.xml
 
       - name: Upload HTML coverage report
         uses: actions/upload-artifact@v4
