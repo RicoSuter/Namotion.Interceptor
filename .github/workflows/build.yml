@@ -40,15 +40,15 @@ jobs:
             /p:CoverletOutput=./TestResults/ `
             /p:MergeWith=""
 
-      - name: Install ReportGenerator
-        run: dotnet tool install --global dotnet-reportgenerator-globaltool
-
-      - name: Generate HTML coverage report
-        run: |
-          reportgenerator `
-            -reports:"**/TestResults/coverage.xml" `
-            -targetdir:"coverage-report" `
-            -reporttypes:Html
+#      - name: Install ReportGenerator
+#        run: dotnet tool install --global dotnet-reportgenerator-globaltool
+#
+#      - name: Generate HTML coverage report
+#        run: |
+#          reportgenerator `
+#            -reports:"**/TestResults/coverage.xml" `
+#            -targetdir:"coverage-report" `
+#            -reporttypes:Html
 
       - name: Upload all raw coverage files (Cobertura XML)
         uses: actions/upload-artifact@v4
@@ -56,11 +56,11 @@ jobs:
           name: all-coverage-xml
           path: '**/TestResults/coverage.xml'
 
-      - name: Upload HTML coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: html-coverage-report
-          path: coverage-report
+#      - name: Upload HTML coverage report
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: html-coverage-report
+#          path: coverage-report
 
   pack:
     if: github.event_name == 'release'
