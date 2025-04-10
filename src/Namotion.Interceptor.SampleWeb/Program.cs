@@ -117,11 +117,11 @@ namespace Namotion.Interceptor.SampleWeb
             builder.Services.AddSubjectController<Car, SubjectController<Car>>();
 
             // trackable UPC UA
-            // builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
-            builder.Services.AddOpcUaSubjectClient<Car>("opc.tcp://localhost:4840", "opc", rootName: "Root");
+            builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
+            // builder.Services.AddOpcUaSubjectClient<Car>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 
             // trackable mqtt
-            // builder.Services.AddMqttSubjectServer<Car>("mqtt");
+            builder.Services.AddMqttSubjectServer<Car>("mqtt");
             //builder.Services.AddMqttSubjectServer<Tire>(sp => sp.GetRequiredService<Car>().Tires[2], "mqtt");
 
             // trackable GraphQL
@@ -138,9 +138,12 @@ namespace Namotion.Interceptor.SampleWeb
 
             var app = builder.Build();
 
+            // http api
+            // app.MapSubjectApis(sp => sp.GetRequiredService<Car>(), "api/car");
+            
             app.UseHttpsRedirection();
             app.UseAuthorization();
-
+            
             app.MapGraphQL();
 
             app.UseOpenApi();

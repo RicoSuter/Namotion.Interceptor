@@ -18,6 +18,8 @@ public static class SubjectGraphQLExtensions
     public static IRequestExecutorBuilder AddSubjectGraphQL<TSubject>(this IRequestExecutorBuilder builder, Func<IServiceProvider, TSubject> subjectSelector)
         where TSubject : IInterceptorSubject
     {
+        // TODO: Add support for multiple subjects with same T
+        
         builder
             .Services
             .AddSingleton<IHostedService>(sp => 
