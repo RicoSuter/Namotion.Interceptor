@@ -3,11 +3,10 @@ using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class CustomNodeManagerFactory<TSubject> : INodeManagerFactory
-    where TSubject : IInterceptorSubject
+internal class CustomNodeManagerFactory : INodeManagerFactory
 {
-    private readonly TSubject _subject;
-    private readonly OpcUaSubjectServerSource<TSubject> _source;
+    private readonly IInterceptorSubject _subject;
+    private readonly OpcUaSubjectServerSource _source;
     private readonly string? _rootName;
 
     public StringCollection NamespacesUris => new StringCollection([
@@ -19,7 +18,7 @@ internal class CustomNodeManagerFactory<TSubject> : INodeManagerFactory
         "http://opcfoundation.org/UA/Machinery/ProcessValues"
     ]);
 
-    public CustomNodeManagerFactory(TSubject subject, OpcUaSubjectServerSource<TSubject> source, string? rootName)
+    public CustomNodeManagerFactory(IInterceptorSubject subject, OpcUaSubjectServerSource source, string? rootName)
     {
         _subject = subject;
         _source = source;
@@ -28,6 +27,6 @@ internal class CustomNodeManagerFactory<TSubject> : INodeManagerFactory
 
     public INodeManager Create(IServerInternal server, ApplicationConfiguration configuration)
     {
-        return new CustomNodeManager<TSubject>(_subject, _source, server, configuration, _rootName);
+        return new CustomNodeManager(_subject, _source, server, configuration, _rootName);
     }
 }

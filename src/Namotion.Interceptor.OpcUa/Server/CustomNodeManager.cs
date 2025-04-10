@@ -9,20 +9,19 @@ using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class CustomNodeManager<TSubject> : CustomNodeManager2
-    where TSubject : IInterceptorSubject
+internal class CustomNodeManager : CustomNodeManager2
 {
     private const string PathDelimiter = ".";
 
-    private readonly TSubject _subject;
-    private readonly OpcUaSubjectServerSource<TSubject> _source;
+    private readonly IInterceptorSubject _subject;
+    private readonly OpcUaSubjectServerSource _source;
     private readonly string? _rootName;
 
     private readonly Dictionary<RegisteredSubject, FolderState> _subjects = new();
 
     public CustomNodeManager(
-        TSubject subject,
-        OpcUaSubjectServerSource<TSubject> source,
+        IInterceptorSubject subject,
+        OpcUaSubjectServerSource source,
         IServerInternal server,
         ApplicationConfiguration configuration,
         string? rootName) :
@@ -209,7 +208,7 @@ internal class CustomNodeManager<TSubject> : CustomNodeManager2
                 }
             };
 
-            property.Property.SetPropertyData(OpcUaSubjectServerSource<TSubject>.OpcVariableKey, variable);
+            property.Property.SetPropertyData(OpcUaSubjectServerSource.OpcVariableKey, variable);
         }
     }
 
