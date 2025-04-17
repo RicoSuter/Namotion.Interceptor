@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
-using Namotion.Interceptor.AspNetCore.Controllers;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.OpcUa.Annotations;
 using Namotion.Interceptor.Registry;
@@ -163,9 +162,6 @@ namespace Namotion.Interceptor.SampleMachine
             // trackable
             builder.Services.AddSingleton(root);
 
-            // trackable api controllers
-            builder.Services.AddSubjectController<Root, SubjectController<Root>>();
-
             // OPC UA server
             builder.Services.AddOpcUaSubjectServer<Root>("opc");
             //builder.Services.AddOpcUaClientProxySource<Root>("opc", "opc.tcp://localhost:4840");
@@ -177,6 +173,7 @@ namespace Namotion.Interceptor.SampleMachine
                 .AddSubjectGraphQL<Root>();
 
             // other asp services
+            builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddOpenApiDocument();
             builder.Services.AddAuthorization();
 
@@ -187,6 +184,7 @@ namespace Namotion.Interceptor.SampleMachine
             app.UseHttpsRedirection();
             app.UseAuthorization();
 
+            app.MapSubjectApis<Root>(sp => sp.GetRequiredService<Root>(), "api/root");
             app.MapGraphQL();
 
             app.UseOpenApi();
@@ -194,16 +192,6 @@ namespace Namotion.Interceptor.SampleMachine
 
             app.MapControllers();
             app.Run();
-        }
-
-        [OpenApiTag("Root")]
-        [Route("/api/root")]
-        public class SubjectController<TProxy> : SubjectControllerBase<TProxy> where TProxy : IInterceptorSubject
-        {
-            public SubjectController(TProxy subject, IOptions<JsonOptions> jsonOptions) 
-                : base(subject, jsonOptions)
-            {
-            }
         }
 
         public class Simulator : BackgroundService
