@@ -47,6 +47,8 @@ public static class SubjectAspNetCoreServiceCollection
                     var subject = subjectSelector(context.RequestServices);
                     return UpdatePropertyValues(subject, updates, propertyValidators);
                 })
+            .Produces<OkResult>()
+            .ProducesProblem(StatusCodes.Status400BadRequest)
             .WithTags(typeof(TSubject).Name);
 
         builder
@@ -86,25 +88,35 @@ public static class SubjectAspNetCoreServiceCollection
                 })
                 .ToArray();
 
-            // check only known variables
-            if (resolvedUpdates.Any(u => u.Subject == null))
+            // check not found
+            var unknownPaths = resolvedUpdates.Where(u => u.Subject is null).Select(u => u.Key).ToArray();
+            if (unknownPaths.Any())
             {
                 return TypedResults.BadRequest(new ProblemDetails
                 {
-                    Detail = "Unknown property paths."
+                    Detail = "Unknown property paths.",
+                    Extensions =
+                    {
+                        { "unknownPaths", unknownPaths }
+                    }
                 });
             }
 
             // check not read-only
-            if (resolvedUpdates.Any(u => u.Property.SetValue is null))
+            var readOnlyPaths = resolvedUpdates.Where(u => u.Property.SetValue is null).Select(u => u.Key).ToArray();
+            if (readOnlyPaths.Any())
             {
                 return TypedResults.BadRequest(new ProblemDetails
                 {
-                    Detail = "Attempted to change read only property."
+                    Detail = "Attempted to change read only property.",
+                    Extensions =
+                    {
+                        { "readOnlyPaths", readOnlyPaths }
+                    }
                 });
             }
 
-            // run validators
+            // validate update value
             var errors = new Dictionary<string, ValidationResult[]>();
             var propertyValidatorsArray = propertyValidators.ToArray();
             foreach (var update in resolvedUpdates)
@@ -124,7 +136,7 @@ public static class SubjectAspNetCoreServiceCollection
             {
                 return TypedResults.BadRequest(new ProblemDetails
                 {
-                    Detail = "Property updates not valid.",
+                    Detail = "Property updates have invalid values.",
                     Extensions =
                     {
                         { "errors", errors.ToDictionary(e => e.Key, e => e.Value.Select(v => v.ErrorMessage)) }
