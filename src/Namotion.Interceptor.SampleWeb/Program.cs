@@ -105,19 +105,19 @@ namespace Namotion.Interceptor.SampleWeb
 
             var car = new Car(context);
 
-            // trackable
+            // register subject and context
             builder.Services.AddSingleton(car);
             builder.Services.AddSingleton(context);
 
-            // trackable UPC UA
+            // expose subject via OPC UA
             builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
             // builder.Services.AddOpcUaSubjectClient<Car>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 
-            // trackable mqtt
+            // expose subject via MQTT
             builder.Services.AddMqttSubjectServer<Car>("mqtt");
             //builder.Services.AddMqttSubjectServer<Tire>(sp => sp.GetRequiredService<Car>().Tires[2], "mqtt");
 
-            // trackable GraphQL
+            // expose subject via GraphQL
             builder.Services
                 .AddGraphQLServer()
                 .AddInMemorySubscriptions()
@@ -132,8 +132,8 @@ namespace Namotion.Interceptor.SampleWeb
 
             var app = builder.Build();
 
-            // http api
-            app.MapSubjectApis<Car>(sp => sp.GetRequiredService<Car>(), "api/car");
+            // expose subject via HTTP web api
+            app.MapSubjectWebApis<Car>("api/car");
             
             app.UseHttpsRedirection();
             app.UseAuthorization();
