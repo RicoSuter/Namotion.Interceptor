@@ -161,7 +161,6 @@ namespace Namotion.Interceptor.SampleMachine
 
             // expose subject via OPC UA
             builder.Services.AddOpcUaSubjectServer<Root>("opc");
-            builder.Services.AddOpcUaSubjectClient<Root>("opc", "opc.tcp://localhost:4840");
 
             // expose subject via GraphQL
             builder.Services
