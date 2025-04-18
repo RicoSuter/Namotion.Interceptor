@@ -21,9 +21,14 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class SubjectAspNetCoreServiceCollection
 {
-    public static IEndpointRouteBuilder MapSubjectApis<TSubject>(this IEndpointRouteBuilder builder,
-        Func<IServiceProvider, IInterceptorSubject> subjectSelector, 
-        string path)
+    public static IEndpointRouteBuilder MapSubjectWebApis<TSubject>(this IEndpointRouteBuilder builder, string path)
+        where TSubject : class, IInterceptorSubject
+    {
+        return builder.MapSubjectWebApis<TSubject>(sp => sp.GetRequiredService<TSubject>(), path);
+    }
+
+    public static IEndpointRouteBuilder MapSubjectWebApis<TSubject>(this IEndpointRouteBuilder builder,
+        Func<IServiceProvider, IInterceptorSubject> subjectSelector, string path)
         where TSubject : class, IInterceptorSubject
     {
         builder

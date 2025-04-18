@@ -1,11 +1,8 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.OpcUa.Annotations;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
-using NSwag.Annotations;
 
 namespace Namotion.Interceptor.SampleMachine
 {
@@ -159,14 +156,14 @@ namespace Namotion.Interceptor.SampleMachine
                 }
             };
 
-            // trackable
+            // register subject
             builder.Services.AddSingleton(root);
 
-            // OPC UA server
+            // expose subject via OPC UA
             builder.Services.AddOpcUaSubjectServer<Root>("opc");
-            //builder.Services.AddOpcUaClientProxySource<Root>("opc", "opc.tcp://localhost:4840");
+            builder.Services.AddOpcUaSubjectClient<Root>("opc", "opc.tcp://localhost:4840");
 
-            // trackable GraphQL
+            // expose subject via GraphQL
             builder.Services
                 .AddGraphQLServer()
                 .AddInMemorySubscriptions()
@@ -184,7 +181,9 @@ namespace Namotion.Interceptor.SampleMachine
             app.UseHttpsRedirection();
             app.UseAuthorization();
 
-            app.MapSubjectApis<Root>(sp => sp.GetRequiredService<Root>(), "api/root");
+            // expose subject via HTTP web api
+            app.MapSubjectWebApis<Root>("api/root");
+
             app.MapGraphQL();
 
             app.UseOpenApi();
