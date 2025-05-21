@@ -10,6 +10,7 @@
     <Description>Interceptor library for .NET</Description>
 
     <RepositoryUrl>https://github.com/RicoSuter/Namotion.Interceptor</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/RicoSuter/Namotion.Interceptor</PackageProjectUrl>
     <PackageTags>Interceptor</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     
