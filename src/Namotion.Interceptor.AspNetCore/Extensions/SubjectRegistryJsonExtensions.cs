@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -183,35 +184,56 @@ public static class SubjectRegistryJsonExtensions
         return subject.FindPropertyFromJsonPath(path.Split('.'));
     }
 
-    private static (IInterceptorSubject?, SubjectPropertyMetadata) FindPropertyFromJsonPath(this IInterceptorSubject subject, IEnumerable<string> segments)
+    private static (IInterceptorSubject?, SubjectPropertyMetadata) FindPropertyFromJsonPath(this IInterceptorSubject subject, Span<string> segments)
     {
-        // TODO: Use span here?
-
-        var nextSegment = segments.First();
-        nextSegment = ConvertToUpperCamelCase(nextSegment);
-
-        segments = segments.Skip(1);
-        if (segments.Any())
+        while (true)
         {
-            if (nextSegment.Contains('['))
-            {
-                var arraySegments = nextSegment.Split('[', ']');
-                var index = int.Parse(arraySegments[1]);
-                nextSegment = arraySegments[0];
+            var nextSegment = segments[0];
+            nextSegment = ConvertToUpperCamelCase(nextSegment);
 
-                var collection = subject.Properties[nextSegment].GetValue?.Invoke(subject) as ICollection;
-                var child = collection?.OfType<IInterceptorSubject>().ElementAt(index);
-                return child is not null ? FindPropertyFromJsonPath(child, segments) : (null, default);
+            if (segments.Length > 1)
+            {
+                segments = segments[1..];
+                if (nextSegment.Contains('['))
+                {
+                    var arraySegments = nextSegment.Split('[', ']');
+                    var index = int.Parse(arraySegments[1]);
+                    nextSegment = arraySegments[0];
+
+                    if (subject.Properties.TryGetValue(nextSegment, out var property))
+                    {
+                        var collection = property.GetValue?.Invoke(subject) as ICollection;
+                        var child = collection?.OfType<IInterceptorSubject>().ElementAt(index);
+                        if (child is not null)
+                        {
+                            subject = child;
+                            continue;
+                        }
+                    }
+
+                    return (null, default);
+                }
+                else
+                {
+                    if (subject.Properties.TryGetValue(nextSegment, out var property) &&
+                        property.GetValue?.Invoke(subject) is IInterceptorSubject child)
+                    {
+                        subject = child;
+                        continue;
+                    }
+
+                    return (null, default);
+                }
             }
             else
             {
-                var child = subject.Properties[nextSegment].GetValue?.Invoke(subject) as IInterceptorSubject;
-                return child is not null ? FindPropertyFromJsonPath(child, segments) : (null, default);
+                if (subject.Properties.TryGetValue(nextSegment, out var property))
+                {
+                    return (subject, property);
+                }
+
+                return (null, default);
             }
-        }
-        else
-        {
-            return (subject, subject.Properties[nextSegment]);
         }
     }
 
