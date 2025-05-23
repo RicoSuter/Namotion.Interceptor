@@ -22,7 +22,7 @@ public class Worker : BackgroundService
                 _root.Person.FirstName = Stopwatch.GetTimestamp().ToString();
             }
             
-            await Task.Delay(1000);
+            await Task.Delay(1000, stoppingToken);
         }
     }
 }
