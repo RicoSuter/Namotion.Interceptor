@@ -31,11 +31,11 @@ context.GetPropertyChangedObservable().Subscribe(x =>
 {
     if (x.Property.Name == "FirstName")
     {
-        long laterTimestamp = Stopwatch.GetTimestamp();
-        long beforeTimestamp = long.Parse(x.NewValue?.ToString() ?? "0");
+        var laterTimestamp = Stopwatch.GetTimestamp();
+        var beforeTimestamp = long.Parse(x.NewValue?.ToString() ?? "0");
 
-        long ticksElapsed = laterTimestamp - beforeTimestamp;
-        double secondsElapsed = (double)ticksElapsed / Stopwatch.Frequency;
+        var ticksElapsed = laterTimestamp - beforeTimestamp;
+        var secondsElapsed = (double)ticksElapsed / Stopwatch.Frequency;
 
         Console.WriteLine($"Elapsed time: {secondsElapsed * 1000} ms");
     }
