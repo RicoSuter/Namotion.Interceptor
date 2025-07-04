@@ -72,9 +72,16 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
 
             foreach (var property in subject.Properties)
             {
+                // handle property initializers from attributes
                 foreach (var attribute in property.Value.ReflectionAttributes.OfType<ISubjectPropertyInitializer>())
                 {
                     attribute.InitializeProperty(property.Value, change.Index);
+                }
+
+                // handle property initializers from context
+                foreach (var initializer in change.Subject.Context.GetServices<ISubjectPropertyInitializer>())
+                {
+                    initializer.InitializeProperty(property.Value, change.Index);
                 }
             }
         }
