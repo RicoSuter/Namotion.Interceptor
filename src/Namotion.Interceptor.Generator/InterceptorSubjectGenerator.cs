@@ -251,7 +251,7 @@ namespace {namespaceName}
     $@"
         private T GetProperty<T>(string propertyName, Func<object?> readValue)
         {{
-            return _context is not null ? (T?)_context.GetProperty(this, propertyName, readValue)! : (T?)readValue()!;
+            return _context is not null ? (T?)_context.GetProperty(propertyName, readValue)! : (T?)readValue()!;
         }}
 
         private void SetProperty<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)
@@ -262,13 +262,13 @@ namespace {namespaceName}
             }}
             else
             {{
-                _context.SetProperty(this, propertyName, newValue, readValue, setValue);
+                _context.SetProperty(propertyName, newValue, readValue, setValue);
             }}
         }}
 
         private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
         {{
-            return _context is not null ? _context.InvokeMethod(this, methodName, parameters, invokeMethod) : invokeMethod(parameters);
+            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(parameters);
         }}
     }}
 }}

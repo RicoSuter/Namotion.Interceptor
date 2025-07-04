@@ -69,7 +69,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     ?? SubjectMutationContext.GetCurrentTimestamp());
 
                 var executor = usedByProperty.Subject.Context as IInterceptorExecutor;
-                executor?.SetProperty(usedByProperty.Subject, usedByProperty.Name, newValue, () => oldValue, delegate {});
+                executor?.SetProperty(usedByProperty.Name, newValue, () => oldValue, delegate {});
             }
         }
 

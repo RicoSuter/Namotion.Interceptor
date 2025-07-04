@@ -71,8 +71,16 @@ public record RegisteredSubject
                 Parent = this,
                 Type = type,
             };
-            
-            // TODO: Raise registry changed event
+
+            if (setValue is not null)
+            {
+                var value = getValue is not null ? Subject.GetInterceptedProperty(reference.Name, getValue) : null;
+                Subject.SetInterceptedProperty(reference.Name, value, getValue, setValue);
+            } 
+            else if (getValue is not null)
+            {
+                Subject.GetInterceptedProperty(reference.Name, getValue);
+            }
             
             _properties.Add(name, property);
             return property;
