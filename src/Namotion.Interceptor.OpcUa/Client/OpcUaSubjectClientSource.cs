@@ -12,13 +12,12 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectSource, IDisposable
-    where TSubject : IInterceptorSubject
+internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDisposable
 {
     private const string PathDelimiter = ".";
     private const string OpcVariableKey = "OpcVariable";
 
-    private readonly TSubject _subject;
+    private readonly IInterceptorSubject _subject;
     private readonly string _serverUrl;
     private readonly ISourcePathProvider _sourcePathProvider;
     private readonly ILogger _logger;
@@ -29,10 +28,10 @@ internal class OpcUaSubjectClientSource<TSubject> : BackgroundService, ISubjectS
     private Session? _session;
 
     public OpcUaSubjectClientSource(
-        TSubject subject,
+        IInterceptorSubject subject,
         string serverUrl,
         ISourcePathProvider sourcePathProvider,
-        ILogger<OpcUaSubjectClientSource<TSubject>> logger,
+        ILogger<OpcUaSubjectClientSource> logger,
         string? rootName)
     {
         _subject = subject;

@@ -1,6 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
-using Namotion.Interceptor.AspNetCore.Controllers;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
@@ -9,7 +6,6 @@ using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Sources.Paths.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
-using NSwag.Annotations;
 
 namespace Namotion.Interceptor.SampleWeb
 {
@@ -109,28 +105,26 @@ namespace Namotion.Interceptor.SampleWeb
 
             var car = new Car(context);
 
-            // trackable
+            // register subject and context
             builder.Services.AddSingleton(car);
             builder.Services.AddSingleton(context);
 
-            // trackable api controllers
-            builder.Services.AddSubjectController<Car, SubjectController<Car>>();
+            // expose subject via OPC UA
+            builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
+            // builder.Services.AddOpcUaSubjectClient<Car>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 
-            // trackable UPC UA
-            // builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
-            builder.Services.AddOpcUaSubjectClient<Car>("opc.tcp://localhost:4840", "opc", rootName: "Root");
-
-            // trackable mqtt
-            // builder.Services.AddMqttSubjectServer<Car>("mqtt");
+            // expose subject via MQTT
+            builder.Services.AddMqttSubjectServer<Car>("mqtt");
             //builder.Services.AddMqttSubjectServer<Tire>(sp => sp.GetRequiredService<Car>().Tires[2], "mqtt");
 
-            // trackable GraphQL
+            // expose subject via GraphQL
             builder.Services
                 .AddGraphQLServer()
                 .AddInMemorySubscriptions()
                 .AddSubjectGraphQL<Car>();
 
             // other asp services
+            builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddOpenApiDocument();
             builder.Services.AddAuthorization();
 
@@ -138,26 +132,18 @@ namespace Namotion.Interceptor.SampleWeb
 
             var app = builder.Build();
 
+            // expose subject via HTTP web api
+            app.MapSubjectWebApis<Car>("api/car");
+            
             app.UseHttpsRedirection();
             app.UseAuthorization();
-
+            
             app.MapGraphQL();
 
             app.UseOpenApi();
             app.UseSwaggerUi();
 
-            app.MapControllers();
             app.Run();
-        }
-
-        [OpenApiTag("Car")]
-        [Route("/api/car")]
-        public class SubjectController<TProxy> : SubjectControllerBase<TProxy> where TProxy : IInterceptorSubject
-        {
-            public SubjectController(TProxy subject, IOptions<JsonOptions> jsonOptions)
-                : base(subject, jsonOptions)
-            {
-            }
         }
 
         public class Simulator : BackgroundService
