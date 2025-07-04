@@ -10,24 +10,23 @@ using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectSource, IDisposable
-    where TSubject : IInterceptorSubject
+internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource, IDisposable
 {
     internal const string OpcVariableKey = "OpcVariable";
 
-    private readonly TSubject _subject;
+    private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
     private readonly string? _rootName;
 
-    private OpcUaSubjectServer<TSubject>? _server;
+    private OpcUaSubjectServer? _server;
     private ISubjectMutationDispatcher? _dispatcher;
 
     internal ISourcePathProvider SourcePathProvider { get; }
 
     public OpcUaSubjectServerSource(
-        TSubject subject,
+        IInterceptorSubject subject,
         ISourcePathProvider sourcePathProvider,
-        ILogger<OpcUaSubjectServerSource<TSubject>> logger,
+        ILogger<OpcUaSubjectServerSource> logger,
         string? rootName)
     {
         _subject = subject;
@@ -91,7 +90,7 @@ internal class OpcUaSubjectServerSource<TSubject> : BackgroundService, ISubjectS
 
             try
             {
-                _server = new OpcUaSubjectServer<TSubject>(_subject, this, _rootName);
+                _server = new OpcUaSubjectServer(_subject, this, _rootName);
 
                 await application.CheckApplicationInstanceCertificate(true, CertificateFactory.DefaultKeySize);
                 await application.Start(_server);

@@ -2,11 +2,10 @@
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServer<TSubject> : StandardServer
-    where TSubject : IInterceptorSubject
+internal class OpcUaSubjectServer : StandardServer
 {
-    public OpcUaSubjectServer(TSubject subject, OpcUaSubjectServerSource<TSubject> source, string? rootName)
+    public OpcUaSubjectServer(IInterceptorSubject subject, OpcUaSubjectServerSource source, string? rootName)
     {
-        AddNodeManager(new CustomNodeManagerFactory<TSubject>(subject, source, rootName));
+        AddNodeManager(new CustomNodeManagerFactory(subject, source, rootName));
     }
 }

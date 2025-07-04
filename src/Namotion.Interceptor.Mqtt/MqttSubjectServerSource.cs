@@ -15,12 +15,11 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt
 {
-    public class MqttSubjectServerSource<TSubject> : BackgroundService, ISubjectSource
-        where TSubject : IInterceptorSubject
+    public class MqttSubjectServerSource : BackgroundService, ISubjectSource
     {
         private readonly string _serverClientId = "Server_" + Guid.NewGuid().ToString("N");
 
-        private readonly TSubject _subject;
+        private readonly IInterceptorSubject _subject;
         private readonly ISourcePathProvider _sourcePathProvider;
         private readonly ILogger _logger;
 
@@ -37,9 +36,9 @@ namespace Namotion.Interceptor.Mqtt
 
         public IInterceptorSubject Subject => _subject;
 
-        public MqttSubjectServerSource(TSubject subject,
+        public MqttSubjectServerSource(IInterceptorSubject subject,
             ISourcePathProvider sourcePathProvider,
-            ILogger<MqttSubjectServerSource<TSubject>> logger)
+            ILogger<MqttSubjectServerSource> logger)
         {
             _subject = subject;
             _sourcePathProvider = sourcePathProvider;

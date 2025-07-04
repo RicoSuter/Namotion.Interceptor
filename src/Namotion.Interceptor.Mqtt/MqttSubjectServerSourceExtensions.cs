@@ -18,23 +18,23 @@ public static class MqttSubjectServerSourceExtensions
         return serviceCollection.AddMqttSubjectServer(sp => sp.GetRequiredService<TSubject>(), sourceName, pathPrefix);
     }
 
-    public static IServiceCollection AddMqttSubjectServer<TSubject>(this IServiceCollection serviceCollection,
-        Func<IServiceProvider, TSubject> subjectSelector, string sourceName, string? pathPrefix = null)
-        where TSubject : IInterceptorSubject
+    public static IServiceCollection AddMqttSubjectServer(this IServiceCollection serviceCollection,
+        Func<IServiceProvider, IInterceptorSubject> subjectSelector, string sourceName, string? pathPrefix = null)
     {
+        var key = Guid.NewGuid().ToString();
         return serviceCollection
-            .AddSingleton(sp =>
+            .AddKeyedSingleton(key, (sp, _) =>
             {
                 var subject = subjectSelector(sp);
                 var attributeBasedSourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, "/", pathPrefix);
-                return new MqttSubjectServerSource<TSubject>(
-                    subject, attributeBasedSourcePathProvider, sp.GetRequiredService<ILogger<MqttSubjectServerSource<TSubject>>>());
+                return new MqttSubjectServerSource(
+                    subject, attributeBasedSourcePathProvider, sp.GetRequiredService<ILogger<MqttSubjectServerSource>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredService<MqttSubjectServerSource<TSubject>>())
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectServerSource>(key))
             .AddSingleton<IHostedService>(sp =>
             {
                 return new SubjectSourceBackgroundService(
-                    sp.GetRequiredService<MqttSubjectServerSource<TSubject>>(),
+                    sp.GetRequiredKeyedService<MqttSubjectServerSource>(key),
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>());
             });
     }
