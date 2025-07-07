@@ -65,7 +65,7 @@ public record RegisteredSubject
     public RegisteredSubjectProperty AddProperty(string name, Type type, Func<object, object?>? getValue, Action<object, object?>? setValue, params Attribute[] attributes)
     {
         var propertyReference = new PropertyReference(Subject, name);
-        propertyReference.SetPropertyMetadata(new SubjectPropertyMetadata(name, type, attributes, getValue, setValue));
+        propertyReference.SetPropertyMetadata(new SubjectPropertyMetadata(name, type, attributes, getValue, setValue, true));
 
         var property = new RegisteredSubjectProperty(propertyReference, attributes)
         {
