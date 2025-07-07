@@ -24,6 +24,7 @@ public static class InterceptorSubjectContextExtensions
 
     public static TService GetService<TService>(this IInterceptorSubjectContext context)
     {
-        return context.TryGetService<TService>() ?? throw new InvalidOperationException("Service not found.");
+        return context.TryGetService<TService>() 
+            ?? throw new InvalidOperationException($"Service type '{typeof(TService).FullName}' not found.");
     }
 }

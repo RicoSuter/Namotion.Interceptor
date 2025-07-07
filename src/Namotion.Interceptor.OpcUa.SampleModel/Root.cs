@@ -12,11 +12,12 @@ public partial class Root
     [SourceName("opc", "Number")]
     public partial decimal Number { get; set; }
     
-    [SourcePath("opc", "Person")]
-    public partial Person? Person { get; set; }
+    [SourcePath("opc", "Persons")]
+    public partial Person[] Persons { get; set; }
 
     public Root()
     {
         Name = "My root name";
+        Persons = [];
     }
 }

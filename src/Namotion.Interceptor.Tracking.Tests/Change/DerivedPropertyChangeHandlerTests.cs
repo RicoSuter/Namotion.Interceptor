@@ -49,9 +49,9 @@ public class DerivedPropertyChangeHandlerTests
         var changes = new List<SubjectPropertyChange>();
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangedObservable();
+            .WithPropertyChangedObservable()
+            .WithContextInheritance();
         
         // Act
         var car = new Car(context);
