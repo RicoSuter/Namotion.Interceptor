@@ -6,14 +6,14 @@ public static class LifecycleInterceptorExtensions
     {            
         var change = new SubjectPropertyLifecycleChange(subject, property);
 
-        foreach (var handler in subject.Context.GetServices<ISubjectPropertyLifecycleHandler>())
+        foreach (var handler in subject.Context.GetServices<IPropertyLifecycleHandler>())
         {
-            handler.AttachSubjectProperty(change);
+            handler.AttachProperty(change);
         }
 
-        if (subject is ISubjectPropertyLifecycleHandler lifecycleHandler)
+        if (subject is IPropertyLifecycleHandler lifecycleHandler)
         {
-            lifecycleHandler.AttachSubjectProperty(change);
+            lifecycleHandler.AttachProperty(change);
         }
     }
     
@@ -21,14 +21,14 @@ public static class LifecycleInterceptorExtensions
     {            
         var change = new SubjectPropertyLifecycleChange(subject, property);
 
-        foreach (var handler in subject.Context.GetServices<ISubjectPropertyLifecycleHandler>())
+        foreach (var handler in subject.Context.GetServices<IPropertyLifecycleHandler>())
         {
-            handler.DetachSubjectProperty(change);
+            handler.DetachProperty(change);
         }
 
-        if (subject is ISubjectPropertyLifecycleHandler lifecycleHandler)
+        if (subject is IPropertyLifecycleHandler lifecycleHandler)
         {
-            lifecycleHandler.DetachSubjectProperty(change);
+            lifecycleHandler.DetachProperty(change);
         }
     }
 }

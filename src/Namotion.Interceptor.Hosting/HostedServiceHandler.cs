@@ -5,7 +5,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Hosting;
 
-internal class HostedServiceHandler : IHostedService, ISubjectLifecycleHandler, IDisposable
+internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDisposable
 {
     private ILogger? _logger;
 

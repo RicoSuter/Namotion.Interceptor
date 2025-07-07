@@ -4,7 +4,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace Namotion.Interceptor.Tracking.Tests.Models
 {
     [InterceptorSubject]
-    public partial class Car : ISubjectLifecycleHandler
+    public partial class Car : ILifecycleHandler
     {
         public partial string Name { get; set; }
 

@@ -5,7 +5,7 @@
 /// <summary>
 /// Automatically assigns or removes the parent context as fallback context to attached and detached subjects.
 /// </summary>
-public class ContextInheritanceHandler : ISubjectLifecycleHandler
+public class ContextInheritanceHandler : ILifecycleHandler
 {
     public void AttachSubject(SubjectLifecycleChange change)
     {

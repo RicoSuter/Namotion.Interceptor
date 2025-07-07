@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Registry;
 
 // TODO: Add lots of tests!
 
-public class SubjectRegistry : ISubjectRegistry, ISubjectLifecycleHandler, ISubjectPropertyLifecycleHandler
+public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Lock _lock = new();
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
@@ -39,7 +39,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectLifecycleHandler, ISubj
     }
 
     /// <inheritdoc />
-    void ISubjectLifecycleHandler.AttachSubject(SubjectLifecycleChange change)
+    void ILifecycleHandler.AttachSubject(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {
@@ -72,7 +72,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectLifecycleHandler, ISubj
         }
     }
 
-    void ISubjectPropertyLifecycleHandler.AttachSubjectProperty(SubjectPropertyLifecycleChange change)
+    void IPropertyLifecycleHandler.AttachProperty(SubjectPropertyLifecycleChange change)
     {
         var property = TryGetRegisteredProperty(change.Property);
         if (property is not null)
@@ -104,7 +104,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectLifecycleHandler, ISubj
         return registeredSubject;
     }
 
-    void ISubjectLifecycleHandler.DetachSubject(SubjectLifecycleChange change)
+    void ILifecycleHandler.DetachSubject(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {
@@ -130,7 +130,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectLifecycleHandler, ISubj
         }
     }
 
-    void ISubjectPropertyLifecycleHandler.DetachSubjectProperty(SubjectPropertyLifecycleChange change)
+    void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
     {
     }
     

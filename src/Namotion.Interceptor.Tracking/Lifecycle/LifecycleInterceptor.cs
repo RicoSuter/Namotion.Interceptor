@@ -57,12 +57,12 @@ public class LifecycleInterceptor : IWriteInterceptor
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
             var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
 
-            foreach (var handler in context.GetServices<ISubjectLifecycleHandler>())
+            foreach (var handler in context.GetServices<ILifecycleHandler>())
             {
                 handler.AttachSubject(registryContext);
             }
 
-            if (subject is ISubjectLifecycleHandler lifecycleHandler)
+            if (subject is ILifecycleHandler lifecycleHandler)
             {
                 lifecycleHandler.AttachSubject(registryContext);
             }
@@ -91,12 +91,12 @@ public class LifecycleInterceptor : IWriteInterceptor
             
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
             var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
-            if (subject is ISubjectLifecycleHandler lifecycleHandler)
+            if (subject is ILifecycleHandler lifecycleHandler)
             {
                 lifecycleHandler.DetachSubject(registryContext);
             }
 
-            foreach (var handler in context.GetServices<ISubjectLifecycleHandler>())
+            foreach (var handler in context.GetServices<ILifecycleHandler>())
             {
                 handler.DetachSubject(registryContext);
             }
