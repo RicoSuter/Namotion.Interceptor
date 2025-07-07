@@ -68,8 +68,8 @@ public record RegisteredSubject
     /// </summary>
     /// <param name="name">The name of the property.</param>
     /// <param name="type">The property type.</param>
-    /// <param name="getValue">The get method which is intercepted.</param>
-    /// <param name="setValue">The set method which is intercepted.</param>
+    /// <param name="getValue">The get method.</param>
+    /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
     public RegisteredSubjectProperty AddProperty(string name, Type type, 
@@ -100,19 +100,16 @@ public record RegisteredSubject
     /// </summary>
     /// <param name="name">The name of the property.</param>
     /// <param name="type">The property type.</param>
-    /// <param name="getValue">The get method which is NOT intercepted.</param>
+    /// <param name="getValue">The get method.</param>
+    /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddDerivedProperty(string name, Type type, Func<IInterceptorSubject, object?>? getValue, params Attribute[] attributes)
+    public RegisteredSubjectProperty AddDerivedProperty(string name, Type type, 
+        Func<IInterceptorSubject, object?>? getValue, 
+        Action<IInterceptorSubject, object?>? setValue, 
+        params Attribute[] attributes)
     {
-        var propertyReference = new PropertyReference(Subject, name);
-        propertyReference.SetPropertyMetadata(new SubjectPropertyMetadata(
-            name, type, attributes.Concat([new DerivedAttribute()]).ToArray(),
-            getValue, 
-            setValue: null,
-            isDynamic: true));
-
-        return AddProperty(propertyReference, type, attributes);
+        return AddProperty(name, type, getValue, setValue, attributes.Concat([new DerivedAttribute()]).ToArray());
     }
 
     private RegisteredSubjectProperty AddProperty(PropertyReference property, Type type, Attribute[] attributes)
