@@ -128,7 +128,7 @@ namespace {namespaceName}
     $@"
             {{
                 ""{propertyName}"",       
-                new SubjectPropertyMetadata(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")})
+                new SubjectPropertyMetadata(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")}, false)
             }},";
                     }
 
