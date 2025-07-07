@@ -169,8 +169,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
         {
             foreach (var change in changes)
             {
-                // _logger.LogInformation("Received notification for {Path} with value {Value}.", change.Property.Name, change.NewValue);
-
                 try
                 {
                     SubjectMutationContext.ApplyChangesWithTimestamp(change.Timestamp,
@@ -178,7 +176,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                 }
                 catch (Exception e)
                 {
-                    _logger.LogError(e, "Failed to apply changes for {Path}.", change.Property.Name);
+                    _logger.LogError(e, "Failed to apply change for {Path}.", change.Property.Name);
                 }
             }
         });
