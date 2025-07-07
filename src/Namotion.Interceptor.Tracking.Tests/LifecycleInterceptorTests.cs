@@ -1,4 +1,6 @@
 ﻿using Castle.Components.DictionaryAdapter.Xml;
+using Moq;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -69,9 +71,9 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
             .WithLifecycle()
-            .WithService(() => handler);
+            .WithService(() => handler)
+            .WithContextInheritance();
 
         // Act
         var mother1 = new Person(context) { FirstName = "Mother1" };
@@ -99,9 +101,9 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
             .WithLifecycle()
-            .WithService(() => handler);
+            .WithService(() => handler)
+            .WithContextInheritance();
 
         // Act
         var mother1 = new Person { FirstName = "Mother1" };
@@ -152,9 +154,9 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
             .WithLifecycle()
-            .WithService(() => handler);
+            .WithService(() => handler)
+            .WithContextInheritance();
 
         // Act
         var mother1 = new Person(context) { FirstName = "Mother1" };
@@ -179,9 +181,9 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecyleHandler(attaches, detaches);
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
             .WithLifecycle()
-            .WithService(() => handler);
+            .WithService(() => handler)
+            .WithContextInheritance();
 
         // Act & Assert
         var car = new Car(context)
@@ -196,5 +198,66 @@ public class LifecycleInterceptorTests
         subject.Context.RemoveFallbackContext(context);
         Assert.Single(car.Attachements);
         Assert.Single(car.Detachements);
+    }
+    
+    [Fact]
+    public Task WhenSubjectIsAttachedThenAllPropertiesAreAttachedAndSameWithDetach()
+    {
+        // Arrange
+        var events = new List<string>();
+        var context = CreateContextAndCollectLifecycleEvents(events);
+
+        // Act
+        var person = new Person
+        {
+            FirstName = "John",
+            LastName = "Doe"
+        };
+        
+        ((IInterceptorSubject)person).Context.AddFallbackContext(context);
+        
+        var father = new Person
+        {
+            FirstName = "Robert",
+            LastName = "Smith"
+        };
+
+        person.Father = father;
+        father
+            .TryGetRegisteredSubject()!
+            .AddProperty("FooBar", typeof(string), subject => "MyValue", null);
+
+        person.Father = null;
+
+        // Assert
+        return Verify(events);
+    }
+
+    private static IInterceptorSubjectContext CreateContextAndCollectLifecycleEvents(List<string> events)
+    {
+        var subjectHandlerMock = new Mock<ILifecycleHandler>();
+        subjectHandlerMock
+            .Setup(h => h.AttachSubject(It.IsAny<SubjectLifecycleChange>()))
+            .Callback((SubjectLifecycleChange h) => events.Add($"Attached: {h.Subject}"));
+        subjectHandlerMock
+            .Setup(h => h.DetachSubject(It.IsAny<SubjectLifecycleChange>()))
+            .Callback((SubjectLifecycleChange h) => events.Add($"Detached: {h.Subject}"));
+        
+        var propertyHandlerMock = new Mock<IPropertyLifecycleHandler>();
+        propertyHandlerMock
+            .Setup(h => h.AttachProperty(It.IsAny<SubjectPropertyLifecycleChange>()))
+            .Callback((SubjectPropertyLifecycleChange h) => events.Add($"Attached property: {h.Subject}.{h.Property.Name}"));
+        propertyHandlerMock
+            .Setup(h => h.DetachProperty(It.IsAny<SubjectPropertyLifecycleChange>()))
+            .Callback((SubjectPropertyLifecycleChange h) => events.Add($"Detached property: {h.Subject}.{h.Property.Name}"));
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+            
+        context
+            .WithService(() => subjectHandlerMock.Object, _ => false)
+            .WithService(() => propertyHandlerMock.Object, _ => false);
+        return context;
     }
 }

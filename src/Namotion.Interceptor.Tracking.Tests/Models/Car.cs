@@ -35,5 +35,10 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
         {
             Detachements.Add(change);
         }
+
+        public override string ToString()
+        {
+            return Name;
+        }
     }
 }
