@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Registry;
 
 // TODO: Add lots of tests!
 
-public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
+public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Lock _lock = new();
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
@@ -39,7 +39,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
     }
 
     /// <inheritdoc />
-    void ILifecycleHandler.Attach(SubjectLifecycleChange change)
+    void ILifecycleHandler.AttachSubject(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {
@@ -69,13 +69,24 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                         Subject = change.Subject,
                     });
             }
+        }
+    }
 
-            foreach (var property in subject.Properties)
+    void IPropertyLifecycleHandler.AttachProperty(SubjectPropertyLifecycleChange change)
+    {
+        var property = TryGetRegisteredProperty(change.Property);
+        if (property is not null)
+        {
+            // handle property initializers from attributes
+            foreach (var attribute in property.ReflectionAttributes.OfType<ISubjectPropertyInitializer>())
             {
-                foreach (var attribute in property.Value.ReflectionAttributes.OfType<ISubjectPropertyInitializer>())
-                {
-                    attribute.InitializeProperty(property.Value, change.Index);
-                }
+                attribute.InitializeProperty(property);
+            }
+
+            // handle property initializers from context
+            foreach (var initializer in change.Subject.Context.GetServices<ISubjectPropertyInitializer>())
+            {
+                initializer.InitializeProperty(property);
             }
         }
     }
@@ -93,7 +104,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         return registeredSubject;
     }
 
-    void ILifecycleHandler.Detach(SubjectLifecycleChange change)
+    void ILifecycleHandler.DetachSubject(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {
@@ -117,6 +128,10 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                 _knownSubjects.Remove(change.Subject);
             }
         }
+    }
+
+    void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
+    {
     }
     
     private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)

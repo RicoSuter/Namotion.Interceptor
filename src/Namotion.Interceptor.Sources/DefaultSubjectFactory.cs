@@ -16,11 +16,12 @@ public class DefaultSubjectFactory : ISubjectFactory
     {
         var itemType = index is not null ? property.Type.GenericTypeArguments[0] : property.Type;
         var serviceProvider = property.Parent.Subject.Context.TryGetService<IServiceProvider>();
-        var item = serviceProvider is not null
-            ? ActivatorUtilities.CreateInstance(serviceProvider, itemType, [])
-            : Activator.CreateInstance(itemType);
-
-        return item as IInterceptorSubject ?? throw new InvalidOperationException("Could not create subject.");
+        var item = (serviceProvider is not null
+                ? ActivatorUtilities.CreateInstance(serviceProvider, itemType, []) as IInterceptorSubject
+                : Activator.CreateInstance(itemType) as IInterceptorSubject)
+            ?? throw new InvalidOperationException("Could not create subject.");
+        
+        return item;
     }
 
     /// <inheritdoc />
@@ -28,7 +29,7 @@ public class DefaultSubjectFactory : ISubjectFactory
     {
         var itemType = property.Type.GenericTypeArguments[0];
         var collectionType = typeof(List<>).MakeGenericType(itemType);
-     
+
         var collection = (IList)Activator.CreateInstance(collectionType)!;
         foreach (var subject in children)
         {

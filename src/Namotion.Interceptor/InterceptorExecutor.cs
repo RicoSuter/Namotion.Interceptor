@@ -9,10 +9,10 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         _subject = subject;
     }
     
-    public object? GetProperty(IInterceptorSubject subject, string propertyName, Func<object?> readValue)
+    public object? GetProperty(string propertyName, Func<object?> readValue)
     {
-        var readInterceptors = subject.Context.GetServices<IReadInterceptor>();
-        var interception = new ReadPropertyInterception(new PropertyReference(subject, propertyName));
+        var readInterceptors = _subject.Context.GetServices<IReadInterceptor>();
+        var interception = new ReadPropertyInterception(new PropertyReference(_subject, propertyName));
         
         var returnReadValue = new Func<ReadPropertyInterception, object?>(_ => readValue());
     
@@ -26,10 +26,10 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         return returnReadValue(interception);
     }
     
-    public void SetProperty(IInterceptorSubject subject, string propertyName, object? newValue, Func<object?> readValue, Action<object?> writeValue)
+    public void SetProperty(string propertyName, object? newValue, Func<object?>? readValue, Action<object?> writeValue)
     {
-        var writeInterceptors = subject.Context.GetServices<IWriteInterceptor>();
-        var interception = new WritePropertyInterception(new PropertyReference(subject, propertyName), readValue(), newValue);
+        var writeInterceptors = _subject.Context.GetServices<IWriteInterceptor>();
+        var interception = new WritePropertyInterception(new PropertyReference(_subject, propertyName), readValue?.Invoke(), newValue); // TODO: reading here might be a problem (performance?)
 
         var returnWriteValue = new Func<WritePropertyInterception, object?>(value =>
         {
@@ -50,10 +50,10 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         returnWriteValue(interception);
     }
 
-    public object? InvokeMethod(IInterceptorSubject subject, string methodName, object?[] parameters, Func<object?[], object?> invokeMethod)
+    public object? InvokeMethod(string methodName, object?[] parameters, Func<object?[], object?> invokeMethod)
     {
-        var methodInterceptors = subject.Context.GetServices<IMethodInterceptor>();
-        var interception = new MethodInvocationInterception(subject, methodName, parameters);
+        var methodInterceptors = _subject.Context.GetServices<IMethodInterceptor>();
+        var interception = new MethodInvocationInterception(_subject, methodName, parameters);
 
         var returnInvokeMethod = new Func<MethodInvocationInterception, object?>(context => invokeMethod(context.Parameters));
     

@@ -152,7 +152,7 @@ public static class SubjectAspNetCoreServiceCollection
             // write updates
             foreach (var update in resolvedUpdates)
             {
-                update.Property.SetValue?.Invoke(update.Subject, update.Value.Deserialize(update.Property.Type));
+                update.Property.SetValue?.Invoke(update.Subject!, update.Value.Deserialize(update.Property.Type));
             }
 
             return TypedResults.Ok();

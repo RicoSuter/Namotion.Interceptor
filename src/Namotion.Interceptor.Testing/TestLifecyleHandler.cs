@@ -15,12 +15,12 @@ namespace Namotion.Interceptor.Testing
             _detaches = detaches;
         }
 
-        public void Attach(SubjectLifecycleChange change)
+        public void AttachSubject(SubjectLifecycleChange change)
         {
             _attaches.Add(change);
         }
 
-        public void Detach(SubjectLifecycleChange change)
+        public void DetachSubject(SubjectLifecycleChange change)
         {
             _detaches.Add(change);
         }

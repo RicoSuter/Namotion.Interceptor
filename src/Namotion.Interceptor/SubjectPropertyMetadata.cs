@@ -1,6 +1,6 @@
 ﻿namespace Namotion.Interceptor;
 
-public readonly struct SubjectPropertyMetadata
+public readonly record struct SubjectPropertyMetadata
 {
     public string Name { get; }
     
@@ -8,18 +8,22 @@ public readonly struct SubjectPropertyMetadata
     
     public IReadOnlyCollection<Attribute> Attributes { get; }
     
-    public Func<object?, object?>? GetValue { get; }
+    public Func<IInterceptorSubject, object?>? GetValue { get; }
     
-    public Action<object?, object?>? SetValue { get; }
+    public Action<IInterceptorSubject, object?>? SetValue { get; }
+    
+    public bool IsDynamic { get; }
 
     public SubjectPropertyMetadata(
         string name, Type type, IReadOnlyCollection<Attribute> attributes, 
-        Func<object?, object?>? getValue, Action<object?, object?>? setValue)
+        Func<IInterceptorSubject, object?>? getValue, Action<IInterceptorSubject, object?>? setValue,
+        bool isDynamic)
     {
         Name = name;
         Type = type;
         Attributes = attributes;
         GetValue = getValue;
         SetValue = setValue;
+        IsDynamic = isDynamic;
     }
 }

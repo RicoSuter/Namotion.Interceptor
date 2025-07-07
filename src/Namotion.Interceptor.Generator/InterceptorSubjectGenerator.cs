@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -17,12 +18,14 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
     {
         var classWithAttributeProvider = context.SyntaxProvider
             .CreateSyntaxProvider(
-                predicate: (node, _) => node is ClassDeclarationSyntax cds && 
-                                        cds.AttributeLists.Count > 0 && 
-                                        cds.AttributeLists.Any(a => a.ToString() == "[InterceptorSubject]"), // TODO: Use actual symbol
+                predicate: (node, _) => node is ClassDeclarationSyntax { AttributeLists.Count: > 0 },
                 transform: (ctx, ct) =>
                 {
                     var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
+
+                    if (!HasInterceptorSubjectAttribute(ctx, classDeclaration, ct))
+                        return null!;
+                    
                     var model = ctx.SemanticModel;
                     return new
                     {
@@ -125,7 +128,7 @@ namespace {namespaceName}
     $@"
             {{
                 ""{propertyName}"",       
-                new SubjectPropertyMetadata(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")})
+                new SubjectPropertyMetadata(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")}, false)
             }},";
                     }
 
@@ -248,7 +251,7 @@ namespace {namespaceName}
     $@"
         private T GetProperty<T>(string propertyName, Func<object?> readValue)
         {{
-            return _context is not null ? (T?)_context.GetProperty(this, propertyName, readValue)! : (T?)readValue()!;
+            return _context is not null ? (T?)_context.GetProperty(propertyName, readValue)! : (T?)readValue()!;
         }}
 
         private void SetProperty<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)
@@ -259,13 +262,13 @@ namespace {namespaceName}
             }}
             else
             {{
-                _context.SetProperty(this, propertyName, newValue, readValue, setValue);
+                _context.SetProperty(propertyName, newValue, readValue, setValue);
             }}
         }}
 
         private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
         {{
-            return _context is not null ? _context.InvokeMethod(this, methodName, parameters, invokeMethod) : invokeMethod(parameters);
+            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(parameters);
         }}
     }}
 }}
@@ -278,6 +281,32 @@ namespace {namespaceName}
                 }
             }
         });
+    }
+
+    private bool HasInterceptorSubjectAttribute(GeneratorSyntaxContext ctx, ClassDeclarationSyntax classDeclaration, CancellationToken ct)
+    {
+        var hasAttribute = classDeclaration.AttributeLists
+            .SelectMany(al => al.Attributes)
+            .Any(attr =>
+            {
+                var attributeType = ctx.SemanticModel.GetTypeInfo(attr, ct).Type as INamedTypeSymbol;
+                return attributeType != null && IsTypeOrInheritsFrom(attributeType, "InterceptorSubjectAttribute");
+            });
+        
+        return hasAttribute;
+    }
+
+    private bool IsTypeOrInheritsFrom(ITypeSymbol? type, string baseTypeName)
+    {
+        do
+        {
+            if (type?.Name == baseTypeName)
+                return true;
+
+            type = type?.BaseType;
+        } while (type is not null);
+
+        return false;
     }
 
     private string? GetFullTypeName(TypeSyntax? type, SemanticModel semanticModel)
