@@ -1,4 +1,5 @@
 ﻿using System.Text.Json.Serialization;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
@@ -63,27 +64,24 @@ public record RegisteredSubject
 
     public RegisteredSubjectProperty AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params Attribute[] attributes)
     {
+        var propertyReference = new PropertyReference(Subject, name);
+        var property = new DynamicRegisteredSubjectProperty(propertyReference, getValue, setValue, attributes)
+        {
+            Parent = this,
+            Type = type,
+        };
+        
         lock (_lock)
         {
-            var reference = new PropertyReference(Subject, name);
-            var property = new DynamicRegisteredSubjectProperty(reference, getValue, setValue, attributes)
-            {
-                Parent = this,
-                Type = type,
-            };
-
-            if (setValue is not null)
-            {
-                var value = getValue is not null ? Subject.GetInterceptedProperty(reference.Name, getValue) : null;
-                Subject.SetInterceptedProperty(reference.Name, value, getValue, setValue);
-            } 
-            else if (getValue is not null)
-            {
-                Subject.GetInterceptedProperty(reference.Name, getValue);
-            }
-            
             _properties.Add(name, property);
-            return property;
         }
+
+        Subject.SetPropertyMetadata(propertyReference, new SubjectPropertyMetadata(name, type, attributes, 
+            getValue is not null ? _ => getValue.Invoke() : null, 
+            setValue is not null ? (_, v) => setValue.Invoke(v) : null));
+
+        Subject.AttachSubjectProperty(propertyReference);
+
+        return property;
     }
 }

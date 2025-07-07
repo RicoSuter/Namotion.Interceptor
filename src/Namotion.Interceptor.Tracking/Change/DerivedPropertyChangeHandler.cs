@@ -5,29 +5,26 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// <summary>
 /// Handles derived properties and triggers change events and recalculations when dependent properties are changed.
 /// </summary>
-public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, ILifecycleHandler
+public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, ISubjectPropertyLifecycleHandler
 {
     [ThreadStatic]
     private static Stack<HashSet<PropertyReference>>? _currentTouchedProperties;
     
-    public void Attach(SubjectLifecycleChange change)
+    public void AttachSubjectProperty(SubjectPropertyLifecycleChange change)
     {
-        foreach (var property in change
-            .Subject.Properties.Where(p => p.Value.IsDerived()))
+        if (change.Property.Metadata.IsDerived())
         {
-            var propertyReference = new PropertyReference(change.Subject, property.Key);
-
             TryStartRecordTouchedProperties();
 
-            var result = property.Value.GetValue?.Invoke(change.Subject);
-            propertyReference.SetLastKnownValue(result);
+            var result = change.Property.Metadata.GetValue?.Invoke(change.Subject);
+            change.Property.SetLastKnownValue(result);
 
-            StoreRecordedTouchedProperties(propertyReference);
-            TouchProperty(propertyReference);
+            StoreRecordedTouchedProperties(change.Property);
+            TouchProperty(change.Property);
         }
     }
 
-    public void Detach(SubjectLifecycleChange change)
+    public void DetachSubjectProperty(SubjectPropertyLifecycleChange change)
     {
     }
 
@@ -54,11 +51,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                 TryStartRecordTouchedProperties();
 
-                var newValue = usedByProperty
-                    .Subject
-                    .Properties[usedByProperty.Name]
-                    .GetValue?
-                    .Invoke(usedByProperty.Subject);
+                var newValue = usedByProperty.Metadata.GetValue?.Invoke(usedByProperty.Subject);
 
                 StoreRecordedTouchedProperties(usedByProperty);
                 TouchProperty(usedByProperty);

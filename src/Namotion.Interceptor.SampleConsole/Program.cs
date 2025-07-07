@@ -77,14 +77,14 @@ namespace Namotion.Interceptor.SampleConsole
         }
     }
 
-    public class LogPropertyChangesHandler : ILifecycleHandler
+    public class LogPropertyChangesHandler : ISubjectLifecycleHandler
     {
-        public void Attach(SubjectLifecycleChange change)
+        public void AttachSubject(SubjectLifecycleChange change)
         {
             Console.WriteLine($"Attach: {change.Subject}");
         }
 
-        public void Detach(SubjectLifecycleChange change)
+        public void DetachSubject(SubjectLifecycleChange change)
         {
             Console.WriteLine($"Detach: {change.Subject}");
         }
