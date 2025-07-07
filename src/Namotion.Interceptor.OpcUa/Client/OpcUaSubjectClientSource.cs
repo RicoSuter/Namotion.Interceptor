@@ -252,19 +252,19 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                             .ToList();
                         
                         var childSubjectArray = Array.CreateInstance(property.Type.GetElementType()!, childSubjectList.Count);
-                        for (var i2 = 0; i2 < childSubjectList.Count; i2++)
+                        for (var arrayIndex = 0; arrayIndex < childSubjectList.Count; arrayIndex++)
                         {
-                            childSubjectArray.SetValue(childSubjectList[i2].Subject, i2);
+                            childSubjectArray.SetValue(childSubjectList[arrayIndex].Subject, arrayIndex);
                         }
 
                         property.SetValue(childSubjectArray);
 
-                        var i = 0;
+                        var pathIndex = 0;
                         foreach (var child in childSubjectList)
                         {
                             var fullPath = prefix + PathDelimiter + propertyName + PathDelimiter + propertyName;
-                            await LoadSubjectAsync(child.Subject, child.Node, subscription, fullPath + $"[{i}]", cancellationToken);
-                            i++;
+                            await LoadSubjectAsync(child.Subject, child.Node, subscription, fullPath + $"[{pathIndex}]", cancellationToken);
+                            pathIndex++;
                         }
                     }
                     else if (property.IsSubjectDictionary)
