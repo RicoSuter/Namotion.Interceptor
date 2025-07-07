@@ -319,6 +319,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
             if (propertyName is null)
                 return null;
             
+            // TODO: Create property reference node instead of __?
             return GetPropertyName(attributedProperty) + "__" + propertyName;
         }
         
