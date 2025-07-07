@@ -21,7 +21,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         _loggerResolver = loggerResolver;
     }
 
-    public void Attach(SubjectLifecycleChange change)
+    public void AttachSubject(SubjectLifecycleChange change)
     {
         _logger ??= _loggerResolver();
         
@@ -39,7 +39,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         }
     }
 
-    public void Detach(SubjectLifecycleChange change)
+    public void DetachSubject(SubjectLifecycleChange change)
     {
         _logger ??= _loggerResolver();
 

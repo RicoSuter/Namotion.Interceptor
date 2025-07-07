@@ -1,4 +1,5 @@
 ﻿using System.Text.Json.Serialization;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
@@ -61,21 +62,23 @@ public record RegisteredSubject
             _parents.Remove(new SubjectPropertyParent { Property = parent, Index = index });
     }
 
-    public RegisteredSubjectProperty AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params Attribute[] attributes)
+    public RegisteredSubjectProperty AddProperty(string name, Type type, Func<object, object?>? getValue, Action<object, object?>? setValue, params Attribute[] attributes)
     {
+        var propertyReference = new PropertyReference(Subject, name);
+        propertyReference.SetPropertyMetadata(new SubjectPropertyMetadata(name, type, attributes, getValue, setValue));
+
+        var property = new RegisteredSubjectProperty(propertyReference, attributes)
+        {
+            Parent = this,
+            Type = type,
+        };
+        
         lock (_lock)
         {
-            var reference = new PropertyReference(Subject, name);
-            var property = new DynamicRegisteredSubjectProperty(reference, getValue, setValue, attributes)
-            {
-                Parent = this,
-                Type = type,
-            };
-            
-            // TODO: Raise registry changed event
-            
             _properties.Add(name, property);
-            return property;
         }
+
+        Subject.AttachSubjectProperty(propertyReference);
+        return property;
     }
 }
