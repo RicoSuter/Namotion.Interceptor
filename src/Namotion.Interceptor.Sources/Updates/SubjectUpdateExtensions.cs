@@ -115,8 +115,9 @@ public static class SubjectUpdateExtensions
                         var item = subjectFactory?.CreateSubject(registeredProperty, null);
                         if (item != null)
                         {
+                            item.Context.AddFallbackContext(subject.Context);
+
                             var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
-                            RegisterSubject(parentRegistry, item, registeredProperty, null);
                             item.ApplySubjectPropertyUpdate(propertyUpdate.Item, applyValuePropertyUpdate, subjectFactory, parentRegistry);
 
                             SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () =>
@@ -157,8 +158,9 @@ public static class SubjectUpdateExtensions
                                     var newItem = subjectFactory?.CreateSubject(registeredProperty, index);
                                     if (newItem is not null)
                                     {
+                                        newItem.Context.AddFallbackContext(subject.Context);
+
                                         var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
-                                        RegisterSubject(parentRegistry, newItem, registeredProperty, list.Count);
                                         ApplySubjectPropertyUpdate(newItem, item.Item!, applyValuePropertyUpdate, subjectFactory, parentRegistry);
                                     }
 
@@ -181,27 +183,20 @@ public static class SubjectUpdateExtensions
                                 var item = subjectFactory?.CreateSubject(registeredProperty, i.Index);
                                 if (item is not null)
                                 {
+                                    item.Context.AddFallbackContext(subject.Context);
+
                                     var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
-                                    RegisterSubject(parentRegistry, item, registeredProperty, i.Index);
                                     item.ApplySubjectPropertyUpdate(i.Item!, applyValuePropertyUpdate, subjectFactory, parentRegistry);
                                 }
                                 return item;
                             }) ?? [];
                         
-                        var collection = subjectFactory
-                            .CreateSubjectCollection(registeredProperty, items);
-                        
-                        SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () =>
-                            registeredProperty.SetValue(collection));
+                        var collection = subjectFactory.CreateSubjectCollection(registeredProperty, items);
+                        SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () => registeredProperty.SetValue(collection));
                     }
                 }
 
                 break;
         }
-    }
-
-    private static void RegisterSubject(ISubjectRegistry registry, IInterceptorSubject subject, RegisteredSubjectProperty property, object? index)
-    {
-        (registry as ILifecycleHandler)?.Attach(new SubjectLifecycleChange(subject, property.Property, index,1));
     }
 }

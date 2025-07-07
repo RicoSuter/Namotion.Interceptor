@@ -26,12 +26,12 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
         
         public List<SubjectLifecycleChange> Detachements { get; } = new();
 
-        public void Attach(SubjectLifecycleChange change)
+        public void AttachSubject(SubjectLifecycleChange change)
         {
             Attachements.Add(change);
         }
         
-        public void Detach(SubjectLifecycleChange change)
+        public void DetachSubject(SubjectLifecycleChange change)
         {
             Detachements.Add(change);
         }
