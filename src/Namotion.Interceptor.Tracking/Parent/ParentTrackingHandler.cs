@@ -4,7 +4,7 @@ namespace Namotion.Interceptor.Tracking.Parent;
 
 public class ParentTrackingHandler : ILifecycleHandler
 {
-    public void Attach(SubjectLifecycleChange change)
+    public void AttachSubject(SubjectLifecycleChange change)
     {
         if (change.Property.HasValue)
         {
@@ -12,7 +12,7 @@ public class ParentTrackingHandler : ILifecycleHandler
         }
     }
 
-    public void Detach(SubjectLifecycleChange change)
+    public void DetachSubject(SubjectLifecycleChange change)
     {
         if (change.Property.HasValue)
         {

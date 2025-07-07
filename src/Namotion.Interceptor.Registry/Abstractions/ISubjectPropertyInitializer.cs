@@ -2,5 +2,5 @@
 
 public interface ISubjectPropertyInitializer
 {
-    void InitializeProperty(RegisteredSubjectProperty property, object? index);
+    void InitializeProperty(RegisteredSubjectProperty property);
 }
