@@ -21,11 +21,13 @@ var context = InterceptorSubjectContext
 
 var root = new Root(context)
 {
-    Person = new Person
-    {
-        FirstName = "John",
-        LastName = "Doe"
-    }
+    Persons = Enumerable
+        .Range(0, 1000).Select(i => new Person
+        {
+            FirstName = "John " + i,
+            LastName = "Doe" + i
+        })
+        .ToArray()
 };
 
 builder.Services.AddSingleton(root);

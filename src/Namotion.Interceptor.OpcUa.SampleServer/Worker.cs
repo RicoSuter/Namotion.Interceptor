@@ -17,12 +17,12 @@ public class Worker : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (_root.Person != null)
+            foreach (var person in _root.Persons)
             {
-                _root.Person.FirstName = Stopwatch.GetTimestamp().ToString();
+                person.FirstName = Stopwatch.GetTimestamp().ToString();
             }
-            
-            await Task.Delay(1000);
+
+            await Task.Delay(1000, stoppingToken);
         }
     }
 }
