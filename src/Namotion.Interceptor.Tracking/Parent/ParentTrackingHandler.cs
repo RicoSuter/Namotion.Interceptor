@@ -2,7 +2,7 @@
 
 namespace Namotion.Interceptor.Tracking.Parent;
 
-public class ParentTrackingHandler : ISubjectLifecycleHandler
+public class ParentTrackingHandler : ILifecycleHandler
 {
     public void AttachSubject(SubjectLifecycleChange change)
     {

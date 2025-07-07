@@ -2,7 +2,7 @@
 
 namespace Namotion.Interceptor.Testing
 {
-    public class TestLifecyleHandler : ISubjectLifecycleHandler
+    public class TestLifecyleHandler : ILifecycleHandler
     {
         private readonly List<SubjectLifecycleChange> _attaches;
         private readonly List<SubjectLifecycleChange> _detaches;

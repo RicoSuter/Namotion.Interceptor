@@ -5,12 +5,12 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// <summary>
 /// Handles derived properties and triggers change events and recalculations when dependent properties are changed.
 /// </summary>
-public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, ISubjectPropertyLifecycleHandler
+public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
     [ThreadStatic]
     private static Stack<HashSet<PropertyReference>>? _currentTouchedProperties;
     
-    public void AttachSubjectProperty(SubjectPropertyLifecycleChange change)
+    public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
         if (change.Property.Metadata.IsDerived())
         {
@@ -24,7 +24,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
     }
 
-    public void DetachSubjectProperty(SubjectPropertyLifecycleChange change)
+    public void DetachProperty(SubjectPropertyLifecycleChange change)
     {
     }
 
