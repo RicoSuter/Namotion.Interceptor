@@ -123,13 +123,42 @@ public record RegisteredSubjectProperty
     /// <param name="setValue">The value setter action.</param>
     /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
     /// <returns>The created attribute property.</returns>
-    public RegisteredSubjectProperty AddAttribute(string name, Type type, 
-        Func<object, object?>? getValue, Action<object, object?>? setValue, 
+    public RegisteredSubjectProperty AddAttribute(
+        string name, Type type, 
+        Func<IInterceptorSubject, object?>? getValue, 
+        Action<IInterceptorSubject, object?>? setValue, 
         params Attribute[] attributes)
     {
         var propertyName = $"{Property.Name}@{name}";
         
         var attribute = Parent.AddProperty(
+            propertyName,
+            type, getValue, setValue,
+            attributes
+                .Concat([new PropertyAttributeAttribute(Property.Name, name)])
+                .ToArray());
+
+        return attribute;
+    }
+
+    /// <summary>
+    /// Adds a derived attribute to the property.
+    /// </summary>
+    /// <param name="name">The name of the attribute.</param>
+    /// <param name="type">The type of the attribute.</param>
+    /// <param name="getValue">The value getter function.</param>
+    /// <param name="setValue">The value setter action.</param>
+    /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
+    /// <returns>The created attribute property.</returns>
+    public RegisteredSubjectProperty AddDerivedAttribute(
+        string name, Type type, 
+        Func<IInterceptorSubject, object?>? getValue, 
+        Action<IInterceptorSubject, object?>? setValue, 
+        params Attribute[] attributes)
+    {
+        var propertyName = $"{Property.Name}@{name}";
+        
+        var attribute = Parent.AddDerivedProperty(
             propertyName,
             type, getValue, setValue,
             attributes
