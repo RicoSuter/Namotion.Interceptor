@@ -7,6 +7,7 @@ using Namotion.Interceptor.OpcUa.SampleClient;
 using Namotion.Interceptor.OpcUa.SampleModel;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Validation;
 using Opc.Ua;
 
@@ -37,7 +38,7 @@ context.GetPropertyChangedObservable().Subscribe(x =>
         var ticksElapsed = laterTimestamp - beforeTimestamp;
         var secondsElapsed = (double)ticksElapsed / Stopwatch.Frequency;
 
-        Console.WriteLine($"Elapsed time: {secondsElapsed * 1000} ms");
+        Console.WriteLine(x.Property.Subject.GetParents().First().Index + $": Elapsed time: {secondsElapsed * 1000} ms");
     }
 });
 

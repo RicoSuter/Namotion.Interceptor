@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Tracking.Change;
+﻿using System.ComponentModel.Design;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Recorder;
@@ -26,9 +27,9 @@ public static class InterceptorSubjectContextExtensions
     {
         return context
             .WithEqualityCheck()
-            .WithContextInheritance()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangedObservable();
+            .WithPropertyChangedObservable()
+            .WithContextInheritance();
     }
     
     /// <summary>
@@ -87,10 +88,10 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithContextInheritance(this IInterceptorSubjectContext context)
     {
         context
+            .WithLifecycle()
             .TryAddService(() => new ContextInheritanceHandler(), _ => true);
 
-        return context
-            .WithLifecycle();
+        return context;
     }
 
     /// <summary>
@@ -100,6 +101,11 @@ public static class InterceptorSubjectContextExtensions
     /// <returns>The collection.</returns>
     public static IInterceptorSubjectContext WithLifecycle(this IInterceptorSubjectContext context)
     {
+        if (context.TryGetService<ContextInheritanceHandler>() is not null)
+        {
+            throw new InvalidOperationException($"{nameof(ContextInheritanceHandler)} must be registered after {nameof(LifecycleInterceptor)}.");
+        }
+        
         return context
             .WithInterceptor(() => new LifecycleInterceptor());
     }

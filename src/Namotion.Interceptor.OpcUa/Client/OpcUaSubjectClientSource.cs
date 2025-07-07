@@ -74,7 +74,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                 var endpointDescription = CoreClientUtils.SelectEndpoint(application.ApplicationConfiguration, _serverUrl, false);
                 var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
 
-                var cancellationTokenSource = new CancellationTokenSource();
                 using var session = await Session.Create(
                     application.ApplicationConfiguration,
                     endpoint,
@@ -83,9 +82,12 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                     60000,
                     new UserIdentity(), // Use anonymous authentication; adjust if needed
                     null, stoppingToken);
+
+                var cancellationTokenSource = new CancellationTokenSource();
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, cancellationTokenSource.Token);
                 
                 _session = session;
-                _session.SessionClosing += (sender, args) =>
+                _session.SessionClosing += (_, _) =>
                 {
                     cancellationTokenSource.Cancel();
                 };
@@ -100,7 +102,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                     ReferenceTypeIds.HierarchicalReferences,
                     true,
                     (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
-                    stoppingToken);
+                    linked.Token);
 
                 var rootNode = references.SelectMany(c => c).FirstOrDefault(r => r.BrowseName == _rootName);
                 if (rootNode is not null)
@@ -115,11 +117,11 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
 
                     if (session.AddSubscription(subscription))
                     {
-                        await subscription.CreateAsync(stoppingToken);
+                        await subscription.CreateAsync(linked.Token);
                         subscription.FastDataChangeCallback += FastDataChangeCallback;
 
-                        await LoadSubjectAsync(_subject, rootNode, subscription, _rootName ?? string.Empty, stoppingToken);
-                        await subscription.ApplyChangesAsync(stoppingToken);
+                        await LoadSubjectAsync(_subject, rootNode, subscription, _rootName ?? string.Empty, linked.Token);
+                        await subscription.ApplyChangesAsync(linked.Token);
                     }
                     else
                     {
@@ -127,7 +129,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                     }
                 }
 
-                using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, cancellationTokenSource.Token);
                 await Task.Delay(-1, linked.Token);
                 _session = null;
             }
@@ -168,7 +169,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
         {
             foreach (var change in changes)
             {
-                _logger.LogInformation("Received notification for {Path} with value {Value}.", change.Property.Name, change.NewValue);
+                // _logger.LogInformation("Received notification for {Path} with value {Value}.", change.Property.Name, change.NewValue);
 
                 try
                 {
@@ -193,10 +194,10 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                 var propertyName = GetPropertyName(property);
                 if (propertyName is not null)
                 {
+                    var collectionPath = prefix + PathDelimiter + propertyName;
                     // TODO: Do the same in the server
                     if (property.IsSubjectReference)
                     {
-                        var collectionPath = prefix + PathDelimiter + propertyName;
                         var children = property.Children;
                         if (children.Any())
                         {
@@ -231,8 +232,42 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                     }
                     else if (property.IsSubjectCollection)
                     {
-                        await LoadSubjectCollectionAsync(property.Children, node, subscription, 
-                            prefix + propertyName + PathDelimiter + propertyName, cancellationToken);
+                        var (_, _ , nodeProperties, _) = await _session.BrowseAsync(
+                            null,
+                            null,
+                            [new NodeId(collectionPath, node.NodeId.NamespaceIndex)],
+                            0u,
+                            BrowseDirection.Forward,
+                            ReferenceTypeIds.HierarchicalReferences,
+                            true,
+                            (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method, 
+                            cancellationToken);
+
+                        var children = nodeProperties
+                            .SelectMany(p => p)
+                            .Select(p => new
+                            {
+                                Node = p,
+                                Subject = (IInterceptorSubject)Activator.CreateInstance(
+                                    property.Type.IsArray ? property.Type.GetElementType()! : property.Type.GenericTypeArguments[0])!
+                            })
+                            .ToList();
+                        
+                        var ch = Array.CreateInstance(property.Type.GetElementType()!, children.Count);
+                        for (var i2 = 0; i2 < children.Count; i2++)
+                        {
+                            ch.SetValue(children[i2].Subject, i2);
+                        }
+
+                        property.SetValue(ch);
+
+                        var i = 0;
+                        foreach (var child in children)
+                        {
+                            var fullPath = prefix + PathDelimiter + propertyName + PathDelimiter + propertyName;
+                            await LoadSubjectAsync(child.Subject, child.Node, subscription, fullPath + $"[{i}]", cancellationToken);
+                            i++;
+                        }
                     }
                     else if (property.IsSubjectDictionary)
                     {
@@ -244,17 +279,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                     }
                 }
             }
-        }
-    }
-
-    private async Task LoadSubjectCollectionAsync(ICollection<SubjectPropertyChild> children, ReferenceDescription collectionNode, 
-        Subscription subscription, string fullPath, CancellationToken cancellationToken)
-    {
-        var i = 0;
-        foreach (var child in children)
-        {
-            await LoadSubjectAsync(child.Subject, collectionNode, subscription, fullPath + $"[{i}]" + PathDelimiter, cancellationToken);
-            i++;
         }
     }
     

@@ -164,8 +164,7 @@ public class ContextInheritanceHandlerTests
         };
 
         ((IInterceptorSubject)person.Mother).Context
-            .WithService(() => service2, x => x == 2)
-            .WithContextInheritance();
+            .WithService(() => service2, x => x == 2);
 
         // Assert
         Assert.Contains(1, person.GetServices<int>());
