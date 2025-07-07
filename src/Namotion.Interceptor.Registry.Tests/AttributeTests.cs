@@ -76,7 +76,7 @@ public class AttributeTests
         // Act
         var dynamicDerivedProperty = person
             .TryGetRegisteredSubject()!
-            .AddDerivedProperty("DynamicDerivedProperty", typeof(string), _ => "Mr. " + person.FirstName);
+            .AddDerivedProperty("DynamicDerivedProperty", typeof(string), _ => "Mr. " + person.FirstName, null);
 
         context
             .GetPropertyChangedObservable()
@@ -110,7 +110,7 @@ public class AttributeTests
         var dynamicDerivedAttribute = person
             .TryGetRegisteredSubject()!
             .TryGetProperty(nameof(Person.FirstName))!
-            .AddDerivedAttribute("DynamicDerivedAttribute", typeof(string), _ => "Mr. " + person.FirstName);
+            .AddDerivedAttribute("DynamicDerivedAttribute", typeof(string), _ => "Mr. " + person.FirstName, null);
 
         context
             .GetPropertyChangedObservable()

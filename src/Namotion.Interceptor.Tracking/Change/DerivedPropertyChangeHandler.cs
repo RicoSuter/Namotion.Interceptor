@@ -49,6 +49,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             foreach (var usedByProperty in usedByProperties)
             {
+                if (usedByProperty == context.Property)
+                {
+                    continue;
+                }
+                
                 var oldValue = usedByProperty.GetLastKnownValue();
 
                 TryStartRecordTouchedProperties();
