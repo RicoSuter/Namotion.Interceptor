@@ -28,17 +28,17 @@ builder.Services.AddSingleton(new Root(context));
 builder.Services.AddOpcUaSubjectClient<Root>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 builder.Services.AddHostedService<Worker>();
 
-context.GetPropertyChangedObservable().Subscribe(x =>
+context.GetPropertyChangedObservable().Subscribe(change =>
 {
-    if (x.Property.Name == "FirstName")
+    if (change.Property.Name == "FirstName")
     {
         var laterTimestamp = Stopwatch.GetTimestamp();
-        var beforeTimestamp = long.Parse(x.NewValue?.ToString() ?? "0");
+        var beforeTimestamp = long.Parse(change.NewValue?.ToString() ?? "0");
 
         var ticksElapsed = laterTimestamp - beforeTimestamp;
         var secondsElapsed = (double)ticksElapsed / Stopwatch.Frequency;
 
-        Console.WriteLine(x.Property.Subject.GetParents().First().Index + $": Elapsed time: {secondsElapsed * 1000} ms");
+        Console.WriteLine(change.Property.Subject.GetParents().First().Index + $": Elapsed time: {secondsElapsed * 1000} ms");
     }
 });
 

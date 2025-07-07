@@ -243,7 +243,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                             (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method, 
                             cancellationToken);
 
-                        var children = nodeProperties
+                        var childSubjectList = nodeProperties
                             .SelectMany(p => p)
                             .Select(p => new
                             {
@@ -253,16 +253,16 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                             })
                             .ToList();
                         
-                        var ch = Array.CreateInstance(property.Type.GetElementType()!, children.Count);
-                        for (var i2 = 0; i2 < children.Count; i2++)
+                        var childSubjectArray = Array.CreateInstance(property.Type.GetElementType()!, childSubjectList.Count);
+                        for (var i2 = 0; i2 < childSubjectList.Count; i2++)
                         {
-                            ch.SetValue(children[i2].Subject, i2);
+                            childSubjectArray.SetValue(childSubjectList[i2].Subject, i2);
                         }
 
-                        property.SetValue(ch);
+                        property.SetValue(childSubjectArray);
 
                         var i = 0;
-                        foreach (var child in children)
+                        foreach (var child in childSubjectList)
                         {
                             var fullPath = prefix + PathDelimiter + propertyName + PathDelimiter + propertyName;
                             await LoadSubjectAsync(child.Subject, child.Node, subscription, fullPath + $"[{i}]", cancellationToken);
