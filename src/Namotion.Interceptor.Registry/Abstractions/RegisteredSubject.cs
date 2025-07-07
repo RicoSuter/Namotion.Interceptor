@@ -62,10 +62,12 @@ public record RegisteredSubject
             _parents.Remove(new SubjectPropertyParent { Property = parent, Index = index });
     }
 
-    public RegisteredSubjectProperty AddProperty(string name, Type type, Func<object?>? getValue, Action<object?>? setValue, params Attribute[] attributes)
+    public RegisteredSubjectProperty AddProperty(string name, Type type, Func<object, object?>? getValue, Action<object, object?>? setValue, params Attribute[] attributes)
     {
         var propertyReference = new PropertyReference(Subject, name);
-        var property = new DynamicRegisteredSubjectProperty(propertyReference, getValue, setValue, attributes)
+        propertyReference.SetPropertyMetadata(new SubjectPropertyMetadata(name, type, attributes, getValue, setValue));
+
+        var property = new RegisteredSubjectProperty(propertyReference, attributes)
         {
             Parent = this,
             Type = type,
@@ -76,12 +78,7 @@ public record RegisteredSubject
             _properties.Add(name, property);
         }
 
-        Subject.SetPropertyMetadata(propertyReference, new SubjectPropertyMetadata(name, type, attributes, 
-            getValue is not null ? _ => getValue.Invoke() : null, 
-            setValue is not null ? (_, v) => setValue.Invoke(v) : null));
-
         Subject.AttachSubjectProperty(propertyReference);
-
         return property;
     }
 }

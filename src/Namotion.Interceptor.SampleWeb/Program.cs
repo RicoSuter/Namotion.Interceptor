@@ -83,7 +83,7 @@ namespace Namotion.Interceptor.SampleWeb
         public void InitializeProperty(RegisteredSubjectProperty property)
         {
             property.AddAttribute("Unit", typeof(string),
-                () => _unit, null,
+                _ => _unit, null,
                 new SourceNameAttribute("mqtt", "unit"));
         }
     }
