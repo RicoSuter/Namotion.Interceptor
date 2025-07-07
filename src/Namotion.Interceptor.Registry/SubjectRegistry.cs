@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Registry;
 
 // TODO: Add lots of tests!
 
-public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
+public class SubjectRegistry : ISubjectRegistry, ISubjectLifecycleHandler, ISubjectPropertyLifecycleHandler
 {
     private readonly Lock _lock = new();
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
@@ -39,7 +39,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
     }
 
     /// <inheritdoc />
-    void ILifecycleHandler.Attach(SubjectLifecycleChange change)
+    void ISubjectLifecycleHandler.AttachSubject(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {
@@ -69,20 +69,24 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                         Subject = change.Subject,
                     });
             }
+        }
+    }
 
-            foreach (var property in subject.Properties)
+    void ISubjectPropertyLifecycleHandler.AttachSubjectProperty(SubjectPropertyLifecycleChange change)
+    {
+        var property = TryGetRegisteredProperty(change.Property);
+        if (property is not null)
+        {
+            // handle property initializers from attributes
+            foreach (var attribute in property.ReflectionAttributes.OfType<ISubjectPropertyInitializer>())
             {
-                // handle property initializers from attributes
-                foreach (var attribute in property.Value.ReflectionAttributes.OfType<ISubjectPropertyInitializer>())
-                {
-                    attribute.InitializeProperty(property.Value, change.Index);
-                }
+                attribute.InitializeProperty(property);
+            }
 
-                // handle property initializers from context
-                foreach (var initializer in change.Subject.Context.GetServices<ISubjectPropertyInitializer>())
-                {
-                    initializer.InitializeProperty(property.Value, change.Index);
-                }
+            // handle property initializers from context
+            foreach (var initializer in change.Subject.Context.GetServices<ISubjectPropertyInitializer>())
+            {
+                initializer.InitializeProperty(property);
             }
         }
     }
@@ -100,7 +104,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
         return registeredSubject;
     }
 
-    void ILifecycleHandler.Detach(SubjectLifecycleChange change)
+    void ISubjectLifecycleHandler.DetachSubject(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {
@@ -124,6 +128,10 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler
                 _knownSubjects.Remove(change.Subject);
             }
         }
+    }
+
+    void ISubjectPropertyLifecycleHandler.DetachSubjectProperty(SubjectPropertyLifecycleChange change)
+    {
     }
     
     private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)

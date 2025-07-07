@@ -5,17 +5,17 @@
 /// The handler can be registered in the subject context and applies to the subject and all its children.
 /// A subject can also implement this interface directly to handle its own lifecycle changes.
 /// </summary>
-public interface ILifecycleHandler
+public interface ISubjectLifecycleHandler
 {
     /// <summary>
     /// Called when a subject is attached to the subject tree.
     /// </summary>
     /// <param name="change">The lifecycle change information.</param>
-    public void Attach(SubjectLifecycleChange change);
+    public void AttachSubject(SubjectLifecycleChange change);
 
     /// <summary>
     /// Called when a subject is detached from the subject tree.
     /// </summary>
     /// <param name="change">The lifecycle change information.</param>
-    public void Detach(SubjectLifecycleChange change);
+    public void DetachSubject(SubjectLifecycleChange change);
 }
