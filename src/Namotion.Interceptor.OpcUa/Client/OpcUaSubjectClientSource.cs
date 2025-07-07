@@ -247,7 +247,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                             .SelectMany(p => p)
                             .Select(p => new
                             {
-                                Node = p,
+                                Node = p, // TODO: Use ISubjectFactory to create the subject
                                 Subject = (IInterceptorSubject)Activator.CreateInstance(
                                     property.Type.IsArray ? property.Type.GetElementType()! : property.Type.GenericTypeArguments[0])!
                             })
