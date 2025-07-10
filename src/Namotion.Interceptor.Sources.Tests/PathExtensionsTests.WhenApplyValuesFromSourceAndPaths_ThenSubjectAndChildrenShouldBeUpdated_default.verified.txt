@@ -16,7 +16,7 @@
                 Type: List`1
               },
               father: {
-                Kind: Value,
+                Kind: Item,
                 Type: Person
               },
               firstName: {
@@ -30,7 +30,7 @@
                 Type: String
               },
               mother: {
-                Kind: Value,
+                Kind: Item,
                 Type: Person
               }
             }
@@ -46,7 +46,7 @@
                 Type: List`1
               },
               father: {
-                Kind: Value,
+                Kind: Item,
                 Type: Person
               },
               firstName: {
@@ -59,7 +59,7 @@
                 Type: String
               },
               mother: {
-                Kind: Value,
+                Kind: Item,
                 Type: Person
               }
             }
@@ -75,7 +75,7 @@
                 Type: List`1
               },
               father: {
-                Kind: Value,
+                Kind: Item,
                 Type: Person
               },
               firstName: {
@@ -89,7 +89,7 @@
                 Type: String
               },
               mother: {
-                Kind: Value,
+                Kind: Item,
                 Type: Person
               }
             }
@@ -109,7 +109,7 @@
             Type: List`1
           },
           father: {
-            Kind: Value,
+            Kind: Item,
             Type: Person
           },
           firstName: {
@@ -123,7 +123,7 @@
             Type: String
           },
           mother: {
-            Kind: Value,
+            Kind: Item,
             Type: Person
           }
         }
@@ -153,7 +153,7 @@
             Type: List`1
           },
           father: {
-            Kind: Value,
+            Kind: Item,
             Type: Person
           },
           firstName: {
@@ -166,7 +166,7 @@
             Type: String
           },
           mother: {
-            Kind: Value,
+            Kind: Item,
             Type: Person
           }
         }

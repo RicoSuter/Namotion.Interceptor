@@ -9,7 +9,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         _subject = subject;
     }
     
-    public object? GetProperty(string propertyName, Func<object?> readValue)
+    public object? GetPropertyValue(string propertyName, Func<object?> readValue)
     {
         var readInterceptors = _subject.Context.GetServices<IReadInterceptor>();
         var interception = new ReadPropertyInterception(new PropertyReference(_subject, propertyName));
@@ -26,7 +26,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         return returnReadValue(interception);
     }
     
-    public void SetProperty(string propertyName, object? newValue, Func<object?>? readValue, Action<object?> writeValue)
+    public void SetPropertyValue(string propertyName, object? newValue, Func<object?>? readValue, Action<object?> writeValue)
     {
         var writeInterceptors = _subject.Context.GetServices<IWriteInterceptor>();
         var interception = new WritePropertyInterception(new PropertyReference(_subject, propertyName), readValue?.Invoke(), newValue); // TODO: reading here might be a problem (performance?)

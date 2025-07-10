@@ -84,23 +84,25 @@ public record SubjectPropertyUpdate
             Attributes = attributes.Count != 0 ? attributes : null
         };
         
-        propertyUpdate.ApplyValue(property.Property.TryGetWriteTimestamp(), property.GetValue());
+        propertyUpdate.ApplyValue(property, property.Property.TryGetWriteTimestamp(), property.GetValue());
         return propertyUpdate;
     }
 
     /// <summary>
     /// Adds a complete update of the given value to the property update.
     /// </summary>
+    /// <param name="property">The property.</param>
     /// <param name="timestamp">The timestamp of the value change.</param>
     /// <param name="value">The value to apply.</param>
-    internal void ApplyValue(DateTimeOffset? timestamp, object? value)
+    internal void ApplyValue(RegisteredSubjectProperty property, DateTimeOffset? timestamp, object? value)
     {
         Timestamp = timestamp;
-        
-        if (value is IReadOnlyDictionary<string, IInterceptorSubject?> dictionary)
+
+        if (property.IsSubjectDictionary)
         {
             Kind = SubjectPropertyUpdateKind.Collection;
-            Collection = dictionary.Keys
+            Collection = value is IReadOnlyDictionary<string, IInterceptorSubject?> dictionary ? dictionary
+                .Keys
                 .Select(key =>
                 {
                     var item = dictionary[key];
@@ -110,23 +112,23 @@ public record SubjectPropertyUpdate
                         Index = key
                     };
                 })
-                .ToList();
+                .ToList() : null;
         }
-        else if (value is IEnumerable<IInterceptorSubject> collection)
+        else if (property.IsSubjectCollection)
         {
             Kind = SubjectPropertyUpdateKind.Collection;
-            Collection = collection
+            Collection = value is IEnumerable<IInterceptorSubject> collection ? collection
                 .Select((itemSubject, index) => new SubjectPropertyCollectionUpdate
                 {
                     Item = SubjectUpdate.CreateCompleteUpdate(itemSubject),
                     Index = index
                 })
-                .ToList();
+                .ToList() : null;
         }
-        else if (value is IInterceptorSubject itemSubject)
+        else if (property.IsSubjectReference)
         {
             Kind = SubjectPropertyUpdateKind.Item;
-            Item = SubjectUpdate.CreateCompleteUpdate(itemSubject);
+            Item = value is IInterceptorSubject itemSubject ? SubjectUpdate.CreateCompleteUpdate(itemSubject) : null;
         }
         else
         {
