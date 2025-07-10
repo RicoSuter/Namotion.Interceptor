@@ -187,7 +187,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} get => GetProperty<{fullyQualifiedName}>(nameof({propertyName}), () => _{propertyName});";
+            {modifiers} get => GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), () => _{propertyName});";
 
                         }
 
@@ -202,7 +202,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} {accessorText} => SetProperty(nameof({propertyName}), value, () => _{propertyName}, v => _{propertyName} = ({fullyQualifiedName})v!);";
+            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, () => _{propertyName}, v => _{propertyName} = ({fullyQualifiedName})v!);";
                         }
 
                         generatedCode +=
@@ -249,12 +249,12 @@ namespace {namespaceName}
 
                     generatedCode +=
     $@"
-        private T GetProperty<T>(string propertyName, Func<object?> readValue)
+        private T GetPropertyValue<T>(string propertyName, Func<object?> readValue)
         {{
-            return _context is not null ? (T?)_context.GetProperty(propertyName, readValue)! : (T?)readValue()!;
+            return _context is not null ? (T?)_context.GetPropertyValue(propertyName, readValue)! : (T?)readValue()!;
         }}
 
-        private void SetProperty<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)
+        private void SetPropertyValue<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)
         {{
             if (_context is null)
             {{
@@ -262,7 +262,7 @@ namespace {namespaceName}
             }}
             else
             {{
-                _context.SetProperty(propertyName, newValue, readValue, setValue);
+                _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
             }}
         }}
 
