@@ -7,6 +7,7 @@ using Namotion.Interceptor.OpcUa.SampleClient;
 using Namotion.Interceptor.OpcUa.SampleModel;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Validation;
 using Opc.Ua;
 
@@ -27,17 +28,17 @@ builder.Services.AddSingleton(new Root(context));
 builder.Services.AddOpcUaSubjectClient<Root>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 builder.Services.AddHostedService<Worker>();
 
-context.GetPropertyChangedObservable().Subscribe(x =>
+context.GetPropertyChangedObservable().Subscribe(change =>
 {
-    if (x.Property.Name == "FirstName")
+    if (change.Property.Name == "FirstName")
     {
-        long laterTimestamp = Stopwatch.GetTimestamp();
-        long beforeTimestamp = long.Parse(x.NewValue?.ToString() ?? "0");
+        var laterTimestamp = Stopwatch.GetTimestamp();
+        var beforeTimestamp = long.Parse(change.NewValue?.ToString() ?? "0");
 
-        long ticksElapsed = laterTimestamp - beforeTimestamp;
-        double secondsElapsed = (double)ticksElapsed / Stopwatch.Frequency;
+        var ticksElapsed = laterTimestamp - beforeTimestamp;
+        var secondsElapsed = (double)ticksElapsed / Stopwatch.Frequency;
 
-        Console.WriteLine($"Elapsed time: {secondsElapsed * 1000} ms");
+        Console.WriteLine(change.Property.Subject.GetParents().First().Index + $": Elapsed time: {secondsElapsed * 1000} ms");
     }
 });
 
