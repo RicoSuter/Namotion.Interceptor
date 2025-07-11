@@ -16,7 +16,7 @@ public record SubjectUpdate
     /// Gets a dictionary of property updates.
     /// The dictionary is mutable so that additional updates can be attached.
     /// </summary>
-    public IDictionary<string, SubjectPropertyUpdate> Properties { get; init; } 
+    public IDictionary<string, SubjectPropertyUpdate> Properties { get; init; }
         = new Dictionary<string, SubjectPropertyUpdate>();
 
     /// <summary>
@@ -26,10 +26,18 @@ public record SubjectUpdate
     /// <returns>The update.</returns>
     public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject)
     {
-        var subjectUpdate = new SubjectUpdate
-        {
-            Type = subject.GetType().Name
-        };
+        return CreateCompleteUpdate(subject, new Dictionary<IInterceptorSubject, SubjectUpdate>());
+    }
+    
+    /// <summary>
+    /// Creates a complete update with all objects and properties for the given subject as root.
+    /// </summary>
+    /// <param name="subject">The root subject.</param>
+    /// <param name="knownSubjectUpdates">The known subject updates.</param>
+    /// <returns>The update.</returns>
+    public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
+    {
+        var subjectUpdate = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
 
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is not null)
@@ -37,7 +45,7 @@ public record SubjectUpdate
             foreach (var property in registeredSubject.Properties
                 .Where(p => p.Value is { HasGetter: true, IsAttribute: false }))
             {
-                subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.CreateCompleteUpdate(registeredSubject, property.Key, property.Value);
+                subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.CreateCompleteUpdate(registeredSubject, property.Key, property.Value, knownSubjectUpdates);
             }
         }
 
@@ -53,138 +61,123 @@ public record SubjectUpdate
     /// <returns>The update.</returns>
     public static SubjectUpdate CreatePartialUpdateFromChanges(IInterceptorSubject subject, IEnumerable<SubjectPropertyChange> propertyChanges)
     {
-        // TODO: Verify correctness of the CreatePartialUpdateFromChanges method
-
-        var update = new SubjectUpdate();
-        var knownSubjectDescriptions = new Dictionary<IInterceptorSubject, SubjectUpdate>
-        {
-            [subject] = update
-        };
+        var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
+        var update = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
 
         foreach (var change in propertyChanges)
         {
             var property = change.Property;
-            var registeredSubject = property.Subject.TryGetRegisteredSubject() 
+            var registeredSubject = property.Subject.TryGetRegisteredSubject()
                 ?? throw new InvalidOperationException("Registered subject not found.");
 
-            do
+            var propertySubject = property.Subject;
+            var subjectUpdate = GetOrCreateSubjectUpdate(propertySubject, knownSubjectUpdates);
+
+            var registeredProperty = property.GetRegisteredProperty();
+            if (registeredProperty.IsAttribute)
             {
-                var propertySubject = property.Subject;
-                var subjectUpdate = GetOrCreateSubjectUpdate(propertySubject, knownSubjectDescriptions);
+                // handle attribute changes
+                var attributeUpdate = new SubjectPropertyUpdate();
+                attributeUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, knownSubjectUpdates);
 
-                var registeredProperty = property.GetRegisteredProperty();
-                if (registeredProperty.IsAttribute)
+                PropertyAttributeAttribute attribute;
+                var currentRegisteredProperty = registeredProperty;
+                do
                 {
-                    // handle attribute changes
-                    var attributeUpdate = new SubjectPropertyUpdate();
-                    attributeUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue);
-                    
-                    PropertyAttributeAttribute attribute;
-                    var currentRegisteredProperty = registeredProperty;
-                    do
-                    {
-                        attribute = currentRegisteredProperty.AttributeMetadata;
+                    attribute = currentRegisteredProperty.AttributeMetadata;
 
-                        var childAttributeUpdate = attributeUpdate;
-                        attributeUpdate = GetOrCreateSubjectPropertyUpdate(registeredSubject, attribute.PropertyName, knownSubjectDescriptions);
-                        attributeUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
-                        attributeUpdate.Attributes[attribute.AttributeName] = childAttributeUpdate;
-                    
-                        currentRegisteredProperty = registeredSubject.Properties[attribute.PropertyName];
-                    } while (currentRegisteredProperty.IsAttribute);
-                    
-                    var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredSubject, attribute.PropertyName, knownSubjectDescriptions);
-                    subjectUpdate.Properties[attribute.PropertyName] = propertyUpdate;
-                }
-                else
-                {
-                    // handle property changes
-                    var propertyName = property.Name;
-                 
-                    var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredSubject, propertyName, knownSubjectDescriptions);
-                    propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue);
-                 
-                    subjectUpdate.Properties[propertyName] = propertyUpdate;
-                }
+                    var childAttributeUpdate = attributeUpdate;
+                    attributeUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, attribute.PropertyName, knownSubjectUpdates);
+                    attributeUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
+                    attributeUpdate.Attributes[attribute.AttributeName] = childAttributeUpdate;
 
-                property = registeredSubject.Parents.FirstOrDefault().Property?.Property ?? default;
-              
-                if (property.Subject is not null)
-                {
-                    registeredSubject = property.Subject.TryGetRegisteredSubject()
-                        ?? throw new InvalidOperationException("Registered subject not found.");;
-                    
-                    CreateParentSubjectUpdate(property, propertySubject, knownSubjectDescriptions);
-                }
-            } while (property.Subject is not null && property.Subject != subject && registeredSubject.Parents.Any());
+                    currentRegisteredProperty = registeredSubject.Properties[attribute.PropertyName];
+                } while (currentRegisteredProperty.IsAttribute);
+
+                var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, attribute.PropertyName, knownSubjectUpdates);
+                subjectUpdate.Properties[attribute.PropertyName] = propertyUpdate;
+            }
+            else
+            {
+                // handle property changes
+                var propertyName = property.Name;
+
+                var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates);
+                propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, knownSubjectUpdates);
+
+                subjectUpdate.Properties[propertyName] = propertyUpdate;
+            }
+
+            CreateParentSubjectUpdatePath(registeredSubject, knownSubjectUpdates);
         }
 
         return update;
     }
 
-    private static void CreateParentSubjectUpdate(
-        PropertyReference parentProperty,
-        IInterceptorSubject childSubject,
-        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectDescriptions)
+    private static void CreateParentSubjectUpdatePath(
+        RegisteredSubject registeredSubject,
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
-        var parentSubjectDescription = GetOrCreateSubjectUpdate(parentProperty.Subject, knownSubjectDescriptions);
-        var property = GetOrCreateProperty(parentSubjectDescription, parentProperty.Name);
-
-        var parentRegisteredSubject = parentProperty.Subject.TryGetRegisteredSubject()
-            ?? throw new InvalidOperationException("Registered subject not found.");;
-
-        var children = parentRegisteredSubject.Properties[parentProperty.Name].Children;
-        if (children.Any(c => c.Index is not null))
+        var parentProperty = registeredSubject.Parents.FirstOrDefault().Property?.Property ?? null;
+        if (parentProperty?.Subject is { } parentPropertySubject)
         {
-            property.Kind = SubjectPropertyUpdateKind.Collection;
-            property.Collection = children
-                .Select(s => new SubjectPropertyCollectionUpdate
-                {
-                    Item = GetOrCreateSubjectUpdate(s.Subject, knownSubjectDescriptions),
-                    Index = s.Index ?? throw new InvalidOperationException("Index must not be null.")
-                })
-                .ToList();
+            var parentSubjectPropertyUpdate = GetOrCreateSubjectPropertyUpdate(parentPropertySubject, parentProperty.Value.Name, knownSubjectUpdates);
+
+            var parentRegisteredSubject = parentPropertySubject.TryGetRegisteredSubject()
+                ?? throw new InvalidOperationException("Registered subject not found.");
+
+            var children = parentRegisteredSubject.Properties[parentProperty.Value.Name].Children;
+            if (children.Any(c => c.Index is not null))
+            {
+                parentSubjectPropertyUpdate.Kind = SubjectPropertyUpdateKind.Collection;
+                parentSubjectPropertyUpdate.Collection = children
+                    .Select(s => new SubjectPropertyCollectionUpdate
+                    {
+                        Item = GetOrCreateSubjectUpdate(s.Subject, knownSubjectUpdates),
+                        Index = s.Index ?? throw new InvalidOperationException("Index must not be null.")
+                    })
+                    .ToList();
+            }
+            else
+            {
+                parentSubjectPropertyUpdate.Kind = SubjectPropertyUpdateKind.Item;
+                parentSubjectPropertyUpdate.Item = GetOrCreateSubjectUpdate(registeredSubject.Subject, knownSubjectUpdates);
+            }
+
+            if (parentPropertySubject.TryGetRegisteredSubject() is { } parentPropertyRegisteredSubject)
+            {
+                CreateParentSubjectUpdatePath(parentPropertyRegisteredSubject, knownSubjectUpdates);
+            }
         }
-        else
-        {
-            property.Kind = SubjectPropertyUpdateKind.Item;
-            property.Item = GetOrCreateSubjectUpdate(childSubject, knownSubjectDescriptions);
-        }
-    }
-
-    private static SubjectPropertyUpdate GetOrCreateProperty(SubjectUpdate parentSubjectUpdate, string propertyName)
-    {
-        if (!parentSubjectUpdate.Properties.TryGetValue(propertyName, out var property))
-        {
-            property = new SubjectPropertyUpdate();
-            parentSubjectUpdate.Properties[propertyName] = property;
-        }
-
-        return property;
-    }
-
-    private static SubjectUpdate GetOrCreateSubjectUpdate(
-        IInterceptorSubject subject, 
-        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectDescriptions)
-    {
-        var parentSubjectDescription = knownSubjectDescriptions.TryGetValue(subject, out var description) ? description : new SubjectUpdate();
-
-        knownSubjectDescriptions[subject] = parentSubjectDescription;
-        return parentSubjectDescription;
     }
 
     private static SubjectPropertyUpdate GetOrCreateSubjectPropertyUpdate(
-        RegisteredSubject registeredSubject, string propertyName,
-        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectDescriptions)
+        IInterceptorSubject subject, string propertyName,
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
-        var subjectUpdate = GetOrCreateSubjectUpdate(registeredSubject.Subject, knownSubjectDescriptions);
+        var subjectUpdate = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
         if (subjectUpdate.Properties.TryGetValue(propertyName, out var existingSubjectUpdate))
         {
             return existingSubjectUpdate;
         }
-        
+
         var propertyUpdate = new SubjectPropertyUpdate();
         subjectUpdate.Properties[propertyName] = propertyUpdate;
         return propertyUpdate;
+    }
+
+    private static SubjectUpdate GetOrCreateSubjectUpdate(
+        IInterceptorSubject subject,
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
+    {
+        var subjectUpdate = knownSubjectUpdates.TryGetValue(subject, out var knownSubjectUpdate)
+            ? knownSubjectUpdate
+            : new SubjectUpdate
+            {
+                Type = subject.GetType().Name
+            };
+
+        knownSubjectUpdates[subject] = subjectUpdate;
+        return subjectUpdate;
     }
 }
