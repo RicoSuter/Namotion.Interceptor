@@ -69,14 +69,14 @@ public record SubjectPropertyUpdate
         };
     }
     
-    public static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubject subject, string propertyName, RegisteredSubjectProperty property)
+    public static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubject subject, string propertyName, RegisteredSubjectProperty property, Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
         var attributes = subject.Properties
             .Where(p => 
                 p.Value.HasGetter && p.Value.IsAttributeForProperty(propertyName))
             .ToDictionary(
                 p => p.Value.AttributeMetadata.AttributeName,
-                p => CreateCompleteUpdate(subject, p.Key, p.Value));
+                p => CreateCompleteUpdate(subject, p.Key, p.Value, knownSubjectUpdates));
 
         var propertyUpdate = new SubjectPropertyUpdate
         {
@@ -84,7 +84,7 @@ public record SubjectPropertyUpdate
             Attributes = attributes.Count != 0 ? attributes : null
         };
         
-        propertyUpdate.ApplyValue(property, property.Property.TryGetWriteTimestamp(), property.GetValue());
+        propertyUpdate.ApplyValue(property, property.Property.TryGetWriteTimestamp(), property.GetValue(), knownSubjectUpdates);
         return propertyUpdate;
     }
 
@@ -94,7 +94,8 @@ public record SubjectPropertyUpdate
     /// <param name="property">The property.</param>
     /// <param name="timestamp">The timestamp of the value change.</param>
     /// <param name="value">The value to apply.</param>
-    internal void ApplyValue(RegisteredSubjectProperty property, DateTimeOffset? timestamp, object? value)
+    /// <param name="knownSubjectUpdates">The known subject updates.</param>
+    internal void ApplyValue(RegisteredSubjectProperty property, DateTimeOffset? timestamp, object? value, Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
         Timestamp = timestamp;
 
@@ -108,7 +109,7 @@ public record SubjectPropertyUpdate
                     var item = dictionary[key];
                     return new SubjectPropertyCollectionUpdate
                     {
-                        Item = item is not null ? SubjectUpdate.CreateCompleteUpdate(item) : null,
+                        Item = item is not null ? SubjectUpdate.CreateCompleteUpdate(item, knownSubjectUpdates) : null,
                         Index = key
                     };
                 })
@@ -120,7 +121,7 @@ public record SubjectPropertyUpdate
             Collection = value is IEnumerable<IInterceptorSubject> collection ? collection
                 .Select((itemSubject, index) => new SubjectPropertyCollectionUpdate
                 {
-                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject),
+                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject, knownSubjectUpdates),
                     Index = index
                 })
                 .ToList() : null;
@@ -128,7 +129,7 @@ public record SubjectPropertyUpdate
         else if (property.IsSubjectReference)
         {
             Kind = SubjectPropertyUpdateKind.Item;
-            Item = value is IInterceptorSubject itemSubject ? SubjectUpdate.CreateCompleteUpdate(itemSubject) : null;
+            Item = value is IInterceptorSubject itemSubject ? SubjectUpdate.CreateCompleteUpdate(itemSubject, knownSubjectUpdates) : null;
         }
         else
         {
