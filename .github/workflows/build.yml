@@ -25,12 +25,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
-      - name: Run tests
-        run: dotnet test src/Namotion.Interceptor.sln --configuration Release
+
+      - name: Run tests and collect coverage (Cobertura)
+        run: |
+          dotnet test src/Namotion.Interceptor.sln `
+            --configuration Release `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload raw coverage file
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-coverage
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: error
+
+      - name: Install ReportGenerator
+        run: dotnet tool install --global dotnet-reportgenerator-globaltool
+
+      - name: Generate HTML coverage report
+        run: |
+          reportgenerator `
+            -reports:"**/TestResults/**/coverage.cobertura.xml" `
+            -targetdir:"coverage-report" `
+            -reporttypes:Html
+
+      - name: Upload HTML coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-coverage-report
+          path: coverage-report
 
   pack:
     if: github.event_name == 'release'
