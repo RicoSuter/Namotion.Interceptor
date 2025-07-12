@@ -31,14 +31,13 @@ jobs:
         with:
           dotnet-version: 9.0.x
 
-      - name: Run tests with coverage (Cobertura format)
+      - name: Run tests and collect coverage (Cobertura)
         run: |
           dotnet test src/Namotion.Interceptor.sln `
             --configuration Release `
-            /p:CollectCoverage=true `
-            /p:CoverletOutputFormat=cobertura `
-            /p:CoverletOutput=./TestResults/ `
-            /p:MergeWith=""
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
 #      - name: Install ReportGenerator
 #        run: dotnet tool install --global dotnet-reportgenerator-globaltool
