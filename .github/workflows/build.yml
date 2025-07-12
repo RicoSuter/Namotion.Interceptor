@@ -39,20 +39,12 @@ jobs:
             --collect:"XPlat Code Coverage" `
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
-      - name: List TestResults folders (debug)
-        run: find . -path '*TestResults*' -type f -name 'coverage*.xml' -print
-
       - name: Upload raw coverage file
         uses: actions/upload-artifact@v4
         with:
           name: cobertura-coverage
-          path: '**/TestResults/**/coverage.cobertura.xml'   # <- fixed pattern
-          if-no-files-found: error                        # fail if nothing is found
-
-      - name: Code Coverage Summary Report
-        uses: irongut/CodeCoverageSummary@v1.3.0
-        with:
-          filename: '**/TestResults/**/coverage.cobertura.xml'
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: error
 
       - name: Install ReportGenerator
         run: dotnet tool install --global dotnet-reportgenerator-globaltool
