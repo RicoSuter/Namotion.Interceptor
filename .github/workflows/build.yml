@@ -50,11 +50,14 @@ jobs:
 #            -targetdir:"coverage-report" `
 #            -reporttypes:Html
 
+      - name: List TestResults folders (debug)
+        run: find . -path '*TestResults*' -type f -name 'coverage*.xml' -print
+
       - name: Upload raw coverage file
         uses: actions/upload-artifact@v4
         with:
           name: all-coverage-xml
-          path: '**/TestResults/coverage.cobertura.xml'   # ← correct file name
+          path: '**/TestResults/**/coverage.cobertura.xml'   # <- fixed pattern
           if-no-files-found: error                        # fail if nothing is found
 
 #      - name: Upload HTML coverage report
