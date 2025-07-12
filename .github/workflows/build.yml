@@ -50,11 +50,12 @@ jobs:
 #            -targetdir:"coverage-report" `
 #            -reporttypes:Html
 
-      - name: Upload all raw coverage files (Cobertura XML)
+      - name: Upload raw coverage file
         uses: actions/upload-artifact@v4
         with:
           name: all-coverage-xml
-          path: '**/TestResults/coverage.xml'
+          path: '**/TestResults/coverage.cobertura.xml'   # ← correct file name
+          if-no-files-found: error                        # fail if nothing is found
 
 #      - name: Upload HTML coverage report
 #        uses: actions/upload-artifact@v4
