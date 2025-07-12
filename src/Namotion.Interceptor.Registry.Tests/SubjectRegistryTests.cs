@@ -221,4 +221,40 @@ public class SubjectRegistryTests
         
         await Verify(person.ToJsonObject(jsonSerializerOptions).ToJsonString(jsonSerializerOptions));
     }
+
+    [Fact]
+    public async Task WhenChangingCollection_ThenIndexAreCorrect()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
+        var child3 = new Person { FirstName = "Child3" };
+
+        var person = new Person(context)
+        {
+            FirstName = "Child",
+            Children = [child1, child2, child3]
+        };
+
+        // Act
+        person.Children = person.Children.Union([new Person { FirstName = "Child4" }]).ToArray(); // add child4
+        person.Children = person.Children.Skip(2).ToArray(); // remove child1 and child2
+        
+        // Assert
+        var children = person
+            .TryGetRegisteredSubject()?
+            .TryGetProperty(nameof(Person.Children))?
+            .Children
+            .Select(c => new
+            {
+                Index = c.Index,
+                Subject = c.Subject is Person p ? p.FirstName : "n/a"
+            });
+
+        await Verify(children).DisableDateCounting();
+    }
 }

@@ -50,9 +50,9 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 DetachHostedService(hostedService);
             }
 
-            foreach (var hostedService2 in change.Subject.GetAttachedHostedServices())
+            foreach (var attachedHostedService in change.Subject.GetAttachedHostedServices())
             {
-                DetachHostedService(hostedService2);
+                change.Subject.DetachHostedService(attachedHostedService);
             }
         }
     }

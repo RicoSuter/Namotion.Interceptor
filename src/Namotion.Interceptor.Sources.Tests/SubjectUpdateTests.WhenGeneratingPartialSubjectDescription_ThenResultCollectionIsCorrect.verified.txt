@@ -1,0 +1,131 @@
+﻿{
+  Type: Person,
+  Properties: {
+    children: {
+      Kind: Collection,
+      Timestamp: {Scrubbed},
+      Collection: [
+        {
+          Index: 0,
+          Item: {
+            Type: Person,
+            Properties: {
+              children: {
+                Kind: Collection,
+                Type: List`1
+              },
+              father: {
+                Kind: Item,
+                Type: Person
+              },
+              firstName: {
+                Kind: Value,
+                Type: String,
+                Value: Child3
+              },
+              lastName: {
+                Kind: Value,
+                Type: String
+              },
+              mother: {
+                Kind: Item,
+                Type: Person
+              }
+            }
+          }
+        },
+        {
+          Index: 1,
+          Item: {
+            Type: Person,
+            Properties: {
+              children: {
+                Kind: Collection,
+                Type: List`1
+              },
+              father: {
+                Kind: Item,
+                Type: Person
+              },
+              firstName: {
+                Kind: Value,
+                Type: String,
+                Value: John,
+                Timestamp: {Scrubbed}
+              },
+              lastName: {
+                Kind: Value,
+                Type: String
+              },
+              mother: {
+                Kind: Item,
+                Type: Person
+              }
+            }
+          }
+        }
+      ]
+    },
+    father: {
+      Kind: Item,
+      Timestamp: {Scrubbed},
+      Item: {
+        Type: Person,
+        Properties: {
+          children: {
+            Kind: Collection,
+            Type: List`1
+          },
+          father: {
+            Kind: Item,
+            Type: Person
+          },
+          firstName: {
+            Kind: Value,
+            Type: String,
+            Value: MyFather
+          },
+          lastName: {
+            Kind: Value,
+            Type: String
+          },
+          mother: {
+            Kind: Item,
+            Type: Person
+          }
+        }
+      }
+    },
+    mother: {
+      Kind: Item,
+      Timestamp: {Scrubbed},
+      Item: {
+        Type: Person,
+        Properties: {
+          children: {
+            Kind: Collection,
+            Type: List`1
+          },
+          father: {
+            Kind: Item,
+            Type: Person
+          },
+          firstName: {
+            Kind: Value,
+            Type: String,
+            Value: Jane,
+            Timestamp: {Scrubbed}
+          },
+          lastName: {
+            Kind: Value,
+            Type: String
+          },
+          mother: {
+            Kind: Item,
+            Type: Person
+          }
+        }
+      }
+    }
+  }
+}
