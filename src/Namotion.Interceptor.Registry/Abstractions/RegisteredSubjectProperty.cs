@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public record RegisteredSubjectProperty
 {
-    private readonly HashSet<SubjectPropertyChild> _children = [];
+    private HashSet<SubjectPropertyChild> _children = [];
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
     public RegisteredSubjectProperty(PropertyReference property, IReadOnlyCollection<Attribute> reflectionAttributes)
@@ -202,12 +202,32 @@ public record RegisteredSubjectProperty
     internal void AddChild(SubjectPropertyChild parent)
     {
         lock (this)
+        {
             _children.Add(parent);
+            if (IsSubjectCollection)
+            {
+                UpdateChildIndexes();
+            }
+        }
     }
 
     internal void RemoveChild(SubjectPropertyChild parent)
     {
         lock (this)
+        {
             _children.Remove(parent);
+            if (IsSubjectCollection)
+            {
+                UpdateChildIndexes();
+            }        
+        }
+    }
+
+    private void UpdateChildIndexes()
+    {
+        // TODO(perf): Check if child index recalculation can be performance improved
+        _children = _children
+            .Select((c, i) => new SubjectPropertyChild { Subject = c.Subject, Index = i })
+            .ToHashSet();
     }
 }

@@ -75,8 +75,8 @@ public static class SubjectRegistryExtensions
     /// <returns>The registered subject.</returns>
     public static RegisteredSubject? TryGetRegisteredSubject(this IInterceptorSubject subject)
     {
-        var registry = subject.Context.GetService<ISubjectRegistry>();
-        return registry.TryGetRegisteredSubject(subject);
+        var registry = subject.Context.TryGetService<ISubjectRegistry>();
+        return registry?.TryGetRegisteredSubject(subject);
     }
     
     /// <summary>
