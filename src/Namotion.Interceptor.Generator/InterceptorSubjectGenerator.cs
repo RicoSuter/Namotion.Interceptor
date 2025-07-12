@@ -128,7 +128,7 @@ namespace {namespaceName}
     $@"
             {{
                 ""{propertyName}"",       
-                new SubjectPropertyMetadata(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")})
+                new SubjectPropertyMetadata(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")}, false)
             }},";
                     }
 
@@ -187,7 +187,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} get => GetProperty<{fullyQualifiedName}>(nameof({propertyName}), () => _{propertyName});";
+            {modifiers} get => GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), () => _{propertyName});";
 
                         }
 
@@ -202,7 +202,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} {accessorText} => SetProperty(nameof({propertyName}), value, () => _{propertyName}, v => _{propertyName} = ({fullyQualifiedName})v!);";
+            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, () => _{propertyName}, v => _{propertyName} = ({fullyQualifiedName})v!);";
                         }
 
                         generatedCode +=
@@ -249,12 +249,12 @@ namespace {namespaceName}
 
                     generatedCode +=
     $@"
-        private T GetProperty<T>(string propertyName, Func<object?> readValue)
+        private T GetPropertyValue<T>(string propertyName, Func<object?> readValue)
         {{
-            return _context is not null ? (T?)_context.GetProperty(this, propertyName, readValue)! : (T?)readValue()!;
+            return _context is not null ? (T?)_context.GetPropertyValue(propertyName, readValue)! : (T?)readValue()!;
         }}
 
-        private void SetProperty<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)
+        private void SetPropertyValue<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)
         {{
             if (_context is null)
             {{
@@ -262,13 +262,13 @@ namespace {namespaceName}
             }}
             else
             {{
-                _context.SetProperty(this, propertyName, newValue, readValue, setValue);
+                _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
             }}
         }}
 
         private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
         {{
-            return _context is not null ? _context.InvokeMethod(this, methodName, parameters, invokeMethod) : invokeMethod(parameters);
+            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(parameters);
         }}
     }}
 }}

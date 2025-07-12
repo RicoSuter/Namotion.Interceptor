@@ -1,8 +1,8 @@
-﻿using System.Text.Json;
-using Namotion.Interceptor.Registry;
+﻿using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Sources.Updates;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Tests;
@@ -118,39 +118,41 @@ public class SubjectUpdateTests
         await Verify(partialSubjectUpdate).DisableDateCounting();
     }
 
-    // [Fact]
-    // public async Task WhenCreatingSubjectUpdateFromPath_ThenResultIsCorrect()
-    // {
-    //     // Arrange
-    //     var context = InterceptorSubjectContext
-    //         .Create()
-    //         .WithRegistry();
-    //
-    //     var father = new Person { FirstName = "Father" };
-    //     var mother = new Person { FirstName = "Mother" };
-    //     var child1 = new Person { FirstName = "Child1" };
-    //     var child2 = new Person { FirstName = "Child2" };
-    //     var child3 = new Person { FirstName = "Child3" };
-    //
-    //     var person = new Person(context)
-    //     {
-    //         FirstName = "Child",
-    //         Mother = mother,
-    //         Father = father,
-    //         Children = [child1, child2, child3]
-    //     };
-    //
-    //     // Act
-    //     var sourcePathProvider = new DefaultSourcePathProvider();
-    //     var partialSubjectUpdate = person.CreateUpdateFromSourcePaths(
-    //         new Dictionary<string, object?>
-    //         {
-    //             { "Children[1].FirstName", "RandomName1" },
-    //             { "Children[2].FirstName", "RandomName2" },
-    //             { "Father.FirstName", "RandomName3" }
-    //         }, sourcePathProvider);
-    //
-    //     // Assert
-    //     await Verify(partialSubjectUpdate);
-    // }
+    [Fact]
+    public async Task WhenGeneratingPartialSubjectDescription_ThenResultCollectionIsCorrect()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithPropertyChangedObservable()
+            .WithRegistry();
+
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
+        var child3 = new Person { FirstName = "Child3" };
+
+        var person = new Person(context)
+        {
+            FirstName = "Child",
+            Children = [child1, child2, child3]
+        };
+
+        // Act
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangedObservable().Subscribe(c => changes.Add(c));
+
+        person.Mother = new Person { FirstName = "MyMother" };
+        person.Children = person.Children.Union([new Person { FirstName = "Child4" }]).ToList(); // add child4
+        person.Father = new Person { FirstName = "MyFather" };
+        person.Mother.FirstName = "Jane";
+        person.Children = person.Children.Skip(2).ToList(); // remove child1 and child2
+        person.Children[1].FirstName = "John";
+
+        var partialSubjectUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(person, changes)
+            .ConvertToJsonCamelCasePath();
+
+        // Assert
+        await Verify(partialSubjectUpdate).DisableDateCounting();
+    }
 }
