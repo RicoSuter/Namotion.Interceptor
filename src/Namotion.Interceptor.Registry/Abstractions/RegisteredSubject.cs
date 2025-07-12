@@ -38,7 +38,7 @@ public record RegisteredSubject
             return _properties.GetValueOrDefault(propertyName);
     }
 
-    internal RegisteredSubject(IInterceptorSubject subject, IEnumerable<RegisteredSubjectProperty> properties)
+    public RegisteredSubject(IInterceptorSubject subject, IEnumerable<RegisteredSubjectProperty> properties)
     {
         Subject = subject;
         _properties = properties

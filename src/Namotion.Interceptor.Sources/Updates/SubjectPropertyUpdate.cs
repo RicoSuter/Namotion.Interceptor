@@ -37,7 +37,7 @@ public record SubjectPropertyUpdate
     public SubjectUpdate? Item { get; internal set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public List<SubjectPropertyCollectionUpdate>? Collection { get; internal set; }
+    public IReadOnlyCollection<SubjectPropertyCollectionUpdate>? Collection { get; internal set; }
     
     public static SubjectPropertyUpdate Create<T>(T value, DateTimeOffset? timestamp = null)
     {
