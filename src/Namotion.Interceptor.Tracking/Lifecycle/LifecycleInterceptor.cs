@@ -59,12 +59,17 @@ public class LifecycleInterceptor : IWriteInterceptor
 
             foreach (var handler in context.GetServices<ILifecycleHandler>())
             {
-                handler.Attach(registryContext);
+                handler.AttachSubject(registryContext);
             }
 
             if (subject is ILifecycleHandler lifecycleHandler)
             {
-                lifecycleHandler.Attach(registryContext);
+                lifecycleHandler.AttachSubject(registryContext);
+            }
+
+            foreach (var propertyName in subject.Properties.Keys)
+            {
+                subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
             }
         }
     }
@@ -77,18 +82,23 @@ public class LifecycleInterceptor : IWriteInterceptor
             {
                 _attachedSubjects.Remove(subject);
             }
+
+            // TODO: Detach dynamically added properties as well
+            foreach (var propertyName in subject.Properties.Keys)
+            {
+                subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
+            }
             
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
             var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
-
             if (subject is ILifecycleHandler lifecycleHandler)
             {
-                lifecycleHandler.Detach(registryContext);
+                lifecycleHandler.DetachSubject(registryContext);
             }
 
             foreach (var handler in context.GetServices<ILifecycleHandler>())
             {
-                handler.Detach(registryContext);
+                handler.DetachSubject(registryContext);
             }
         }
     }

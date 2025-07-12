@@ -3,7 +3,6 @@
   Properties: {
     children: {
       Kind: Collection,
-      Type: List`1,
       Timestamp: {Scrubbed},
       Collection: [
         {
@@ -22,7 +21,7 @@
               firstName: {
                 Kind: Value,
                 Type: String,
-                Value: Child1
+                Value: Child3
               },
               lastName: {
                 Kind: Value,
@@ -51,36 +50,8 @@
               firstName: {
                 Kind: Value,
                 Type: String,
-                Value: Child2
-              },
-              lastName: {
-                Kind: Value,
-                Type: String
-              },
-              mother: {
-                Kind: Item,
-                Type: Person
-              }
-            }
-          }
-        },
-        {
-          Index: 2,
-          Item: {
-            Type: Person,
-            Properties: {
-              children: {
-                Kind: Collection,
-                Type: List`1
-              },
-              father: {
-                Kind: Item,
-                Type: Person
-              },
-              firstName: {
-                Kind: Value,
-                Type: String,
-                Value: Child3
+                Value: John,
+                Timestamp: {Scrubbed}
               },
               lastName: {
                 Kind: Value,
@@ -97,7 +68,6 @@
     },
     father: {
       Kind: Item,
-      Type: Person,
       Timestamp: {Scrubbed},
       Item: {
         Type: Person,
@@ -113,7 +83,7 @@
           firstName: {
             Kind: Value,
             Type: String,
-            Value: Father
+            Value: MyFather
           },
           lastName: {
             Kind: Value,
@@ -126,19 +96,8 @@
         }
       }
     },
-    firstName: {
-      Kind: Value,
-      Type: String,
-      Value: Child,
-      Timestamp: {Scrubbed}
-    },
-    lastName: {
-      Kind: Value,
-      Type: String
-    },
     mother: {
       Kind: Item,
-      Type: Person,
       Timestamp: {Scrubbed},
       Item: {
         Type: Person,
@@ -154,7 +113,8 @@
           firstName: {
             Kind: Value,
             Type: String,
-            Value: Mother
+            Value: Jane,
+            Timestamp: {Scrubbed}
           },
           lastName: {
             Kind: Value,

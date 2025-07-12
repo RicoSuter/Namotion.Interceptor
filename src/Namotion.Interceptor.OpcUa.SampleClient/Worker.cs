@@ -16,14 +16,8 @@ public class Worker : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            // if (_root.Person != null)
-            // {
-            //     _root.Person.FirstName = Guid.NewGuid().ToString();
-            // }
-
             _root.Number++;
-            
-            await Task.Delay(1000);
+            await Task.Delay(1000, stoppingToken);
         }
     }
 }

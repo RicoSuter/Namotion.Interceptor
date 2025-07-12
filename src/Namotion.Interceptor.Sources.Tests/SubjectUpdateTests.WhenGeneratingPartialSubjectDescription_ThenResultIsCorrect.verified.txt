@@ -1,4 +1,5 @@
 ﻿{
+  Type: Person,
   Properties: {
     children: {
       Kind: Collection,
@@ -6,6 +7,7 @@
         {
           Index: 0,
           Item: {
+            Type: Person,
             Properties: {
               firstName: {
                 Kind: Value,
@@ -17,11 +19,14 @@
         },
         {
           Index: 1,
-          Item: {}
+          Item: {
+            Type: Person
+          }
         },
         {
           Index: 2,
           Item: {
+            Type: Person,
             Properties: {
               firstName: {
                 Kind: Value,
@@ -36,6 +41,7 @@
     father: {
       Kind: Item,
       Item: {
+        Type: Person,
         Properties: {
           firstName: {
             Kind: Value,

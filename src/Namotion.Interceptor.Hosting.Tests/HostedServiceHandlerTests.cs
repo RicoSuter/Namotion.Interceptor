@@ -13,7 +13,7 @@ public class HostedServiceHandlerTests
         PersonWithBackgroundService person = null!;
 
         // Act
-        await RunAsync(async context =>
+        await RunWithAppLifecycleAsync(async context =>
         {
             person = new PersonWithBackgroundService(context);
             await Task.Delay(100);
@@ -32,7 +32,7 @@ public class HostedServiceHandlerTests
     {
         // Arrange
         Person person = null!;
-        await RunAsync(async context =>
+        await RunWithAppLifecycleAsync(async context =>
         {
             person = new Person(context);
             
@@ -56,7 +56,7 @@ public class HostedServiceHandlerTests
     {
         // Arrange
         Person person = null!;
-        await RunAsync(async context =>
+        await RunWithAppLifecycleAsync(async context =>
         {
             person = new Person(context);
          
@@ -81,7 +81,35 @@ public class HostedServiceHandlerTests
         });
     }
 
-    private static async Task RunAsync(Func<IInterceptorSubjectContext, Task> action)
+    [Fact]
+    public async Task WhenSubjectServiceIsDetached_ThenHostedServiceIsStopped()
+    {
+        // Arrange
+        Person person = null!;
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            person = new Person(context);
+         
+            var hostedService = new PersonBackgroundService(person);
+            person.AttachHostedService(hostedService);
+            var attachedHostedServices = person.GetAttachedHostedServices();
+            
+            await Task.Delay(100);
+            Assert.Single(attachedHostedServices!);
+
+            // Act
+            ((IInterceptorSubject)person).Context.RemoveFallbackContext(context);
+            attachedHostedServices = person.GetAttachedHostedServices();
+
+            // Assert
+            await Task.Delay(100);
+            Assert.Equal("Disposed", person!.FirstName);
+            Assert.Empty(attachedHostedServices!); // the service has been stopped and
+                                                   // removed from list (not allowed to restart again anyway)
+        });
+    }
+
+    private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action)
     {
         var cancellationTokenSource = new CancellationTokenSource();
         try
