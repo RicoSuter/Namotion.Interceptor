@@ -148,12 +148,14 @@ public class LifecycleInterceptor : IWriteInterceptor
         HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject> touchedSubjects)
     {
+        // TODO: Also scan dynamic properties if available (registry)
         foreach (var property in subject.Properties)
         {
             var childValue = property.Value.GetValue?.Invoke(subject);
             if (childValue is not null)
             {
-                FindSubjectsInProperty(new PropertyReference(subject, property.Key), childValue, null, collectedSubjects, touchedSubjects);
+                FindSubjectsInProperty(new PropertyReference(subject, property.Key), 
+                    childValue, null, collectedSubjects, touchedSubjects);
             }
         }
     }
@@ -167,24 +169,27 @@ public class LifecycleInterceptor : IWriteInterceptor
         {
             foreach (var (key, item) in dictionary)
             {
-                if (item is not null)
+                if (item is not null && touchedSubjects.Add(item))
                 {
-                    FindSubjectsInProperty(property, item, key, collectedSubjects, touchedSubjects);
+                    collectedSubjects.Add((item, property, key));
                 }
             }
         }
         else if (value is ICollection collection)
         {
             var i = 0;
-            foreach (var proxy in collection.OfType<IInterceptorSubject>())
+            foreach (var subject in collection.OfType<IInterceptorSubject>())
             {
-                FindSubjectsInProperty(property, proxy, i, collectedSubjects, touchedSubjects);
+                if (touchedSubjects.Add(subject))
+                {
+                    collectedSubjects.Add((subject, property, i));
+                }
+
                 i++;
             }
         }
         else if (value is IInterceptorSubject subject && touchedSubjects.Add(subject))
         {
-            FindSubjectsInProperties(subject, collectedSubjects, touchedSubjects);
             collectedSubjects.Add((subject, property, index));
         }
     }
