@@ -90,25 +90,41 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return services.OfType<TInterface>();
     }
 
-    public virtual void AddFallbackContext(IInterceptorSubjectContext context)
+    public virtual bool AddFallbackContext(IInterceptorSubjectContext context)
     {
         var contextImpl = (InterceptorSubjectContext)context;
         lock (_services)
         {
-            contextImpl._usedByContexts.Add(this);
-            _fallbackContexts.Add(contextImpl);
-            OnContextChanged();
+            if (_fallbackContexts.Add(contextImpl))
+            {
+                contextImpl._usedByContexts.Add(this);
+                OnContextChanged();
+                return true;
+            }
+
+            return false;
         }
     }
 
-    public virtual void RemoveFallbackContext(IInterceptorSubjectContext context)
+    protected bool HasFallbackContext(IInterceptorSubjectContext context)
+    {
+        lock (_services)
+            return _fallbackContexts.Contains(context);
+    }
+
+    public virtual bool RemoveFallbackContext(IInterceptorSubjectContext context)
     {
         var contextImpl = (InterceptorSubjectContext)context;
         lock (_services)
         {
-            _fallbackContexts.Remove(contextImpl);
-            contextImpl._usedByContexts.Remove(this);
-            OnContextChanged();
+            if (_fallbackContexts.Remove(contextImpl))
+            {
+                contextImpl._usedByContexts.Remove(this);
+                OnContextChanged();
+                return true;
+            }
+
+            return false;
         }
     }
 

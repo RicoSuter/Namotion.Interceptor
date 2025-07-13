@@ -43,23 +43,32 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         return returnInvokeMethod(interception);
     }
 
-    public override void AddFallbackContext(IInterceptorSubjectContext context)
+    public override bool AddFallbackContext(IInterceptorSubjectContext context)
     {
-        base.AddFallbackContext(context);
-        
-        foreach (var interceptor in context.GetServices<IInterceptor>())
+        var result = base.AddFallbackContext(context);
+        if (result)
         {
-            interceptor.AttachTo(_subject);
+            foreach (var interceptor in context.GetServices<IInterceptor>())
+            {
+                interceptor.AttachTo(_subject);
+            }
         }
+
+        return result;
     }
 
-    public override void RemoveFallbackContext(IInterceptorSubjectContext context)
+    public override bool RemoveFallbackContext(IInterceptorSubjectContext context)
     {
-        foreach (var interceptor in context.GetServices<IInterceptor>())
+        if (HasFallbackContext(context))
         {
-            interceptor.DetachFrom(_subject);
+            foreach (var interceptor in context.GetServices<IInterceptor>())
+            {
+                interceptor.DetachFrom(_subject);
+            }
+
+            return base.RemoveFallbackContext(context);
         }
-        
-        base.RemoveFallbackContext(context);
+
+        return false;
     }
 }
