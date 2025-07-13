@@ -48,7 +48,7 @@ public class RegistryBenchmark
             .ToArray();
     }
 
-    // [Benchmark]
+    [Benchmark]
     public void IncrementDerivedAverage()
     {
         _object.Tires[0].Pressure += 5;
@@ -61,7 +61,7 @@ public class RegistryBenchmark
         _object.PreviousCars = null;
     }
 
-    // [Benchmark]
+    [Benchmark]
     public void Write()
     {
         _object.Tires[0].Pressure = 5;
@@ -70,7 +70,7 @@ public class RegistryBenchmark
         _object.Tires[3].Pressure = 8;
     }
 
-    // [Benchmark]
+    [Benchmark]
     public decimal Read()
     {
         return 
@@ -80,13 +80,13 @@ public class RegistryBenchmark
             _object.Tires[3].Pressure;
     }
 
-    // [Benchmark]
+    [Benchmark]
     public void DerivedAverage()
     {
         var average = _object.AveragePressure;
     }
 
-    // [Benchmark]
+    [Benchmark]
     public void ChangeAllTires()
     {
         var newTires = new Tire[]

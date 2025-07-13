@@ -11,43 +11,16 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
     
     public object? GetPropertyValue(string propertyName, Func<object?> readValue)
     {
-        var readInterceptors = _subject.Context.GetServices<IReadInterceptor>();
         var interception = new ReadPropertyInterception(new PropertyReference(_subject, propertyName));
-        
-        var returnReadValue = new Func<ReadPropertyInterception, object?>(_ => readValue());
-    
-        foreach (var handler in readInterceptors)
-        {
-            var previousReadValue = returnReadValue;
-            returnReadValue = context =>
-                handler.ReadProperty(context, ctx => previousReadValue(ctx));
-        }
-
-        return returnReadValue(interception);
+        return _subject.Context.ExecuteInterceptedRead(interception, readValue);
     }
     
     public void SetPropertyValue(string propertyName, object? newValue, Func<object?>? readValue, Action<object?> writeValue)
     {
-        var writeInterceptors = _subject.Context.GetServices<IWriteInterceptor>();
-        var interception = new WritePropertyInterception(new PropertyReference(_subject, propertyName), readValue?.Invoke(), newValue); // TODO: reading here might be a problem (performance?)
-
-        var returnWriteValue = new Func<WritePropertyInterception, object?>(value =>
-        {
-            writeValue(value.NewValue);
-            return value.NewValue;
-        });
-    
-        foreach (var handler in writeInterceptors)
-        {
-            var previousWriteValue = returnWriteValue;
-            returnWriteValue = (context) =>
-            {
-                return handler.WriteProperty(context,
-                    innerContext => previousWriteValue(innerContext));
-            };
-        }
-
-        returnWriteValue(interception);
+        // TODO: reading here might be a problem (performance?)
+        var interception = new WritePropertyInterception(
+            new PropertyReference(_subject, propertyName), readValue?.Invoke(), newValue); 
+        _subject.Context.ExecuteInterceptedWrite(interception, writeValue);
     }
 
     public object? InvokeMethod(string methodName, object?[] parameters, Func<object?[], object?> invokeMethod)

@@ -10,6 +10,10 @@ public interface IInterceptorSubjectContext
 
     IEnumerable<TInterface> GetServices<TInterface>();
 
+    object? ExecuteInterceptedRead(ReadPropertyInterception interception, Func<object?> readValue);
+
+    void ExecuteInterceptedWrite(WritePropertyInterception interception, Action<object?> writeValue);
+
     void AddFallbackContext(IInterceptorSubjectContext context);
 
     void RemoveFallbackContext(IInterceptorSubjectContext context);
