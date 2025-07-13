@@ -24,7 +24,7 @@ public class SourcePathProviderBenchmark
         _car = new Car(context);
     }
 
-    [Benchmark]
+    // [Benchmark]
     public void TryGetPropertyFromSegment()
     {
         var subject = _car.TryGetRegisteredSubject();
@@ -38,7 +38,7 @@ public class SourcePathProviderBenchmark
         }
     }
 
-    [Benchmark]
+    // [Benchmark]
     public void TryGetSourcePath()
     {
         var property = _car.Tires[1].TryGetRegisteredSubject()?.TryGetProperty("Pressure");

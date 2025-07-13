@@ -204,10 +204,6 @@ public record RegisteredSubjectProperty
         lock (this)
         {
             _children.Add(parent);
-            if (IsSubjectCollection)
-            {
-                UpdateChildIndexes();
-            }
         }
     }
 
@@ -215,19 +211,17 @@ public record RegisteredSubjectProperty
     {
         lock (this)
         {
-            _children.Remove(parent);
-            if (IsSubjectCollection)
+            if (IsSubjectCollection && _children.LastOrDefault() != parent)
             {
-                UpdateChildIndexes();
-            }        
+                _children = _children
+                    .Where(c => c != parent)
+                    .Select((c, i) => new SubjectPropertyChild { Subject = c.Subject, Index = i })
+                    .ToHashSet();
+            }
+            else
+            {
+                _children.Remove(parent);
+            }
         }
-    }
-
-    private void UpdateChildIndexes()
-    {
-        // TODO(perf): Check if child index recalculation can be performance improved
-        _children = _children
-            .Select((c, i) => new SubjectPropertyChild { Subject = c.Subject, Index = i })
-            .ToHashSet();
     }
 }

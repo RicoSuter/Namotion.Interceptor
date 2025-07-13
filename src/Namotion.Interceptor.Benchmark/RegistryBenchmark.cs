@@ -40,15 +40,15 @@ public class RegistryBenchmark
         }
     }
 
-    //[Benchmark]
+    [Benchmark]
     public void AddLotsOfPreviousCars()
     {
-        _object.PreviousCars = Enumerable.Range(0, 10000)
+        _object.PreviousCars = Enumerable.Range(0, 1000)
             .Select(i => new Car())
             .ToArray();
     }
 
-    //[Benchmark]
+    // [Benchmark]
     public void IncrementDerivedAverage()
     {
         _object.Tires[0].Pressure += 5;
@@ -61,32 +61,32 @@ public class RegistryBenchmark
         _object.PreviousCars = null;
     }
 
-    //[Benchmark]
-    //public void Write()
-    //{
-    //    _object.Tires[0].Pressure = 5;
-    //    _object.Tires[1].Pressure = 6;
-    //    _object.Tires[2].Pressure = 7;
-    //    _object.Tires[3].Pressure = 8;
-    //}
+    // [Benchmark]
+    public void Write()
+    {
+        _object.Tires[0].Pressure = 5;
+        _object.Tires[1].Pressure = 6;
+        _object.Tires[2].Pressure = 7;
+        _object.Tires[3].Pressure = 8;
+    }
 
-    //[Benchmark]
-    //public decimal Read()
-    //{
-    //    return 
-    //        _object.Tires[0].Pressure +
-    //        _object.Tires[1].Pressure +
-    //        _object.Tires[2].Pressure +
-    //        _object.Tires[3].Pressure;
-    //}
+    // [Benchmark]
+    public decimal Read()
+    {
+        return 
+            _object.Tires[0].Pressure +
+            _object.Tires[1].Pressure +
+            _object.Tires[2].Pressure +
+            _object.Tires[3].Pressure;
+    }
 
-    //[Benchmark]
-    //public void DerivedAverage()
-    //{
-    //    var average = _object.AveragePressure;
-    //}
+    // [Benchmark]
+    public void DerivedAverage()
+    {
+        var average = _object.AveragePressure;
+    }
 
-    //[Benchmark]
+    // [Benchmark]
     public void ChangeAllTires()
     {
         var newTires = new Tire[]
