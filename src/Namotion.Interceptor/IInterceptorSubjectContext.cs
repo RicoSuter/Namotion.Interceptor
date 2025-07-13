@@ -14,7 +14,7 @@ public interface IInterceptorSubjectContext
 
     void ExecuteInterceptedWrite(WritePropertyInterception interception, Action<object?> writeValue);
 
-    void AddFallbackContext(IInterceptorSubjectContext context);
+    bool AddFallbackContext(IInterceptorSubjectContext context);
 
-    void RemoveFallbackContext(IInterceptorSubjectContext context);
+    bool RemoveFallbackContext(IInterceptorSubjectContext context);
 }
