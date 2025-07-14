@@ -150,12 +150,15 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     
     private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)
     {
-        if (_knownSubjects.TryGetValue(property.Subject, out var registeredSubject) &&
-            registeredSubject.Properties.TryGetValue(property.Name, out var result))
+        lock (_knownSubjects)
         {
-            return result;
-        }
+            if (_knownSubjects.TryGetValue(property.Subject, out var registeredSubject) &&
+                registeredSubject.Properties.TryGetValue(property.Name, out var result))
+            {
+                return result;
+            }
 
-        return null;
+            return null;
+        }
     }
 }
