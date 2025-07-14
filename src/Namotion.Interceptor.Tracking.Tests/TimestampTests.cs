@@ -11,10 +11,9 @@ public class TimestampTests
     public void WhenDefiningAsyncLocalTimestamp_ThenAllChangesHaveThisTimestamp()
     {
         // Arrange
-        var attaches = new List<SubjectLifecycleChange>();
-        var detaches = new List<SubjectLifecycleChange>();
+        var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()

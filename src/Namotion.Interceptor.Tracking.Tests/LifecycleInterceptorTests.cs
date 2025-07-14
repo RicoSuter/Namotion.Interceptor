@@ -10,13 +10,12 @@ namespace Namotion.Interceptor.Tracking.Tests;
 public class LifecycleInterceptorTests
 {
     [Fact]
-    public void WhenAssigningArray_ThenAllSubjectsAreAttached()
+    public Task WhenAssigningArray_ThenAllSubjectsAreAttached()
     {
         // Arrange
-        var attaches = new List<SubjectLifecycleChange>();
-        var detaches = new List<SubjectLifecycleChange>();
+        var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -31,18 +30,16 @@ public class LifecycleInterceptorTests
         mother.Children = [child1]; // should only detach child2
 
         // Assert
-        Assert.Equal(3, attaches.Count);
-        Assert.Single(detaches);
+        return Verify(events);
     }
 
     [Fact]
-    public void WhenAddingInterceptorCollection_ThenArrayItemsAndParentAreAttached()
+    public Task WhenAddingInterceptorCollection_ThenArrayItemsAndParentAreAttached()
     {
         // Arrange
-        var attaches = new List<SubjectLifecycleChange>();
-        var detaches = new List<SubjectLifecycleChange>();
+        var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -58,17 +55,16 @@ public class LifecycleInterceptorTests
         ((IInterceptorSubject)mother).Context.AddFallbackContext(context);
 
         // Assert
-        Assert.Equal(3, attaches.Count);
+        return Verify(events);
     }
 
     [Fact]
     public void WhenAssigningSubject_ThenAllSubjectsAreAttached()
     {
         // Arrange
-        var attaches = new List<SubjectLifecycleChange>();
-        var detaches = new List<SubjectLifecycleChange>();
+        var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -82,23 +78,22 @@ public class LifecycleInterceptorTests
 
         // Act & Assert
         mother1.Mother = mother2;
-        Assert.Equal(2, attaches.Count);
+        Assert.Equal(2, events.Count(e => e.StartsWith("Attached: ")));
 
         mother2.Mother = mother3;
-        Assert.Equal(3, attaches.Count);
+        Assert.Equal(3, events.Count(e => e.StartsWith("Attached: ")));
 
         mother1.Mother = null;
-        Assert.Equal(2, detaches.Count);
+        Assert.Equal(2, events.Count(e => e.StartsWith("Detached: ")));
     }
 
     [Fact]
-    public void WhenAddingInterceptorCollection_ThenAllChildrenAreAlsoAttached()
+    public Task WhenAddingInterceptorCollection_ThenAllChildrenAreAlsoAttached()
     {
         // Arrange
-        var attaches = new List<SubjectLifecycleChange>();
-        var detaches = new List<SubjectLifecycleChange>();
+        var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -116,17 +111,16 @@ public class LifecycleInterceptorTests
         ((IInterceptorSubject)mother1).Context.AddFallbackContext(context);
 
         // Assert
-        Assert.Equal(3, attaches.Count);
+        return Verify(events);
     }
 
     [Fact]
-    public void WhenRemovingInterceptors_ThenAllArrayChildrenAreDetached()
+    public Task WhenRemovingInterceptors_ThenAllArrayChildrenAreDetached()
     {
         // Arrange
-        var attaches = new List<SubjectLifecycleChange>();
-        var detaches = new List<SubjectLifecycleChange>();
+        var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -141,17 +135,16 @@ public class LifecycleInterceptorTests
         ((IInterceptorSubject)mother).Context.RemoveFallbackContext(context);
 
         // Assert
-        Assert.Equal(3, detaches.Count);
+        return Verify(events);
     }
 
     [Fact]
-    public void WhenRemovingInterceptors_ThenAllChildrenAreDetached()
+    public Task WhenRemovingInterceptors_ThenAllChildrenAreDetached()
     {
         // Arrange
-        var attaches = new List<SubjectLifecycleChange>();
-        var detaches = new List<SubjectLifecycleChange>();
+        var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -168,17 +161,16 @@ public class LifecycleInterceptorTests
         ((IInterceptorSubject)mother1).Context.RemoveFallbackContext(context);
 
         // Assert
-        Assert.Equal(3, detaches.Count);
+        return Verify(events);
     }
     
     [Fact]
     public void WhenChangingProperty_ThenSubjectAttachAndDetachAreCalled()
     {
         // Arrange
-        var attaches = new List<SubjectLifecycleChange>();
-        var detaches = new List<SubjectLifecycleChange>();
+        var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()

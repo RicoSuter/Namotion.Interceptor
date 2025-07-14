@@ -17,16 +17,16 @@ public static class Program
 
     private static void Run()
     {
-        var benchmark = new SourcePathProviderBenchmark()
+        var benchmark = new RegistryBenchmark()
         {
-            // Type = "interceptable"
+            Type = "interceptor"
         };
         benchmark.Setup();
         RunCode(benchmark);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void RunCode(SourcePathProviderBenchmark benchmark)
+    private static void RunCode(RegistryBenchmark benchmark)
     {
         var watch = Stopwatch.StartNew();
 
@@ -39,7 +39,7 @@ public static class Program
             watch.Restart();
             for (var j = 0; j < inner; ++j)
             {
-                benchmark.TryGetSourcePath();
+                benchmark.AddLotsOfPreviousCars();
             }
             Console.WriteLine($"{i * inner}/{total} ({watch.ElapsedMilliseconds / inner} ms)");
         }
