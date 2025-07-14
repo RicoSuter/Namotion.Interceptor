@@ -10,13 +10,12 @@ namespace Namotion.Interceptor.Registry.Tests;
 public class SubjectRegistryTests
 {
     [Fact]
-    public void WhenTwoChildrenAreAttachedSequentially_ThenWeHaveThreeAttaches()
+    public Task WhenTwoChildrenAreAttachedSequentially_ThenWeHaveThreeAttaches()
     {
         // Arrange
-        var attaches = new List<SubjectLifecycleChange>();
-        var detaches = new List<SubjectLifecycleChange>();
+        var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -37,21 +36,19 @@ public class SubjectRegistryTests
         };
 
         // Assert
-        Assert.Equal(3, attaches.Count);
-        Assert.Empty(detaches);
-
         var registry = context.GetService<ISubjectRegistry>();
         Assert.Equal(3, registry.KnownSubjects.Count());
+        
+        return Verify(events);
     }
 
     [Fact]
-    public void WhenTwoChildrenAreAttachedInOneBranch_ThenWeHaveThreeAttaches()
+    public Task WhenTwoChildrenAreAttachedInOneBranch_ThenWeHaveThreeAttaches()
     {
         // Arrange
-        var attaches = new List<SubjectLifecycleChange>();
-        var detaches = new List<SubjectLifecycleChange>();
+        var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -72,21 +69,19 @@ public class SubjectRegistryTests
         };
 
         // Assert
-        Assert.Equal(3, attaches.Count);
-        Assert.Empty(detaches);
-
         var registry = context.GetService<ISubjectRegistry>();
         Assert.Equal(3, registry.KnownSubjects.Count());
+        
+        return Verify(events);
     }
 
     [Fact]
-    public void WhenProxyWithChildProxyIsRemoved_ThenWeHaveTwoDetaches()
+    public Task WhenProxyWithChildProxyIsRemoved_ThenWeHaveTwoDetaches()
     {
         // Arrange
-        var attaches = new List<SubjectLifecycleChange>();
-        var detaches = new List<SubjectLifecycleChange>();
+        var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(attaches, detaches);
+        var handler = new TestLifecyleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -109,11 +104,10 @@ public class SubjectRegistryTests
         person.Mother = null;
 
         // Assert
-        Assert.Equal(3, attaches.Count);
-        Assert.Equal(2, detaches.Count);
-
         var registry = context.GetService<ISubjectRegistry>();
         Assert.Single(registry.KnownSubjects);
+        
+        return Verify(events);
     }
 
     [Fact]

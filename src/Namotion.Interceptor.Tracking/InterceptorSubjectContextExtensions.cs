@@ -101,11 +101,6 @@ public static class InterceptorSubjectContextExtensions
     /// <returns>The collection.</returns>
     public static IInterceptorSubjectContext WithLifecycle(this IInterceptorSubjectContext context)
     {
-        if (context.TryGetService<ContextInheritanceHandler>() is not null)
-        {
-            throw new InvalidOperationException($"{nameof(ContextInheritanceHandler)} must be registered after {nameof(LifecycleInterceptor)}.");
-        }
-        
         return context
             .WithInterceptor(() => new LifecycleInterceptor());
     }
