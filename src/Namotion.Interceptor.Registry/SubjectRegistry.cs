@@ -52,13 +52,12 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
 
             if (change.Property is not null)
             {
-                if (!_knownSubjects.ContainsKey(change.Property.Value.Subject))
+                if (!_knownSubjects.TryGetValue(change.Property.Value.Subject, out var registeredSubject))
                 {
-                    // parent of property not yet registered
-                    RegisterSubject(change.Property.Value.Subject);
+                    registeredSubject = RegisterSubject(change.Property.Value.Subject);
                 }
 
-                var property = TryGetRegisteredProperty(change.Property.Value) ?? 
+                var property = registeredSubject.TryGetProperty(change.Property.Value.Name) ?? 
                     throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
                     
                 subject
