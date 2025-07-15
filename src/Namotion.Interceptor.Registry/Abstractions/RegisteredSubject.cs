@@ -1,5 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -36,6 +37,19 @@ public record RegisteredSubject
     {
         lock (_lock)
             return _properties.GetValueOrDefault(propertyName);
+    }
+    
+    public RegisteredSubjectProperty? TryGetRegisteredAttribute(string propertyName, string attributeName)
+    {
+        lock (_lock)
+        {
+            var attribute = _properties
+                .SingleOrDefault(p => p.Value.ReflectionAttributes
+                    .OfType<PropertyAttributeAttribute>()
+                    .Any(a => a.PropertyName == propertyName && a.AttributeName == attributeName));
+
+            return attribute.Value;
+        }
     }
 
     public RegisteredSubject(IInterceptorSubject subject, IEnumerable<RegisteredSubjectProperty> properties)
