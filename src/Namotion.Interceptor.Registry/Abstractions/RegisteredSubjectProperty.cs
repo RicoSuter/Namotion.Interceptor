@@ -189,9 +189,8 @@ public record RegisteredSubjectProperty
     /// <returns>The property.</returns>
     public RegisteredSubjectProperty GetAttributedProperty()
     {
-        return Parent.Properties
-            .Single(p => p.Key == AttributeMetadata.PropertyName)
-            .Value;
+        return Parent.TryGetProperty(AttributeMetadata.PropertyName) ??
+            throw new InvalidOperationException($"The property '{Property.Name}' is not an attribute of any property.");
     }
 
     public static implicit operator PropertyReference(RegisteredSubjectProperty property)

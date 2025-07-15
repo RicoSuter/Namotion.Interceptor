@@ -152,13 +152,8 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     {
         lock (_knownSubjects)
         {
-            if (_knownSubjects.TryGetValue(property.Subject, out var registeredSubject) &&
-                registeredSubject.Properties.TryGetValue(property.Name, out var result))
-            {
-                return result;
-            }
-
-            return null;
+            return _knownSubjects.TryGetValue(property.Subject, out var registeredSubject) ? 
+                registeredSubject.TryGetProperty(property.Name) : null;
         }
     }
 }
