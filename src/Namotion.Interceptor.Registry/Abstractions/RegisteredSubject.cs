@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Serialization;
+﻿using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -33,6 +34,7 @@ public record RegisteredSubject
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty? TryGetProperty(string propertyName)
     {
         lock (_lock)
