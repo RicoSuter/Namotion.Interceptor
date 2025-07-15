@@ -24,6 +24,7 @@ public static class SubjectRegistryExtensions
             if (registeredSubjects.Add(innerSubject) == false)
                 yield break;
             
+            // TODO(perf): Move to directly implemented and avoid accessing Properties property
             foreach (var (_, property) in innerSubject.Properties)
             {
                 yield return property;
@@ -48,11 +49,10 @@ public static class SubjectRegistryExtensions
     /// <returns>The registered property.</returns>
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName, ISubjectRegistry? registry = null)
     {
-        registry = registry ?? subject.Context.GetService<ISubjectRegistry>();
+        registry ??= subject.Context.GetService<ISubjectRegistry>();
         return registry
             .TryGetRegisteredSubject(subject)?
-            .Properties
-            .GetValueOrDefault(propertyName);
+            .TryGetProperty(propertyName);
     }
     
     /// <summary>
@@ -172,6 +172,7 @@ public static class SubjectRegistryExtensions
 
     private static RegisteredSubjectProperty? TryGetRegisteredSubjectProperty(IInterceptorSubject subject, string propertyName, string attributeName)
     {
+        // TODO(perf): Cache the property attributes
         var registry = subject.Context.GetService<ISubjectRegistry>();
         var attribute = registry
             .TryGetRegisteredSubject(subject)?

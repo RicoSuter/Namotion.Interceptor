@@ -24,7 +24,7 @@ public static class SubjectRegistryJsonExtensions
             {
                 var attribute = registry
                     .TryGetRegisteredSubject(parent.Property.Subject)?
-                    .Properties[parent.Property.Name]
+                    .TryGetProperty(parent.Property.Name)?
                     .ReflectionAttributes
                     .OfType<PropertyAttributeAttribute>()
                     .FirstOrDefault();
