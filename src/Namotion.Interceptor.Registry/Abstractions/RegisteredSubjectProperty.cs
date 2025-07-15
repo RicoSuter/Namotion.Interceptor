@@ -107,7 +107,7 @@ public record RegisteredSubjectProperty
     {
         get
         {
-            lock (this)
+            lock (_children)
             {
                 return _children.ToArray();
             }
@@ -200,7 +200,7 @@ public record RegisteredSubjectProperty
 
     internal void AddChild(SubjectPropertyChild parent)
     {
-        lock (this)
+        lock (_children)
         {
             _children.Add(parent);
         }
@@ -208,7 +208,7 @@ public record RegisteredSubjectProperty
 
     internal void RemoveChild(SubjectPropertyChild parent)
     {
-        lock (this)
+        lock (_children)
         {
             if (IsSubjectCollection && _children.LastOrDefault() != parent)
             {
