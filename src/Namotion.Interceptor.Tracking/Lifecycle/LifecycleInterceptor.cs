@@ -154,8 +154,11 @@ public class LifecycleInterceptor : IWriteInterceptor
         // TODO: Also scan dynamic properties if available (registry)
         // TODO(perf): Maybe isDerived can be made faster somehow here
         
-        foreach (var property in subject.Properties.Where(p => !p.Value.IsDerived))
+        foreach (var property in subject.Properties)
         {
+            if (property.Value.IsDerived)
+                continue;
+
             var childValue = property.Value.GetValue?.Invoke(subject);
             if (childValue is not null)
             {
@@ -185,9 +188,9 @@ public class LifecycleInterceptor : IWriteInterceptor
         else if (value is ICollection collection)
         {
             var i = 0;
-            foreach (var subject in collection.OfType<IInterceptorSubject>())
+            foreach (var item in collection)
             {
-                if (touchedSubjects?.Add(subject) != false)
+                if (item is IInterceptorSubject subject && touchedSubjects?.Add(subject) != false)
                 {
                     collectedSubjects.Add((subject, property, i));
                 }
