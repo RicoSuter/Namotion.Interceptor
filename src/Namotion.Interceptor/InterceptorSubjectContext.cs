@@ -16,13 +16,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private readonly HashSet<InterceptorSubjectContext> _usedByContexts = [];
     private readonly HashSet<InterceptorSubjectContext> _fallbackContexts = [];
-    
+    private InterceptorSubjectContext? _noServicesSingleFallbackContext;
+
 #pragma warning disable CS8618
     public InterceptorSubjectContext()
     {
         ResetInterceptorFunctions();
     }
-    
+
     public static InterceptorSubjectContext Create()
     {
         return new InterceptorSubjectContext();
@@ -72,7 +73,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     public void ExecuteInterceptedWrite(
-        WritePropertyInterception interception, 
+        WritePropertyInterception interception,
         Action<object?> writeValue)
     {
         _writeInterceptorFunction.Value(interception, writeValue);
@@ -80,6 +81,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     public IEnumerable<TInterface> GetServices<TInterface>()
     {
+        // When there is only a fallback context and no services then we do not
+        // need to create an own cache and waste time creating and maintaining it.
+        // We can just redirect the call to the fallback context.
+        var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
+        if (noServicesSingleFallbackContext is not null)
+        {
+            return noServicesSingleFallbackContext.GetServices<TInterface>();
+        }
+
         var services = _serviceCache.GetOrAdd(
             typeof(TInterface), _ =>
             {
@@ -169,6 +179,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private void OnContextChanged()
     {
         _serviceCache.Clear();
+        _noServicesSingleFallbackContext = _services.Count == 0 && _fallbackContexts.Count == 1 
+            ? _fallbackContexts.Single() : null;
+
         ResetInterceptorFunctions();
 
         foreach (var parent in _usedByContexts)

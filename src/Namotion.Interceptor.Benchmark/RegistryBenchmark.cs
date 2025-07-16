@@ -14,7 +14,7 @@ public class RegistryBenchmark
     private IInterceptorSubjectContext? _context;
     
     [Params(
-        "regular",
+        // "regular",
         "interceptor"
     )]
     public string? Type;
