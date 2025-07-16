@@ -149,7 +149,8 @@ public class LifecycleInterceptor : IWriteInterceptor
         HashSet<IInterceptorSubject> touchedSubjects)
     {
         // TODO: Also scan dynamic properties if available (registry)
-
+        // TODO(perf): Maybe isDerived can be made faster somehow here
+        
         foreach (var property in subject.Properties
             .Where(p => subject.GetPropertyReference(p.Key).Metadata.IsDerived() == false))
         {

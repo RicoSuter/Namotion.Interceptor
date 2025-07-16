@@ -34,6 +34,11 @@ public record RegisteredSubject
         }
     }
 
+    /// <summary>
+    /// Gets the property with the given name.
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    /// <returns>The property or null.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty? TryGetProperty(string propertyName)
     {
@@ -41,6 +46,12 @@ public record RegisteredSubject
             return _properties.GetValueOrDefault(propertyName);
     }
     
+    /// <summary>
+    /// Gets an attribute which is attached to a property of the subject.
+    /// </summary>
+    /// <param name="propertyName">The parent property the attribute is attached to.</param>
+    /// <param name="attributeName">The attribute name.</param>
+    /// <returns>The attribute property or null.</returns>
     public RegisteredSubjectProperty? TryGetRegisteredAttribute(string propertyName, string attributeName)
     {
         lock (_lock)
@@ -67,13 +78,13 @@ public record RegisteredSubject
                 });
     }
 
-    public void AddParent(RegisteredSubjectProperty parent, object? index)
+    internal void AddParent(RegisteredSubjectProperty parent, object? index)
     {
         lock (_lock)
             _parents.Add(new SubjectPropertyParent { Property = parent, Index = index });
     }
 
-    public void RemoveParent(RegisteredSubjectProperty parent, object? index)
+    internal void RemoveParent(RegisteredSubjectProperty parent, object? index)
     {
         lock (_lock)
             _parents.Remove(new SubjectPropertyParent { Property = parent, Index = index });
