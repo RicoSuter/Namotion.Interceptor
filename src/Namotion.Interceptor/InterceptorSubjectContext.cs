@@ -87,7 +87,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                     return GetServicesWithoutCache<TInterface>().ToArray();
             });
 
-        return services.OfType<TInterface>();
+        return (TInterface[])services;
     }
 
     public virtual bool AddFallbackContext(IInterceptorSubjectContext context)
