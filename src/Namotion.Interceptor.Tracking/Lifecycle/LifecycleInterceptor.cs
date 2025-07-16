@@ -1,12 +1,11 @@
 ﻿using System.Collections;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public class LifecycleInterceptor : IWriteInterceptor
 {
-    // TODO(perf): Profile and improve this class, high potential to improve
-
     private const string ReferenceCountKey = "Namotion.Interceptor.Tracking.ReferenceCount";
     
     private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference?>> _attachedSubjects = [];
@@ -15,9 +14,8 @@ public class LifecycleInterceptor : IWriteInterceptor
     {
         lock (_attachedSubjects)
         {
-            var touchedSubjects = new HashSet<IInterceptorSubject>();
             var collectedSubjects = new HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)>();
-            FindSubjectsInProperties(subject, collectedSubjects, touchedSubjects);
+            FindSubjectsInProperties(subject, collectedSubjects, null);
 
             foreach (var child in collectedSubjects)
             {
@@ -36,9 +34,8 @@ public class LifecycleInterceptor : IWriteInterceptor
     {
         lock (_attachedSubjects)
         {
-            var touchedProxies = new HashSet<IInterceptorSubject>();
             var collectedSubjects = new HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)>();
-            FindSubjectsInProperties(subject, collectedSubjects, touchedProxies);
+            FindSubjectsInProperties(subject, collectedSubjects, null);
 
             DetachFrom(subject, subject.Context, null, null);
             foreach (var child in collectedSubjects)
@@ -111,7 +108,13 @@ public class LifecycleInterceptor : IWriteInterceptor
         
         context.Property.SetWriteTimestamp(SubjectMutationContext.GetCurrentTimestamp());
         
-        if (!Equals(currentValue, newValue))
+        if (!Equals(currentValue, newValue) &&
+            (currentValue is IInterceptorSubject || 
+             currentValue is ICollection || 
+             currentValue is IDictionary ||
+             newValue is IInterceptorSubject || 
+             newValue is ICollection || 
+             newValue is IDictionary))
         {
             lock (_attachedSubjects)
             {
@@ -133,7 +136,7 @@ public class LifecycleInterceptor : IWriteInterceptor
                     }
 
                     foreach (var d in newCollectedSubjects
-                        .Where(u => !oldTouchedSubjects.Contains(u.Item1)))
+                        .Where(u => !oldTouchedSubjects.Contains(u.subject)))
                     {
                         AttachTo(d.subject, context.Property.Subject.Context, d.property, d.index);
                     }
@@ -146,13 +149,12 @@ public class LifecycleInterceptor : IWriteInterceptor
 
     private void FindSubjectsInProperties(IInterceptorSubject subject,
         HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
-        HashSet<IInterceptorSubject> touchedSubjects)
+        HashSet<IInterceptorSubject>? touchedSubjects)
     {
         // TODO: Also scan dynamic properties if available (registry)
         // TODO(perf): Maybe isDerived can be made faster somehow here
         
-        foreach (var property in subject.Properties
-            .Where(p => subject.GetPropertyReference(p.Key).Metadata.IsDerived() == false))
+        foreach (var property in subject.Properties.Where(p => !p.Value.IsDerived))
         {
             var childValue = property.Value.GetValue?.Invoke(subject);
             if (childValue is not null)
@@ -163,18 +165,20 @@ public class LifecycleInterceptor : IWriteInterceptor
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void FindSubjectsInProperty(PropertyReference property,
         object? value, object? index,
         HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
-        HashSet<IInterceptorSubject> touchedSubjects)
+        HashSet<IInterceptorSubject>? touchedSubjects)
     {
-        if (value is IReadOnlyDictionary<string, IInterceptorSubject?> dictionary)
+        if (value is IDictionary dictionary)
         {
-            foreach (var (key, item) in dictionary)
+            foreach (var key in dictionary.Keys)
             {
-                if (item is not null && touchedSubjects.Add(item))
+                var item = dictionary[key];
+                if (item is IInterceptorSubject subjectItem && touchedSubjects?.Add(subjectItem) != false)
                 {
-                    collectedSubjects.Add((item, property, key));
+                    collectedSubjects.Add((subjectItem, property, key));
                 }
             }
         }
@@ -183,7 +187,7 @@ public class LifecycleInterceptor : IWriteInterceptor
             var i = 0;
             foreach (var subject in collection.OfType<IInterceptorSubject>())
             {
-                if (touchedSubjects.Add(subject))
+                if (touchedSubjects?.Add(subject) != false)
                 {
                     collectedSubjects.Add((subject, property, i));
                 }
@@ -191,7 +195,7 @@ public class LifecycleInterceptor : IWriteInterceptor
                 i++;
             }
         }
-        else if (value is IInterceptorSubject subject && touchedSubjects.Add(subject))
+        else if (value is IInterceptorSubject subject && touchedSubjects?.Add(subject) != false)
         {
             collectedSubjects.Add((subject, property, index));
         }
