@@ -1,4 +1,5 @@
 ﻿using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -22,6 +23,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     }
 
     /// <inheritdoc />
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
     {
         lock (_knownSubjects)
@@ -148,14 +150,9 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     {
     }
     
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)
     {
-        if (_knownSubjects.TryGetValue(property.Subject, out var registeredSubject) &&
-            registeredSubject.Properties.TryGetValue(property.Name, out var result))
-        {
-            return result;
-        }
-
-        return null;
+        return TryGetRegisteredSubject(property.Subject)?.TryGetProperty(property.Name);
     }
 }
