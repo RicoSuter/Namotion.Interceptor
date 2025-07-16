@@ -33,7 +33,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     {
         _readInterceptorFunction = new Lazy<Func<ReadPropertyInterception, Func<object?>, object?>>(() =>
         {
-            var returnReadValue = new Func<ReadPropertyInterception, Func<object?>, object?>((_, innerReadValue) => innerReadValue());
+            var returnReadValue = new Func<ReadPropertyInterception, Func<object?>, object?>(
+                (_, innerReadValue) => innerReadValue());
 
             var readInterceptors = GetServices<IReadInterceptor>();
             foreach (var handler in readInterceptors)
