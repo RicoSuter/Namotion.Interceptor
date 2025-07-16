@@ -24,6 +24,7 @@ public static class SubjectRegistryExtensions
             if (registeredSubjects.Add(innerSubject) == false)
                 yield break;
             
+            // TODO(perf): Move to directly implemented and avoid accessing Properties property
             foreach (var (_, property) in innerSubject.Properties)
             {
                 yield return property;
@@ -48,11 +49,10 @@ public static class SubjectRegistryExtensions
     /// <returns>The registered property.</returns>
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName, ISubjectRegistry? registry = null)
     {
-        registry = registry ?? subject.Context.GetService<ISubjectRegistry>();
+        registry ??= subject.Context.GetService<ISubjectRegistry>();
         return registry
             .TryGetRegisteredSubject(subject)?
-            .Properties
-            .GetValueOrDefault(propertyName);
+            .TryGetProperty(propertyName);
     }
     
     /// <summary>
@@ -63,9 +63,9 @@ public static class SubjectRegistryExtensions
     public static RegisteredSubjectProperty GetRegisteredProperty(this PropertyReference propertyReference)
     {
         return propertyReference.Subject
-                   .TryGetRegisteredSubject()?
-                   .TryGetProperty(propertyReference.Name) 
-               ?? throw new InvalidOperationException($"Property '{propertyReference.Name}' not found.");
+            .TryGetRegisteredSubject()?
+            .TryGetProperty(propertyReference.Name) 
+            ?? throw new InvalidOperationException($"Property '{propertyReference.Name}' not found.");
     }
 
     /// <summary>
@@ -154,7 +154,7 @@ public static class SubjectRegistryExtensions
     /// <returns>The attribute which is a specialization of a property.</returns>
     public static RegisteredSubjectProperty? TryGetRegisteredAttribute(this PropertyReference property, string attributeName)
     {
-        return TryGetRegisteredSubjectProperty(property.Subject, property.Name, attributeName);
+        return TryGetRegisteredAttribute(property.Subject, property.Name, attributeName);
     }
 
     /// <summary>
@@ -166,20 +166,15 @@ public static class SubjectRegistryExtensions
     /// <returns>The attribute which is a specialization of a property.</returns>
     public static RegisteredSubjectProperty GetRegisteredAttribute(this IInterceptorSubject subject, string propertyName, string attributeName)
     {
-        return TryGetRegisteredSubjectProperty(subject, propertyName, attributeName)
+        return TryGetRegisteredAttribute(subject, propertyName, attributeName)
             ?? throw new InvalidOperationException($"Attribute '{attributeName}' not found on property '{propertyName}'.");
     }
 
-    private static RegisteredSubjectProperty? TryGetRegisteredSubjectProperty(IInterceptorSubject subject, string propertyName, string attributeName)
+    private static RegisteredSubjectProperty? TryGetRegisteredAttribute(IInterceptorSubject subject, string propertyName, string attributeName)
     {
         var registry = subject.Context.GetService<ISubjectRegistry>();
-        var attribute = registry
+        return registry
             .TryGetRegisteredSubject(subject)?
-            .Properties
-            .SingleOrDefault(p => p.Value.ReflectionAttributes
-                .OfType<PropertyAttributeAttribute>()
-                .Any(a => a.PropertyName == propertyName && a.AttributeName == attributeName));
-
-        return attribute?.Value;
+            .TryGetRegisteredAttribute(propertyName, attributeName);
     }
 }

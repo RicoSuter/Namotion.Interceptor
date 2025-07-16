@@ -87,11 +87,13 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
 // </auto-generated>
 
 using Namotion.Interceptor;
+
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 
 #pragma warning disable CS8669
@@ -249,11 +251,13 @@ namespace {namespaceName}
 
                     generatedCode +=
     $@"
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private T GetPropertyValue<T>(string propertyName, Func<object?> readValue)
         {{
             return _context is not null ? (T?)_context.GetPropertyValue(propertyName, readValue)! : (T?)readValue()!;
         }}
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void SetPropertyValue<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)
         {{
             if (_context is null)
@@ -266,6 +270,7 @@ namespace {namespaceName}
             }}
         }}
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
         {{
             return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(parameters);

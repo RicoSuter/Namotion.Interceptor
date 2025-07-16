@@ -107,7 +107,7 @@ public record RegisteredSubjectProperty
     {
         get
         {
-            lock (this)
+            lock (_children)
             {
                 return _children.ToArray();
             }
@@ -189,9 +189,8 @@ public record RegisteredSubjectProperty
     /// <returns>The property.</returns>
     public RegisteredSubjectProperty GetAttributedProperty()
     {
-        return Parent.Properties
-            .Single(p => p.Key == AttributeMetadata.PropertyName)
-            .Value;
+        return Parent.TryGetProperty(AttributeMetadata.PropertyName) ??
+            throw new InvalidOperationException($"The property '{Property.Name}' is not an attribute of any property.");
     }
 
     public static implicit operator PropertyReference(RegisteredSubjectProperty property)
@@ -201,7 +200,7 @@ public record RegisteredSubjectProperty
 
     internal void AddChild(SubjectPropertyChild parent)
     {
-        lock (this)
+        lock (_children)
         {
             _children.Add(parent);
         }
@@ -209,7 +208,7 @@ public record RegisteredSubjectProperty
 
     internal void RemoveChild(SubjectPropertyChild parent)
     {
-        lock (this)
+        lock (_children)
         {
             if (IsSubjectCollection && _children.LastOrDefault() != parent)
             {
