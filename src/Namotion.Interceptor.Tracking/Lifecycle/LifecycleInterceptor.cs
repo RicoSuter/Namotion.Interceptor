@@ -149,7 +149,9 @@ public class LifecycleInterceptor : IWriteInterceptor
         HashSet<IInterceptorSubject> touchedSubjects)
     {
         // TODO: Also scan dynamic properties if available (registry)
-        foreach (var property in subject.Properties)
+
+        foreach (var property in subject.Properties
+            .Where(p => subject.GetPropertyReference(p.Key).Metadata.IsDerived() == false))
         {
             var childValue = property.Value.GetValue?.Invoke(subject);
             if (childValue is not null)
