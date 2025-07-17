@@ -17,16 +17,16 @@ public static class Program
 
     private static void Run()
     {
-        var benchmark = new RegistryBenchmark()
+        var benchmark = new SubjectUpdateBenchmark()
         {
-            Type = "interceptor"
+            // Type = "interceptor"
         };
         benchmark.Setup();
         RunCode(benchmark);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void RunCode(RegistryBenchmark benchmark)
+    private static void RunCode(SubjectUpdateBenchmark benchmark)
     {
         var watch = Stopwatch.StartNew();
 
@@ -39,7 +39,8 @@ public static class Program
             watch.Restart();
             for (var j = 0; j < inner; ++j)
             {
-                benchmark.AddLotsOfPreviousCars();
+                benchmark.CreateCompleteUpdate();
+                benchmark.CreatePartialUpdate();
             }
             Console.WriteLine($"{i * inner}/{total} ({watch.ElapsedMilliseconds / inner} ms)");
         }
