@@ -12,7 +12,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
-        if (change.Property.Metadata.IsDerived())
+        if (change.Property.Metadata.IsDerived)
         {
             TryStartRecordTouchedProperties();
 

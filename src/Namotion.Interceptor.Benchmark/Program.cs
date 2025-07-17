@@ -31,7 +31,7 @@ public static class Program
         var watch = Stopwatch.StartNew();
 
         const int outer = 100;
-        const int inner = 100000;
+        const int inner = 10;
         
         const int total = outer * inner;
         for (var i = 0; i < outer; ++i)

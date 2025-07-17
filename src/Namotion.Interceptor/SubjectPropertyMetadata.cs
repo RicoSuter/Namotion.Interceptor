@@ -1,4 +1,6 @@
-﻿namespace Namotion.Interceptor;
+﻿using Namotion.Interceptor.Attributes;
+
+namespace Namotion.Interceptor;
 
 public readonly record struct SubjectPropertyMetadata
 {
@@ -14,6 +16,8 @@ public readonly record struct SubjectPropertyMetadata
     
     public bool IsDynamic { get; }
 
+    public bool IsDerived { get; }
+
     public SubjectPropertyMetadata(
         string name, Type type, IReadOnlyCollection<Attribute> attributes, 
         Func<IInterceptorSubject, object?>? getValue, Action<IInterceptorSubject, object?>? setValue,
@@ -25,5 +29,6 @@ public readonly record struct SubjectPropertyMetadata
         GetValue = getValue;
         SetValue = setValue;
         IsDynamic = isDynamic;
+        IsDerived = attributes.Any(a => a is DerivedAttribute);
     }
 }
