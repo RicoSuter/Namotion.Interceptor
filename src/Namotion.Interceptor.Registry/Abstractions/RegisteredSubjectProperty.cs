@@ -36,7 +36,7 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Specifies whether the property is an attribute property (property attached to another property).
     /// </summary>
-    public bool IsAttribute => ReflectionAttributes.Any(a => a is PropertyAttributeAttribute);
+    public bool IsAttribute => _attributeMetadata is not null;
     
     /// <summary>
     /// Gets the attribute with information about this attribute property.
@@ -79,8 +79,7 @@ public record RegisteredSubjectProperty
     /// </summary>
     /// <param name="propertyName">The property name.</param>
     /// <returns>The result.</returns>
-    public bool IsAttributeForProperty(string propertyName) 
-        => ReflectionAttributes.OfType<PropertyAttributeAttribute>().Any(a => a.PropertyName == propertyName);
+    public bool IsAttributeForProperty(string propertyName) => _attributeMetadata?.PropertyName == propertyName;
 
     /// <summary>
     /// Gets the current value of the property.

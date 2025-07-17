@@ -23,19 +23,28 @@ public record SubjectUpdate
     /// Creates a complete update with all objects and properties for the given subject as root.
     /// </summary>
     /// <param name="subject">The root subject.</param>
+    /// <param name="propertyFilter">The property filter to exclude certain properties in the update.</param>
+    /// <param name="getPropertyValue">The get property value which can be used to transform or read value not directly from the property.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject)
+    public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, 
+        Func<RegisteredSubjectProperty, bool>? propertyFilter = null, 
+        Func<RegisteredSubjectProperty, object?>? getPropertyValue = null)
     {
-        return CreateCompleteUpdate(subject, new Dictionary<IInterceptorSubject, SubjectUpdate>());
+        return CreateCompleteUpdate(subject, propertyFilter, getPropertyValue, new Dictionary<IInterceptorSubject, SubjectUpdate>());
     }
     
     /// <summary>
     /// Creates a complete update with all objects and properties for the given subject as root.
     /// </summary>
     /// <param name="subject">The root subject.</param>
+    /// <param name="propertyFilter">The property filter to exclude certain properties in the update.</param>
+    /// <param name="getPropertyValue">The get property value which can be used to transform or read value not directly from the property.</param>
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
+    internal static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject,
+        Func<RegisteredSubjectProperty, bool>? propertyFilter,
+        Func<RegisteredSubjectProperty, object?>? getPropertyValue, 
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
         var subjectUpdate = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
 
@@ -43,9 +52,10 @@ public record SubjectUpdate
         if (registeredSubject is not null)
         {
             foreach (var property in registeredSubject.Properties
-                .Where(p => p.Value is { HasGetter: true, IsAttribute: false }))
+                .Where(p => p.Value is { HasGetter: true, IsAttribute: false } && propertyFilter?.Invoke(p.Value) != false))
             {
-                subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.CreateCompleteUpdate(registeredSubject, property.Key, property.Value, knownSubjectUpdates);
+                subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.CreateCompleteUpdate(
+                    registeredSubject, property.Key, property.Value, propertyFilter, getPropertyValue, knownSubjectUpdates);
             }
         }
 
@@ -58,8 +68,13 @@ public record SubjectUpdate
     /// </summary>
     /// <param name="subject">The root subject.</param>
     /// <param name="propertyChanges">The changes to look up within the object graph.</param>
+    /// <param name="propertyFilter">The property filter to exclude certain properties in the update.</param>
+    /// <param name="getPropertyValue">The get property value which can be used to transform or read value not directly from the property.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreatePartialUpdateFromChanges(IInterceptorSubject subject, IEnumerable<SubjectPropertyChange> propertyChanges)
+    public static SubjectUpdate CreatePartialUpdateFromChanges(
+        IInterceptorSubject subject, IEnumerable<SubjectPropertyChange> propertyChanges,
+        Func<RegisteredSubjectProperty, bool>? propertyFilter = null,
+        Func<RegisteredSubjectProperty, object?>? getPropertyValue = null)
     {
         var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
         var update = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
@@ -78,7 +93,7 @@ public record SubjectUpdate
             {
                 // handle attribute changes
                 var attributeUpdate = new SubjectPropertyUpdate();
-                attributeUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, knownSubjectUpdates);
+                attributeUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, propertyFilter, getPropertyValue, knownSubjectUpdates);
 
                 PropertyAttributeAttribute attribute;
                 var currentRegisteredProperty = registeredProperty;
@@ -103,7 +118,7 @@ public record SubjectUpdate
                 var propertyName = property.Name;
 
                 var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates);
-                propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, knownSubjectUpdates);
+                propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, propertyFilter, getPropertyValue, knownSubjectUpdates);
 
                 subjectUpdate.Properties[propertyName] = propertyUpdate;
             }
