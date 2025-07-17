@@ -31,7 +31,7 @@ public static class Program
         var watch = Stopwatch.StartNew();
 
         const int outer = 100;
-        const int inner = 10;
+        const int inner = 100000;
         
         const int total = outer * inner;
         for (var i = 0; i < outer; ++i)
@@ -39,7 +39,7 @@ public static class Program
             watch.Restart();
             for (var j = 0; j < inner; ++j)
             {
-                benchmark.CreateCompleteUpdate();
+                // benchmark.CreateCompleteUpdate();
                 benchmark.CreatePartialUpdate();
             }
             Console.WriteLine($"{i * inner}/{total} ({watch.ElapsedMilliseconds / inner} ms)");

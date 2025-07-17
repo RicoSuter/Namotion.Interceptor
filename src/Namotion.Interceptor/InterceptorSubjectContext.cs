@@ -80,6 +80,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         _writeInterceptorFunction.Value(interception, writeValue);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public IEnumerable<TInterface> GetServices<TInterface>()
     {
         // When there is only a fallback context and no services then we do not
