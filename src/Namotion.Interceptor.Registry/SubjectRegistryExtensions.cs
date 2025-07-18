@@ -1,4 +1,5 @@
 ﻿using System.Linq.Expressions;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -73,6 +74,7 @@ public static class SubjectRegistryExtensions
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <returns>The registered subject.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RegisteredSubject? TryGetRegisteredSubject(this IInterceptorSubject subject)
     {
         var registry = subject.Context.TryGetService<ISubjectRegistry>();
