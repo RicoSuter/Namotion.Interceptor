@@ -23,27 +23,27 @@ public record SubjectUpdate
     /// Creates a complete update with all objects and properties for the given subject as root.
     /// </summary>
     /// <param name="subject">The root subject.</param>
-    /// <param name="propertyFilter">The property filter to exclude certain properties in the update.</param>
-    /// <param name="getPropertyValue">The get property value which can be used to transform or read value not directly from the property.</param>
+    /// <param name="propertyFilter">The predicate to exclude properties from the update.</param>
+    /// <param name="transformPropertyUpdate">The function to transform or exclude (return null) subject property updates..</param>
     /// <returns>The update.</returns>
     public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, 
-        Func<RegisteredSubjectProperty, bool>? propertyFilter = null, 
-        Func<RegisteredSubjectProperty, object?>? getPropertyValue = null)
+        Func<RegisteredSubjectProperty, bool>? propertyFilter = null,
+        Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate = null)
     {
-        return CreateCompleteUpdate(subject, propertyFilter, getPropertyValue, new Dictionary<IInterceptorSubject, SubjectUpdate>());
+        return CreateCompleteUpdate(subject, propertyFilter, transformPropertyUpdate, new Dictionary<IInterceptorSubject, SubjectUpdate>());
     }
     
     /// <summary>
     /// Creates a complete update with all objects and properties for the given subject as root.
     /// </summary>
     /// <param name="subject">The root subject.</param>
-    /// <param name="propertyFilter">The property filter to exclude certain properties in the update.</param>
-    /// <param name="getPropertyValue">The get property value which can be used to transform or read value not directly from the property.</param>
+    /// <param name="propertyFilter">The predicate to exclude properties from the update.</param>
+    /// <param name="transformPropertyUpdate">The function to transform or exclude (return null) subject property updates..</param>
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
     /// <returns>The update.</returns>
     internal static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject,
         Func<RegisteredSubjectProperty, bool>? propertyFilter,
-        Func<RegisteredSubjectProperty, object?>? getPropertyValue, 
+        Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate, 
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
         var subjectUpdate = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
@@ -54,8 +54,11 @@ public record SubjectUpdate
             foreach (var property in registeredSubject.Properties
                 .Where(p => p.Value is { HasGetter: true, IsAttribute: false } && propertyFilter?.Invoke(p.Value) != false))
             {
-                subjectUpdate.Properties[property.Key] = SubjectPropertyUpdate.CreateCompleteUpdate(
-                    registeredSubject, property.Key, property.Value, propertyFilter, getPropertyValue, knownSubjectUpdates);
+                var propertyUpdate = SubjectPropertyUpdate.CreateCompleteUpdate(
+                    registeredSubject, property.Key, property.Value, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+
+                subjectUpdate.Properties[property.Key] = 
+                    transformPropertyUpdate is not null ? transformPropertyUpdate(property.Value, propertyUpdate) : propertyUpdate;
             }
         }
 
@@ -68,13 +71,13 @@ public record SubjectUpdate
     /// </summary>
     /// <param name="subject">The root subject.</param>
     /// <param name="propertyChanges">The changes to look up within the object graph.</param>
-    /// <param name="propertyFilter">The property filter to exclude certain properties in the update.</param>
-    /// <param name="getPropertyValue">The get property value which can be used to transform or read value not directly from the property.</param>
+    /// <param name="propertyFilter">The predicate to exclude properties from the update.</param>
+    /// <param name="transformPropertyUpdate">The function to transform or exclude (return null) subject property updates..</param>
     /// <returns>The update.</returns>
     public static SubjectUpdate CreatePartialUpdateFromChanges(
         IInterceptorSubject subject, IEnumerable<SubjectPropertyChange> propertyChanges,
         Func<RegisteredSubjectProperty, bool>? propertyFilter = null,
-        Func<RegisteredSubjectProperty, object?>? getPropertyValue = null)
+        Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate = null)
     {
         var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
         var update = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
@@ -87,14 +90,21 @@ public record SubjectUpdate
 
             var propertySubject = property.Subject;
             var subjectUpdate = GetOrCreateSubjectUpdate(propertySubject, knownSubjectUpdates);
-
+            
             var registeredProperty = property.GetRegisteredProperty();
+            if (propertyFilter?.Invoke(registeredProperty) == false)
+            {
+                continue;
+            }
+
+            var propertyName = property.Name;
             if (registeredProperty.IsAttribute)
             {
                 // handle attribute changes
-                var attributeUpdate = new SubjectPropertyUpdate();
-                attributeUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, propertyFilter, getPropertyValue, knownSubjectUpdates);
-
+                var attributeUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates);
+                attributeUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(registeredProperty, attributeUpdate) : attributeUpdate;
+             
                 PropertyAttributeAttribute attribute;
                 var currentRegisteredProperty = registeredProperty;
                 do
@@ -110,17 +120,15 @@ public record SubjectUpdate
                 } while (currentRegisteredProperty.IsAttribute);
 
                 var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, attribute.PropertyName, knownSubjectUpdates);
+
                 subjectUpdate.Properties[attribute.PropertyName] = propertyUpdate;
             }
             else
             {
                 // handle property changes
-                var propertyName = property.Name;
-
                 var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates);
-                propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, propertyFilter, getPropertyValue, knownSubjectUpdates);
-
-                subjectUpdate.Properties[propertyName] = propertyUpdate;
+                propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                subjectUpdate.Properties[propertyName] = transformPropertyUpdate is not null ? transformPropertyUpdate(registeredProperty, propertyUpdate) : propertyUpdate;
             }
 
             CreateParentSubjectUpdatePath(registeredSubject, knownSubjectUpdates);

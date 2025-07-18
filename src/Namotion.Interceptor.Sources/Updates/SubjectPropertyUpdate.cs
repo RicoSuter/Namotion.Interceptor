@@ -24,9 +24,9 @@ public record SubjectPropertyUpdate
     public string? Type { get; init; }
 
     /// <summary>
-    /// Gets the value of the property update.
+    /// Gets or sets the value of the property update.
     /// </summary>
-    public object? Value { get; private set; }
+    public object? Value { get; set; }
     
     /// <summary>
     /// Gets the timestamp of the property update or null if unknown.
@@ -71,15 +71,14 @@ public record SubjectPropertyUpdate
     
     internal static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubject subject, string propertyName, RegisteredSubjectProperty property, 
         Func<RegisteredSubjectProperty, bool>? propertyFilter,
-        Func<RegisteredSubjectProperty, object?>? getPropertyValue,
+        Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
         var attributes = subject.Properties
-            .Where(p => 
-                p.Value.HasGetter && p.Value.IsAttributeForProperty(propertyName))
+            .Where(p => p.Value.HasGetter && p.Value.IsAttributeForProperty(propertyName))
             .ToDictionary(
                 p => p.Value.AttributeMetadata.AttributeName,
-                p => CreateCompleteUpdate(subject, p.Key, p.Value, propertyFilter, getPropertyValue, knownSubjectUpdates));
+                p => CreateCompleteUpdate(subject, p.Key, p.Value, propertyFilter, transformPropertyUpdate, knownSubjectUpdates));
 
         var propertyUpdate = new SubjectPropertyUpdate
         {
@@ -87,9 +86,8 @@ public record SubjectPropertyUpdate
             Attributes = attributes.Count != 0 ? attributes : null
         };
         
-        propertyUpdate.ApplyValue(property, property.Property.TryGetWriteTimestamp(), 
-            getPropertyValue is not null ? getPropertyValue(property) : property.GetValue(), 
-            propertyFilter, getPropertyValue, knownSubjectUpdates);
+        propertyUpdate.ApplyValue(property, property.Property.TryGetWriteTimestamp(), property.GetValue(), 
+            propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
 
         return propertyUpdate;
     }
@@ -100,12 +98,12 @@ public record SubjectPropertyUpdate
     /// <param name="property">The property.</param>
     /// <param name="timestamp">The timestamp of the value change.</param>
     /// <param name="value">The value to apply.</param>
-    /// <param name="propertyFilter">The property filter to exclude certain properties in the update.</param>
-    /// <param name="getPropertyValue">The get property value which can be used to transform or read value not directly from the property.</param>
+    /// <param name="propertyFilter">The predicate to exclude properties from the update.</param>
+    /// <param name="transformPropertyUpdate">The function to transform or exclude (return null) subject property updates..</param>
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
     internal void ApplyValue(RegisteredSubjectProperty property, DateTimeOffset? timestamp, object? value, 
         Func<RegisteredSubjectProperty, bool>? propertyFilter,
-        Func<RegisteredSubjectProperty, object?>? getPropertyValue,
+        Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
         Timestamp = timestamp;
@@ -120,7 +118,7 @@ public record SubjectPropertyUpdate
                     var item = dictionary[key];
                     return new SubjectPropertyCollectionUpdate
                     {
-                        Item = item is not null ? SubjectUpdate.CreateCompleteUpdate(item, propertyFilter, getPropertyValue, knownSubjectUpdates) : null,
+                        Item = item is not null ? SubjectUpdate.CreateCompleteUpdate(item, propertyFilter, transformPropertyUpdate, knownSubjectUpdates) : null,
                         Index = key
                     };
                 })
@@ -132,7 +130,7 @@ public record SubjectPropertyUpdate
             Collection = value is IEnumerable<IInterceptorSubject> collection ? collection
                 .Select((itemSubject, index) => new SubjectPropertyCollectionUpdate
                 {
-                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject, propertyFilter, getPropertyValue, knownSubjectUpdates),
+                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject, propertyFilter, transformPropertyUpdate, knownSubjectUpdates),
                     Index = index
                 })
                 .ToList() : null;
@@ -140,7 +138,7 @@ public record SubjectPropertyUpdate
         else if (property.IsSubjectReference)
         {
             Kind = SubjectPropertyUpdateKind.Item;
-            Item = value is IInterceptorSubject itemSubject ? SubjectUpdate.CreateCompleteUpdate(itemSubject, propertyFilter, getPropertyValue, knownSubjectUpdates) : null;
+            Item = value is IInterceptorSubject itemSubject ? SubjectUpdate.CreateCompleteUpdate(itemSubject, propertyFilter, transformPropertyUpdate, knownSubjectUpdates) : null;
         }
         else
         {
