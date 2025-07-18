@@ -27,7 +27,9 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
     {
         lock (_knownSubjects)
+        {
             return _knownSubjects.GetValueOrDefault(subject);
+        }
     }
 
     /// <inheritdoc />

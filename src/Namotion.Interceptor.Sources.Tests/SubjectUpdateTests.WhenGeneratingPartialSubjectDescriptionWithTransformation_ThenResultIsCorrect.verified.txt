@@ -1,0 +1,53 @@
+﻿{
+  Type: Person,
+  Properties: {
+    children: {
+      Kind: Collection,
+      Collection: [
+        {
+          Index: 0,
+          Item: {
+            Type: Person
+          }
+        },
+        {
+          Index: 1,
+          Item: {
+            Type: Person
+          }
+        },
+        {
+          Index: 2,
+          Item: {
+            Type: Person,
+            Properties: {
+              firstName: {
+                Kind: Value,
+                Value: TransformedValue,
+                Timestamp: {Scrubbed}
+              }
+            }
+          }
+        }
+      ]
+    },
+    father: {
+      Kind: Item,
+      Item: {
+        Type: Person,
+        Properties: {
+          firstName: {
+            Kind: Value,
+            Value: NewFather,
+            Timestamp: {Scrubbed}
+          }
+        }
+      }
+    },
+    firstName: {
+      Kind: Value,
+      Value: NewPerson,
+      Timestamp: {Scrubbed}
+    }
+  }
+}
