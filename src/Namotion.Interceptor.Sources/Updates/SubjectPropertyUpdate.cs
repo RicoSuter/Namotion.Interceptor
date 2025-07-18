@@ -75,7 +75,7 @@ public record SubjectPropertyUpdate
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
         var attributes = subject.Properties
-            .Where(p => p.Value.HasGetter && p.Value.IsAttributeForProperty(propertyName))
+            .Where(p => p.Value.HasGetter && p.Value.IsAttributeForProperty(propertyName) && propertyFilter?.Invoke(p.Value) != false)
             .ToDictionary(
                 p => p.Value.AttributeMetadata.AttributeName,
                 p => CreateCompleteUpdate(subject, p.Key, p.Value, propertyFilter, transformPropertyUpdate, knownSubjectUpdates));
