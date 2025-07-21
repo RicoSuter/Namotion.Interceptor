@@ -37,10 +37,11 @@ public record RegisteredSubjectProperty
     /// Specifies whether the property is an attribute property (property attached to another property).
     /// </summary>
     public bool IsAttribute => _attributeMetadata is not null;
-    
+
     /// <summary>
     /// Gets the attribute with information about this attribute property.
     /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when this property is not an attribute.</exception>
     public PropertyAttributeAttribute AttributeMetadata => _attributeMetadata 
         ?? throw new InvalidOperationException("The property is not an attribute.");
 
@@ -73,13 +74,6 @@ public record RegisteredSubjectProperty
     /// Gets a value indicating whether the property has a setter.
     /// </summary>
     public bool HasSetter => Property.Metadata.SetValue is not null;
-
-    /// <summary>
-    /// Checks whether this is an attribute property for the given property.
-    /// </summary>
-    /// <param name="propertyName">The property name.</param>
-    /// <returns>The result.</returns>
-    public bool IsAttributeForProperty(string propertyName) => _attributeMetadata?.PropertyName == propertyName;
 
     /// <summary>
     /// Gets the current value of the property.
@@ -168,28 +162,30 @@ public record RegisteredSubjectProperty
     }
 
     /// <summary>
+    /// Gets all attributes which are attached to this property.
+    /// </summary>
+    public IEnumerable<RegisteredSubjectProperty> Attributes => Parent.GetPropertyAttributes(Property.Name);
+
+    /// <summary>
     /// Gets a property attribute by name.
     /// </summary>
     /// <param name="attributeName">The attribute name to find.</param>
     /// <returns>The attribute property.</returns>
     public RegisteredSubjectProperty? TryGetAttribute(string attributeName)
     {
-        var pair = Parent.Properties
-            .SingleOrDefault(p => p.Value.ReflectionAttributes
-                .OfType<PropertyAttributeAttribute>()
-                .Any(a => a.PropertyName == Property.Name && a.AttributeName == attributeName));
-
-        return pair.Value;
+        return Parent.TryGetPropertyAttribute(Property.Name, attributeName);
     } 
 
     /// <summary>
     /// Gets the attribute property this property is attached to.
     /// </summary>
     /// <returns>The property.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when this property is not an attribute.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the property this attribute is attached could not be found.</exception>
     public RegisteredSubjectProperty GetAttributedProperty()
     {
         return Parent.TryGetProperty(AttributeMetadata.PropertyName) ??
-            throw new InvalidOperationException($"The property '{Property.Name}' is not an attribute of any property.");
+            throw new InvalidOperationException($"The attributed property '{AttributeMetadata.PropertyName}' could not be found on the parent subject.");
     }
 
     public static implicit operator PropertyReference(RegisteredSubjectProperty property)

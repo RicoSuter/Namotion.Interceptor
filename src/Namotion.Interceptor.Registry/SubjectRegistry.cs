@@ -5,8 +5,6 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry;
 
-// TODO: Add lots of tests!
-
 public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Lock _lock = new();

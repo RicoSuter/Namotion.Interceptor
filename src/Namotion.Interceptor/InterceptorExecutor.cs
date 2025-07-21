@@ -17,7 +17,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
     
     public void SetPropertyValue(string propertyName, object? newValue, Func<object?>? readValue, Action<object?> writeValue)
     {
-        // TODO: reading here might be a problem (performance?)
+        // TODO(perf): Reading current value (invoke getter) here might be a performance problem. 
         var interception = new WritePropertyInterception(
             new PropertyReference(_subject, propertyName), readValue?.Invoke(), newValue); 
         _subject.Context.ExecuteInterceptedWrite(interception, writeValue);
