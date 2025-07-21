@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Registry.Attributes;
+﻿using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
@@ -164,13 +165,18 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
-    public IEnumerable<RegisteredSubjectProperty> Attributes => Parent.GetPropertyAttributes(Property.Name);
+    public IEnumerable<RegisteredSubjectProperty> Attributes
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Parent.GetPropertyAttributes(Property.Name);
+    }
 
     /// <summary>
     /// Gets a property attribute by name.
     /// </summary>
     /// <param name="attributeName">The attribute name to find.</param>
     /// <returns>The attribute property.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty? TryGetAttribute(string attributeName)
     {
         return Parent.TryGetPropertyAttribute(Property.Name, attributeName);
@@ -182,6 +188,7 @@ public record RegisteredSubjectProperty
     /// <returns>The property.</returns>
     /// <exception cref="InvalidOperationException">Thrown when this property is not an attribute.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the property this attribute is attached could not be found.</exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty GetAttributedProperty()
     {
         return Parent.TryGetProperty(AttributeMetadata.PropertyName) ??
