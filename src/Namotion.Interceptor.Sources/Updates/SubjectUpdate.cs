@@ -55,7 +55,7 @@ public record SubjectUpdate
                 .Where(p => p.Value is { HasGetter: true, IsAttribute: false } && propertyFilter?.Invoke(p.Value) != false))
             {
                 var propertyUpdate = SubjectPropertyUpdate.CreateCompleteUpdate(
-                    registeredSubject, property.Key, property.Value, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                    property.Value, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
 
                 subjectUpdate.Properties[property.Key] = 
                     transformPropertyUpdate is not null ? transformPropertyUpdate(property.Value, propertyUpdate) : propertyUpdate;

@@ -69,16 +69,17 @@ public record SubjectPropertyUpdate
         };
     }
     
-    internal static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubject subject, string propertyName, RegisteredSubjectProperty property, 
+    public static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubjectProperty property, 
         Func<RegisteredSubjectProperty, bool>? propertyFilter,
         Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
-        var attributes = subject.Properties
-            .Where(p => p.Value.HasGetter && p.Value.IsAttributeForProperty(propertyName) && propertyFilter?.Invoke(p.Value) != false)
+        var attributes = property
+            .Attributes
+            .Where(p => p.HasGetter)
             .ToDictionary(
-                p => p.Value.AttributeMetadata.AttributeName,
-                p => CreateCompleteUpdate(subject, p.Key, p.Value, propertyFilter, transformPropertyUpdate, knownSubjectUpdates));
+                p => p.AttributeMetadata.AttributeName,
+                p => CreateCompleteUpdate(p, propertyFilter, transformPropertyUpdate, knownSubjectUpdates));
 
         var propertyUpdate = new SubjectPropertyUpdate
         {

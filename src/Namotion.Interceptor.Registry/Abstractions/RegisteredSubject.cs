@@ -35,6 +35,36 @@ public record RegisteredSubject
     }
 
     /// <summary>
+    /// Gets all attributes which are attached to this property.
+    /// </summary>
+    public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
+    {
+        lock (_lock)
+        {
+            return _properties.Values
+                .Where(p => p.IsAttribute &&
+                            p.AttributeMetadata.PropertyName == propertyName);
+        }
+    }
+
+    /// <summary>
+    /// Gets a property attribute by name.
+    /// </summary>
+    /// <param name="propertyName">The property name.</param>
+    /// <param name="attributeName">The attribute name to find.</param>
+    /// <returns>The attribute property.</returns>
+    public RegisteredSubjectProperty? TryGetPropertyAttribute(string propertyName, string attributeName)
+    {
+        lock (_lock)
+        {
+            return _properties.Values
+                .FirstOrDefault(p => p.IsAttribute &&
+                                     p.AttributeMetadata.PropertyName == propertyName && 
+                                     p.AttributeMetadata.AttributeName == attributeName);
+        }
+    } 
+
+    /// <summary>
     /// Gets the property with the given name.
     /// </summary>
     /// <param name="propertyName">The property name.</param>
@@ -44,25 +74,6 @@ public record RegisteredSubject
     {
         lock (_lock)
             return _properties.GetValueOrDefault(propertyName);
-    }
-    
-    /// <summary>
-    /// Gets an attribute which is attached to a property of the subject.
-    /// </summary>
-    /// <param name="propertyName">The parent property the attribute is attached to.</param>
-    /// <param name="attributeName">The attribute name.</param>
-    /// <returns>The attribute property or null.</returns>
-    public RegisteredSubjectProperty? TryGetRegisteredAttribute(string propertyName, string attributeName)
-    {
-        lock (_lock)
-        {
-            var attribute = _properties
-                .SingleOrDefault(p => p.Value.ReflectionAttributes
-                    .OfType<PropertyAttributeAttribute>()
-                    .Any(a => a.PropertyName == propertyName && a.AttributeName == attributeName));
-
-            return attribute.Value;
-        }
     }
 
     public RegisteredSubject(IInterceptorSubject subject, IEnumerable<RegisteredSubjectProperty> properties)

@@ -74,7 +74,10 @@ public static class SubjectUpdateExtensions
             {
                 foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
                 {
-                    var registeredAttribute = subject.GetRegisteredAttribute(propertyName, attributeName);
+                    var registeredAttribute = subject
+                        .TryGetRegisteredProperty(propertyName)?
+                        .TryGetAttribute(attributeName) ?? throw new InvalidOperationException("Attribute not found on property.");
+                    
                     ApplySubjectPropertyUpdate(subject, registeredAttribute.Property.Name, attributeUpdate, applyValuePropertyUpdate, subjectFactory, registry);
                 }
             }
@@ -134,48 +137,60 @@ public static class SubjectUpdateExtensions
                 break;
 
             case SubjectPropertyUpdateKind.Collection:
-                if (propertyUpdate.Collection is not null)
+                if (propertyUpdate.Collection is null)
+                {
+                    break;
+                }
+
+                if (registeredProperty.Type.IsAssignableTo(typeof(IDictionary)))
                 {
                     // TODO: Handle dictionary
-
+                }
+                else
+                {
                     var value = registeredProperty.GetValue();
-                    if (value is IReadOnlyCollection<IInterceptorSubject> existingCollection)
+                    if (value is not null)
                     {
-                        foreach (var (item, index) in propertyUpdate
-                            .Collection
-                            .Select((item, index) => (item, index)))
+                        // Update existing collection
+                        foreach (var item in propertyUpdate.Collection)
                         {
-                            if (item.Item is not null)
+                            if (item.Item is null)
                             {
-                                if (existingCollection.Count > index)
-                                {
-                                    // Update existing collection item
-                                    ApplySubjectPropertyUpdate(existingCollection.ElementAt(index), item.Item!, applyValuePropertyUpdate, subjectFactory);
-                                }
-                                else if (existingCollection is IList list)
-                                {
-                                    // Missing index, create new collection item
-                                    var newItem = subjectFactory?.CreateSubject(registeredProperty, index);
-                                    if (newItem is not null)
-                                    {
-                                        newItem.Context.AddFallbackContext(subject.Context);
+                                continue;
+                            }
 
-                                        var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
-                                        ApplySubjectPropertyUpdate(newItem, item.Item!, applyValuePropertyUpdate, subjectFactory, parentRegistry);
-                                    }
-
-                                    list.Add(newItem);
-                                }
-                                else
+                            var index = (int)item.Index;
+                            if (value is ICollection existingCollection &&
+                                existingCollection.Count > index &&
+                                existingCollection.Cast<object>().ElementAt(index) is IInterceptorSubject collectionElement)
+                            {
+                                // Update existing collection item
+                                ApplySubjectPropertyUpdate(collectionElement, item.Item!, applyValuePropertyUpdate, subjectFactory);
+                            }
+                            else if (value is IList list)
+                            {
+                                // Missing item at index, create and add new collection item
+                                var newItem = subjectFactory?.CreateSubject(registeredProperty, index);
+                                if (newItem is not null)
                                 {
-                                    throw new InvalidOperationException("Cannot add item to non-list collection.");
+                                    newItem.Context.AddFallbackContext(subject.Context);
+
+                                    var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
+                                    ApplySubjectPropertyUpdate(newItem, item.Item!, applyValuePropertyUpdate, subjectFactory, parentRegistry);
                                 }
+
+                                // TODO: Trigger property changed event (mutating list does not trigger change event)?
+                                list.Add(newItem);
+                            }
+                            else
+                            {
+                                throw new InvalidOperationException("Cannot add item to non-list collection.");
                             }
                         }
                     }
                     else if (subjectFactory is not null)
                     {
-                        // create new collection
+                        // Create new collection
                         var items = propertyUpdate
                             .Collection?
                             .Select(i =>
@@ -183,19 +198,20 @@ public static class SubjectUpdateExtensions
                                 var item = subjectFactory?.CreateSubject(registeredProperty, i.Index);
                                 if (item is not null)
                                 {
+                                    // TODO: Is setting fallback context needed here or even too early?
                                     item.Context.AddFallbackContext(subject.Context);
 
                                     var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
                                     item.ApplySubjectPropertyUpdate(i.Item!, applyValuePropertyUpdate, subjectFactory, parentRegistry);
                                 }
+
                                 return item;
                             }) ?? [];
-                        
+
                         var collection = subjectFactory.CreateSubjectCollection(registeredProperty, items);
                         SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () => registeredProperty.SetValue(collection));
                     }
                 }
-
                 break;
         }
     }

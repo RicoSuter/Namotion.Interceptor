@@ -1,7 +1,6 @@
 ﻿using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Registry;
 
@@ -22,10 +21,12 @@ public static class SubjectRegistryExtensions
         IEnumerable<RegisteredSubjectProperty> InnerGetAllProperties(
             RegisteredSubject innerSubject, HashSet<RegisteredSubject> registeredSubjects)
         {
-            if (registeredSubjects.Add(innerSubject) == false)
+            if (!registeredSubjects.Add(innerSubject))
+            {
                 yield break;
-            
-            // TODO(perf): Move to directly implemented and avoid accessing Properties property
+            }
+
+            // TODO(perf): Implement directly on subject to avoid accessing Properties property
             foreach (var (_, property) in innerSubject.Properties)
             {
                 yield return property;
@@ -116,67 +117,5 @@ public static class SubjectRegistryExtensions
         }
 
         return null;
-    }
-    
-    /// <summary>
-    /// Gets all registered attributes of a property.
-    /// </summary>
-    /// <param name="subject">The subject with the property with attributes.</param>
-    /// <param name="propertyName">The property with the attributes.</param>
-    /// <returns>The dictionary with the attribute names and their registered properties.</returns>
-    public static IReadOnlyDictionary<string, RegisteredSubjectProperty> GetRegisteredAttributes(this IInterceptorSubject subject, string propertyName)
-    {
-        return GetRegisteredAttributes(new PropertyReference(subject, propertyName));
-    }
-
-    /// <summary>
-    /// Gets all registered attributes of a property.
-    /// </summary>
-    /// <param name="property">The property with the attributes.</param>
-    /// <returns>The dictionary with the attribute names and their registered properties.</returns>
-    public static IReadOnlyDictionary<string, RegisteredSubjectProperty> GetRegisteredAttributes(this PropertyReference property)
-    {
-        // TODO(perf): Cache the property attributes
-
-        var registry = property.Subject.Context.GetService<ISubjectRegistry>();
-        return registry
-            .TryGetRegisteredSubject(property.Subject)?
-            .Properties
-            .Where(p => p.Value.ReflectionAttributes
-                .OfType<PropertyAttributeAttribute>()
-                .Any(a => a.PropertyName == property.Name))
-            .ToDictionary()?? [];
-    }
-    
-    /// <summary>
-    /// Gets a registered attribute of a property.
-    /// </summary>
-    /// <param name="property">The property with the attribute.</param>
-    /// <param name="attributeName">The attribute name which is attached to the specified property.</param>
-    /// <returns>The attribute which is a specialization of a property.</returns>
-    public static RegisteredSubjectProperty? TryGetRegisteredAttribute(this PropertyReference property, string attributeName)
-    {
-        return TryGetRegisteredAttribute(property.Subject, property.Name, attributeName);
-    }
-
-    /// <summary>
-    /// Gets a registered attribute of a property.
-    /// </summary>
-    /// <param name="subject">The subject with the property.</param>
-    /// <param name="propertyName">The property name.</param>
-    /// <param name="attributeName">The attribute name which is attached to the specified property.</param>
-    /// <returns>The attribute which is a specialization of a property.</returns>
-    public static RegisteredSubjectProperty GetRegisteredAttribute(this IInterceptorSubject subject, string propertyName, string attributeName)
-    {
-        return TryGetRegisteredAttribute(subject, propertyName, attributeName)
-            ?? throw new InvalidOperationException($"Attribute '{attributeName}' not found on property '{propertyName}'.");
-    }
-
-    private static RegisteredSubjectProperty? TryGetRegisteredAttribute(IInterceptorSubject subject, string propertyName, string attributeName)
-    {
-        var registry = subject.Context.GetService<ISubjectRegistry>();
-        return registry
-            .TryGetRegisteredSubject(subject)?
-            .TryGetRegisteredAttribute(propertyName, attributeName);
     }
 }
