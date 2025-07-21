@@ -75,8 +75,9 @@ public static class SubjectUpdateExtensions
                 foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
                 {
                     var registeredAttribute = subject
-                        .TryGetRegisteredProperty(propertyName)?
-                        .TryGetAttribute(attributeName) ?? throw new InvalidOperationException("Attribute not found on property.");
+                        .TryGetRegisteredSubject()?
+                        .TryGetPropertyAttribute(propertyName, attributeName) 
+                            ?? throw new InvalidOperationException("Attribute not found on property.");
                     
                     ApplySubjectPropertyUpdate(subject, registeredAttribute.Property.Name, attributeUpdate, applyValuePropertyUpdate, subjectFactory, registry);
                 }
