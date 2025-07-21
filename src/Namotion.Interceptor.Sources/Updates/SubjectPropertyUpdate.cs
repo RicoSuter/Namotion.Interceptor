@@ -69,7 +69,7 @@ public record SubjectPropertyUpdate
         };
     }
     
-    public static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubjectProperty property, 
+    internal static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubjectProperty property, 
         Func<RegisteredSubjectProperty, bool>? propertyFilter,
         Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
