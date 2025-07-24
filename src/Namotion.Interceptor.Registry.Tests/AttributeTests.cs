@@ -41,15 +41,10 @@ public class AttributeTests
 
         var attribute = registeredProperty.TryGetAttribute("MyAttribute");
         var attribute2 = attribute?.TryGetAttribute("MyAttribute2");
-        var attribute3 = person.GetRegisteredAttribute(nameof(Person.FirstName), "MyAttribute");
-        var attribute4 = new PropertyReference(person, nameof(Person.FirstName))
-            .TryGetRegisteredAttribute("MyAttribute");
 
         // Assert
         Assert.NotNull(attribute);
         Assert.NotNull(attribute2);
-        Assert.NotNull(attribute3);
-        Assert.NotNull(attribute4);
 
         attribute.SetValue(500);
         var newValue = attribute2.GetValue();

@@ -24,7 +24,7 @@ public record SubjectPropertyUpdate
     public string? Type { get; init; }
 
     /// <summary>
-    /// Gets or sets the value of the property update.
+    /// Gets or sets the value of the property update if kind is Value.
     /// </summary>
     public object? Value { get; set; }
     
@@ -33,11 +33,23 @@ public record SubjectPropertyUpdate
     /// </summary>
     public DateTimeOffset? Timestamp { get; private set; }
 
+    /// <summary>
+    /// Gets the item if kind is Item.
+    /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public SubjectUpdate? Item { get; internal set; }
 
+    /// <summary>
+    /// Gets or sets the all items of the collection if kind is Collection.
+    /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public IReadOnlyCollection<SubjectPropertyCollectionUpdate>? Collection { get; internal set; }
+    
+    /// <summary>
+    /// Gets or sets custom extension data added by the transformPropertyUpdate function.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, object>? ExtensionData { get; set; }
     
     public static SubjectPropertyUpdate Create<T>(T value, DateTimeOffset? timestamp = null)
     {
@@ -69,16 +81,17 @@ public record SubjectPropertyUpdate
         };
     }
     
-    internal static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubject subject, string propertyName, RegisteredSubjectProperty property, 
+    internal static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubjectProperty property, 
         Func<RegisteredSubjectProperty, bool>? propertyFilter,
         Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
-        var attributes = subject.Properties
-            .Where(p => p.Value.HasGetter && p.Value.IsAttributeForProperty(propertyName) && propertyFilter?.Invoke(p.Value) != false)
+        var attributes = property
+            .Attributes
+            .Where(p => p.HasGetter)
             .ToDictionary(
-                p => p.Value.AttributeMetadata.AttributeName,
-                p => CreateCompleteUpdate(subject, p.Key, p.Value, propertyFilter, transformPropertyUpdate, knownSubjectUpdates));
+                p => p.AttributeMetadata.AttributeName,
+                p => CreateCompleteUpdate(p, propertyFilter, transformPropertyUpdate, knownSubjectUpdates));
 
         var propertyUpdate = new SubjectPropertyUpdate
         {
