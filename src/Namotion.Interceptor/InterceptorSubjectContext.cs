@@ -166,7 +166,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     public TInterface? TryGetService<TInterface>()
     {
-        return GetServices<TInterface>().SingleOrDefault();
+        var services = (TInterface[])GetServices<TInterface>();
+        return services is { Length: 1 } ? services[0] : 
+            throw new InvalidOperationException($"There must be exactly one service of type {typeof(TInterface).FullName}.");
     }
 
     private IEnumerable<TInterface> GetServicesWithoutCache<TInterface>()
