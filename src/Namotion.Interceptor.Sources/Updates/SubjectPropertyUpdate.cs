@@ -24,7 +24,7 @@ public record SubjectPropertyUpdate
     public string? Type { get; init; }
 
     /// <summary>
-    /// Gets or sets the value of the property update.
+    /// Gets or sets the value of the property update if kind is Value.
     /// </summary>
     public object? Value { get; set; }
     
@@ -33,11 +33,23 @@ public record SubjectPropertyUpdate
     /// </summary>
     public DateTimeOffset? Timestamp { get; private set; }
 
+    /// <summary>
+    /// Gets the item if kind is Item.
+    /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public SubjectUpdate? Item { get; internal set; }
 
+    /// <summary>
+    /// Gets or sets the all items of the collection if kind is Collection.
+    /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public IReadOnlyCollection<SubjectPropertyCollectionUpdate>? Collection { get; internal set; }
+    
+    /// <summary>
+    /// Gets or sets custom extension data added by the transformPropertyUpdate function.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, object>? ExtensionData { get; set; }
     
     public static SubjectPropertyUpdate Create<T>(T value, DateTimeOffset? timestamp = null)
     {
