@@ -159,7 +159,9 @@ public class SubjectUpdateTests
 
         // Act
         var partialSubjectUpdate = SubjectUpdate
-            .CreatePartialUpdateFromChanges(father, changes) // TODO(perf): This method can probably made much faster in case of non-root subjects (no need to create many objects)
+            // TODO(perf): This method can probably made much faster in case of
+            // non-root subjects (no need to create many objects)
+            .CreatePartialUpdateFromChanges(father, changes) 
             .ConvertToJsonCamelCasePath();
 
         // Assert

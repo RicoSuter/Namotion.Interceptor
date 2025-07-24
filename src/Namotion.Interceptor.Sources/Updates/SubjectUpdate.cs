@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
@@ -18,6 +19,12 @@ public record SubjectUpdate
     /// </summary>
     public IDictionary<string, SubjectPropertyUpdate> Properties { get; init; }
         = new Dictionary<string, SubjectPropertyUpdate>();
+
+    /// <summary>
+    /// Gets or sets custom extension data added by the transformPropertyUpdate function.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, object>? ExtensionData { get; set; }
 
     /// <summary>
     /// Creates a complete update with all objects and properties for the given subject as root.
@@ -55,7 +62,7 @@ public record SubjectUpdate
                 .Where(p => p.Value is { HasGetter: true, IsAttribute: false } && propertyFilter?.Invoke(p.Value) != false))
             {
                 var propertyUpdate = SubjectPropertyUpdate.CreateCompleteUpdate(
-                    registeredSubject, property.Key, property.Value, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                    property.Value, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
 
                 subjectUpdate.Properties[property.Key] = 
                     transformPropertyUpdate is not null ? transformPropertyUpdate(property.Value, propertyUpdate) : propertyUpdate;

@@ -47,7 +47,6 @@ public class LifecycleInterceptor : IWriteInterceptor
 
     private void AttachTo(IInterceptorSubject subject, IInterceptorSubjectContext context, PropertyReference? property, object? index)
     {
-        // TODO(perf): Can maybe be improved
         _attachedSubjects.TryAdd(subject, []);
         if (_attachedSubjects[subject].Add(property))
         {
@@ -64,6 +63,9 @@ public class LifecycleInterceptor : IWriteInterceptor
                 lifecycleHandler.AttachSubject(registryContext);
             }
 
+            // Note: Dynamically added properties can only be added after
+            // the subject has been attached and thus we do not need to handle
+            // dynamic properties here
             foreach (var propertyName in subject.Properties.Keys)
             {
                 subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
@@ -80,7 +82,9 @@ public class LifecycleInterceptor : IWriteInterceptor
                 _attachedSubjects.Remove(subject);
             }
 
-            // TODO: Detach dynamically added properties as well
+            // Note: Dynamically added properties (IsDynamic) are detached in 
+            // SubjectRegistry.DetachSubject() and not here as this libraries
+            // does not know about this feature
             foreach (var propertyName in subject.Properties.Keys)
             {
                 subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
@@ -151,8 +155,7 @@ public class LifecycleInterceptor : IWriteInterceptor
         HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects)
     {
-        // TODO: Also scan dynamic properties if available (registry)
-        // TODO(perf): Maybe isDerived can be made faster somehow here
+        // TODO: Also scan dynamic properties if available (registry), is this needed?
         
         foreach (var property in subject.Properties)
         {
