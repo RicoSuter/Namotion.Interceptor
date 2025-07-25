@@ -23,10 +23,10 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                 {
                     var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
 
-                    if (!HasInterceptorSubjectAttribute(ctx, classDeclaration, ct))
+                    var model = ctx.SemanticModel;
+                    if (!HasInterceptorSubjectAttribute(classDeclaration, model, ct))
                         return null!;
                     
-                    var model = ctx.SemanticModel;
                     return new
                     {
                         Model = model,
@@ -36,13 +36,13 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                             .Where(p => p.Modifiers
                                 .Any(m => m.IsKind(
                                     SyntaxKind.PartialKeyword)) || 
-                                    p.AttributeLists.Any(a => a.ToString() == "[Derived]")) // TODO: Use actual symbol
+                                    HasDerivedAttribute(p, model, ct))
                             .Select(p => new
                             {
                                 Property = p,
                                 Type = model.GetTypeInfo(p.Type, ct),
                                 IsPartial = p.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)),
-                                IsDerived = p.AttributeLists.Any(a => a.ToString() == "[Derived]"), // TODO: Use actual symbol
+                                IsDerived = HasDerivedAttribute(p, model, ct),
                                 IsRequired = p.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword)),
                                 HasGetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
                                             p.ExpressionBody.IsKind(SyntaxKind.ArrowExpressionClause),
@@ -288,16 +288,26 @@ namespace {namespaceName}
         });
     }
 
-    private bool HasInterceptorSubjectAttribute(GeneratorSyntaxContext ctx, ClassDeclarationSyntax classDeclaration, CancellationToken ct)
+    private bool HasDerivedAttribute(PropertyDeclarationSyntax property, SemanticModel semanticModel, CancellationToken ct)
     {
-        var hasAttribute = classDeclaration.AttributeLists
+        return HasAttribute(property.AttributeLists, "DerivedAttribute", semanticModel, ct);
+    }
+
+    private bool HasInterceptorSubjectAttribute(ClassDeclarationSyntax classDeclaration, SemanticModel semanticModel, CancellationToken ct)
+    {
+        return HasAttribute(classDeclaration.AttributeLists, "InterceptorSubjectAttribute", semanticModel, ct);
+    }
+
+    private bool HasAttribute(SyntaxList<AttributeListSyntax> attributeLists, string baseTypeName, SemanticModel semanticModel, CancellationToken ct)
+    {
+        var hasAttribute = attributeLists
             .SelectMany(al => al.Attributes)
             .Any(attr =>
             {
-                var attributeType = ctx.SemanticModel.GetTypeInfo(attr, ct).Type as INamedTypeSymbol;
-                return attributeType != null && IsTypeOrInheritsFrom(attributeType, "InterceptorSubjectAttribute");
+                var attributeType = semanticModel.GetTypeInfo(attr, ct).Type as INamedTypeSymbol;
+                return attributeType != null && IsTypeOrInheritsFrom(attributeType, baseTypeName);
             });
-        
+
         return hasAttribute;
     }
 
