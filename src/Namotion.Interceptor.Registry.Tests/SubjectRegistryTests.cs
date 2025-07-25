@@ -2,6 +2,7 @@
 using Namotion.Interceptor.AspNetCore.Extensions;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Person = Namotion.Interceptor.Registry.Tests.Models.Person;
 
@@ -190,6 +191,7 @@ public class SubjectRegistryTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
+            .WithParents()
             .WithRegistry();
 
         // Act
@@ -213,6 +215,12 @@ public class SubjectRegistryTests
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         };
         
+        var path = person.Mother.Mother
+            .TryGetRegisteredProperty("FirstName")?
+            .Property
+            .GetJsonPath(jsonSerializerOptions) ?? string.Empty;
+        
+        Assert.Equal("mother.mother.firstName", path);
         await Verify(person.ToJsonObject(jsonSerializerOptions).ToJsonString(jsonSerializerOptions));
     }
 
