@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
@@ -12,7 +12,14 @@ namespace Namotion.Interceptor.AspNetCore.Extensions;
 
 public static class SubjectRegistryJsonExtensions
 {
-    public static string GetJsonPath(this PropertyReference property)
+    /// <summary>
+    /// Gets the JSON path for a property, requires the ParentTrackingHandler
+    /// to be registered (WithParents()) and uses optionally the registry.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="jsonSerializerOptions">The serializer options.</param>
+    /// <returns>The path.</returns>
+    public static string GetJsonPath(this PropertyReference property, JsonSerializerOptions jsonSerializerOptions)
     {
         var registry = property.Subject.Context.TryGetService<ISubjectRegistry>();
         if (registry is not null)
@@ -33,11 +40,12 @@ public static class SubjectRegistryJsonExtensions
                 {
                     return GetJsonPath(new PropertyReference(
                         parent.Property.Subject,
-                        attribute.PropertyName)) +
+                        attribute.PropertyName), jsonSerializerOptions) +
                         "@" + attribute.AttributeName;
                 }
 
-                path = JsonNamingPolicy.CamelCase.ConvertName(parent.Property.Name) +
+                var propertyName = GetJsonPropertyName(parent.Property.Subject, parent.Property.Metadata, jsonSerializerOptions);
+                path = propertyName +
                     (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
                     (path is not null ? $".{path}" : string.Empty);
 
@@ -64,11 +72,12 @@ public static class SubjectRegistryJsonExtensions
                 {
                     return GetJsonPath(new PropertyReference(
                         parent.Property.Subject,
-                        attribute.PropertyName)) +
+                        attribute.PropertyName), jsonSerializerOptions) +
                         "@" + attribute.AttributeName;
                 }
 
-                path = JsonNamingPolicy.CamelCase.ConvertName(parent.Property.Name) +
+                var propertyName = GetJsonPropertyName(parent.Property.Subject, parent.Property.Metadata, jsonSerializerOptions);
+                path = propertyName +
                     (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
                     (path is not null ? $".{path}" : string.Empty);
 
@@ -82,12 +91,12 @@ public static class SubjectRegistryJsonExtensions
 
     public static JsonObject ToJsonObject(this IInterceptorSubject subject, JsonSerializerOptions jsonSerializerOptions)
     {
-        var registry = subject.Context.TryGetService<ISubjectRegistry>();
         var obj = new JsonObject();
         foreach (var property in subject
             .Properties
             .Where(p => p.Value.GetValue is not null))
         {
+            // add static properties
             var propertyName = GetJsonPropertyName(subject, property.Value, jsonSerializerOptions);
             var value = property.Value.GetValue?.Invoke(subject);
             if (value is IInterceptorSubject childProxy)
@@ -109,15 +118,16 @@ public static class SubjectRegistryJsonExtensions
             }
         }
 
-        var registeredSubject = registry?.TryGetRegisteredSubject(subject);
+        var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is not null)
         {
+            // add dynamic properties
             foreach (var property in registeredSubject
                 .Properties
                 .Where(p => p.Value.HasGetter && 
                             subject.Properties.ContainsKey(p.Key) == false))
             {
-                var propertyName = property.GetJsonPropertyName(jsonSerializerOptions);
+                var propertyName = property.Value.GetJsonPropertyName(jsonSerializerOptions);
                 var value = property.Value.GetValue();
                 if (value is IInterceptorSubject childProxy)
                 {
@@ -158,24 +168,17 @@ public static class SubjectRegistryJsonExtensions
         return jsonSerializerOptions.PropertyNamingPolicy?.ConvertName(property.Name) ?? property.Name;
     }
 
-    private static string GetJsonPropertyName(this KeyValuePair<string, RegisteredSubjectProperty> property, JsonSerializerOptions jsonSerializerOptions)
+    private static string GetJsonPropertyName(this RegisteredSubjectProperty property, JsonSerializerOptions jsonSerializerOptions)
     {
-        var attribute = property
-            .Value
-            .ReflectionAttributes
-            .OfType<PropertyAttributeAttribute>()
-            .FirstOrDefault();
-
-        if (attribute is not null)
+        if (property.IsAttribute)
         {
-            // TODO(perf): Use cache to improve performance
-            return property.Value
-                .Parent.Properties
-                .Single(p => p.Key == attribute.PropertyName)
-                .GetJsonPropertyName(jsonSerializerOptions) + "@" + attribute.AttributeName;
+            return property
+                .GetAttributedProperty()
+                .GetJsonPropertyName(jsonSerializerOptions) + "@" + property.AttributeMetadata.AttributeName;
         }
 
-        return jsonSerializerOptions.PropertyNamingPolicy?.ConvertName(property.Key) ?? property.Key;
+        return jsonSerializerOptions.PropertyNamingPolicy?
+            .ConvertName(property.Property.Name) ?? property.Property.Name;
     }
 
     public static (IInterceptorSubject?, SubjectPropertyMetadata) FindPropertyFromJsonPath(this IInterceptorSubject subject, string path)
