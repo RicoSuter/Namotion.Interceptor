@@ -1,8 +1,8 @@
 ﻿namespace Namotion.Interceptor.GraphQL
 {
-    public class Subscription<TProxy>
+    public class Subscription<TSubject>
     {
         [Subscribe]
-        public TProxy Root([EventMessage] TProxy proxy) => proxy;
+        public TSubject Root([EventMessage] TSubject subject) => subject;
     }
 }

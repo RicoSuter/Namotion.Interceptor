@@ -1,14 +1,14 @@
 ﻿namespace Namotion.Interceptor.GraphQL
 {
-    public class Query<TProxy>
+    public class Query<TSubject>
     {
-        private readonly TProxy _proxy;
+        private readonly TSubject _subject;
 
-        public Query(TProxy proxy)
+        public Query(TSubject subject)
         {
-            _proxy = proxy;
+            _subject = subject;
         }
 
-        public TProxy GetRoot() => _proxy;
+        public TSubject GetRoot() => _subject;
     }
 }
