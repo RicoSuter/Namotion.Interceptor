@@ -20,7 +20,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
 
     public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return TryGetSourceNameAttribute(property) is not null && 
+        return TryGetSourcePathAttribute(property) is not null && 
             (property.Parent.Parents.Count == 0 || 
              property.Parent.Parents.Any(p => TryGetSourcePathAttribute(p.Property) is not null));
     }
@@ -58,8 +58,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
 
     public override string? TryGetPropertyName(RegisteredSubjectProperty property)
     {
-        return TryGetSourceNameAttribute(property)?.Path ?? 
-               TryGetSourcePathAttribute(property)?.Path;
+        return TryGetSourcePathAttribute(property)?.Path;
     }
 
     public override string GetPropertyFullPath(IEnumerable<(RegisteredSubjectProperty property, object? index)> propertiesInPath)
@@ -76,12 +75,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
             return GetAttributeBasedSourcePropertyPath(attributedProperty) + _attributePathDelimiter + TryGetPropertyName(property);
         }
         
-        var sourcePath = TryGetSourceNameAttribute(property)?.Path;
-        if (sourcePath is null)
-        {
-            sourcePath = TryGetSourcePathAttribute(property)?.Path;
-        }
-
+        var sourcePath = TryGetSourcePathAttribute(property)?.Path;
         var prefix = TryGetAttributeBasedSourcePathPrefix(property);
         return (prefix is not null ? prefix + _propertyPathDelimiter : "") + sourcePath;
     }
@@ -103,14 +97,6 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
         }
         
         return null;
-    }
-
-    private SourceNameAttribute? TryGetSourceNameAttribute(RegisteredSubjectProperty property)
-    {
-        return property
-            .ReflectionAttributes
-            .OfType<SourceNameAttribute>()
-            .FirstOrDefault(a => a.SourceName == _sourceName);
     }
 
     private SourcePathAttribute? TryGetSourcePathAttribute(RegisteredSubjectProperty property)

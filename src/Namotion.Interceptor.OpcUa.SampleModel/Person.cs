@@ -12,11 +12,15 @@ public partial class Person
         Children = [];
     }
 
-    [SourceName("opc", "FirstName")]
+    [SourcePath("opc", "FirstName")]
     public partial string? FirstName { get; set; }
 
-    [SourceName("opc", "LastName")]
+    [SourcePath("opc", "LastName")]
     public partial string? LastName { get; set; }
+    
+    [Derived]
+    [SourcePath("opc", "FullName")]
+    public string FullName => $"{FirstName} {LastName}";
 
     public partial Person? Father { get; set; }
 

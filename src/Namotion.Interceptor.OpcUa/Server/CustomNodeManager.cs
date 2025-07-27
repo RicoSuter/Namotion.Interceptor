@@ -2,7 +2,6 @@
 using Namotion.Interceptor.OpcUa.Annotations;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources.Paths;
 using Opc.Ua;
 using Opc.Ua.Export;
 using Opc.Ua.Server;
@@ -180,36 +179,32 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private void CreateVariableNode(string propertyName, RegisteredSubjectProperty property, NodeId parentNodeId, string parentPath)
     {
-        var sourcePath = property.TryGetSourcePath(_source.SourcePathProvider, _source.Subject);
-        if (sourcePath is not null)
+        var value = property.GetValue();
+        var type = property.Type;
+
+        if (type == typeof(decimal))
         {
-            var value = property.GetValue();
-            var type = property.Type;
-
-            if (type == typeof(decimal))
-            {
-                type = typeof(double);
-                value = Convert.ToDouble(value);
-            }
-
-            var nodeId = new NodeId(parentPath + propertyName, NamespaceIndex);
-            var browseName = GetBrowseName(propertyName, property, null);
-            var dataType = Opc.Ua.TypeInfo.Construct(type);
-            var referenceTypeId = GetReferenceTypeId(property);
-
-            // TODO: Add support for arrays (valueRank >= 0)
-            var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataType, -1, referenceTypeId);
-            variable.Value = value;
-            variable.StateChanged += (_, _, changes) =>
-            {
-                if (changes.HasFlag(NodeStateChangeMasks.Value))
-                {
-                    _source.UpdateProperty(property.Property, sourcePath, variable.Timestamp, variable.Value);
-                }
-            };
-
-            property.Property.SetPropertyData(OpcUaSubjectServerSource.OpcVariableKey, variable);
+            type = typeof(double);
+            value = Convert.ToDouble(value);
         }
+
+        var nodeId = new NodeId(parentPath + propertyName, NamespaceIndex);
+        var browseName = GetBrowseName(propertyName, property, null);
+        var dataType = Opc.Ua.TypeInfo.Construct(type);
+        var referenceTypeId = GetReferenceTypeId(property);
+
+        // TODO: Add support for arrays (valueRank >= 0)
+        var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataType, -1, referenceTypeId);
+        variable.Value = value;
+        variable.StateChanged += (_, _, changes) =>
+        {
+            if (changes.HasFlag(NodeStateChangeMasks.Value))
+            {
+                _source.UpdateProperty(property.Property, variable.Timestamp, variable.Value);
+            }
+        };
+
+        property.Property.SetPropertyData(OpcUaSubjectServerSource.OpcVariableKey, variable);
     }
 
     private void CreateChildObject(

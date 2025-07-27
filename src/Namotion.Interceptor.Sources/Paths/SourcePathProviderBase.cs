@@ -1,5 +1,4 @@
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Sources.Paths;
 
