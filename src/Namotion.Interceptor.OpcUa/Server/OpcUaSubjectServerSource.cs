@@ -10,7 +10,7 @@ using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource, IDisposable
+internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 {
     internal const string OpcVariableKey = "OpcVariable";
 
@@ -53,7 +53,8 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource, IDi
     {
         foreach (var change in changes)
         {
-            if (change.Property.GetPropertyData(OpcVariableKey) is BaseDataVariableState node)
+            if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) && 
+                data is BaseDataVariableState node)
             {
                 var actualValue = change.Property.GetValue();
                 if (actualValue is decimal)
