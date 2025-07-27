@@ -1,4 +1,7 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Collections;
+using System.Collections.Concurrent;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -7,6 +10,10 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public record RegisteredSubjectProperty
 {
+    private static readonly ConcurrentDictionary<Type, bool> IsSubjectReferenceCache = new();
+    private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
+    private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
+
     private HashSet<SubjectPropertyChild> _children = [];
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
@@ -49,17 +56,39 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets a value indicating whether this property references another subject.
     /// </summary>
-    public bool IsSubjectReference => Type.IsAssignableTo(typeof(IInterceptorSubject));
-
+    public bool IsSubjectReference => 
+        IsSubjectReferenceCache.GetOrAdd(Type, t => 
+            t.IsAssignableTo(typeof(IInterceptorSubject)));
+    
     /// <summary>
     /// Gets a value indicating whether this property references multiple subject with a collection.
     /// </summary>
-    public bool IsSubjectCollection => Type.IsAssignableTo(typeof(IEnumerable<IInterceptorSubject>));
+    public bool IsSubjectCollection =>
+        IsSubjectCollectionCache.GetOrAdd(Type, t =>
+        {
+            return
+                t.IsAssignableTo(typeof(IEnumerable)) &&
+                t.GetInterfaces().Any(i =>
+                    i.IsAssignableTo(typeof(IEnumerable)) &&
+                    i.GenericTypeArguments.FirstOrDefault()?.IsAssignableTo(typeof(IInterceptorSubject)) == true);
+        });
 
     /// <summary>
     /// Gets a value indicating whether this property references multiple subject with a dictionary.
     /// </summary>
-    public bool IsSubjectDictionary => Type.IsAssignableTo(typeof(IReadOnlyDictionary<string, IInterceptorSubject?>));
+    public bool IsSubjectDictionary =>
+        IsSubjectDictionaryCache.GetOrAdd(Type, t =>
+        {
+            return
+                t.IsAssignableTo(typeof(IEnumerable)) && 
+                t.GetInterfaces().Any(i => 
+                    i.IsAssignableTo(typeof(IEnumerable)) && 
+                    i.GenericTypeArguments.FirstOrDefault() is
+                    {
+                        Name: "KeyValuePair`2",
+                        Namespace: "System.Collections.Generic"
+                    } keyValueType && keyValueType.GenericTypeArguments[1].IsAssignableTo(typeof(IInterceptorSubject)));
+        });
 
     /// <summary>
     /// Gets the parent subject which contains the property.
