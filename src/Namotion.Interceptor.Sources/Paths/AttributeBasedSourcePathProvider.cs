@@ -21,7 +21,8 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
     public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
         return TryGetSourceNameAttribute(property) is not null && 
-            (property.Parent.Parents.Count == 0 || property.Parent.Parents.Any(p => TryGetSourcePathAttribute(p.Property) is not null));
+            (property.Parent.Parents.Count == 0 || 
+             property.Parent.Parents.Any(p => TryGetSourcePathAttribute(p.Property) is not null));
     }
     
     public override IEnumerable<(string path, object? index)> ParsePathSegments(string path)

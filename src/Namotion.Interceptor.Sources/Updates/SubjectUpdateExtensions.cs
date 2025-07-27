@@ -143,11 +143,11 @@ public static class SubjectUpdateExtensions
                     break;
                 }
 
-                if (registeredProperty.Type.IsAssignableTo(typeof(IDictionary)))
+                if (registeredProperty.IsSubjectDictionary)
                 {
                     // TODO: Handle dictionary
                 }
-                else
+                else if (registeredProperty.IsSubjectCollection)
                 {
                     var value = registeredProperty.GetValue();
                     if (value is not null)
@@ -212,6 +212,10 @@ public static class SubjectUpdateExtensions
                         var collection = subjectFactory.CreateSubjectCollection(registeredProperty, items);
                         SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () => registeredProperty.SetValue(collection));
                     }
+                }
+                else
+                {
+                    throw new InvalidOperationException("Collection update received for a property that is not a collection or dictionary.");
                 }
                 break;
         }
