@@ -49,7 +49,7 @@ namespace Namotion.Interceptor.SampleMachine
     [OpcUaTypeDefinition("ProcessValueType", "http://opcfoundation.org/UA/Machinery/ProcessValues/")]
     public partial class ProcessValueType
     {
-        [OpcUaVariable("AnalogSignal", "http://opcfoundation.org/UA/PADIM/")]
+        [OpcUaNode("AnalogSignal", "http://opcfoundation.org/UA/PADIM/")]
         public partial AnalogSignalVariable AnalogSignal { get; private set; }
 
         [OpcUaVariable("SignalTag", "http://opcfoundation.org/UA/PADIM/")]
@@ -188,7 +188,6 @@ namespace Namotion.Interceptor.SampleMachine
             app.UseOpenApi();
             app.UseSwaggerUi();
 
-            app.MapControllers();
             app.Run();
         }
 

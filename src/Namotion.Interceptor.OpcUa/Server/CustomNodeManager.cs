@@ -200,7 +200,7 @@ internal class CustomNodeManager : CustomNodeManager2
             // TODO: Add support for arrays (valueRank >= 0)
             var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataType, -1, referenceTypeId);
             variable.Value = value;
-            variable.StateChanged += (context, node, changes) =>
+            variable.StateChanged += (_, _, changes) =>
             {
                 if (changes.HasFlag(NodeStateChangeMasks.Value))
                 {
@@ -301,6 +301,7 @@ internal class CustomNodeManager : CustomNodeManager2
             return new QualifiedName(propertyName + (index is not null ? $"[{index}]" : string.Empty), NamespaceIndex);
         }
 
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         if (browseNameProvider.BrowseNamespace is not null)
         {
             return new QualifiedName(browseNameProvider.BrowseName, (ushort)SystemContext.NamespaceUris.GetIndex(browseNameProvider.BrowseNamespace));
