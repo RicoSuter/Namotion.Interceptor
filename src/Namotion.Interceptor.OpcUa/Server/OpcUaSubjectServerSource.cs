@@ -115,15 +115,15 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         }
     }
 
-    internal void UpdateProperty(PropertyReference property, string sourcePath, DateTimeOffset timestamp, object? value)
+    internal void UpdateProperty(PropertyReference property, DateTimeOffset timestamp, object? value)
     {
         // TODO: Implement actual correct conversion based on the property type
-
         var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
+        
         _dispatcher?.EnqueueSubjectUpdate(() =>
         {
-            _subject.UpdatePropertyValueFromSourcePath(
-                sourcePath, timestamp, convertedValue, SourcePathProvider, this);
+            SubjectMutationContext.ApplyChangesWithTimestamp(timestamp, 
+                () => property.SetValueFromSource(this, convertedValue));
         });
     }
 }

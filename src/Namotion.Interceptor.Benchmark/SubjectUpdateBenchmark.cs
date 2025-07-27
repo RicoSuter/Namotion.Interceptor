@@ -32,7 +32,7 @@ public class SubjectUpdateBenchmark
         ];
     }
 
-    // [Benchmark]
+    [Benchmark]
     public void CreateCompleteUpdate()
     {
         var subjectUpdate = SubjectUpdate
@@ -40,7 +40,7 @@ public class SubjectUpdateBenchmark
             .ConvertToJsonCamelCasePath();
     }
     
-    // [Benchmark]
+    [Benchmark]
     public void CreatePartialUpdate()
     {
         var partialSubjectUpdate = SubjectUpdate

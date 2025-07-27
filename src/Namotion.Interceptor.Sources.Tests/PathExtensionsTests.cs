@@ -83,8 +83,8 @@ public class PathExtensionsTests
             { "Children[2].FirstName", "NewChild3" }
         }, timestamp, sourcePathProvider, null);
         
-        person.UpdatePropertyValuesFromSourcePaths(["LastName"], timestamp, (_, _) => "NewLn", sourcePathProvider, null);
-
+        person.UpdatePropertyValuesFromSourcePaths(
+            ["LastName"], timestamp, (_, _) => "NewLn", sourcePathProvider, null);
         person.UpdatePropertyValueFromSourcePath(
             "Father.FirstName", timestamp, "NewFather", sourcePathProvider, null);
         
