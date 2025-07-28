@@ -26,8 +26,8 @@ public record struct PropertyReference
             }
 
             _metadata = 
-                TryGetPropertyMetadata(out var md1) ? md1 : // dynamic metadata (overrides)
                 Subject.Properties.TryGetValue(Name, out var md2) ? md2 : // static metadata
+                TryGetPropertyMetadata(out var md1) ? md1 : // dynamic metadata (overrides)
                 throw new InvalidOperationException("No metadata found.");
 
             return _metadata!.Value;
