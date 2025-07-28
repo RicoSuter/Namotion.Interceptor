@@ -1,6 +1,5 @@
 ﻿using System.Collections;
 using System.Collections.Concurrent;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -226,6 +225,7 @@ public record RegisteredSubjectProperty
 
     public static implicit operator PropertyReference(RegisteredSubjectProperty property)
     {
+        // TODO: Remove Property property and use this operator instead
         return property.Property;
     }
 

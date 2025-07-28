@@ -10,12 +10,10 @@ public static class RegisteredSubjectPropertyExtensions
     /// </summary>
     /// <param name="property">The property.</param>
     /// <param name="source">The source which changes the property.</param>
+    /// <param name="timestamp">The timestamp to set in the context.</param>
     /// <param name="value">The new value.</param>
-    public static void SetValueFromSource(this RegisteredSubjectProperty property, ISubjectSource source, object? value)
+    public static void SetValueFromSource(this RegisteredSubjectProperty property, ISubjectSource source, DateTimeOffset? timestamp, object? value)
     {
-        SubjectMutationContext.ApplyChangesWithSource(source, () =>
-        {
-            property.SetValue(value);
-        });
+        property.Property.SetValueFromSource(source, timestamp, value);
     }
 }

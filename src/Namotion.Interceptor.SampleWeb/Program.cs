@@ -12,8 +12,8 @@ namespace Namotion.Interceptor.SampleWeb
     [InterceptorSubject]
     public partial class Car
     {
-        [SourceName("mqtt", "name")]
-        [SourceName("opc", "Name")]
+        [SourcePath("mqtt", "name")]
+        [SourcePath("opc", "Name")]
         public partial string Name { get; set; }
 
         [SourcePath("mqtt", "tires")]
@@ -21,8 +21,8 @@ namespace Namotion.Interceptor.SampleWeb
         public partial Tire[] Tires { get; set; }
 
         [Derived]
-        [SourceName("mqtt", "averagePressure")]
-        [SourceName("opc", "AveragePressure")]
+        [SourcePath("mqtt", "averagePressure")]
+        [SourcePath("opc", "AveragePressure")]
         public decimal AveragePressure => Tires.Average(t => t.Pressure);
 
         public Car()
@@ -39,19 +39,19 @@ namespace Namotion.Interceptor.SampleWeb
     [InterceptorSubject]
     public partial class Tire //: BackgroundService
     {
-        [SourceName("mqtt", "pressure")]
-        [SourceName("opc", "Pressure")]
+        [SourcePath("mqtt", "pressure")]
+        [SourcePath("opc", "Pressure")]
         [Unit("bar")]
         public partial decimal Pressure { get; set; }
 
         [Unit("bar")]
-        [SourceName("mqtt", "minimum")]
+        [SourcePath("mqtt", "minimum")]
         [PropertyAttribute(nameof(Pressure), "Minimum")]
         public partial decimal Pressure_Minimum { get; set; }
 
         [Derived]
-        [SourceName("mqtt", "maximum")]
-        [SourceName("opc", "Maximum")]
+        [SourcePath("mqtt", "maximum")]
+        [SourcePath("opc", "Maximum")]
         [PropertyAttribute(nameof(Pressure), "Maximum")]
         public decimal Pressure_Maximum => 4 * Pressure;
 
@@ -84,7 +84,7 @@ namespace Namotion.Interceptor.SampleWeb
         {
             property.AddAttribute("Unit", typeof(string),
                 _ => _unit, null,
-                new SourceNameAttribute("mqtt", "unit"));
+                new SourcePathAttribute("mqtt", "unit"));
         }
     }
 

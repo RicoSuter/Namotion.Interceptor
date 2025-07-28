@@ -17,6 +17,7 @@ public static class SubjectMutationContext
     /// <param name="action">The action.</param>
     public static T ApplyChangesWithTimestamp<T>(DateTimeOffset? timestamp, Func<T> action)
     {
+        var previousTimestamp = _currentTimestamp;
         _currentTimestamp = timestamp;
         try
         {
@@ -24,7 +25,7 @@ public static class SubjectMutationContext
         }
         finally
         {
-            _currentTimestamp = null;
+            _currentTimestamp = previousTimestamp;
         }
     }
     
@@ -35,6 +36,7 @@ public static class SubjectMutationContext
     /// <param name="action">The action.</param>
     public static void ApplyChangesWithTimestamp(DateTimeOffset? timestamp, Action action)
     {
+        var previousTimestamp = _currentTimestamp;
         _currentTimestamp = timestamp;
         try
         {
@@ -42,7 +44,7 @@ public static class SubjectMutationContext
         }
         finally
         {
-            _currentTimestamp = null;
+            _currentTimestamp = previousTimestamp;
         }
     }
 
@@ -51,8 +53,9 @@ public static class SubjectMutationContext
     /// </summary>
     /// <param name="source">The source.</param>
     /// <param name="action">The action</param>
-    public static void ApplyChangesWithSource(object source, Action action)
+    public static void ApplyChangesWithSource(object? source, Action action)
     {
+        var previousSource = _currentSource;
         _currentSource = source;
         try
         {
@@ -60,7 +63,7 @@ public static class SubjectMutationContext
         }
         finally
         {
-            _currentSource = null;
+            _currentSource = previousSource;
         }
     }
 
@@ -98,9 +101,13 @@ public static class SubjectMutationContext
     /// </summary>
     /// <param name="property">The property.</param>
     /// <param name="source">The source.</param>
+    /// <param name="timestamp">The timestamp to set in the context.</param>
     /// <param name="valueFromSource">The value</param>
-    public static void SetValueFromSource(this PropertyReference property, object source, object? valueFromSource)
-    {
+    public static void SetValueFromSource(this PropertyReference property, object source, DateTimeOffset? timestamp, object? valueFromSource)
+    {        
+        var previousTimestamp = _currentTimestamp;
+        var previousSource = _currentSource;
+        _currentTimestamp = timestamp;
         _currentSource = source;
         try
         {
@@ -108,7 +115,8 @@ public static class SubjectMutationContext
         }
         finally
         {
-            _currentSource = null;
+            _currentTimestamp = previousTimestamp;
+            _currentSource = previousSource;
         }
     }
 }

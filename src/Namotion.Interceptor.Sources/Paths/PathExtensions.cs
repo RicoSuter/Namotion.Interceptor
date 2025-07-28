@@ -99,7 +99,7 @@ public static class PathExtensions
     {
         if (source is not null)
         {
-            property.SetValueFromSource(source, value);
+            property.SetValueFromSource(source, timestamp, value);
         }
         else
         {

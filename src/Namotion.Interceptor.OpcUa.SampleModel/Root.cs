@@ -6,10 +6,10 @@ namespace Namotion.Interceptor.OpcUa.SampleModel;
 [InterceptorSubject]
 public partial class Root
 {
-    [SourceName("opc", "Name")]
+    [SourcePath("opc", "Name")]
     public partial string Name { get; set; }
     
-    [SourceName("opc", "Number")]
+    [SourcePath("opc", "Number")]
     public partial decimal Number { get; set; }
     
     [SourcePath("opc", "Persons")]
