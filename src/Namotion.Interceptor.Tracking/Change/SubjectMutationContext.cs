@@ -98,9 +98,11 @@ public static class SubjectMutationContext
     /// </summary>
     /// <param name="property">The property.</param>
     /// <param name="source">The source.</param>
+    /// <param name="timestamp">The timestamp to set in the context.</param>
     /// <param name="valueFromSource">The value</param>
-    public static void SetValueFromSource(this PropertyReference property, object source, object? valueFromSource)
+    public static void SetValueFromSource(this PropertyReference property, object source, DateTimeOffset? timestamp, object? valueFromSource)
     {
+        _currentTimestamp = timestamp;
         _currentSource = source;
         try
         {
@@ -108,6 +110,7 @@ public static class SubjectMutationContext
         }
         finally
         {
+            _currentTimestamp = null;
             _currentSource = null;
         }
     }

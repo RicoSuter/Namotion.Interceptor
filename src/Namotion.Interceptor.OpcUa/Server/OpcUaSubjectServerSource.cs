@@ -122,8 +122,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         
         _dispatcher?.EnqueueSubjectUpdate(() =>
         {
-            SubjectMutationContext.ApplyChangesWithTimestamp(timestamp, 
-                () => property.SetValueFromSource(this, convertedValue));
+            property.SetValueFromSource(this, timestamp, convertedValue);
         });
     }
 }
