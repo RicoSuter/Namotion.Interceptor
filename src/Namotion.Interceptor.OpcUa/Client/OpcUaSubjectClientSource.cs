@@ -171,8 +171,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
             {
                 try
                 {
-                    SubjectMutationContext.ApplyChangesWithTimestamp(change.Timestamp,
-                        () => change.Property.SetValueFromSource(this, change.NewValue));
+                    change.Property.SetValueFromSource(this, change.Timestamp, change.NewValue);
                 }
                 catch (Exception e)
                 {
@@ -224,7 +223,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
                                 var newSubject = DefaultSubjectFactory.Instance.CreateSubject(property, null);
                                 newSubject.Context.AddFallbackContext(subject.Context);
                                 await LoadSubjectAsync(newSubject, nodeProperty, subscription, collectionPath, cancellationToken);
-                                property.SetValueFromSource(this, newSubject);
+                                property.SetValueFromSource(this, null, newSubject);
                             }
                         }
                     }
