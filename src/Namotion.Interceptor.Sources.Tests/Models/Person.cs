@@ -13,7 +13,7 @@ public partial class Person
     }
 
     [MaxLength(4)]
-    [SourceName("test", "FirstName")]
+    [SourcePath("test", "FirstName")]
     public partial string? FirstName { get; set; }
 
     public partial string? LastName { get; set; }

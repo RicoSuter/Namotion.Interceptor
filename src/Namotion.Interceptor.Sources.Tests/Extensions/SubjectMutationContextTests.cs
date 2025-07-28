@@ -31,7 +31,7 @@ public class SubjectMutationContextTests
    
         // Act
         person.FirstName = "A";
-        registeredProperty.SetValueFromSource(source, "B");
+        registeredProperty.SetValueFromSource(source, null, "B");
         person.FirstName = "C";
 
         // Assert

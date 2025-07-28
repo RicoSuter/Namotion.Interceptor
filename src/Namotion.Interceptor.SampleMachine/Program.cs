@@ -52,7 +52,7 @@ namespace Namotion.Interceptor.SampleMachine
         [OpcUaNode("AnalogSignal", "http://opcfoundation.org/UA/PADIM/")]
         public partial AnalogSignalVariable AnalogSignal { get; private set; }
 
-        [OpcUaVariable("SignalTag", "http://opcfoundation.org/UA/PADIM/")]
+        [OpcUaNode("SignalTag", "http://opcfoundation.org/UA/PADIM/")]
         public partial string? SignalTag { get; set; }
 
         public ProcessValueType()
@@ -65,13 +65,13 @@ namespace Namotion.Interceptor.SampleMachine
     [OpcUaTypeDefinition("AnalogSignalVariableType", "http://opcfoundation.org/UA/PADIM/")]
     public partial class AnalogSignalVariable
     {
-        [OpcUaVariable("ActualValue", "http://opcfoundation.org/UA/")]
+        [OpcUaNode("ActualValue", "http://opcfoundation.org/UA/")]
         public partial object? ActualValue { get; set; }
 
-        [OpcUaVariable("EURange", "http://opcfoundation.org/UA/")]
+        [OpcUaNode("EURange", "http://opcfoundation.org/UA/")]
         public partial object? EURange { get; set; }
 
-        [OpcUaVariable("EngineeringUnits", "http://opcfoundation.org/UA/")]
+        [OpcUaNode("EngineeringUnits", "http://opcfoundation.org/UA/")]
         public partial object? EngineeringUnits { get; set; }
 
         public AnalogSignalVariable()
@@ -100,10 +100,10 @@ namespace Namotion.Interceptor.SampleMachine
     [OpcUaTypeDefinition("MachineIdentificationType", "http://opcfoundation.org/UA/Machinery/")]
     public partial class Identification
     {
-        [OpcUaVariable("Manufacturer", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaNode("Manufacturer", "http://opcfoundation.org/UA/DI/")]
         public partial string? Manufacturer { get; set; }
 
-        [OpcUaVariable("SerialNumber", "http://opcfoundation.org/UA/DI/")]
+        [OpcUaNode("SerialNumber", "http://opcfoundation.org/UA/DI/")]
         public partial string? SerialNumber { get; set; }
 
         public Identification()

@@ -68,8 +68,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     context.Property.TryGetWriteTimestamp() 
                     ?? SubjectMutationContext.GetCurrentTimestamp());
 
-                // trigger change event
-                usedByProperty.SetPropertyValue(newValue, () => oldValue, delegate {});
+                // trigger change event (derived change has local process as source (null))
+                SubjectMutationContext.ApplyChangesWithSource(null, () =>
+                    usedByProperty.SetPropertyValue(newValue, () => oldValue, delegate {})
+                );
             }
         }
 
