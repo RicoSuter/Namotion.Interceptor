@@ -104,35 +104,21 @@ public record SubjectUpdate
                 continue;
             }
 
-            var propertyName = property.Name;
             if (registeredProperty.IsAttribute)
             {
                 // handle attribute changes
-                var attributeUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates);
-                attributeUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
-                attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(registeredProperty, attributeUpdate) : attributeUpdate;
-             
-                PropertyAttributeAttribute attribute;
-                var currentRegisteredProperty = registeredProperty;
-                do
-                {
-                    attribute = currentRegisteredProperty.AttributeMetadata;
-
-                    var childAttributeUpdate = attributeUpdate;
-                    attributeUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, attribute.PropertyName, knownSubjectUpdates);
-                    attributeUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
-                    attributeUpdate.Attributes[attribute.AttributeName] = childAttributeUpdate;
-
-                    currentRegisteredProperty = registeredSubject.Properties[attribute.PropertyName];
-                } while (currentRegisteredProperty.IsAttribute);
-
-                var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, attribute.PropertyName, knownSubjectUpdates);
-
-                subjectUpdate.Properties[attribute.PropertyName] = propertyUpdate;
+                var (_, rootPropertyUpdate, rootPropertyName) = GetOrCreateSubjectAttributeUpdate(
+                    registeredProperty.GetAttributedProperty(), 
+                    registeredProperty.AttributeMetadata.AttributeName, 
+                    registeredProperty, change, propertyFilter, transformPropertyUpdate,
+                    knownSubjectUpdates);
+                
+                subjectUpdate.Properties[rootPropertyName] = rootPropertyUpdate;
             }
             else
             {
                 // handle property changes
+                var propertyName = property.Name;
                 var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates);
                 propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
                 subjectUpdate.Properties[propertyName] = transformPropertyUpdate is not null ? transformPropertyUpdate(registeredProperty, propertyUpdate) : propertyUpdate;
@@ -179,6 +165,65 @@ public record SubjectUpdate
                 CreateParentSubjectUpdatePath(parentPropertyRegisteredSubject, knownSubjectUpdates);
             }
         }
+    }
+
+    private static (SubjectPropertyUpdate attributeUpdate, SubjectPropertyUpdate propertyUpdate, string propertyName) 
+        GetOrCreateSubjectAttributeUpdate(
+            RegisteredSubjectProperty property, 
+            string attributeName,
+            RegisteredSubjectProperty? changeProperty, 
+            SubjectPropertyChange? change, 
+            Func<RegisteredSubjectProperty, bool>? propertyFilter, 
+            Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate,
+            Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
+    {
+        if (property.IsAttribute)
+        {
+            var (parentAttributeUpdate, parentPropertyUpdate, parentPropertyName) = GetOrCreateSubjectAttributeUpdate(
+                property.GetAttributedProperty(), 
+                property.AttributeMetadata.AttributeName, 
+                null, null, propertyFilter, transformPropertyUpdate, 
+                knownSubjectUpdates);
+            
+            var attributeUpdate = OrCreateSubjectAttributeUpdate(parentAttributeUpdate, attributeName);
+            if (changeProperty is not null && change.HasValue)
+            {
+                attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(changeProperty, attributeUpdate) : attributeUpdate;
+                parentAttributeUpdate.Attributes![attributeName] = attributeUpdate;
+            }
+
+            return (attributeUpdate, parentPropertyUpdate, parentPropertyName);
+        }
+        else
+        {
+            var propertyUpdate = GetOrCreateSubjectPropertyUpdate(
+                property.Parent.Subject, property.Property.Name, knownSubjectUpdates);
+
+            var attributeUpdate = OrCreateSubjectAttributeUpdate(propertyUpdate, attributeName);
+            if (changeProperty is not null && change.HasValue)
+            {
+                attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(changeProperty, attributeUpdate) : attributeUpdate;
+                propertyUpdate.Attributes![attributeName] = attributeUpdate;
+            }
+
+            return (attributeUpdate, propertyUpdate, property.Property.Name);
+        }
+    }
+
+    private static SubjectPropertyUpdate OrCreateSubjectAttributeUpdate(
+        SubjectPropertyUpdate propertyUpdate, string attributeName)
+    {
+        propertyUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
+        if (propertyUpdate.Attributes.TryGetValue(attributeName, out var existingSubjectUpdate))
+        {
+            return existingSubjectUpdate;
+        }
+
+        var attributeUpdate = new SubjectPropertyUpdate();
+        propertyUpdate.Attributes[attributeName] = attributeUpdate;
+        return attributeUpdate;
     }
 
     private static SubjectPropertyUpdate GetOrCreateSubjectPropertyUpdate(
