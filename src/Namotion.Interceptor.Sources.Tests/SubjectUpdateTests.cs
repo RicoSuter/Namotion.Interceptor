@@ -113,12 +113,13 @@ public class SubjectUpdateTests
         var partialSubjectUpdate = SubjectUpdate
             .CreatePartialUpdateFromChanges(person, changes, property =>
             {
-                return property.Parent.Subject != child1; // ignore child1.FirstName
+                return property.Parent.Subject != child1; // exclude child1.FirstName
             }, (property, update) =>
             {
-
                 if (property.Parent.Subject == child3)
+                {
                     update.Value = "TransformedValue"; // transform child3.FirstName
+                }
 
                 return update;
             })
