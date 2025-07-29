@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -102,7 +103,9 @@ namespace Namotion.Interceptor.Mqtt
 
         public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
-            foreach (var (path, change) in changes.GetSourcePaths(_sourcePathProvider, _subject))
+            foreach (var (path, change) in changes
+                .GetSourcePaths(_sourcePathProvider, _subject)
+                .Where(c => !c.change.Property.GetRegisteredProperty().HasChildSubjects))
             {
                 await PublishPropertyValueAsync(path, change.NewValue, cancellationToken);
             }
@@ -117,7 +120,8 @@ namespace Namotion.Interceptor.Mqtt
                 await Task.Delay(1000);
                 foreach (var (path, property) in _subject
                     .TryGetRegisteredSubject()?
-                    .GetAllRegisteredPropertiesWithSourcePaths(_sourcePathProvider) ?? [])
+                    .GetAllRegisteredPropertiesWithSourcePaths(_sourcePathProvider)
+                    .Where(p => !p.property.HasChildSubjects) ?? [])
                 {
                     // TODO: Send only to new client
                     await PublishPropertyValueAsync(path, property.GetValue(), CancellationToken.None);
