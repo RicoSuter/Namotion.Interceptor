@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
@@ -36,7 +37,10 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         SourcePathProvider = sourcePathProvider;
     }
 
-    public IInterceptorSubject Subject => _subject;
+    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
+    {
+        return SourcePathProvider.IsPropertyIncluded(property);
+    }
 
     public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
     {
@@ -77,7 +81,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            using var stream = typeof(OpcUaSubjectServerSourceExtensions).Assembly
+            using var stream = typeof(OpcUaSubjectServerExtensions).Assembly
                 .GetManifestResourceStream("Namotion.Interceptor.OpcUa.MyOpcUaServer.Config.xml")
                 ?? throw new InvalidOperationException("Config.xml not found.");
 

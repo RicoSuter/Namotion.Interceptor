@@ -7,20 +7,6 @@ namespace Namotion.Interceptor.Sources.Paths;
 public static class PathExtensions
 {
     /// <summary>
-    /// Gets a list of all properties of the subject and child subjects with their source paths.
-    /// </summary>
-    /// <param name="subject">The subject.</param>
-    /// <param name="sourcePathProvider">The source path provider.</param>
-    /// <returns>The paths.</returns>
-    public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetAllRegisteredPropertiesWithSourcePaths(this RegisteredSubject subject, ISourcePathProvider sourcePathProvider)
-    {
-        return subject
-            .GetAllProperties()
-            .GetSourcePaths(sourcePathProvider, subject.Subject)
-            .ToArray() ?? [];
-    }
-
-    /// <summary>
     /// Sets the value of the property and marks the assignment as applied by the specified source (optional).
     /// </summary>
     /// <param name="subject">The subject.</param>

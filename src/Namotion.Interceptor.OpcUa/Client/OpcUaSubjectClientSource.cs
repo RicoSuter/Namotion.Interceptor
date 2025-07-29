@@ -12,7 +12,7 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDisposable
+internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 {
     private const string PathDelimiter = ".";
     private const string OpcVariableKey = "OpcVariable";
@@ -41,7 +41,10 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
         _rootName = rootName;
     }
 
-    public IInterceptorSubject Subject => _subject;
+    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
+    {
+        return _sourcePathProvider.IsPropertyIncluded(property);
+    }
 
     public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
     {
@@ -53,7 +56,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            await using var stream = typeof(OpcUaSubjectServerSourceExtensions).Assembly
+            await using var stream = typeof(OpcUaSubjectServerExtensions).Assembly
                 .GetManifestResourceStream("Namotion.Interceptor.OpcUa.MyOpcUaServer.Config.xml");
 
             var application = new ApplicationInstance
