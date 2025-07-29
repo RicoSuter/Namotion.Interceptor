@@ -1,0 +1,22 @@
+﻿{
+  Type: Person,
+  Properties: {
+    mother: {
+      Kind: Item,
+      Item: {
+        Type: Person,
+        Properties: {
+          firstName: {
+            Attributes: {
+              test: {
+                Kind: Value,
+                Value: 43,
+                Timestamp: {Scrubbed}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
