@@ -12,6 +12,7 @@ namespace Namotion.Interceptor.Sources;
 public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutationDispatcher
 {
     private readonly ISubjectSource _source;
+    private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
@@ -20,11 +21,13 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
     public SubjectSourceBackgroundService(
         ISubjectSource source,
+        IInterceptorSubjectContext context,
         ILogger logger,
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null)
     {
         _source = source;
+        _context = context;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
@@ -43,7 +46,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
             {
                 try
                 {
-                    var registry = _source.Subject.Context.GetService<ISubjectRegistry>();
+                    var registry = _context.GetService<ISubjectRegistry>();
                     registry.ExecuteSubjectUpdate(update);
                 }
                 catch (Exception e)
@@ -86,22 +89,10 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 }
                 
                 // listen for changes by ignoring changes from the source and buffering them into a single update
-                await foreach (var changes in _source
-                    .Subject
-                    .Context 
+                await foreach (var changes in _context 
                     .GetPropertyChangedObservable()
-                    .Where(change =>
-                    {
-                        var registeredProperty = change.Property.GetRegisteredProperty();
-                        
-                        // TODO(perf): Find better way or a way to subscribe only to changes of the subject and its children
-
-                        var isIncluded = registeredProperty
-                            .GetPropertiesInPath(_source.Subject)
-                            .Any(p => p.property == registeredProperty);
-                        
-                        return isIncluded && !change.IsChangingFromSource(_source);
-                    })
+                    .Where(change => !change.IsChangingFromSource(_source) 
+                                     && _source.IsIncluded(change.Property.GetRegisteredProperty()))
                     .BufferChanges(_bufferTime)
                     .Where(changes => changes.Any())
                     .ToAsyncEnumerable()

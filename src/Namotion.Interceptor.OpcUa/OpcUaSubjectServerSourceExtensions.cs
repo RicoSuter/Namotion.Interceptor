@@ -52,8 +52,10 @@ public static class OpcUaSubjectServerSourceExtensions
             .AddSingleton<IHostedService>(sp =>
             {
                 // TODO: Register only once and inject all sources?
+                var subject = subjectSelector(sp);
                 return new SubjectSourceBackgroundService(
                     sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key),
+                    subject.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>());
             });
     }
@@ -94,8 +96,10 @@ public static class OpcUaSubjectServerSourceExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServerSource>(key))
             .AddSingleton<IHostedService>(sp =>
             {
+                var subject = subjectSelector(sp);
                 return new SubjectSourceBackgroundService(
                     sp.GetRequiredKeyedService<OpcUaSubjectServerSource>(key),
+                    subject.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>());
             });
     }

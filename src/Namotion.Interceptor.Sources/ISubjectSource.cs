@@ -1,4 +1,5 @@
 ﻿using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources;
@@ -9,9 +10,11 @@ namespace Namotion.Interceptor.Sources;
 public interface ISubjectSource
 {
     /// <summary>
-    /// Gets the subject this source is associated with.
+    /// Checks whether the specified property is included in the source.
     /// </summary>
-    IInterceptorSubject Subject { get; }
+    /// <param name="registeredProperty">The property.</param>
+    /// <returns>The result.</returns>
+    bool IsIncluded(RegisteredSubjectProperty registeredProperty);
     
     /// <summary>
     /// Initializes the source and starts listening for changes.
