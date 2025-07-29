@@ -81,7 +81,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            using var stream = typeof(OpcUaSubjectServerSourceExtensions).Assembly
+            using var stream = typeof(OpcUaSubjectServerExtensions).Assembly
                 .GetManifestResourceStream("Namotion.Interceptor.OpcUa.MyOpcUaServer.Config.xml")
                 ?? throw new InvalidOperationException("Config.xml not found.");
 

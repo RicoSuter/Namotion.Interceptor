@@ -23,9 +23,10 @@ public static class MqttSubjectServerSourceExtensions
     {
         var key = Guid.NewGuid().ToString();
         return serviceCollection
+            .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
             .AddKeyedSingleton(key, (sp, _) =>
             {
-                var subject = subjectSelector(sp);
+                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 var attributeBasedSourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, "/", pathPrefix);
                 return new MqttSubjectServerSource(
                     subject, attributeBasedSourcePathProvider, sp.GetRequiredService<ILogger<MqttSubjectServerSource>>());
@@ -33,7 +34,7 @@ public static class MqttSubjectServerSourceExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectServerSource>(key))
             .AddSingleton<IHostedService>(sp =>
             {
-                var subject = subjectSelector(sp);
+                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 return new SubjectSourceBackgroundService(
                     sp.GetRequiredKeyedService<MqttSubjectServerSource>(key),
                     subject.Context,

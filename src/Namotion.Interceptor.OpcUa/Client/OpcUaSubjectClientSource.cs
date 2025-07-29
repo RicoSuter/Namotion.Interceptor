@@ -56,7 +56,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            await using var stream = typeof(OpcUaSubjectServerSourceExtensions).Assembly
+            await using var stream = typeof(OpcUaSubjectServerExtensions).Assembly
                 .GetManifestResourceStream("Namotion.Interceptor.OpcUa.MyOpcUaServer.Config.xml");
 
             var application = new ApplicationInstance

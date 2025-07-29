@@ -9,7 +9,7 @@ using Namotion.Interceptor.Sources.Paths;
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class OpcUaSubjectServerSourceExtensions
+public static class OpcUaSubjectServerExtensions
 {
     public static IServiceCollection AddOpcUaSubjectClient<TSubject>(
         this IServiceCollection serviceCollection,
@@ -37,9 +37,10 @@ public static class OpcUaSubjectServerSourceExtensions
     {
         var key = Guid.NewGuid().ToString();
         return serviceCollection
+            .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
             .AddKeyedSingleton(key, (sp, _) =>
             {
-                var subject = subjectSelector(sp);
+                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix);
                 return new OpcUaSubjectClientSource(
                     subject,
@@ -51,8 +52,7 @@ public static class OpcUaSubjectServerSourceExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key))
             .AddSingleton<IHostedService>(sp =>
             {
-                // TODO: Register only once and inject all sources?
-                var subject = subjectSelector(sp);
+                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 return new SubjectSourceBackgroundService(
                     sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key),
                     subject.Context,
@@ -83,9 +83,10 @@ public static class OpcUaSubjectServerSourceExtensions
     {
         var key = Guid.NewGuid().ToString();
         return serviceCollection
+            .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
             .AddKeyedSingleton(key, (sp, _) =>
             {
-                var subject = subjectSelector(sp);
+                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix);
                 return new OpcUaSubjectServerSource(
                     subject,
@@ -96,7 +97,7 @@ public static class OpcUaSubjectServerSourceExtensions
             .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServerSource>(key))
             .AddSingleton<IHostedService>(sp =>
             {
-                var subject = subjectSelector(sp);
+                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 return new SubjectSourceBackgroundService(
                     sp.GetRequiredKeyedService<OpcUaSubjectServerSource>(key),
                     subject.Context,
