@@ -205,4 +205,41 @@ public class SubjectUpdateTests
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
     }
+
+    [Fact]
+    public async Task WhenGeneratingPartialSubjectWithAttribute_ThenResultIsCorrect()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var father = new Person { FirstName = "Father" };
+        var mother = new Person { FirstName = "Mother" };
+        
+        var person = new Person(context)
+        {
+            FirstName = "Child",
+            Mother = mother,
+            Father = father,
+            Children = []
+        };
+        
+        var attribute = mother.TryGetRegisteredSubject()!
+            .TryGetProperty("FirstName")!
+            .AddAttribute("Test", typeof(int), _ => 42, null);
+
+        var changes = new[]
+        {
+            new SubjectPropertyChange(attribute.Property, null, DateTimeOffset.Now, 42, 43)
+        };
+
+        // Act
+        var partialSubjectUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(person, changes)
+            .ConvertToJsonCamelCasePath();
+
+        // Assert
+        await Verify(partialSubjectUpdate).DisableDateCounting();
+    }
 }

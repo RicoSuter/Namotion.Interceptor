@@ -108,7 +108,7 @@ public record SubjectUpdate
             if (registeredProperty.IsAttribute)
             {
                 // handle attribute changes
-                var attributeUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates);
+                var attributeUpdate = new SubjectPropertyUpdate();
                 attributeUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
                 attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(registeredProperty, attributeUpdate) : attributeUpdate;
              
