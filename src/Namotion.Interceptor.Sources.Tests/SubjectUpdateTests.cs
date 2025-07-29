@@ -234,9 +234,10 @@ public class SubjectUpdateTests
 
         var changes = new[]
         {
-            new SubjectPropertyChange(attribute2.Property, null, DateTimeOffset.Now, 20, 22),
+            new SubjectPropertyChange(attribute2.Property, null, DateTimeOffset.Now, 20, 21),
             new SubjectPropertyChange(attribute1.Property, null, DateTimeOffset.Now, 10, 11),
-            new SubjectPropertyChange(attribute1.Property, null, DateTimeOffset.Now, 11, 12)
+            new SubjectPropertyChange(attribute1.Property, null, DateTimeOffset.Now, 11, 12),
+            new SubjectPropertyChange(attribute2.Property, null, DateTimeOffset.Now, 20, 22),
         };
 
         // Act
