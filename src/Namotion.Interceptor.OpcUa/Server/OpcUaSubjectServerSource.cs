@@ -37,8 +37,6 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         SourcePathProvider = sourcePathProvider;
     }
 
-    public IInterceptorSubject Subject => _subject;
-    
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
         return SourcePathProvider.IsPropertyIncluded(property);

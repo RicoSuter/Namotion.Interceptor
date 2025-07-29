@@ -12,7 +12,7 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDisposable
+internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 {
     private const string PathDelimiter = ".";
     private const string OpcVariableKey = "OpcVariable";
@@ -41,8 +41,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IDi
         _rootName = rootName;
     }
 
-    public IInterceptorSubject Subject => _subject;
-    
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
         return _sourcePathProvider.IsPropertyIncluded(property);

@@ -35,8 +35,6 @@ namespace Namotion.Interceptor.Mqtt
 
         public int? NumberOfClients => _numberOfClients;
 
-        public IInterceptorSubject Subject => _subject;
-
         public MqttSubjectServerSource(IInterceptorSubject subject,
             ISourcePathProvider sourcePathProvider,
             ILogger<MqttSubjectServerSource> logger)
