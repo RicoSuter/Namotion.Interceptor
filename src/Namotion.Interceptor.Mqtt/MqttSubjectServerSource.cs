@@ -86,9 +86,9 @@ namespace Namotion.Interceptor.Mqtt
             }
         }
 
-        public bool IsIncluded(RegisteredSubjectProperty registeredProperty)
+        public bool IsPropertyIncluded(RegisteredSubjectProperty property)
         {
-            return _sourcePathProvider.IsPropertyIncluded(registeredProperty);
+            return _sourcePathProvider.IsPropertyIncluded(property);
         }
 
         public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)

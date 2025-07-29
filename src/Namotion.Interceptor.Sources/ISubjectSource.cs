@@ -12,9 +12,9 @@ public interface ISubjectSource
     /// <summary>
     /// Checks whether the specified property is included in the source.
     /// </summary>
-    /// <param name="registeredProperty">The property.</param>
+    /// <param name="property">The property.</param>
     /// <returns>The result.</returns>
-    bool IsIncluded(RegisteredSubjectProperty registeredProperty);
+    bool IsPropertyIncluded(RegisteredSubjectProperty property);
     
     /// <summary>
     /// Initializes the source and starts listening for changes.

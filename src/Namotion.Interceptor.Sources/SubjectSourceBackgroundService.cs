@@ -92,7 +92,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 await foreach (var changes in _context 
                     .GetPropertyChangedObservable()
                     .Where(change => !change.IsChangingFromSource(_source) 
-                                     && _source.IsIncluded(change.Property.GetRegisteredProperty()))
+                        && _source.IsPropertyIncluded(change.Property.GetRegisteredProperty()))
                     .BufferChanges(_bufferTime)
                     .Where(changes => changes.Any())
                     .ToAsyncEnumerable()
