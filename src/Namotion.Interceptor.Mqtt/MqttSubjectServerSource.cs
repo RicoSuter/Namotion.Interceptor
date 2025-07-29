@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -9,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Server;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
@@ -33,8 +35,6 @@ namespace Namotion.Interceptor.Mqtt
         public bool IsListening { get; private set; }
 
         public int? NumberOfClients => _numberOfClients;
-
-        public IInterceptorSubject Subject => _subject;
 
         public MqttSubjectServerSource(IInterceptorSubject subject,
             ISourcePathProvider sourcePathProvider,
@@ -85,6 +85,11 @@ namespace Namotion.Interceptor.Mqtt
             }
         }
 
+        public bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        {
+            return _sourcePathProvider.IsPropertyIncluded(property);
+        }
+
         public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
         {
             _dispatcher = dispatcher;
@@ -98,7 +103,9 @@ namespace Namotion.Interceptor.Mqtt
 
         public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
-            foreach (var (path, change) in changes.GetSourcePaths(_sourcePathProvider, _subject))
+            foreach (var (path, change) in changes
+                .Where(c => !c.Property.GetRegisteredProperty().HasChildSubjects)
+                .GetSourcePaths(_sourcePathProvider, _subject))
             {
                 await PublishPropertyValueAsync(path, change.NewValue, cancellationToken);
             }
@@ -113,7 +120,9 @@ namespace Namotion.Interceptor.Mqtt
                 await Task.Delay(1000);
                 foreach (var (path, property) in _subject
                     .TryGetRegisteredSubject()?
-                    .GetAllRegisteredPropertiesWithSourcePaths(_sourcePathProvider) ?? [])
+                    .GetAllProperties()
+                    .Where(p => !p.HasChildSubjects)
+                    .GetSourcePaths(_sourcePathProvider, _subject) ?? [])
                 {
                     // TODO: Send only to new client
                     await PublishPropertyValueAsync(path, property.GetValue(), CancellationToken.None);

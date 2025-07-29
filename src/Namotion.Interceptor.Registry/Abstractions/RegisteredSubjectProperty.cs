@@ -51,6 +51,13 @@ public record RegisteredSubjectProperty
     /// <exception cref="InvalidOperationException">Thrown when this property is not an attribute.</exception>
     public PropertyAttributeAttribute AttributeMetadata => _attributeMetadata 
         ?? throw new InvalidOperationException("The property is not an attribute.");
+    
+    /// <summary>
+    /// Checks whether this property has child subjects, which can be either
+    /// a subject reference, a collection of subjects, or a dictionary of subjects.
+    /// </summary>
+    public bool HasChildSubjects => 
+        IsSubjectReference || IsSubjectCollection || IsSubjectDictionary;
 
     /// <summary>
     /// Gets a value indicating whether this property references another subject.
