@@ -111,8 +111,7 @@ public record SubjectUpdate
                     registeredProperty.GetAttributedProperty(), 
                     registeredProperty.AttributeMetadata.AttributeName, 
                     registeredProperty, change, propertyFilter, transformPropertyUpdate,
-                    knownSubjectUpdates,
-                    apply: true);
+                    knownSubjectUpdates);
                 
                 subjectUpdate.Properties[rootPropertyName] = rootPropertyUpdate;
             }
@@ -172,30 +171,28 @@ public record SubjectUpdate
         GetOrCreateSubjectAttributeUpdate(
             RegisteredSubjectProperty property, 
             string attributeName,
-            RegisteredSubjectProperty attributeProperty, 
+            RegisteredSubjectProperty? changeProperty, 
             SubjectPropertyChange change, 
             Func<RegisteredSubjectProperty, bool>? propertyFilter, 
             Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate,
-            Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-            bool apply)
+            Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
         if (property.IsAttribute)
         {
-            var parentAttribute = GetOrCreateSubjectAttributeUpdate(
+            var (parentAttributeUpdate, parentPropertyUpdate, parentPropertyName) = GetOrCreateSubjectAttributeUpdate(
                 property.GetAttributedProperty(), 
                 property.AttributeMetadata.AttributeName, 
-                attributeProperty, change, propertyFilter, transformPropertyUpdate, 
-                knownSubjectUpdates, 
-                apply: false);
+                null, change, propertyFilter, transformPropertyUpdate, 
+                knownSubjectUpdates);
             
-            var attributeUpdate = OrCreateSubjectAttributeUpdate(parentAttribute.Item1, attributeName);
-            if (apply)
+            var attributeUpdate = OrCreateSubjectAttributeUpdate(parentAttributeUpdate, attributeName);
+            if (changeProperty is not null)
             {
-                attributeUpdate.ApplyValue(attributeProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
-                attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(attributeProperty, attributeUpdate) : attributeUpdate;
-                parentAttribute.Item1.Attributes![attributeName] = attributeUpdate;
+                attributeUpdate.ApplyValue(changeProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(changeProperty, attributeUpdate) : attributeUpdate;
+                parentAttributeUpdate.Attributes![attributeName] = attributeUpdate;
             }
-            return (attributeUpdate, parentAttribute.Item2, parentAttribute.Item3);
+            return (attributeUpdate, parentPropertyUpdate, parentPropertyName);
         }
         else
         {
@@ -203,10 +200,10 @@ public record SubjectUpdate
                 property.Parent.Subject, property.Property.Name, knownSubjectUpdates);
 
             var attributeUpdate = OrCreateSubjectAttributeUpdate(propertyUpdate, attributeName);
-            if (apply)
+            if (changeProperty is not null)
             {
-                attributeUpdate.ApplyValue(attributeProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
-                attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(attributeProperty, attributeUpdate) : attributeUpdate;
+                attributeUpdate.ApplyValue(changeProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(changeProperty, attributeUpdate) : attributeUpdate;
                 propertyUpdate.Attributes![attributeName] = attributeUpdate;
             }
             return (attributeUpdate, propertyUpdate, property.Property.Name);
