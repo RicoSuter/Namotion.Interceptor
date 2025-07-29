@@ -104,35 +104,22 @@ public record SubjectUpdate
                 continue;
             }
 
-            var propertyName = property.Name;
             if (registeredProperty.IsAttribute)
             {
                 // handle attribute changes
-                var attributeUpdate = new SubjectPropertyUpdate();
-                attributeUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
-                attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(registeredProperty, attributeUpdate) : attributeUpdate;
-             
-                PropertyAttributeAttribute attribute;
-                var currentRegisteredProperty = registeredProperty;
-                do
-                {
-                    attribute = currentRegisteredProperty.AttributeMetadata;
-
-                    var childAttributeUpdate = attributeUpdate;
-                    attributeUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, attribute.PropertyName, knownSubjectUpdates);
-                    attributeUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
-                    attributeUpdate.Attributes[attribute.AttributeName] = childAttributeUpdate;
-
-                    currentRegisteredProperty = registeredSubject.Properties[attribute.PropertyName];
-                } while (currentRegisteredProperty.IsAttribute);
-
-                var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, attribute.PropertyName, knownSubjectUpdates);
-
-                subjectUpdate.Properties[attribute.PropertyName] = propertyUpdate;
+                var (_, rootPropertyUpdate, rootPropertyName) = GetOrCreateSubjectAttributeUpdate(
+                    registeredProperty.GetAttributedProperty(), 
+                    registeredProperty.AttributeMetadata.AttributeName, 
+                    registeredProperty, change, propertyFilter, transformPropertyUpdate,
+                    knownSubjectUpdates,
+                    apply: true);
+                
+                subjectUpdate.Properties[rootPropertyName] = rootPropertyUpdate;
             }
             else
             {
                 // handle property changes
+                var propertyName = property.Name;
                 var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates);
                 propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
                 subjectUpdate.Properties[propertyName] = transformPropertyUpdate is not null ? transformPropertyUpdate(registeredProperty, propertyUpdate) : propertyUpdate;
@@ -179,6 +166,65 @@ public record SubjectUpdate
                 CreateParentSubjectUpdatePath(parentPropertyRegisteredSubject, knownSubjectUpdates);
             }
         }
+    }
+
+    private static (SubjectPropertyUpdate attributeUpdate, SubjectPropertyUpdate propertyUpdate, string propertyName) 
+        GetOrCreateSubjectAttributeUpdate(
+            RegisteredSubjectProperty property, 
+            string attributeName,
+            RegisteredSubjectProperty attributeProperty, 
+            SubjectPropertyChange change, 
+            Func<RegisteredSubjectProperty, bool>? propertyFilter, 
+            Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate,
+            Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
+            bool apply)
+    {
+        if (property.IsAttribute)
+        {
+            var parentAttribute = GetOrCreateSubjectAttributeUpdate(
+                property.GetAttributedProperty(), 
+                property.AttributeMetadata.AttributeName, 
+                attributeProperty, change, propertyFilter, transformPropertyUpdate, 
+                knownSubjectUpdates, 
+                apply: false);
+            
+            var attributeUpdate = OrCreateSubjectAttributeUpdate(parentAttribute.Item1, attributeName);
+            if (apply)
+            {
+                attributeUpdate.ApplyValue(attributeProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(attributeProperty, attributeUpdate) : attributeUpdate;
+                parentAttribute.Item1.Attributes![attributeName] = attributeUpdate;
+            }
+            return (attributeUpdate, parentAttribute.Item2, parentAttribute.Item3);
+        }
+        else
+        {
+            var propertyUpdate = GetOrCreateSubjectPropertyUpdate(
+                property.Parent.Subject, property.Property.Name, knownSubjectUpdates);
+
+            var attributeUpdate = OrCreateSubjectAttributeUpdate(propertyUpdate, attributeName);
+            if (apply)
+            {
+                attributeUpdate.ApplyValue(attributeProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(attributeProperty, attributeUpdate) : attributeUpdate;
+                propertyUpdate.Attributes![attributeName] = attributeUpdate;
+            }
+            return (attributeUpdate, propertyUpdate, property.Property.Name);
+        }
+    }
+
+    private static SubjectPropertyUpdate OrCreateSubjectAttributeUpdate(
+        SubjectPropertyUpdate propertyUpdate, string attributeName)
+    {
+        propertyUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
+        if (propertyUpdate.Attributes.TryGetValue(attributeName, out var existingSubjectUpdate))
+        {
+            return existingSubjectUpdate;
+        }
+
+        var attributeUpdate = new SubjectPropertyUpdate();
+        propertyUpdate.Attributes[attributeName] = attributeUpdate;
+        return attributeUpdate;
     }
 
     private static SubjectPropertyUpdate GetOrCreateSubjectPropertyUpdate(

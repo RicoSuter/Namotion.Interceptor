@@ -225,13 +225,18 @@ public class SubjectUpdateTests
             Children = []
         };
         
-        var attribute = mother.TryGetRegisteredSubject()!
+        var attribute1 = mother.TryGetRegisteredSubject()!
             .TryGetProperty("FirstName")!
-            .AddAttribute("Test", typeof(int), _ => 42, null);
+            .AddAttribute("Test1", typeof(int), _ => 42, null);
+
+        var attribute2 = attribute1
+            .AddAttribute("Test2", typeof(int), _ => 42, null);
 
         var changes = new[]
         {
-            new SubjectPropertyChange(attribute.Property, null, DateTimeOffset.Now, 42, 43)
+            new SubjectPropertyChange(attribute2.Property, null, DateTimeOffset.Now, 20, 22),
+            new SubjectPropertyChange(attribute1.Property, null, DateTimeOffset.Now, 10, 11),
+            new SubjectPropertyChange(attribute1.Property, null, DateTimeOffset.Now, 11, 12)
         };
 
         // Act
