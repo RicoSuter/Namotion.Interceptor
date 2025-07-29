@@ -192,6 +192,7 @@ public record SubjectUpdate
                 attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(changeProperty, attributeUpdate) : attributeUpdate;
                 parentAttributeUpdate.Attributes![attributeName] = attributeUpdate;
             }
+
             return (attributeUpdate, parentPropertyUpdate, parentPropertyName);
         }
         else
@@ -206,6 +207,7 @@ public record SubjectUpdate
                 attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(changeProperty, attributeUpdate) : attributeUpdate;
                 propertyUpdate.Attributes![attributeName] = attributeUpdate;
             }
+
             return (attributeUpdate, propertyUpdate, property.Property.Name);
         }
     }
