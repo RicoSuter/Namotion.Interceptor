@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
@@ -37,6 +38,11 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
     }
 
     public IInterceptorSubject Subject => _subject;
+    
+    public bool IsIncluded(RegisteredSubjectProperty registeredProperty)
+    {
+        return SourcePathProvider.IsPropertyIncluded(registeredProperty);
+    }
 
     public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
     {

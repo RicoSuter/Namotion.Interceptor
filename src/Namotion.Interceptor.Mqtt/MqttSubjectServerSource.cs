@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Server;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
@@ -83,6 +84,11 @@ namespace Namotion.Interceptor.Mqtt
                     await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
                 }
             }
+        }
+
+        public bool IsIncluded(RegisteredSubjectProperty registeredProperty)
+        {
+            return _sourcePathProvider.IsPropertyIncluded(registeredProperty);
         }
 
         public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)

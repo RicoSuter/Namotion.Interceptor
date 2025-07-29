@@ -28,10 +28,6 @@ public class SubjectSourceBackgroundServiceTests
 
         var updates = new List<string>();
         subjectSourceMock
-            .Setup(s => s.Subject)
-            .Returns(subjectMock.Object);
-
-        subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<ISubjectMutationDispatcher>(), It.IsAny<CancellationToken>()))
             .Callback((ISubjectMutationDispatcher dispatcher, CancellationToken _) =>
             {
@@ -51,7 +47,7 @@ public class SubjectSourceBackgroundServiceTests
         var cancellationTokenSource = new CancellationTokenSource();
 
         // Act
-        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, NullLogger.Instance);
+        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, subjectContextMock.Object, NullLogger.Instance);
 
         await service.StartAsync(cancellationTokenSource.Token);
         await Task.Delay(1000, cancellationTokenSource.Token);
@@ -83,8 +79,8 @@ public class SubjectSourceBackgroundServiceTests
         var subjectSourceMock = new Mock<ISubjectSource>();
 
         subjectSourceMock
-            .Setup(s => s.Subject)
-            .Returns(subject);
+            .Setup(s => s.IsIncluded(It.IsAny<RegisteredSubjectProperty>()))
+            .Returns(true);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<ISubjectMutationDispatcher>(), It.IsAny<CancellationToken>()))
@@ -104,7 +100,7 @@ public class SubjectSourceBackgroundServiceTests
         var cancellationTokenSource = new CancellationTokenSource();
 
         // Act
-        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, NullLogger.Instance);
+        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance);
 
         await service.StartAsync(cancellationTokenSource.Token);
         propertyChangedObservable.WriteProperty(
