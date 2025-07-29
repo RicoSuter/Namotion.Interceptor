@@ -79,7 +79,7 @@ public class SubjectSourceBackgroundServiceTests
         var subjectSourceMock = new Mock<ISubjectSource>();
 
         subjectSourceMock
-            .Setup(s => s.IsIncluded(It.IsAny<RegisteredSubjectProperty>()))
+            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
             .Returns(true);
 
         subjectSourceMock

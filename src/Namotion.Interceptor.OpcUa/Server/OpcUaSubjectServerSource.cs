@@ -39,9 +39,9 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     public IInterceptorSubject Subject => _subject;
     
-    public bool IsIncluded(RegisteredSubjectProperty registeredProperty)
+    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return SourcePathProvider.IsPropertyIncluded(registeredProperty);
+        return SourcePathProvider.IsPropertyIncluded(property);
     }
 
     public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
