@@ -14,6 +14,6 @@ public static class RegisteredSubjectPropertyExtensions
     /// <param name="value">The new value.</param>
     public static void SetValueFromSource(this RegisteredSubjectProperty property, ISubjectSource source, DateTimeOffset? timestamp, object? value)
     {
-        property.Property.SetValueFromSource(source, timestamp, value);
+        property.Reference.SetValueFromSource(source, timestamp, value);
     }
 }

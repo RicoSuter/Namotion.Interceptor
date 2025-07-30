@@ -300,7 +300,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             
             _monitoredItems[monitoredItem.ClientHandle] = property;
             
-            property.Property.SetPropertyData(OpcVariableKey, nodeId);
+            property.Reference.SetPropertyData(OpcVariableKey, nodeId);
             subscription.AddItem(monitoredItem);
 
             _logger.LogInformation("Subscribed to '{Path}'", nodeId);

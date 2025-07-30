@@ -75,7 +75,7 @@ public class AttributeTests
 
         context
             .GetPropertyChangedObservable()
-            .Where(c => c.Property == dynamicDerivedProperty.Property)
+            .Where(c => c.Property == dynamicDerivedProperty)
             .Subscribe(a => changes.Add(a));
 
         person.FirstName = "Rico";
@@ -109,7 +109,7 @@ public class AttributeTests
 
         context
             .GetPropertyChangedObservable()
-            .Where(c => c.Property == dynamicDerivedAttribute.Property)
+            .Where(c => c.Property == dynamicDerivedAttribute)
             .Subscribe(a => changes.Add(a));
 
         person.FirstName = "Rico";
@@ -144,7 +144,7 @@ public class AttributeTests
 
         context
             .GetPropertyChangedObservable()
-            .Where(c => c.Property == dynamicProperty.Property)
+            .Where(c => c.Property == dynamicProperty)
             .Subscribe(a => changes.Add(a));
 
         dynamicProperty.SetValue("Abc");
@@ -179,7 +179,7 @@ public class AttributeTests
 
         context
             .GetPropertyChangedObservable()
-            .Where(c => c.Property == dynamicAttribute.Property)
+            .Where(c => c.Property == dynamicAttribute)
             .Subscribe(a => changes.Add(a));
 
         dynamicAttribute.SetValue("Abc");
