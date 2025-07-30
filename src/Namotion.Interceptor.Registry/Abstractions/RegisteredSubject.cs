@@ -81,7 +81,7 @@ public record RegisteredSubject
         Subject = subject;
         _properties = properties
             .ToDictionary(
-                p => p.Property.Name,
+                p => p.Name,
                 p =>
                 {
                     p.Parent = this;
@@ -133,7 +133,7 @@ public record RegisteredSubject
         var property = AddProperty(propertyReference, type, attributes);
         
         // trigger change event
-        property.Property.SetPropertyValue(getValue?.Invoke(Subject) ?? null, 
+        property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null, 
             () => getValue?.Invoke(Subject), delegate {});
         
         return property;

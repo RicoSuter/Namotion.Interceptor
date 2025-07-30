@@ -111,7 +111,7 @@ public static class SubjectMutationContext
         _currentSource = source;
         try
         {
-            property.SetValue(valueFromSource);
+            property.Metadata.SetValue?.Invoke(property.Subject, valueFromSource);
         }
         finally
         {

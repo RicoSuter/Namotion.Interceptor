@@ -214,11 +214,11 @@ public class SubjectRegistryTests
             WriteIndented = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         };
+
+        var property = person.Mother.Mother
+            .TryGetRegisteredProperty("FirstName")!;
         
-        var path = person.Mother.Mother
-            .TryGetRegisteredProperty("FirstName")?
-            .Property
-            .GetJsonPath(jsonSerializerOptions) ?? string.Empty;
+        var path = property.Reference.GetJsonPath(jsonSerializerOptions);
         
         Assert.Equal("mother.mother.firstName", path);
         await Verify(person.ToJsonObject(jsonSerializerOptions).ToJsonString(jsonSerializerOptions));

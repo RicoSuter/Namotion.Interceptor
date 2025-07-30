@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Collections.Concurrent;
+using System.Reactive.Subjects;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -18,7 +19,7 @@ public record RegisteredSubjectProperty
 
     public RegisteredSubjectProperty(PropertyReference property, IReadOnlyCollection<Attribute> reflectionAttributes)
     {
-        Property = property;
+        Reference = property;
         ReflectionAttributes = reflectionAttributes;
         _attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
     }
@@ -28,7 +29,11 @@ public record RegisteredSubjectProperty
     /// </summary>
     public required Type Type { get; init; }
     
-    public PropertyReference Property { get; }
+    public PropertyReference Reference { get; }
+
+    public string Name => Reference.Name;
+
+    public IInterceptorSubject Subject => Reference.Subject;
 
     /// <summary>
     /// Gets a list of all .NET reflection attributes.
@@ -38,7 +43,7 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets the browse name of the property (either the property or attribute name).
     /// </summary>
-    public string BrowseName => IsAttribute ? AttributeMetadata.AttributeName : Property.Name;
+    public string BrowseName => IsAttribute ? AttributeMetadata.AttributeName : Name;
     
     /// <summary>
     /// Specifies whether the property is an attribute property (property attached to another property).
@@ -104,12 +109,12 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets a value indicating whether the property has a getter.
     /// </summary>
-    public bool HasGetter => Property.Metadata.GetValue is not null;
+    public bool HasGetter => Reference.Metadata.GetValue is not null;
 
     /// <summary>
     /// Gets a value indicating whether the property has a setter.
     /// </summary>
-    public bool HasSetter => Property.Metadata.SetValue is not null;
+    public bool HasSetter => Reference.Metadata.SetValue is not null;
 
     /// <summary>
     /// Gets the current value of the property.
@@ -117,7 +122,7 @@ public record RegisteredSubjectProperty
     /// <returns>The value.</returns>
     public object? GetValue()
     {
-        return Property.Metadata.GetValue?.Invoke(Property.Subject);
+        return Reference.Metadata.GetValue?.Invoke(Subject);
     }
 
     /// <summary>
@@ -126,7 +131,7 @@ public record RegisteredSubjectProperty
     /// <param name="value">The value.</param>
     public void SetValue(object? value)
     {
-        Property.Metadata.SetValue?.Invoke(Property.Subject, value);
+        Reference.Metadata.SetValue?.Invoke(Subject, value);
     }
 
     /// <summary>
@@ -158,13 +163,13 @@ public record RegisteredSubjectProperty
         Action<IInterceptorSubject, object?>? setValue, 
         params Attribute[] attributes)
     {
-        var propertyName = $"{Property.Name}@{name}";
+        var propertyName = $"{Name}@{name}";
         
         var attribute = Parent.AddProperty(
             propertyName,
             type, getValue, setValue,
             attributes
-                .Concat([new PropertyAttributeAttribute(Property.Name, name)])
+                .Concat([new PropertyAttributeAttribute(Name, name)])
                 .ToArray());
 
         return attribute;
@@ -185,13 +190,13 @@ public record RegisteredSubjectProperty
         Action<IInterceptorSubject, object?>? setValue, 
         params Attribute[] attributes)
     {
-        var propertyName = $"{Property.Name}@{name}";
+        var propertyName = $"{Name}@{name}";
         
         var attribute = Parent.AddDerivedProperty(
             propertyName,
             type, getValue, setValue,
             attributes
-                .Concat([new PropertyAttributeAttribute(Property.Name, name)])
+                .Concat([new PropertyAttributeAttribute(Name, name)])
                 .ToArray());
 
         return attribute;
@@ -203,7 +208,7 @@ public record RegisteredSubjectProperty
     public IEnumerable<RegisteredSubjectProperty> Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Parent.GetPropertyAttributes(Property.Name);
+        get => Parent.GetPropertyAttributes(Name);
     }
 
     /// <summary>
@@ -214,7 +219,7 @@ public record RegisteredSubjectProperty
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty? TryGetAttribute(string attributeName)
     {
-        return Parent.TryGetPropertyAttribute(Property.Name, attributeName);
+        return Parent.TryGetPropertyAttribute(Name, attributeName);
     } 
 
     /// <summary>
@@ -232,8 +237,7 @@ public record RegisteredSubjectProperty
 
     public static implicit operator PropertyReference(RegisteredSubjectProperty property)
     {
-        // TODO: Remove Property property and use this operator instead
-        return property.Property;
+        return new PropertyReference(property.Subject, property.Name);
     }
 
     internal void AddChild(SubjectPropertyChild parent)

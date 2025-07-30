@@ -134,15 +134,15 @@ public record SubjectUpdate
         RegisteredSubject registeredSubject,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
-        var parentProperty = registeredSubject.Parents.FirstOrDefault().Property?.Property ?? null;
+        var parentProperty = registeredSubject.Parents.FirstOrDefault().Property ?? null;
         if (parentProperty?.Subject is { } parentPropertySubject)
         {
-            var parentSubjectPropertyUpdate = GetOrCreateSubjectPropertyUpdate(parentPropertySubject, parentProperty.Value.Name, knownSubjectUpdates);
+            var parentSubjectPropertyUpdate = GetOrCreateSubjectPropertyUpdate(parentPropertySubject, parentProperty.Name, knownSubjectUpdates);
 
             var parentRegisteredSubject = parentPropertySubject.TryGetRegisteredSubject()
                 ?? throw new InvalidOperationException("Registered subject not found.");
 
-            var children = parentRegisteredSubject.Properties[parentProperty.Value.Name].Children;
+            var children = parentRegisteredSubject.Properties[parentProperty.Name].Children;
             if (children.Any(c => c.Index is not null))
             {
                 parentSubjectPropertyUpdate.Kind = SubjectPropertyUpdateKind.Collection;
@@ -198,7 +198,7 @@ public record SubjectUpdate
         else
         {
             var propertyUpdate = GetOrCreateSubjectPropertyUpdate(
-                property.Parent.Subject, property.Property.Name, knownSubjectUpdates);
+                property.Parent.Subject, property.Name, knownSubjectUpdates);
 
             var attributeUpdate = OrCreateSubjectAttributeUpdate(propertyUpdate, attributeName);
             if (changeProperty is not null && change.HasValue)
@@ -208,7 +208,7 @@ public record SubjectUpdate
                 propertyUpdate.Attributes![attributeName] = attributeUpdate;
             }
 
-            return (attributeUpdate, propertyUpdate, property.Property.Name);
+            return (attributeUpdate, propertyUpdate, property.Name);
         }
     }
 
