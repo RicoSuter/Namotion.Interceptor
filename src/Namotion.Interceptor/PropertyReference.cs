@@ -34,16 +34,6 @@ public record struct PropertyReference
         }
     }
 
-    public object? GetValue()
-    {
-        return Metadata.GetValue?.Invoke(Subject);
-    }
-    
-    public void SetValue(object? value)
-    {
-        Metadata.SetValue?.Invoke(Subject, value);
-    }
-
     public void SetPropertyData(string key, object? value)
     {
         Subject.Data[$"{Name}:{key}"] = value;
