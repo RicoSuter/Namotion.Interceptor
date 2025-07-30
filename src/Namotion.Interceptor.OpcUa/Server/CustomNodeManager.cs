@@ -200,11 +200,11 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             if (changes.HasFlag(NodeStateChangeMasks.Value))
             {
-                _source.UpdateProperty(property.Property, variable.Timestamp, variable.Value);
+                _source.UpdateProperty(property.Reference, variable.Timestamp, variable.Value);
             }
         };
 
-        property.Property.SetPropertyData(OpcUaSubjectServerSource.OpcVariableKey, variable);
+        property.Reference.SetPropertyData(OpcUaSubjectServerSource.OpcVariableKey, variable);
     }
 
     private void CreateChildObject(

@@ -44,7 +44,7 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
     {
         return property.Parent.Properties
             .Where(p => p.Value.IsAttribute)
-            .SingleOrDefault(p => p.Value.AttributeMetadata.PropertyName == property.Property.Name && 
+            .SingleOrDefault(p => p.Value.AttributeMetadata.PropertyName == property.Name && 
                                   p.Value.AttributeMetadata.AttributeName == segment)
             .Value;
     }

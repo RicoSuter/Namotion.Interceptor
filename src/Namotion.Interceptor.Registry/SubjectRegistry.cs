@@ -119,7 +119,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
 
                 foreach (var property in registeredSubject.Properties)
                 {
-                    if (property.Value.Property.Metadata.IsDynamic)
+                    if (property.Value.Reference.Metadata.IsDynamic)
                     {
                         change.Subject.DetachSubjectProperty(property.Value);
                     }

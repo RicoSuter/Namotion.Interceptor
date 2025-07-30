@@ -178,7 +178,7 @@ public static class SubjectRegistryJsonExtensions
         }
 
         return jsonSerializerOptions.PropertyNamingPolicy?
-            .ConvertName(property.Property.Name) ?? property.Property.Name;
+            .ConvertName(property.Name) ?? property.Name;
     }
 
     public static (IInterceptorSubject?, SubjectPropertyMetadata) FindPropertyFromJsonPath(this IInterceptorSubject subject, string path)
