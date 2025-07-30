@@ -60,7 +60,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) && 
                 data is BaseDataVariableState node)
             {
-                var actualValue = change.Property.GetValue();
+                var actualValue = change.NewValue;
                 if (actualValue is decimal)
                 {
                     actualValue = Convert.ToDouble(actualValue);
