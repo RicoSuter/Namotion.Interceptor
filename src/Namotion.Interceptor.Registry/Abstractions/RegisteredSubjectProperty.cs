@@ -23,17 +23,26 @@ public record RegisteredSubjectProperty
         ReflectionAttributes = reflectionAttributes;
         _attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
     }
+
+    /// <summary>
+    /// Gets the subject object this property belongs to.
+    /// </summary>
+    public IInterceptorSubject Subject => Reference.Subject;
+
+    /// <summary>
+    /// Gets the name of the property.
+    /// </summary>
+    public string Name => Reference.Name;
+    
+    /// <summary>
+    /// Gets the property reference.
+    /// </summary>
+    public PropertyReference Reference { get; }
     
     /// <summary>
     /// Gets the type of the property.
     /// </summary>
     public required Type Type { get; init; }
-    
-    public PropertyReference Reference { get; }
-
-    public string Name => Reference.Name;
-
-    public IInterceptorSubject Subject => Reference.Subject;
 
     /// <summary>
     /// Gets a list of all .NET reflection attributes.
