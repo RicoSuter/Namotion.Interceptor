@@ -25,12 +25,12 @@ public record RegisteredSubject
         }
     }
 
-    public IReadOnlyDictionary<string, RegisteredSubjectProperty> Properties
+    public IEnumerable<RegisteredSubjectProperty> Properties
     {
         get
         {
             lock (_lock)
-                return _properties!.ToDictionary(p => p.Key, p => p.Value);
+                return _properties.Values.ToArray(); // TODO(perf): Use frozen instead?
         }
     }
 
