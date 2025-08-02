@@ -84,7 +84,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private void CreateObjectNode(NodeId parentNodeId, RegisteredSubject subject, string prefix)
     {
-        foreach (var (_, property) in subject.Properties)
+        foreach (var property in subject.Properties)
         {
             var propertyName = GetPropertyName(property);
             if (propertyName is not null)

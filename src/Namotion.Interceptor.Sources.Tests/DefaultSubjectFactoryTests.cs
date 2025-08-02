@@ -42,7 +42,7 @@ public class DefaultSubjectFactoryTests
             }
         ]);
 
-        var property = subject.Properties.First().Value;
+        var property = subject.Properties.First();
 
         // Act
         var subjectFactory = new DefaultSubjectFactory();
@@ -69,7 +69,7 @@ public class DefaultSubjectFactoryTests
             }
         ]);
 
-        var property = subject.Properties.First().Value;
+        var property = subject.Properties.First();
 
         // Act
         var subjectFactory = new DefaultSubjectFactory();

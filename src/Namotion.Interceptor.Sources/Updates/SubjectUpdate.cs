@@ -59,13 +59,13 @@ public record SubjectUpdate
         if (registeredSubject is not null)
         {
             foreach (var property in registeredSubject.Properties
-                .Where(p => p.Value is { HasGetter: true, IsAttribute: false } && propertyFilter?.Invoke(p.Value) != false))
+                .Where(p => p is { HasGetter: true, IsAttribute: false } && propertyFilter?.Invoke(p) != false))
             {
                 var propertyUpdate = SubjectPropertyUpdate.CreateCompleteUpdate(
-                    property.Value, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                    property, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
 
-                subjectUpdate.Properties[property.Key] = 
-                    transformPropertyUpdate is not null ? transformPropertyUpdate(property.Value, propertyUpdate) : propertyUpdate;
+                subjectUpdate.Properties[property.Name] = 
+                    transformPropertyUpdate is not null ? transformPropertyUpdate(property, propertyUpdate) : propertyUpdate;
             }
         }
 
@@ -142,8 +142,8 @@ public record SubjectUpdate
             var parentRegisteredSubject = parentPropertySubject.TryGetRegisteredSubject()
                 ?? throw new InvalidOperationException("Registered subject not found.");
 
-            var children = parentRegisteredSubject.Properties[parentProperty.Name].Children;
-            if (children.Any(c => c.Index is not null))
+            var children = parentRegisteredSubject.TryGetProperty(parentProperty.Name)?.Children;
+            if (children?.Any(c => c.Index is not null) == true)
             {
                 parentSubjectPropertyUpdate.Kind = SubjectPropertyUpdateKind.Collection;
                 parentSubjectPropertyUpdate.Collection = children

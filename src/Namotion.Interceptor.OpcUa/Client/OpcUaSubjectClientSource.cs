@@ -189,7 +189,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is not null && _session is not null)
         {
-            foreach (var (_, property) in registeredSubject.Properties)
+            foreach (var property in registeredSubject.Properties)
             {
                 var propertyName = GetPropertyName(property);
                 if (propertyName is not null)
