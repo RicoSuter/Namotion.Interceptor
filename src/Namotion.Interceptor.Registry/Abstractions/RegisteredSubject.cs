@@ -1,7 +1,7 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Collections.Frozen;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -10,7 +10,7 @@ public record RegisteredSubject
 {
     private readonly Lock _lock = new();
 
-    private readonly Dictionary<string, RegisteredSubjectProperty> _properties;
+    private FrozenDictionary<string, RegisteredSubjectProperty> _properties;
     private readonly HashSet<SubjectPropertyParent> _parents = [];
 
     [JsonIgnore]
@@ -30,7 +30,7 @@ public record RegisteredSubject
         get
         {
             lock (_lock)
-                return _properties.Values.ToArray(); // TODO(perf): Use frozen instead?
+                return _properties.Values;
         }
     }
 
@@ -80,7 +80,7 @@ public record RegisteredSubject
     {
         Subject = subject;
         _properties = properties
-            .ToDictionary(
+            .ToFrozenDictionary(
                 p => p.Name,
                 p =>
                 {
@@ -166,7 +166,9 @@ public record RegisteredSubject
         
         lock (_lock)
         {
-            _properties.Add(property.Name, subjectProperty);
+            _properties = _properties
+                .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
+                .ToFrozenDictionary(p => p.Key, p => p.Value);
         }
 
         Subject.AttachSubjectProperty(property);
