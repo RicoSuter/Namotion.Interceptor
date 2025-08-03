@@ -59,13 +59,13 @@ public record SubjectUpdate
         if (registeredSubject is not null)
         {
             foreach (var property in registeredSubject.Properties
-                .Where(p => p.Value is { HasGetter: true, IsAttribute: false } && propertyFilter?.Invoke(p.Value) != false))
+                .Where(p => p is { HasGetter: true, IsAttribute: false } && propertyFilter?.Invoke(p) != false))
             {
                 var propertyUpdate = SubjectPropertyUpdate.CreateCompleteUpdate(
-                    property.Value, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                    property, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
 
-                subjectUpdate.Properties[property.Key] = 
-                    transformPropertyUpdate is not null ? transformPropertyUpdate(property.Value, propertyUpdate) : propertyUpdate;
+                subjectUpdate.Properties[property.Name] = 
+                    transformPropertyUpdate is not null ? transformPropertyUpdate(property, propertyUpdate) : propertyUpdate;
             }
         }
 
@@ -134,16 +134,16 @@ public record SubjectUpdate
         RegisteredSubject registeredSubject,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
-        var parentProperty = registeredSubject.Parents.FirstOrDefault().Property?.Property ?? null;
+        var parentProperty = registeredSubject.Parents.FirstOrDefault().Property ?? null;
         if (parentProperty?.Subject is { } parentPropertySubject)
         {
-            var parentSubjectPropertyUpdate = GetOrCreateSubjectPropertyUpdate(parentPropertySubject, parentProperty.Value.Name, knownSubjectUpdates);
+            var parentSubjectPropertyUpdate = GetOrCreateSubjectPropertyUpdate(parentPropertySubject, parentProperty.Name, knownSubjectUpdates);
 
             var parentRegisteredSubject = parentPropertySubject.TryGetRegisteredSubject()
                 ?? throw new InvalidOperationException("Registered subject not found.");
 
-            var children = parentRegisteredSubject.Properties[parentProperty.Value.Name].Children;
-            if (children.Any(c => c.Index is not null))
+            var children = parentRegisteredSubject.TryGetProperty(parentProperty.Name)?.Children;
+            if (children?.Any(c => c.Index is not null) == true)
             {
                 parentSubjectPropertyUpdate.Kind = SubjectPropertyUpdateKind.Collection;
                 parentSubjectPropertyUpdate.Collection = children
@@ -198,7 +198,7 @@ public record SubjectUpdate
         else
         {
             var propertyUpdate = GetOrCreateSubjectPropertyUpdate(
-                property.Parent.Subject, property.Property.Name, knownSubjectUpdates);
+                property.Parent.Subject, property.Name, knownSubjectUpdates);
 
             var attributeUpdate = OrCreateSubjectAttributeUpdate(propertyUpdate, attributeName);
             if (changeProperty is not null && change.HasValue)
@@ -208,7 +208,7 @@ public record SubjectUpdate
                 propertyUpdate.Attributes![attributeName] = attributeUpdate;
             }
 
-            return (attributeUpdate, propertyUpdate, property.Property.Name);
+            return (attributeUpdate, propertyUpdate, property.Name);
         }
     }
 

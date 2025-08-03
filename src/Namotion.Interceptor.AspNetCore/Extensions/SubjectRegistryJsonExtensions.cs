@@ -124,11 +124,11 @@ public static class SubjectRegistryJsonExtensions
             // add dynamic properties
             foreach (var property in registeredSubject
                 .Properties
-                .Where(p => p.Value.HasGetter && 
-                            subject.Properties.ContainsKey(p.Key) == false))
+                .Where(p => p.HasGetter && 
+                            subject.Properties.ContainsKey(p.Name) == false))
             {
-                var propertyName = property.Value.GetJsonPropertyName(jsonSerializerOptions);
-                var value = property.Value.GetValue();
+                var propertyName = property.GetJsonPropertyName(jsonSerializerOptions);
+                var value = property.GetValue();
                 if (value is IInterceptorSubject childProxy)
                 {
                     obj[propertyName] = childProxy.ToJsonObject(jsonSerializerOptions);
@@ -178,7 +178,7 @@ public static class SubjectRegistryJsonExtensions
         }
 
         return jsonSerializerOptions.PropertyNamingPolicy?
-            .ConvertName(property.Property.Name) ?? property.Property.Name;
+            .ConvertName(property.Name) ?? property.Name;
     }
 
     public static (IInterceptorSubject?, SubjectPropertyMetadata) FindPropertyFromJsonPath(this IInterceptorSubject subject, string path)

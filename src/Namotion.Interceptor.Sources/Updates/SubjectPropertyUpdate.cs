@@ -99,7 +99,7 @@ public record SubjectPropertyUpdate
             Attributes = attributes.Count != 0 ? attributes : null
         };
         
-        propertyUpdate.ApplyValue(property, property.Property.TryGetWriteTimestamp(), property.GetValue(), 
+        propertyUpdate.ApplyValue(property, property.Reference.TryGetWriteTimestamp(), property.GetValue(), 
             propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
 
         return propertyUpdate;

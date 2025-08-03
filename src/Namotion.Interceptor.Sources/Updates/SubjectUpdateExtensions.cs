@@ -79,7 +79,7 @@ public static class SubjectUpdateExtensions
                         .TryGetPropertyAttribute(propertyName, attributeName) 
                             ?? throw new InvalidOperationException("Attribute not found on property.");
                     
-                    ApplySubjectPropertyUpdate(subject, registeredAttribute.Property.Name, attributeUpdate, applyValuePropertyUpdate, subjectFactory, registry);
+                    ApplySubjectPropertyUpdate(subject, registeredAttribute.Name, attributeUpdate, applyValuePropertyUpdate, subjectFactory, registry);
                 }
             }
 
