@@ -1,7 +1,7 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Collections.Frozen;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -10,8 +10,8 @@ public record RegisteredSubject
 {
     private readonly Lock _lock = new();
 
-    private readonly Dictionary<string, RegisteredSubjectProperty> _properties;
-    private readonly HashSet<SubjectPropertyParent> _parents = [];
+    private FrozenDictionary<string, RegisteredSubjectProperty> _properties;
+    private readonly HashSet<SubjectPropertyParent> _parents = []; // TODO(perf): Use a FrozenSet?
 
     [JsonIgnore]
     public IInterceptorSubject Subject { get; }
@@ -25,12 +25,12 @@ public record RegisteredSubject
         }
     }
 
-    public IReadOnlyDictionary<string, RegisteredSubjectProperty> Properties
+    public IEnumerable<RegisteredSubjectProperty> Properties
     {
         get
         {
             lock (_lock)
-                return _properties!.ToDictionary(p => p.Key, p => p.Value);
+                return _properties.Values;
         }
     }
 
@@ -80,8 +80,8 @@ public record RegisteredSubject
     {
         Subject = subject;
         _properties = properties
-            .ToDictionary(
-                p => p.Property.Name,
+            .ToFrozenDictionary(
+                p => p.Name,
                 p =>
                 {
                     p.Parent = this;
@@ -133,7 +133,7 @@ public record RegisteredSubject
         var property = AddProperty(propertyReference, type, attributes);
         
         // trigger change event
-        property.Property.SetPropertyValue(getValue?.Invoke(Subject) ?? null, 
+        property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null, 
             () => getValue?.Invoke(Subject), delegate {});
         
         return property;
@@ -166,7 +166,9 @@ public record RegisteredSubject
         
         lock (_lock)
         {
-            _properties.Add(property.Name, subjectProperty);
+            _properties = _properties
+                .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
+                .ToFrozenDictionary(p => p.Key, p => p.Value);
         }
 
         Subject.AttachSubjectProperty(property);

@@ -8,15 +8,13 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
     where TSubject : IInterceptorSubject
 {
     private IDisposable? _subscription;
-    private ReadPropertyRecorderScope? _recorder;
+    private ReadPropertyRecorderScope? _recorderScope;
         
     private PropertyReference[]? _properties;
+    private ReadPropertyRecorder? _recorder;
 
     [Inject]
     public TSubject? Subject { get; set; }
-        
-    [Inject]
-    public ReadPropertyRecorder? Recorder { get; set; }
 
     protected override void OnInitialized()
     {
@@ -25,11 +23,15 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
             .GetPropertyChangedObservable()
             .Subscribe(change =>
             {
-                if (_properties?.Any(p => p == change.Property) != false)
+                if (_properties?.Contains(change.Property) == true)
                 {
                     InvokeAsync(StateHasChanged);
                 }
             });
+        
+        _recorder = Subject?
+            .Context
+            .GetService<ReadPropertyRecorder>();
     }
 
     protected override bool ShouldRender()
@@ -37,7 +39,7 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
         var result = base.ShouldRender();
         if (result)
         {
-            _recorder = Recorder?.StartPropertyAccessRecording();
+            _recorderScope = _recorder?.StartPropertyAccessRecording();
         }
 
         return result;
@@ -45,12 +47,12 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
 
     protected override void OnAfterRender(bool firstRender)
     {
-        _properties = _recorder?.GetPropertiesAndDispose();
+        _properties = _recorderScope?.GetPropertiesAndDispose();
     }
 
     public virtual void Dispose()
     {
         _subscription?.Dispose();
-        _recorder?.Dispose();
+        _recorderScope?.Dispose();
     }
 }
