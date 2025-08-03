@@ -11,7 +11,7 @@ public record RegisteredSubject
     private readonly Lock _lock = new();
 
     private FrozenDictionary<string, RegisteredSubjectProperty> _properties;
-    private readonly HashSet<SubjectPropertyParent> _parents = [];
+    private readonly HashSet<SubjectPropertyParent> _parents = []; // TODO(perf): Use a FrozenSet?
 
     [JsonIgnore]
     public IInterceptorSubject Subject { get; }
