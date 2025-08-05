@@ -47,7 +47,7 @@ namespace Namotion.Interceptor.Mqtt
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _mqttServer = new MqttFactory()
+            _mqttServer = new MqttServerFactory()
                 .CreateMqttServer(new MqttServerOptions
                 {
                     DefaultEndpointOptions =
@@ -142,7 +142,10 @@ namespace Namotion.Interceptor.Mqtt
                         ContentType = "application/json",
                         PayloadSegment = new ArraySegment<byte>(
                             Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))),
-                    }) { SenderClientId = _serverClientId }, cancellationToken);
+                    })
+                {
+                    SenderClientId = _serverClientId
+                }, cancellationToken);
         }
 
         private Task InterceptingPublishAsync(InterceptingPublishEventArgs args)
@@ -153,7 +156,7 @@ namespace Namotion.Interceptor.Mqtt
             }
 
             var path = args.ApplicationMessage.Topic;
-            var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
+            var payload = Encoding.UTF8.GetString(args.ApplicationMessage.Payload);
 
             _dispatcher?.EnqueueSubjectUpdate(() =>
             {

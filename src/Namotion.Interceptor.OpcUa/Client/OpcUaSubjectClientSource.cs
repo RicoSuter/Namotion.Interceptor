@@ -71,7 +71,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
             try
             {
-                await application.CheckApplicationInstanceCertificate(true, CertificateFactory.DefaultKeySize);
+                await application.CheckApplicationInstanceCertificates(true);
 
                 var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
                 var endpointDescription = CoreClientUtils.SelectEndpoint(application.ApplicationConfiguration, _serverUrl, false);
