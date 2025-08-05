@@ -8,7 +8,6 @@
 
   <ItemGroup>
 	<PackageReference Include="HotChocolate.AspNetCore" Version="15.1.8" />
-	<PackageReference Include="NSwag.AspNetCore" Version="14.5.0" />
 	<PackageReference Include="System.Linq.Async" Version="6.0.3" />
   </ItemGroup>
 
