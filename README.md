@@ -123,10 +123,59 @@ For more samples, check out the "Samples" directory in the Visual Studio solutio
 ## Projects
 
 ### Namotion.Interceptor
-Core library for property and method interception.
+Core library for property and method interception with source generation support. Provides the fundamental building blocks for creating intercepted objects.
+
+**Key Components:**
+
+- **`IInterceptorSubject`** - The fundamental interface that every intercepted object implements. Represents an observable object that participates in the interception system with context, data storage, and property metadata.
+
+- **`IInterceptorSubjectContext`** - The central coordination hub that manages all interception behavior. Acts as a service container and orchestrates the interception pipeline with support for context hierarchies.
+
+- **`IInterceptorExecutor`** - High-level execution engine that subjects use to perform intercepted property and method operations. Extends the context with actual execution capabilities.
+
+- **`IReadInterceptor / IWriteInterceptor`** - Core interception interfaces that define middleware components for observing, modifying, or blocking property operations using a chain-of-responsibility pattern.
+
+- **`SubjectPropertyMetadata`** - Property descriptor containing type information, access methods, and interception flags that tells the system how to work with each property.
 
 ### Namotion.Interceptor.Generator
-Source generator that creates the interception logic for classes marked with `[InterceptorSubject]`.
+Source generator that creates the interception logic for classes marked with `[InterceptorSubject]`. Automatically included when you install the main `Namotion.Interceptor` package.
+
+**What it generates:**
+
+The generator creates partial property implementations that route through the interception pipeline:
+
+```csharp
+// Your code:
+[InterceptorSubject]
+public partial class Car
+{
+    public partial string Name { get; set; }
+    public partial Tire[] Tires { get; set; }
+}
+
+// Generated code (simplified):
+public partial class Car : IInterceptorSubject
+{
+    public IInterceptorSubjectContext Context { get; }
+    
+    public partial string Name 
+    { 
+        get => (string)((IInterceptorExecutor)Context).GetPropertyValue("Name", () => _name);
+        set => ((IInterceptorExecutor)Context).SetPropertyValue("Name", value, () => _name, v => _name = v);
+    }
+    
+    // Constructor injection, metadata registration, etc.
+}
+```
+
+**Key Features:**
+- **Zero Runtime Reflection** - All interception logic is generated at compile time
+- **Preserves IntelliSense** - Full IDE support for your partial properties
+- **Metadata Generation** - Creates property metadata for the registry system
+- **Constructor Injection** - Generates constructors that accept `IInterceptorSubjectContext`
+
+**Build Integration:**
+The generator runs during compilation and integrates with MSBuild, supporting incremental builds and design-time builds for optimal IDE experience.
 
 ### Namotion.Interceptor.Hosting
 Automatically start and stop subjects which implement `IHostedService` based on object graph attachment and detachment, with support for attaching and detaching hosted services to subjects.
