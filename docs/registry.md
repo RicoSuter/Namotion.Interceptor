@@ -6,7 +6,7 @@ The Registry package provides a powerful tracking system that automatically disc
 
 ## Core Concepts
 
-The registry automatically tracks subjects and their references, building a comprehensive map of your object graph. This enables several powerful patterns:
+The registry automatically discovers and tracks every subject in your interceptor context as they are created and modified. It builds a live, comprehensive map of your entire object graph—including all properties, their types, relationships, and metadata. This automatic tracking enables several powerful patterns:
 
 **Property Attributes**: Special properties that attach metadata to other properties. Instead of storing metadata in separate dictionaries or configurations, you can define it directly as properties on your subjects.
 
@@ -25,7 +25,7 @@ var context = InterceptorSubjectContext
     .Create()
     .WithRegistry(); // Enables automatic subject and property tracking
 
-var sensor = new Sensor(context);
+var car = new Car(context);
 ```
 
 The registry integrates with other interceptor features and automatically includes context inheritance to ensure child subjects participate in the registry.
@@ -144,7 +144,7 @@ The registry makes it easy to find metadata associated with properties:
 var attributes = registered.GetPropertyAttributes("Pressure");
 foreach (var attribute in attributes)
 {
-    Console.WriteLine($"{attribute.AttributeMetadata.AttributeName}: {attr.Reference.GetValue()}");
+    Console.WriteLine($"{attribute.AttributeMetadata.AttributeName}: {attribute.Reference.GetValue()}");
 }
 ```
 
