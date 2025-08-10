@@ -4,24 +4,21 @@
 
 # Namotion.Interceptor for .NET
 
-Namotion.Interceptor is a .NET library  designed to simplify the creation of trackable object models by automatically generating property interceptors (requires [C# 13 partial properties](https://learn.microsoft.com/en-us/dotnet/csharp/whats-new/csharp-13#more-partial-members)). All you need to do is annotate your model classes with a few simple attributes; they remain regular POCOs otherwise. The library uses source generation to handle the interception logic for you.
+Namotion.Interceptor is a .NET library designed to simplify the creation of trackable object models by automatically generating property interceptors (requires [C# 13 partial properties](https://learn.microsoft.com/en-us/dotnet/csharp/whats-new/csharp-13#more-partial-members)). All you need to do is annotate your model classes with a few simple attributes; they remain regular POCOs otherwise. The library uses source generation to handle the interception logic for you.
 
 In addition to property tracking, Namotion.Interceptor offers advanced features such as automatic change detection (including derived properties), reactive source mapping (e.g., for GraphQL subscriptions or MQTT publishing), and other powerful capabilities that integrate seamlessly into your workflow.
 
-Feature map:
+![Feature Map](./features.png)
 
-![features](./features.png)
+## Change Tracking Sample
 
-## Change tracking sample
-
-First you can define a proxied class:
+First, define a proxied class:
 
 ```csharp
 [InterceptorSubject]
 public partial class Person
 {
     public partial string FirstName { get; set; }
-
     public partial string LastName { get; set; }
 
     [Derived]
@@ -29,7 +26,7 @@ public partial class Person
 }
 ```
 
-With this implemented you can now create a context and start tracking changes of these persons:
+Then create a context and start tracking changes:
 
 ```csharp
 var context = InterceptorSubjectContext
@@ -59,22 +56,17 @@ var person = new Person(context)
 person.FirstName = "Jane";
 // Property 'FirstName' changed from 'John' to 'Jane'.
 // Property 'FullName' changed from 'John Doe' to 'Jane Doe'.
-
-person.LastName = "Smith";
-// Property 'LastName' changed from 'Doe' to 'Smith'.
-// Property 'FullName' changed from 'Jane Doe' to 'Jane Smith'.
 ```
 
-## Subject attach and detach tracking sample
+## Subject Attach and Detach Tracking Sample
 
-Implement a class with properties which reference other proxied objects:
+Implement a class with properties that reference other proxied objects:
 
 ```csharp
 [InterceptorSubject]
 public partial class Person
 {
     public partial string Name { get; set; }
-
     public partial Person[] Children { get; set; }
 
     public Person()
@@ -83,43 +75,30 @@ public partial class Person
         Children = [];
     }
 
-    public override string ToString()
-    {
-        return "Person: " + Name;
-    }
- }
+    public override string ToString() => "Person: " + Name;
+}
 ```
 
-The context now automatically tracks the attachment and detachment of referenced proxies:
+The context automatically tracks attachment and detachment of referenced proxies:
 
 ```csharp
-var context = ProxyContext
-    .CreateBuilder()
+var context = InterceptorSubjectContext
+    .Create()
     .WithService(() => new LogPropertyChangesHandler())
-    .WithFullPropertyTracking() // this will track property changes and subject attaches/detaches
-    .Build();
+    .WithFullPropertyTracking(); // tracks property changes and subject attaches/detaches
 
 var child1 = new Person { Name = "Child1" };
 var child2 = new Person { Name = "Child2" };
 var child3 = new Person { Name = "Child3" };
 
-var person = new Person(context)
+var person = new Person(context);
 // Attach: Person: n/a
 
-person.Children = 
-[
-    child1,
-    child2
-];
+person.Children = [child1, child2];
 // Attach: Person: Child1
 // Attach: Person: Child2
 
-person.Children = 
-[
-    child1,
-    child2,
-    child3
-];
+person.Children = [child1, child2, child3];
 // Attach: Person: Child3
 
 person.Children = [];
@@ -129,37 +108,32 @@ person.Children = [];
 
 public class LogPropertyChangesHandler : ILifecycleHandler
 {
-    public void Attach(LifecycleContext context)
-    {
+    public void Attach(LifecycleContext context) => 
         Console.WriteLine($"Attach: {context.Subject}");
-    }
 
-    public void Detach(LifecycleContext context)
-    {
+    public void Detach(LifecycleContext context) => 
         Console.WriteLine($"Detach: {context.Subject}");
-    }
 }
 ```
 
-## More samples
+## More Samples
 
 For more samples, check out the "Samples" directory in the Visual Studio solution.
+
+## Documentation
+
+- **[Registry](docs/registry.md)** - Dynamic property tracking and metadata management
 
 ## Projects
 
 ### Namotion.Interceptor
-
-- Core library for property and method interception.
+Core library for property and method interception.
 
 ### Namotion.Interceptor.Generator
-
-- Source generator for the `InterceptorSubject` attribute.
+Source generator for the `InterceptorSubject` attribute.
 
 ### Namotion.Interceptor.Hosting
-
-- Automatically start and stop subjects which implement `IHostedService`
-  - Based on object graph attachment and detachment
-- Support for attaching and detaching hosted services to subjects
+Automatically start and stop subjects which implement `IHostedService` based on object graph attachment and detachment, with support for attaching and detaching hosted services to subjects.
 
 Attach a hosted service to a subject:
 
@@ -169,69 +143,52 @@ var context = InterceptorSubjectContext
     .WithHostedServices(builder.Services);
     
 var person = new Person(context);
-
 var hostedService = new PersonBackgroundService(person);
 person.AttachHostedService(hostedService);
 ```
 
-Methods:
-
-- WithHostedServices()
-  - Tracking.WithLifecycle()
+**Methods:**
+- `WithHostedServices()` → `Tracking.WithLifecycle()`
 
 ### Namotion.Interceptor.Registry
 
-- Registry which tracks subjects and child subjects and their properties
-- Support for dynamic properties and property attributes
-  - Attributes are properties which are attached to other properties and marked as attribute
+Registry which tracks subjects and child subjects and their properties. Support for dynamic properties and property attributes—attributes are properties which are attached to other properties and marked as attribute.
+
+[Documentation](docs/registry.md)
 
 Retrieve registered subject from the registry to access dynamic properties and attributes:
 
-````csharp
+```csharp
 var context = InterceptorSubjectContext
     .Create()
     .WithRegistry();
 
 var person = new Person(context);
 var registeredSubject = person.TryGetRegisteredSubject();
-````
+```
 
-Methods:
-
-- WithRegistry()
-  - Tracking.WithContextInheritance()
+**Methods:**
+- `WithRegistry()` → `Tracking.WithContextInheritance()`
 
 ### Namotion.Interceptor.Sources
-
-- Support to attach an object branch to an external source
+Support to attach an object branch to an external source.
 
 ### Namotion.Interceptor.Tracking
+Support for tracking changes of subjects and their properties and derived properties.
 
-- Support for tracking changes of subjects and their properties and derived properties
-
-Methods: 
-
-- WithLifecycle(): Attach and detach callbacks (set or remove from property or collection)
-- WithFullPropertyTracking()
-  - WithEqualityCheck()
-  - WithContextInheritance()
-  - WithDerivedPropertyChangeDetection()
-  - WithPropertyChangedObservable()
-- WithReadPropertyRecorder()
-- WithParents()
-- WithEqualityCheck()
-- WithDerivedPropertyChangeDetection()
-  - WithLifecycle()
-- WithPropertyChangedObservable()
-- WithContextInheritance()
-  - WithLifecycle()
+**Methods:**
+- `WithLifecycle()` - Attach and detach callbacks (set or remove from property or collection)
+- `WithFullPropertyTracking()` → `WithEqualityCheck()`, `WithContextInheritance()`, `WithDerivedPropertyChangeDetection()`, `WithPropertyChangedObservable()`
+- `WithReadPropertyRecorder()`
+- `WithParents()`
+- `WithEqualityCheck()`
+- `WithDerivedPropertyChangeDetection()` → `WithLifecycle()`
+- `WithPropertyChangedObservable()`
+- `WithContextInheritance()` → `WithLifecycle()`
 
 ### Namotion.Interceptor.Validation
+Support for validating subjects and their properties.
 
-- Support for validating subjects and their properties
-
-Methods:
-
-- WithPropertyValidation()
-- WithDataAnnotationValidation()
-  - WithPropertyValidation()
+**Methods:**
+- `WithPropertyValidation()`
+- `WithDataAnnotationValidation()` → `WithPropertyValidation()`
