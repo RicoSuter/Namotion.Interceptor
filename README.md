@@ -120,10 +120,6 @@ public class LogPropertyChangesHandler : ILifecycleHandler
 
 For more samples, check out the "Samples" directory in the Visual Studio solution.
 
-## Documentation
-
-- **[Registry](docs/registry.md)** - Dynamic property tracking and metadata management
-
 ## Projects
 
 ### Namotion.Interceptor
@@ -150,11 +146,9 @@ person.AttachHostedService(hostedService);
 **Methods:**
 - `WithHostedServices()` → `Tracking.WithLifecycle()`
 
-### Namotion.Interceptor.Registry
+### [Namotion.Interceptor.Registry](docs/registry.md)
 
 Registry which tracks subjects and child subjects and their properties. Support for dynamic properties and property attributes—attributes are properties which are attached to other properties and marked as attribute.
-
-[Documentation](docs/registry.md)
 
 Retrieve registered subject from the registry to access dynamic properties and attributes:
 
