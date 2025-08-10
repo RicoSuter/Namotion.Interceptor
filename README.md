@@ -126,7 +126,7 @@ For more samples, check out the "Samples" directory in the Visual Studio solutio
 Core library for property and method interception.
 
 ### Namotion.Interceptor.Generator
-Source generator for the `InterceptorSubject` attribute.
+Source generator that creates the interception logic for classes marked with `[InterceptorSubject]`.
 
 ### Namotion.Interceptor.Hosting
 Automatically start and stop subjects which implement `IHostedService` based on object graph attachment and detachment, with support for attaching and detaching hosted services to subjects.
@@ -137,7 +137,7 @@ Attach a hosted service to a subject:
 var context = InterceptorSubjectContext
     .Create()
     .WithHostedServices(builder.Services);
-    
+
 var person = new Person(context);
 var hostedService = new PersonBackgroundService(person);
 person.AttachHostedService(hostedService);
@@ -148,41 +148,66 @@ person.AttachHostedService(hostedService);
 
 ### [Namotion.Interceptor.Registry](docs/registry.md)
 
-Registry which tracks subjects and child subjects and their properties. Support for dynamic properties and property attributes—attributes are properties which are attached to other properties and marked as attribute.
-
-Retrieve registered subject from the registry to access dynamic properties and attributes:
+Tracks subjects and their properties with support for dynamic properties and property attributes. Enables runtime discovery of metadata and object graph navigation.
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
     .WithRegistry();
 
-var person = new Person(context);
-var registeredSubject = person.TryGetRegisteredSubject();
+var registered = subject.TryGetRegisteredSubject();
 ```
 
 **Methods:**
 - `WithRegistry()` → `Tracking.WithContextInheritance()`
 
 ### Namotion.Interceptor.Sources
-Support to attach an object branch to an external source.
+Enables binding subject properties to external data sources like MQTT, OPC UA, or custom providers.
 
 ### Namotion.Interceptor.Tracking
-Support for tracking changes of subjects and their properties and derived properties.
+Provides comprehensive change tracking for subjects, including property changes, derived properties, and subject lifecycle events.
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking();
+
+context.GetPropertyChangedObservable().Subscribe(change => {
+    Console.WriteLine($"{change.Property.Name}: {change.OldValue} → {change.NewValue}");
+});
+```
 
 **Methods:**
-- `WithLifecycle()` - Attach and detach callbacks (set or remove from property or collection)
+- `WithLifecycle()` - Subject attach and detach callbacks
 - `WithFullPropertyTracking()` → `WithEqualityCheck()`, `WithContextInheritance()`, `WithDerivedPropertyChangeDetection()`, `WithPropertyChangedObservable()`
-- `WithReadPropertyRecorder()`
-- `WithParents()`
-- `WithEqualityCheck()`
-- `WithDerivedPropertyChangeDetection()` → `WithLifecycle()`
-- `WithPropertyChangedObservable()`
-- `WithContextInheritance()` → `WithLifecycle()`
+- `WithPropertyChangedObservable()` - Observable property change notifications
+- `WithDerivedPropertyChangeDetection()` → `WithLifecycle()` - Automatic derived property updates
+- `WithContextInheritance()` → `WithLifecycle()` - Child subjects inherit parent context
+- `WithEqualityCheck()` - Only trigger changes when values actually change
+- `WithParents()` - Track parent-child relationships
+- `WithReadPropertyRecorder()` - Record property read operations
 
 ### Namotion.Interceptor.Validation
-Support for validating subjects and their properties.
+Validates subjects and properties using custom validation logic or data annotations.
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithDataAnnotationValidation();
+```
 
 **Methods:**
-- `WithPropertyValidation()`
-- `WithDataAnnotationValidation()` → `WithPropertyValidation()`
+- `WithPropertyValidation()` - Custom property validation
+- `WithDataAnnotationValidation()` → `WithPropertyValidation()` - Automatic data annotation validation
+
+### Integration Packages
+
+**Namotion.Interceptor.AspNetCore** - ASP.NET Core integration for exposing subjects as web APIs
+
+**Namotion.Interceptor.Blazor** - Blazor components for data binding with interceptor subjects
+
+**Namotion.Interceptor.GraphQL** - GraphQL integration with subscription support for real-time updates
+
+**Namotion.Interceptor.Mqtt** - MQTT client/server integration for IoT scenarios
+
+**Namotion.Interceptor.OpcUa** - OPC UA client/server integration for industrial automation
