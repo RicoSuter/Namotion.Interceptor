@@ -54,7 +54,7 @@ This pattern provides several benefits:
 - **Bindable**: Metadata can be bound to external sources (MQTT, OPC UA, etc.)
 - **Discoverable**: Metadata is accessible at runtime through the registry
 
-## Dynamic Property Creation
+## Dynamic Property and Attribute Creation
 
 The registry allows you to dynamically add properties and attributes to registered subjects at runtime. This enables building flexible systems that can extend object models programmatically.
 
@@ -75,8 +75,6 @@ registered.AddProperty("ReadOnlyInfo", typeof(DateTime),
     getValue: s => DateTime.Now,
     setValue: null);
 ```
-
-### Adding Derived Properties
 
 Use `AddDerivedProperty` to create computed properties that automatically track dependencies:
 
@@ -107,8 +105,6 @@ pressureProperty.AddAttribute("MinValue", typeof(decimal),
     setValue: (s, v) => /* store min value */);
 ```
 
-### Adding Derived Attributes
-
 Use `AddDerivedAttribute` to create computed metadata that updates automatically:
 
 ```csharp
@@ -120,9 +116,7 @@ pressureProperty.AddDerivedAttribute("DynamicMax", typeof(decimal),
 
 This pattern is useful for creating adaptive metadata that changes based on the current state of your properties.
 
-## Working with the Registry
-
-### Accessing Registry Data
+## Accessing Registry Subjects and Properties
 
 Every subject provides access to its registry information:
 
@@ -135,32 +129,22 @@ foreach (var prop in registered.Properties)
     Console.WriteLine($"{prop.Name} ({prop.Type.Name})");
 ```
 
-### Finding Property Attributes
+## Enumerate Property Attributes
 
 The registry makes it easy to find metadata associated with properties:
 
 ```csharp
 // Get all attributes for a specific property
-var attributes = registered.GetPropertyAttributes("Pressure");
-foreach (var attribute in attributes)
+var property = registered.TryGetProperty("Pressure");
+foreach (var attribute in property!.Attributes)
 {
     Console.WriteLine($"{attribute.AttributeMetadata.AttributeName}: {attribute.Reference.GetValue()}");
 }
 ```
 
-### Property-First Approach
-
-You can also retrieve a property first, then access its attributes:
-
-```csharp
-var property = registered.Properties.First(p => p.Name == "Pressure");
-var attributes = registered.GetPropertyAttributes(property.Name);
-// Work with property and its attributes...
-```
-
 ## Custom Property Initializers
 
-Implement `ISubjectPropertyInitializer` to automatically add metadata when properties are decorated with specific attributes:
+Implement `ISubjectPropertyInitializer` to automatically add metadata attributes when properties are created:
 
 ```csharp
 public class UnitAttribute : Attribute, ISubjectPropertyInitializer
@@ -180,18 +164,6 @@ public partial decimal Temperature { get; set; }
 ```
 
 This pattern allows you to define reusable metadata behaviors that are automatically applied when subjects are registered.
-
-## Integration with Other Features
-
-The registry serves as a foundation for many advanced scenarios:
-
-**Dynamic UIs**: Build user interfaces that automatically adapt to your object model by discovering properties and their metadata at runtime.
-
-**External System Integration**: Use property attributes to store source paths, validation rules, or other integration metadata that can be discovered and used by other interceptor packages.
-
-**Validation**: Store validation metadata as property attributes that can be processed by validation systems.
-
-**Documentation**: Attach display names, descriptions, and other documentation directly to properties as discoverable metadata.
 
 ## Thread Safety
 
