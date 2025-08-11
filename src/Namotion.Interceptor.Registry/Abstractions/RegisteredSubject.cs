@@ -24,26 +24,35 @@ public record RegisteredSubject
                 return _parents.ToArray();
         }
     }
-
+    
     public IEnumerable<RegisteredSubjectProperty> Properties
     {
         get
         {
             lock (_lock)
-                return _properties.Values;
+                return _properties.Values.Where(p => p is not RegisteredSubjectPropertyAttribute);
+        }
+    }
+    
+    public IEnumerable<RegisteredSubjectProperty> PropertiesAndAttributes
+    {
+        get
+        {
+            lock (_lock)
+                return _properties.Values; //.Where(p => p is not RegisteredSubjectPropertyAttribute);
         }
     }
 
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
-    public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
+    public IEnumerable<RegisteredSubjectPropertyAttribute> GetPropertyAttributes(string propertyName)
     {
         lock (_lock)
         {
             return _properties.Values
-                .Where(p => p.IsAttribute &&
-                            p.AttributeMetadata.PropertyName == propertyName);
+                .OfType<RegisteredSubjectPropertyAttribute>()
+                .Where(p => p.AttributeMetadata.PropertyName == propertyName);
         }
     }
 
@@ -58,8 +67,8 @@ public record RegisteredSubject
         lock (_lock)
         {
             return _properties.Values
-                .FirstOrDefault(p => p.IsAttribute &&
-                                     p.AttributeMetadata.PropertyName == propertyName && 
+                .OfType<RegisteredSubjectPropertyAttribute>()
+                .FirstOrDefault(p => p.AttributeMetadata.PropertyName == propertyName && 
                                      p.AttributeMetadata.AttributeName == attributeName);
         }
     } 
@@ -158,11 +167,8 @@ public record RegisteredSubject
 
     private RegisteredSubjectProperty AddProperty(PropertyReference property, Type type, Attribute[] attributes)
     {
-        var subjectProperty = new RegisteredSubjectProperty(property, attributes)
-        {
-            Parent = this,
-            Type = type,
-        };
+        var subjectProperty = RegisteredSubjectProperty.Create(property, type, attributes);
+        subjectProperty.Parent = this;
         
         lock (_lock)
         {

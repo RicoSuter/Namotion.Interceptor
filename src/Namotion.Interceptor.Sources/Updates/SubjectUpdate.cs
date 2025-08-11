@@ -59,7 +59,7 @@ public record SubjectUpdate
         if (registeredSubject is not null)
         {
             foreach (var property in registeredSubject.Properties
-                .Where(p => p is { HasGetter: true, IsAttribute: false } && propertyFilter?.Invoke(p) != false))
+                .Where(p => p is { HasGetter: true } && propertyFilter?.Invoke(p) != false))
             {
                 var propertyUpdate = SubjectPropertyUpdate.CreateCompleteUpdate(
                     property, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
@@ -104,13 +104,13 @@ public record SubjectUpdate
                 continue;
             }
 
-            if (registeredProperty.IsAttribute)
+            if (registeredProperty is RegisteredSubjectPropertyAttribute attribute)
             {
                 // handle attribute changes
                 var (_, rootPropertyUpdate, rootPropertyName) = GetOrCreateSubjectAttributeUpdate(
-                    registeredProperty.GetAttributedProperty(), 
-                    registeredProperty.AttributeMetadata.AttributeName, 
-                    registeredProperty, change, propertyFilter, transformPropertyUpdate,
+                    attribute.GetAttributedProperty(), 
+                    attribute.AttributeMetadata.AttributeName, 
+                    attribute, change, propertyFilter, transformPropertyUpdate,
                     knownSubjectUpdates);
                 
                 subjectUpdate.Properties[rootPropertyName] = rootPropertyUpdate;
@@ -177,11 +177,11 @@ public record SubjectUpdate
             Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate,
             Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
-        if (property.IsAttribute)
+        if (property is RegisteredSubjectPropertyAttribute attribute)
         {
             var (parentAttributeUpdate, parentPropertyUpdate, parentPropertyName) = GetOrCreateSubjectAttributeUpdate(
-                property.GetAttributedProperty(), 
-                property.AttributeMetadata.AttributeName, 
+                attribute.GetAttributedProperty(), 
+                attribute.AttributeMetadata.AttributeName, 
                 null, null, propertyFilter, transformPropertyUpdate, 
                 knownSubjectUpdates);
             

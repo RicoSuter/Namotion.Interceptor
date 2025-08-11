@@ -15,13 +15,20 @@ public record RegisteredSubjectProperty
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
     private HashSet<SubjectPropertyChild> _children = [];
-    private readonly PropertyAttributeAttribute? _attributeMetadata;
 
-    public RegisteredSubjectProperty(PropertyReference property, IReadOnlyCollection<Attribute> reflectionAttributes)
+    protected RegisteredSubjectProperty(PropertyReference property, Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
     {
         Reference = property;
+        Type = type;
         ReflectionAttributes = reflectionAttributes;
-        _attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
+    }
+
+    public static RegisteredSubjectProperty Create(PropertyReference property, Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
+    {
+        var attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
+        return attributeMetadata is not null ? 
+            new RegisteredSubjectPropertyAttribute(property, type, reflectionAttributes, attributeMetadata) : 
+            new RegisteredSubjectProperty(property, type, reflectionAttributes);
     }
 
     /// <summary>
@@ -42,7 +49,7 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets the type of the property.
     /// </summary>
-    public required Type Type { get; init; }
+    public Type Type { get; private set; }
 
     /// <summary>
     /// Gets a list of all .NET reflection attributes.
@@ -52,19 +59,7 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets the browse name of the property (either the property or attribute name).
     /// </summary>
-    public string BrowseName => IsAttribute ? AttributeMetadata.AttributeName : Name;
-    
-    /// <summary>
-    /// Specifies whether the property is an attribute property (property attached to another property).
-    /// </summary>
-    public bool IsAttribute => _attributeMetadata is not null;
-
-    /// <summary>
-    /// Gets the attribute with information about this attribute property.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">Thrown when this property is not an attribute.</exception>
-    public PropertyAttributeAttribute AttributeMetadata => _attributeMetadata 
-        ?? throw new InvalidOperationException("The property is not an attribute.");
+    public virtual string BrowseName => Name;
     
     /// <summary>
     /// Checks whether this property has child subjects, which can be either
@@ -214,7 +209,7 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
-    public IEnumerable<RegisteredSubjectProperty> Attributes
+    public IEnumerable<RegisteredSubjectPropertyAttribute> Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Parent.GetPropertyAttributes(Name);
@@ -230,19 +225,6 @@ public record RegisteredSubjectProperty
     {
         return Parent.TryGetPropertyAttribute(Name, attributeName);
     } 
-
-    /// <summary>
-    /// Gets the attribute property this property is attached to.
-    /// </summary>
-    /// <returns>The property.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when this property is not an attribute.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the property this attribute is attached could not be found.</exception>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public RegisteredSubjectProperty GetAttributedProperty()
-    {
-        return Parent.TryGetProperty(AttributeMetadata.PropertyName) ??
-            throw new InvalidOperationException($"The attributed property '{AttributeMetadata.PropertyName}' could not be found on the parent subject.");
-    }
 
     public static implicit operator PropertyReference(RegisteredSubjectProperty property)
     {
