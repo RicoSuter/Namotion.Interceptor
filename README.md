@@ -10,7 +10,7 @@ In addition to property tracking, Namotion.Interceptor offers advanced features 
 
 ![Feature Map](./features.png)
 
-## Change Tracking Sample
+## Change tracking sample
 
 First, define a proxied class:
 
@@ -58,7 +58,7 @@ person.FirstName = "Jane";
 // Property 'FullName' changed from 'John Doe' to 'Jane Doe'.
 ```
 
-## Subject Attach and Detach Tracking Sample
+## Subject attach and detach tracking sample
 
 Implement a class with properties that reference other proxied objects:
 
@@ -116,7 +116,7 @@ public class LogPropertyChangesHandler : ILifecycleHandler
 }
 ```
 
-## More Samples
+## More samples
 
 For more samples, check out the "Samples" directory in the Visual Studio solution.
 
@@ -247,6 +247,7 @@ context.GetPropertyChangedObservable().Subscribe(change => {
 - `WithReadPropertyRecorder()` - Record property read operations
 
 ### Namotion.Interceptor.Validation
+
 Validates subjects and properties using custom validation logic or data annotations.
 
 ```csharp
