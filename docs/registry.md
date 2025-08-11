@@ -18,7 +18,50 @@ var car = new Car(context);
 
 The registry integrates with other interceptor features and automatically includes context inheritance to ensure child subjects participate in the registry.
 
-## Define attributes
+## Accessing registry subjects and properties
+
+Every subject provides access to its registry information:
+
+```csharp
+var tire = new Tire(context);
+var registeredTire = tire.TryGetRegisteredSubject();
+
+foreach (var prop in registeredTire.Properties)
+{
+    Console.WriteLine($"{prop.Name} ({prop.Type.Name})");
+}
+```
+
+## Enumerate property attributes
+
+The registry makes it easy to find metadata associated with properties:
+
+```csharp
+// Get all attributes for a specific property
+var property = registered.TryGetProperty("Pressure");
+foreach (var attribute in property!.Attributes)
+{
+    Console.WriteLine($"{attribute.AttributeMetadata.AttributeName}: {attribute.Reference.GetValue()}");
+}
+```
+
+
+## Thread safety mutations
+
+The registry provides thread-safe access to all data and includes a synchronization mechanism for updates:
+
+```csharp
+var registry = context.GetRequiredService<ISubjectRegistry>();
+registry.ExecuteSubjectUpdate(() => {
+    // All updates here are synchronized
+    tire.Pressure = 2.5m;
+    tire.Pressure_Minimum = 2.0m;
+});
+```
+
+This ensures consistent state when multiple threads are modifying subjects or when the registry needs to update its internal tracking structures.
+
+## Define attributes using properties
 
 Property attributes solve the common problem of where to store metadata about your properties. Instead of external configuration or attributes that disappear at runtime, you can define metadata as actual properties:
 
@@ -105,33 +148,6 @@ pressureProperty.AddDerivedAttribute("DynamicMax", typeof(decimal),
 
 This pattern is useful for creating adaptive metadata that changes based on the current state of your properties.
 
-## Accessing registry subjects and properties
-
-Every subject provides access to its registry information:
-
-```csharp
-var tire = new Tire(context);
-var registeredTire = tire.TryGetRegisteredSubject();
-
-foreach (var prop in registeredTire.Properties)
-{
-    Console.WriteLine($"{prop.Name} ({prop.Type.Name})");
-}
-```
-
-## Enumerate property attributes
-
-The registry makes it easy to find metadata associated with properties:
-
-```csharp
-// Get all attributes for a specific property
-var property = registered.TryGetProperty("Pressure");
-foreach (var attribute in property!.Attributes)
-{
-    Console.WriteLine($"{attribute.AttributeMetadata.AttributeName}: {attribute.Reference.GetValue()}");
-}
-```
-
 ## Custom property initializers
 
 Implement `ISubjectPropertyInitializer` in a .NET attribute to automatically add metadata attributes when properties are created:
@@ -155,18 +171,3 @@ public partial decimal Temperature { get; set; }
 ```
 
 This pattern allows you to define reusable metadata behaviors that are automatically applied when subjects are registered.
-
-## Thread safety mutations
-
-The registry provides thread-safe access to all data and includes a synchronization mechanism for updates:
-
-```csharp
-var registry = context.GetRequiredService<ISubjectRegistry>();
-registry.ExecuteSubjectUpdate(() => {
-    // All updates here are synchronized
-    tire.Pressure = 2.5m;
-    tire.Pressure_Minimum = 2.0m;
-});
-```
-
-This ensures consistent state when multiple threads are modifying subjects or when the registry needs to update its internal tracking structures.
