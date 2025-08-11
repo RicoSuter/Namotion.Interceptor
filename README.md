@@ -123,6 +123,7 @@ For more samples, check out the "Samples" directory in the Visual Studio solutio
 ## Projects
 
 ### Namotion.Interceptor
+
 Core library for property and method interception with source generation support. Provides the fundamental building blocks for creating intercepted objects.
 
 **Key Components:**
@@ -138,6 +139,7 @@ Core library for property and method interception with source generation support
 - **`SubjectPropertyMetadata`** - Property descriptor containing type information, access methods, and interception flags that tells the system how to work with each property.
 
 ### Namotion.Interceptor.Generator
+
 Source generator that creates the interception logic for classes marked with `[InterceptorSubject]`. Automatically included when you install the main `Namotion.Interceptor` package.
 
 **What it generates:**
@@ -169,15 +171,18 @@ public partial class Car : IInterceptorSubject
 ```
 
 **Key Features:**
+
 - **Zero Runtime Reflection** - All interception logic is generated at compile time
 - **Preserves IntelliSense** - Full IDE support for your partial properties
 - **Metadata Generation** - Creates property metadata for the registry system
 - **Constructor Injection** - Generates constructors that accept `IInterceptorSubjectContext`
 
 **Build Integration:**
+
 The generator runs during compilation and integrates with MSBuild, supporting incremental builds and design-time builds for optimal IDE experience.
 
 ### Namotion.Interceptor.Hosting
+
 Automatically start and stop subjects which implement `IHostedService` based on object graph attachment and detachment, with support for attaching and detaching hosted services to subjects.
 
 Attach a hosted service to a subject:
@@ -193,6 +198,7 @@ person.AttachHostedService(hostedService);
 ```
 
 **Methods:**
+
 - `WithHostedServices()` → `Tracking.WithLifecycle()`
 
 ### [Namotion.Interceptor.Registry](docs/registry.md)
@@ -208,12 +214,15 @@ var registered = subject.TryGetRegisteredSubject();
 ```
 
 **Methods:**
+
 - `WithRegistry()` → `Tracking.WithContextInheritance()`
 
 ### [Namotion.Interceptor.Sources](docs/sources.md)
+
 Enables binding subject properties to external data sources like MQTT, OPC UA, or custom providers.
 
 ### Namotion.Interceptor.Tracking
+
 Provides comprehensive change tracking for subjects, including property changes, derived properties, and subject lifecycle events.
 
 ```csharp
@@ -227,6 +236,7 @@ context.GetPropertyChangedObservable().Subscribe(change => {
 ```
 
 **Methods:**
+
 - `WithLifecycle()` - Subject attach and detach callbacks
 - `WithFullPropertyTracking()` → `WithEqualityCheck()`, `WithContextInheritance()`, `WithDerivedPropertyChangeDetection()`, `WithPropertyChangedObservable()`
 - `WithPropertyChangedObservable()` - Observable property change notifications
@@ -246,6 +256,7 @@ var context = InterceptorSubjectContext
 ```
 
 **Methods:**
+
 - `WithPropertyValidation()` - Custom property validation
 - `WithDataAnnotationValidation()` → `WithPropertyValidation()` - Automatic data annotation validation
 
