@@ -19,7 +19,7 @@ public record RegisteredSubjectPropertyAttribute : RegisteredSubjectProperty
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown when this property is not an attribute.</exception>
     public PropertyAttributeAttribute AttributeMetadata => _attributeMetadata 
-                                                           ?? throw new InvalidOperationException("The property is not an attribute.");
+        ?? throw new InvalidOperationException("The property is not an attribute.");
     
     public override string BrowseName => AttributeMetadata.AttributeName;
     
