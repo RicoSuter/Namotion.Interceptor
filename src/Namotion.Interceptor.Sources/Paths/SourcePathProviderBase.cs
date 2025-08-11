@@ -42,10 +42,7 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
     /// <inheritdoc />
     public RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string segment)
     {
-        return property.Parent.Properties
-            .Where(p => p.IsAttribute)
-            .SingleOrDefault(p => p.AttributeMetadata.PropertyName == property.Name && 
-                                  p.AttributeMetadata.AttributeName == segment);
+        return property.Parent.TryGetPropertyAttribute(property.Name, segment);
     }
     
     /// <inheritdoc />
@@ -54,7 +51,7 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
         // TODO(1, perf): Improve performance by caching the property name
 
         return subject
-            .Properties
+            .PropertiesAndAttributes
             .SingleOrDefault(p => TryGetPropertyName(p) == segment);
     }
 }

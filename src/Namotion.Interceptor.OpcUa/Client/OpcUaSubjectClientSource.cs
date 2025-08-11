@@ -189,7 +189,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is not null && _session is not null)
         {
-            foreach (var property in registeredSubject.Properties)
+            foreach (var property in registeredSubject.PropertiesAndAttributes)
             {
                 var propertyName = GetPropertyName(property);
                 if (propertyName is not null)
@@ -314,9 +314,9 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     
     private string? GetPropertyName(RegisteredSubjectProperty property)
     {
-        if (property.IsAttribute)
+        if (property is RegisteredSubjectPropertyAttribute attribute)
         {
-            var attributedProperty = property.GetAttributedProperty();
+            var attributedProperty = attribute.GetAttributedProperty();
             var propertyName = _sourcePathProvider.TryGetPropertyName(property);
             if (propertyName is null)
                 return null;

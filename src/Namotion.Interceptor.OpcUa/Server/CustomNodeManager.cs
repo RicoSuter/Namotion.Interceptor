@@ -84,7 +84,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private void CreateObjectNode(NodeId parentNodeId, RegisteredSubject subject, string prefix)
     {
-        foreach (var property in subject.Properties)
+        foreach (var property in subject.PropertiesAndAttributes)
         {
             var propertyName = GetPropertyName(property);
             if (propertyName is not null)
@@ -115,9 +115,9 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private string? GetPropertyName(RegisteredSubjectProperty property)
     {
-        if (property.IsAttribute)
+        if (property is RegisteredSubjectPropertyAttribute attribute)
         {
-            var attributedProperty = property.GetAttributedProperty();
+            var attributedProperty = attribute.GetAttributedProperty();
             var propertyName = _source.SourcePathProvider.TryGetPropertyName(property);
             if (propertyName is null)
                 return null;
