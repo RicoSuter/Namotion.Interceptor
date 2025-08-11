@@ -1,20 +1,8 @@
 # Registry
 
-The Registry package provides a powerful tracking system that automatically discovers and manages interceptor subjects and their properties. It enables advanced features like property attributes (metadata attached to properties), dynamic property discovery, and hierarchical subject relationships.
+The Registry package provides a powerful tracking system that automatically discovers and manages interceptor subjects and their properties. It enables advanced features like property attributes (metadata attached to properties), dynamic property discovery, and hierarchical subject relationships. Unlike reflection-based approaches, the registry maintains full type safety while providing dynamic capabilities.
 
 ![Registry Domain](registry-domain.png)
-
-## Core Concepts
-
-The registry automatically discovers and tracks every subject in your interceptor context as they are created and modified. It builds a live, comprehensive map of your entire object graph—including all properties, their types, relationships, and metadata. This automatic tracking enables several powerful patterns:
-
-**Property Attributes**: Special properties that attach metadata to other properties. Instead of storing metadata in separate dictionaries or configurations, you can define it directly as properties on your subjects.
-
-**Dynamic Discovery**: The registry provides runtime access to all properties, their types, relationships, and metadata. This enables building dynamic UIs, APIs, or validation systems that adapt to your object model.
-
-**Hierarchical Tracking**: The registry understands parent-child relationships between subjects, allowing you to navigate and query the entire object graph programmatically.
-
-**Type Safety**: Unlike reflection-based approaches, the registry maintains full type safety while providing dynamic capabilities.
 
 ## Setup
 
@@ -30,7 +18,7 @@ var car = new Car(context);
 
 The registry integrates with other interceptor features and automatically includes context inheritance to ensure child subjects participate in the registry.
 
-## Property Attributes Pattern
+## Define attributes
 
 Property attributes solve the common problem of where to store metadata about your properties. Instead of external configuration or attributes that disappear at runtime, you can define metadata as actual properties:
 
@@ -49,16 +37,17 @@ public partial class Tire
 ```
 
 This pattern provides several benefits:
+
 - **Type Safety**: Metadata is strongly typed
 - **Trackable**: Changes to metadata are tracked like any other property
 - **Bindable**: Metadata can be bound to external sources (MQTT, OPC UA, etc.)
 - **Discoverable**: Metadata is accessible at runtime through the registry
 
-## Dynamic Property and Attribute Creation
+## Dynamic property and attribute creation
 
 The registry allows you to dynamically add properties and attributes to registered subjects at runtime. This enables building flexible systems that can extend object models programmatically.
 
-### Adding Properties
+### Add properties
 
 Use `AddProperty` to create new trackable properties on a subject:
 
@@ -87,7 +76,7 @@ registered.AddDerivedProperty("Status", typeof(string),
 
 Derived properties automatically participate in change tracking and will update when their dependencies change.
 
-### Adding Property Attributes
+### Add attributes
 
 Use `AddAttribute` on any property to attach metadata dynamically:
 
@@ -116,20 +105,21 @@ pressureProperty.AddDerivedAttribute("DynamicMax", typeof(decimal),
 
 This pattern is useful for creating adaptive metadata that changes based on the current state of your properties.
 
-## Accessing Registry Subjects and Properties
+## Accessing registry subjects and properties
 
 Every subject provides access to its registry information:
 
 ```csharp
 var tire = new Tire(context);
-var registered = tire.TryGetRegisteredSubject();
+var registeredTire = tire.TryGetRegisteredSubject();
 
-// Discover all properties
-foreach (var prop in registered.Properties)
+foreach (var prop in registeredTire.Properties)
+{
     Console.WriteLine($"{prop.Name} ({prop.Type.Name})");
+}
 ```
 
-## Enumerate Property Attributes
+## Enumerate property attributes
 
 The registry makes it easy to find metadata associated with properties:
 
@@ -142,14 +132,15 @@ foreach (var attribute in property!.Attributes)
 }
 ```
 
-## Custom Property Initializers
+## Custom property initializers
 
-Implement `ISubjectPropertyInitializer` to automatically add metadata attributes when properties are created:
+Implement `ISubjectPropertyInitializer` in a .NET attribute to automatically add metadata attributes when properties are created:
 
 ```csharp
 public class UnitAttribute : Attribute, ISubjectPropertyInitializer
 {
     private readonly string _unit;
+
     public UnitAttribute(string unit) => _unit = unit;
 
     public void InitializeProperty(RegisteredSubjectProperty property)
@@ -165,7 +156,7 @@ public partial decimal Temperature { get; set; }
 
 This pattern allows you to define reusable metadata behaviors that are automatically applied when subjects are registered.
 
-## Thread Safety
+## Thread safety mutations
 
 The registry provides thread-safe access to all data and includes a synchronization mechanism for updates:
 

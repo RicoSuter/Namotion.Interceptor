@@ -2,18 +2,6 @@
 
 The Sources package enables binding subject properties to external data sources like MQTT, OPC UA, or custom providers. It provides a powerful abstraction layer that automatically synchronizes property values with external systems while maintaining full type safety and change tracking.
 
-## Core Concepts
-
-The Sources system works by establishing bidirectional connections between your interceptor subjects and external data sources. This enables scenarios like:
-
-**Real-time Data Binding**: Automatically sync property values with live data from IoT devices, databases, or APIs without manual polling or event handling.
-
-**Source Path Mapping**: Use attributes to declaratively map properties to specific paths in external systems (MQTT topics, OPC UA nodes, REST endpoints, etc.).
-
-**Automatic Synchronization**: Changes in external sources automatically update your subjects, and changes to your subjects can be pushed back to external systems.
-
-**Multi-Source Support**: A single property can be bound to multiple sources simultaneously, enabling data replication and failover scenarios.
-
 ## Setup
 
 Enable sources in your interceptor context:
@@ -27,7 +15,7 @@ var context = InterceptorSubjectContext
 
 The Sources package builds on the Registry to discover properties and their source path mappings.
 
-## Source Path Attributes
+## Source path attributes
 
 Use `[SourcePath]` attributes to map properties to external data sources:
 
@@ -51,9 +39,9 @@ public partial class Sensor
 
 Multiple `[SourcePath]` attributes allow the same property to be synchronized with different external systems using their respective naming conventions.
 
-## Built-in Source Providers
+## Built-in source implementations
 
-### MQTT Integration
+### MQTT integration
 
 Bind subjects to MQTT topics for IoT scenarios:
 
@@ -65,7 +53,7 @@ builder.Services.AddMqttSubjectClient("mqtt://localhost:1883", "mqtt");
 
 Properties with `[SourcePath("mqtt", "topic")]` are automatically synchronized with MQTT messages.
 
-### OPC UA Integration
+### OPC UA integration
 
 Connect to industrial automation systems:
 
@@ -77,7 +65,7 @@ builder.Services.AddOpcUaSubjectClient<Sensor>("opc.tcp://localhost:4840", "opc"
 
 Properties with `[SourcePath("opc", "NodeName")]` map to OPC UA nodes in the address space.
 
-### GraphQL Integration
+### GraphQL integration
 
 Enable real-time subscriptions for web applications:
 
@@ -90,7 +78,7 @@ builder.Services
 
 Properties become queryable and subscribable through GraphQL, with automatic change notifications.
 
-## Custom Source Providers
+## Custom source implementations
 
 Implement `ISubjectSource` to create custom data source integrations:
 
@@ -127,11 +115,11 @@ Register your custom source:
 builder.Services.AddSingleton<ISubjectSource, DatabaseSource>();
 ```
 
-## Source Path Providers
+## Source path providers
 
 Source path providers determine how property paths are resolved for different source types:
 
 Built-in providers include:
+
 - **DefaultSourcePathProvider** - Uses paths exactly as specified in attributes
 - **JsonCamelCaseSourcePathProvider** - Converts property names to camelCase for JSON APIs
-
