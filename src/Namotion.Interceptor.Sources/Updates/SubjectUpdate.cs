@@ -59,7 +59,8 @@ public record SubjectUpdate
         if (registeredSubject is not null)
         {
             foreach (var property in registeredSubject.Properties
-                .Where(p => p is { HasGetter: true } && propertyFilter?.Invoke(p) != false))
+                .Where(p => p is not RegisteredSubjectAttribute and { HasGetter: true } && 
+                            propertyFilter?.Invoke(p) != false))
             {
                 var propertyUpdate = SubjectPropertyUpdate.CreateCompleteUpdate(
                     property, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
