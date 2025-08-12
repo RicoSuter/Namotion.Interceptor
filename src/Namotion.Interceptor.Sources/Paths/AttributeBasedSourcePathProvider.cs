@@ -69,7 +69,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
 
     private string GetAttributeBasedSourcePropertyPath(RegisteredSubjectProperty property)
     {
-        if (property is RegisteredSubjectPropertyAttribute attribute)
+        if (property is RegisteredSubjectAttribute attribute)
         {
             var attributedProperty = attribute.GetAttributedProperty();
             return GetAttributeBasedSourcePropertyPath(attributedProperty) + _attributePathDelimiter + TryGetPropertyName(property);

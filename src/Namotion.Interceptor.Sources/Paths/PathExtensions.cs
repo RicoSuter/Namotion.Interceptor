@@ -212,7 +212,7 @@ public static class PathExtensions
                 var registeredSubject = currentSubject.TryGetRegisteredSubject()
                     ?? throw new InvalidOperationException("Registered subject not found.");
 
-                var registeredProperty = parentProperty is RegisteredSubjectPropertyAttribute
+                var registeredProperty = parentProperty is RegisteredSubjectAttribute
                     ? sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment)
                     : sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
 

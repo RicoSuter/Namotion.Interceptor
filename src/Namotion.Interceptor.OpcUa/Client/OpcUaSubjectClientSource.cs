@@ -314,7 +314,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     
     private string? GetPropertyName(RegisteredSubjectProperty property)
     {
-        if (property is RegisteredSubjectPropertyAttribute attribute)
+        if (property is RegisteredSubjectAttribute attribute)
         {
             var attributedProperty = attribute.GetAttributedProperty();
             var propertyName = _sourcePathProvider.TryGetPropertyName(property);

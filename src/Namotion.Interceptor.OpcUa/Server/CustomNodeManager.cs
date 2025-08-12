@@ -115,7 +115,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private string? GetPropertyName(RegisteredSubjectProperty property)
     {
-        if (property is RegisteredSubjectPropertyAttribute attribute)
+        if (property is RegisteredSubjectAttribute attribute)
         {
             var attributedProperty = attribute.GetAttributedProperty();
             var propertyName = _source.SourcePathProvider.TryGetPropertyName(property);
