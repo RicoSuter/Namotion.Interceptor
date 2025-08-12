@@ -96,10 +96,8 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     {
         var registeredSubject = new RegisteredSubject(subject, subject
             .Properties
-            .Select(p => new RegisteredSubjectProperty(new PropertyReference(subject, p.Key), p.Value.Attributes)
-            {
-                Type = p.Value.Type,
-            }));
+            .Select(p => RegisteredSubjectProperty.Create(
+                new PropertyReference(subject, p.Key), p.Value.Type, p.Value.Attributes)));
 
         _knownSubjects[subject] = registeredSubject;
         return registeredSubject;
@@ -117,7 +115,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                     return;
                 }
 
-                foreach (var property in registeredSubject.Properties)
+                foreach (var property in registeredSubject.PropertiesAndAttributes)
                 {
                     if (property.Reference.Metadata.IsDynamic)
                     {
