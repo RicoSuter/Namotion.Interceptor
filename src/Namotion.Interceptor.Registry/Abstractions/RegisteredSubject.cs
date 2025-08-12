@@ -29,8 +29,8 @@ public record RegisteredSubject
     {
         get
         {
-            lock (_lock)
-                return _properties.Values.Where(p => p is not RegisteredSubjectPropertyAttribute);
+            lock (_lock) // TODO(perf): Avoid linq?
+                return _properties.Values.Where(p => p is not RegisteredSubjectAttribute);
         }
     }
     
@@ -39,19 +39,19 @@ public record RegisteredSubject
         get
         {
             lock (_lock)
-                return _properties.Values; //.Where(p => p is not RegisteredSubjectPropertyAttribute);
+                return _properties.Values;
         }
     }
 
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
-    public IEnumerable<RegisteredSubjectPropertyAttribute> GetPropertyAttributes(string propertyName)
+    public IEnumerable<RegisteredSubjectAttribute> GetPropertyAttributes(string propertyName)
     {
         lock (_lock)
         {
             return _properties.Values
-                .OfType<RegisteredSubjectPropertyAttribute>()
+                .OfType<RegisteredSubjectAttribute>()
                 .Where(p => p.AttributeMetadata.PropertyName == propertyName);
         }
     }
@@ -67,7 +67,7 @@ public record RegisteredSubject
         lock (_lock)
         {
             return _properties.Values
-                .OfType<RegisteredSubjectPropertyAttribute>()
+                .OfType<RegisteredSubjectAttribute>()
                 .FirstOrDefault(p => p.AttributeMetadata.PropertyName == propertyName && 
                                      p.AttributeMetadata.AttributeName == attributeName);
         }

@@ -3,11 +3,11 @@ using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
-public record RegisteredSubjectPropertyAttribute : RegisteredSubjectProperty
+public record RegisteredSubjectAttribute : RegisteredSubjectProperty
 {
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
-    internal RegisteredSubjectPropertyAttribute(
+    internal RegisteredSubjectAttribute(
         PropertyReference property, Type type, IReadOnlyCollection<Attribute> reflectionAttributes, PropertyAttributeAttribute attributeMetadata) 
         : base(property, type, reflectionAttributes)
     {

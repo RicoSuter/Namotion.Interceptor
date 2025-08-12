@@ -104,7 +104,7 @@ public record SubjectUpdate
                 continue;
             }
 
-            if (registeredProperty is RegisteredSubjectPropertyAttribute attribute)
+            if (registeredProperty is RegisteredSubjectAttribute attribute)
             {
                 // handle attribute changes
                 var (_, rootPropertyUpdate, rootPropertyName) = GetOrCreateSubjectAttributeUpdate(
@@ -177,7 +177,7 @@ public record SubjectUpdate
             Func<RegisteredSubjectProperty, SubjectPropertyUpdate, SubjectPropertyUpdate>? transformPropertyUpdate,
             Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
-        if (property is RegisteredSubjectPropertyAttribute attribute)
+        if (property is RegisteredSubjectAttribute attribute)
         {
             var (parentAttributeUpdate, parentPropertyUpdate, parentPropertyName) = GetOrCreateSubjectAttributeUpdate(
                 attribute.GetAttributedProperty(), 
