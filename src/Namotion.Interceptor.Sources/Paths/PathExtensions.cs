@@ -32,9 +32,9 @@ public static class PathExtensions
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
     /// <returns>The result specifying whether the path could be found and the value has been applied.</returns>
-    public static bool UpdatePropertyValueFromSourcePath(this IInterceptorSubject subject, 
+    public static bool UpdatePropertyValueFromSourcePath(this IInterceptorSubject subject,
         string sourcePath, DateTimeOffset timestamp,
-        Func<RegisteredSubjectProperty, string, object?> getPropertyValue, 
+        Func<RegisteredSubjectProperty, string, object?> getPropertyValue,
         ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
@@ -77,7 +77,7 @@ public static class PathExtensions
         IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Action<RegisteredSubjectProperty, string> visitProperty,
         ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
-        return SubjectMutationContext.ApplyChangesWithTimestamp(timestamp, 
+        return SubjectMutationContext.ApplyChangesWithTimestamp(timestamp,
             () => VisitPropertiesFromSourcePaths(subject, sourcePaths, visitProperty, sourcePathProvider, subjectFactory));
     }
 
@@ -106,7 +106,7 @@ public static class PathExtensions
             .GetPropertiesInPath(rootSubject)
             .ToArray();
 
-        if (propertiesInPath.Length > 0 && 
+        if (propertiesInPath.Length > 0 &&
             sourcePathProvider.IsPropertyIncluded(propertiesInPath.Last().property))
         {
             return sourcePathProvider.GetPropertyFullPath(propertiesInPath);
@@ -174,7 +174,7 @@ public static class PathExtensions
         {
             property = pathWithProperty.Value.Property;
             yield return (property ?? throw new InvalidOperationException("Property is null."), pathWithProperty.Value.Index);
-            pathWithProperty = property?.Parent?.Subject != rootSubject 
+            pathWithProperty = property?.Parent?.Subject != rootSubject
                 ? property?.Parent?.Parents?.FirstOrDefault()
                 : null;
         } while (pathWithProperty?.Property is not null);
@@ -189,90 +189,185 @@ public static class PathExtensions
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="subjectFactory">The subject factory.</param>
     /// <returns>The list of visited paths.</returns>
-    public static IReadOnlyCollection<string> VisitPropertiesFromSourcePaths(this IInterceptorSubject subject, 
-        IEnumerable<string> sourcePaths, Action<RegisteredSubjectProperty, string> visitProperty, 
+    public static IReadOnlyCollection<string> VisitPropertiesFromSourcePaths(this IInterceptorSubject subject,
+        IEnumerable<string> sourcePaths, Action<RegisteredSubjectProperty, string> visitProperty,
         ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
-        // TODO(perf): Optimize for multiple paths (group by)
-
-        var foundPaths = new List<string>();
-        foreach (var sourcePath in sourcePaths)
+        var visitedPaths = new List<string>();
+        foreach (var (path, property) in GetPropertiesFromSourcePaths(subject, sourcePaths, sourcePathProvider, subjectFactory))
         {
-            var currentSubject = subject;
-            var segments = sourcePathProvider
-                .ParsePathSegments(sourcePath)
-                .ToArray();
+            visitProperty(property, path);
+            visitedPaths.Add(path);
+        }
 
-            RegisteredSubjectProperty? parentProperty = null!;
-            for (var i = 0; i < segments.Length; i++)
+        return visitedPaths.AsReadOnly();
+    }
+
+    public static RegisteredSubjectProperty? TryGetPropertyFromSourcePath(
+        this IInterceptorSubject subject, string sourcePath, ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
+    {
+        var currentSubject = subject;
+        var segments = sourcePathProvider
+            .ParsePathSegments(sourcePath)
+            .ToArray();
+
+        RegisteredSubjectProperty? parentProperty = null;
+        for (var i = 0; i < segments.Length; i++)
+        {
+            var (segment, index) = segments[i];
+            var isLastSegment = i == segments.Length - 1;
+
+            var registeredSubject = currentSubject.TryGetRegisteredSubject();
+            if (registeredSubject is null)
             {
-                var (segment, index) = segments[i];
-                var isLastSegment = i == segments.Length - 1;
+                return null;
+            }
 
-                var registeredSubject = currentSubject.TryGetRegisteredSubject()
-                    ?? throw new InvalidOperationException("Registered subject not found.");
+            var registeredProperty = parentProperty?.IsAttribute == true
+                ? sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment)
+                : sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
+
+            if (registeredProperty is null ||
+                sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
+            {
+                return null;
+            }
+
+            if (isLastSegment)
+            {
+                if (index is null)
+                {
+                    return registeredProperty;
+                }
+            }
+            else
+            {
+                currentSubject = TryGetNextSubject(registeredProperty, index, subjectFactory);
+            }
+
+            if (currentSubject is null)
+            {
+                return null;
+            }
+
+            parentProperty = registeredProperty;
+        }
+
+        return null;
+    }
+
+    public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetPropertiesFromSourcePaths(
+        this IInterceptorSubject subject,
+        IEnumerable<string> sourcePaths,
+        ISourcePathProvider sourcePathProvider,
+        ISubjectFactory? subjectFactory = null)
+    {
+        var rootNode = new PathNode();
+        foreach (var sourcePath in sourcePaths.Distinct())
+        {
+            var currentNode = rootNode;
+            var segments = sourcePathProvider.ParsePathSegments(sourcePath);
+            foreach (var segment in segments)
+            {
+                if (!currentNode.Children.TryGetValue(segment, out var childNode))
+                {
+                    childNode = new PathNode();
+                    currentNode.Children[segment] = childNode;
+                }
+
+                currentNode = childNode;
+            }
+
+            currentNode.FullPath = sourcePath;
+        }
+
+        var stack = new Stack<(IInterceptorSubject Subject, PathNode Node, RegisteredSubjectProperty? ParentProperty)>();
+        stack.Push((subject, rootNode, null));
+
+        while (stack.Count > 0)
+        {
+            var (currentSubject, pathNode, parentProperty) = stack.Pop();
+            var registeredSubject = currentSubject.TryGetRegisteredSubject();
+            if (registeredSubject is null)
+            {
+                continue;
+            }
+
+            foreach (var childPathNode in pathNode.Children)
+            {
+                var (segment, index) = childPathNode.Key;
+                var nextPathNode = childPathNode.Value;
 
                 var registeredProperty = parentProperty?.IsAttribute == true
                     ? sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment)
                     : sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
 
-                if (registeredProperty is null ||
-                    sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
+                if (registeredProperty is null || sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
                 {
-                    break;
+                    continue;
                 }
 
-                if (!isLastSegment)
+                if (nextPathNode.FullPath is not null && index is null)
                 {
-                    if (index is not null)
+                    yield return (nextPathNode.FullPath, registeredProperty);
+                }
+
+                if (nextPathNode.Children.Count > 0)
+                {
+                    var childSubject = TryGetNextSubject(registeredProperty, index, subjectFactory);
+                    if (childSubject is not null)
                     {
-                        // handle array or dictionary item update
-                        currentSubject = registeredProperty
-                            .Children
-                            .SingleOrDefault(c => Equals(c.Index, index))
-                            .Subject;
-
-                        if (currentSubject is null && subjectFactory is not null)
-                        {
-                            // create missing item collection or item dictionary
-                            
-                            throw new InvalidOperationException("Missing collection items cannot be created.");
-                            // TODO: Implement collection or dictionary creation from paths (need to know all paths).
-
-                            // currentSubject = subjectFactory.CreateSubject(registeredProperty, null);
-                            // var collection  = subjectFactory.CreateSubjectCollection(registeredProperty, currentSubject);
-                            // registeredProperty.SetValue(collection);
-                        }
-                    }
-                    else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
-                    {
-                        // handle item update
-                        currentSubject = registeredProperty.Children.SingleOrDefault().Subject;
-
-                        if (currentSubject is null && subjectFactory is not null)
-                        {
-                            // create missing item
-                            currentSubject = subjectFactory.CreateSubject(registeredProperty, null);
-                            registeredProperty.SetValue(currentSubject);
-                        }
+                        stack.Push((childSubject, nextPathNode, registeredProperty));
                     }
                 }
-                else if (index is null) // paths to collection items are ignored, e.g. "foo/bar[0]"
-                {
-                    visitProperty(registeredProperty, sourcePath);
-                    foundPaths.Add(sourcePath);
-                    break;
-                }
-
-                if (currentSubject is null)
-                {
-                    break;
-                }
-
-                parentProperty = registeredProperty;
             }
         }
+    }
 
-        return foundPaths.AsReadOnly();
+    private static IInterceptorSubject? TryGetNextSubject(RegisteredSubjectProperty registeredProperty, object? index, ISubjectFactory? subjectFactory)
+    {
+        IInterceptorSubject? nextSubject;
+        if (index is not null)
+        {
+            nextSubject = registeredProperty
+                .Children
+                .SingleOrDefault(c => Equals(c.Index, index))
+                .Subject;
+
+            if (nextSubject is null && subjectFactory is not null)
+            {
+                // create missing item collection or item dictionary
+                            
+                throw new InvalidOperationException("Missing collection items cannot be created.");
+                // TODO: Implement collection or dictionary creation from paths (need to know all paths).
+
+                // currentSubject = subjectFactory.CreateSubject(registeredProperty, null);
+                // var collection  = subjectFactory.CreateSubjectCollection(registeredProperty, currentSubject);
+                // registeredProperty.SetValue(collection);
+            }
+        }
+        else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
+        {
+            nextSubject = registeredProperty.Children.SingleOrDefault().Subject;
+
+            if (nextSubject is null && subjectFactory is not null)
+            {
+                nextSubject = subjectFactory.CreateSubject(registeredProperty, null);
+                registeredProperty.SetValue(nextSubject);
+            }
+        }
+        else
+        {
+            nextSubject = null;
+        }
+
+        return nextSubject;
+    }
+
+    private class PathNode
+    {
+        public string? FullPath { get; set; }
+
+        public Dictionary<(string Segment, object? Index), PathNode> Children { get; } = new();
     }
 }
