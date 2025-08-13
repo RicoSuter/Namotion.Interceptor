@@ -133,4 +133,37 @@ public class PathExtensionsTests
         // Assert
         Assert.Equal("Children[2].FirstName", path);
     }
+    
+    [Theory]
+    [InlineData("FirstName", "FirstName")]
+    [InlineData("Children", "Children")]
+    [InlineData("Children[0].FirstName", "FirstName")]
+    [InlineData("Children[2].FirstName", "FirstName")]
+    public void WhenTryGetPropertyFromSourcePath_ReturnsResolvedProperty(string fullPath, string propertyName)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var father = new Person { FirstName = "Father" };
+        var mother = new Person { FirstName = "Mother" };
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
+        var child3 = new Person { FirstName = "Child3" };
+
+        var person = new Person(context)
+        {
+            FirstName = "Child",
+            Mother = mother,
+            Father = father,
+            Children = [child1, child2, child3]
+        };
+
+        // Act
+        var property = person.TryGetPropertyFromSourcePath(fullPath, DefaultSourcePathProvider.Instance);
+
+        // Assert
+        Assert.Equal(propertyName, property!.Name);
+    }
 }
