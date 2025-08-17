@@ -196,10 +196,14 @@ public static class PathExtensions
         ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
         var visitedPaths = new List<string>();
-        foreach (var (path, property, index) in GetPropertiesFromSourcePaths(subject, sourcePaths, sourcePathProvider, subjectFactory))
+        foreach (var (path, property, index) in 
+            GetPropertiesFromSourcePaths(subject, sourcePaths, sourcePathProvider, subjectFactory))
         {
-            visitProperty(property, path, index);
-            visitedPaths.Add(path);
+            if (property is not null)
+            {
+                visitProperty(property!, path, index);
+                visitedPaths.Add(path);
+            }
         }
 
         return visitedPaths.AsReadOnly();
@@ -216,48 +220,11 @@ public static class PathExtensions
     public static (RegisteredSubjectProperty? property, object? index) TryGetPropertyFromSourcePath(
         this IInterceptorSubject subject, string sourcePath, ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
-        var currentSubject = subject;
-        var segments = sourcePathProvider
-            .ParsePathSegments(sourcePath)
-            .ToArray();
+        var (_, property, index) = subject
+            .GetPropertiesFromSourcePaths([sourcePath], sourcePathProvider, subjectFactory, useCache: false)
+            .FirstOrDefault();
 
-        RegisteredSubjectProperty? parentProperty = null;
-        for (var i = 0; i < segments.Length; i++)
-        {
-            var (segment, index) = segments[i];
-            var isLastSegment = i == segments.Length - 1;
-
-            var registeredSubject = currentSubject.TryGetRegisteredSubject();
-            if (registeredSubject is null)
-            {
-                return (null, null);
-            }
-
-            var registeredProperty = parentProperty?.IsAttribute == true
-                ? sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment)
-                : sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
-
-            if (registeredProperty is null ||
-                sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
-            {
-                return (null, null);
-            }
-
-            if (isLastSegment)
-            {
-                return (registeredProperty, index);
-            }
-
-            currentSubject = TryGetPropertySubjectOrCreate(registeredProperty, index, subjectFactory);
-            if (currentSubject is null)
-            {
-                return (null, null);
-            }
-
-            parentProperty = registeredProperty;
-        }
-
-        return (null, null);
+        return (property, index);
     }
 
     /// <summary>
@@ -267,14 +234,16 @@ public static class PathExtensions
     /// <param name="sourcePaths">The source path of the property to look up.</param>
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
+    /// <param name="useCache">Defines whether to use a method-scoped property path cache, only useful when passing multiple similar paths.</param>
     /// <returns>The found subject properties.</returns>
-    public static IEnumerable<(string path, RegisteredSubjectProperty propertym, object? index)> GetPropertiesFromSourcePaths(
+    public static IEnumerable<(string path, RegisteredSubjectProperty? property, object? index)> GetPropertiesFromSourcePaths(
         this IInterceptorSubject rootSubject,
         IEnumerable<string> sourcePaths,
         ISourcePathProvider sourcePathProvider,
-        ISubjectFactory? subjectFactory = null)
+        ISubjectFactory? subjectFactory = null, 
+        bool useCache = true)
     {
-        var cache = new Dictionary<string, (RegisteredSubjectProperty property, IInterceptorSubject? subject)>();
+        var pathCache = useCache ? new Dictionary<string, RegisteredSubjectProperty>() : null;
         foreach (var sourcePath in sourcePaths)
         {
             var segments = sourcePathProvider.ParsePathSegments(sourcePath).ToArray();
@@ -283,38 +252,32 @@ public static class PathExtensions
                 continue;
             }
 
-            var currentSubject = rootSubject;
             RegisteredSubjectProperty? parentProperty = null;
-
-            var sb = new StringBuilder();
+            var currentSubject = rootSubject;
+            var currentPath = new StringBuilder();
             for (var i = 0; i < segments.Length; i++)
             {
                 var (segment, index) = segments[i];
-                var isLast = i == segments.Length - 1;
+                var isLastSegment = i == segments.Length - 1;
 
-                if (sb.Length > 0) sb.Append('/');
-                sb.Append(segment);
+                if (currentPath.Length > 0) currentPath.Append(":/:.:");
+                currentPath.Append(segment);
                 if (index is not null)
                 {
-                    sb.Append('[').Append(index).Append(']');
+                    currentPath.Append('[').Append(index).Append(']');
                 }
-                var prefix = sb.ToString();
+                var currentPathString = currentPath.ToString();
 
-                RegisteredSubjectProperty? property;
                 IInterceptorSubject? nextSubject;
-                if (cache.TryGetValue(prefix, out var entry))
+                if (pathCache?.TryGetValue(currentPathString, out var property) == true)
                 {
-                    property = entry.property;
-                    if (!isLast)
+                    // load property from cache
+                    if (!isLastSegment)
                     {
-                        var subject = entry.subject ?? TryGetPropertySubjectOrCreate(entry.property, index, subjectFactory);
-                        if (!ReferenceEquals(subject, entry.subject))
-                        {
-                            cache[prefix] = (entry.property, subject);
-                        }
-                        nextSubject = subject;
+                        nextSubject = TryGetPropertySubjectOrCreate(property, index, subjectFactory);
                         if (nextSubject is null)
                         {
+                            yield return (sourcePath, null, null);
                             break;
                         }
                     }
@@ -325,43 +288,43 @@ public static class PathExtensions
                 }
                 else
                 {
-                    if (parentProperty?.IsAttribute == true)
+                    // look up property in subject & add to cache
+                    var registeredSubject = currentSubject.TryGetRegisteredSubject();
+                    if (registeredSubject is null)
                     {
-                        property = sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment);
-                    }
-                    else
-                    {
-                        var registeredSubject = currentSubject.TryGetRegisteredSubject();
-                        if (registeredSubject is null)
-                        {
-                            break;
-                        }
-
-                        property = sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
-                    }
-
-                    if (property is null || sourcePathProvider.IsPropertyIncluded(property) == false)
-                    {
+                        yield return (sourcePath, null, null);
                         break;
                     }
 
-                    if (!isLast)
+                    property = parentProperty?.IsAttribute == true
+                        ? sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment) 
+                        : sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
+
+                    if (property is null || 
+                        sourcePathProvider.IsPropertyIncluded(property) == false)
+                    {
+                        yield return (sourcePath, null, null);
+                        break;
+                    }
+
+                    pathCache?.Add(currentPathString, property);
+
+                    if (!isLastSegment)
                     {
                         nextSubject = TryGetPropertySubjectOrCreate(property, index, subjectFactory);
-                        cache[prefix] = (property, nextSubject);
                         if (nextSubject is null)
                         {
+                            yield return (sourcePath, null, null);
                             break;
                         }
                     }
                     else
                     {
                         nextSubject = null;
-                        cache[prefix] = (property, null);
                     }
                 }
 
-                if (isLast)
+                if (isLastSegment)
                 {
                     yield return (sourcePath, property, index);
                 }
