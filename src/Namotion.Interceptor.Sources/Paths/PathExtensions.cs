@@ -39,7 +39,8 @@ public static class PathExtensions
         ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
-            .VisitPropertiesFromSourcePathsWithTimestamp([sourcePath], timestamp, (property, path) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), sourcePathProvider)
+            .VisitPropertiesFromSourcePathsWithTimestamp([sourcePath], timestamp, 
+                (property, path, _) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), sourcePathProvider)
             .Count == 1;
     }
 
@@ -56,7 +57,7 @@ public static class PathExtensions
     public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
-            .VisitPropertiesFromSourcePathsWithTimestamp(sourcePaths, timestamp, (property, path) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), sourcePathProvider);
+            .VisitPropertiesFromSourcePathsWithTimestamp(sourcePaths, timestamp, (property, path, _) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), sourcePathProvider);
     }
 
     /// <summary>
@@ -71,11 +72,11 @@ public static class PathExtensions
     public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, DateTimeOffset timestamp, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
     {
         return subject
-            .VisitPropertiesFromSourcePathsWithTimestamp(pathsAndValues.Keys, timestamp, (property, path) => SetPropertyValue(property, timestamp, pathsAndValues[path], source), sourcePathProvider);
+            .VisitPropertiesFromSourcePathsWithTimestamp(pathsAndValues.Keys, timestamp, (property, path, _) => SetPropertyValue(property, timestamp, pathsAndValues[path], source), sourcePathProvider);
     }
 
     private static IReadOnlyCollection<string> VisitPropertiesFromSourcePathsWithTimestamp(this IInterceptorSubject subject,
-        IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Action<RegisteredSubjectProperty, string> visitProperty,
+        IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Action<RegisteredSubjectProperty, string, object?> visitProperty,
         ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
         return SubjectMutationContext.ApplyChangesWithTimestamp(timestamp,
@@ -191,13 +192,13 @@ public static class PathExtensions
     /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
     /// <returns>The list of visited paths.</returns>
     public static IReadOnlyCollection<string> VisitPropertiesFromSourcePaths(this IInterceptorSubject subject,
-        IEnumerable<string> sourcePaths, Action<RegisteredSubjectProperty, string> visitProperty,
+        IEnumerable<string> sourcePaths, Action<RegisteredSubjectProperty, string, object?> visitProperty,
         ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
         var visitedPaths = new List<string>();
-        foreach (var (path, property) in GetPropertiesFromSourcePaths(subject, sourcePaths, sourcePathProvider, subjectFactory))
+        foreach (var (path, property, index) in GetPropertiesFromSourcePaths(subject, sourcePaths, sourcePathProvider, subjectFactory))
         {
-            visitProperty(property, path);
+            visitProperty(property, path, index);
             visitedPaths.Add(path);
         }
 
@@ -267,15 +268,13 @@ public static class PathExtensions
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
     /// <returns>The found subject properties.</returns>
-    public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetPropertiesFromSourcePaths(
+    public static IEnumerable<(string path, RegisteredSubjectProperty propertym, object? index)> GetPropertiesFromSourcePaths(
         this IInterceptorSubject rootSubject,
         IEnumerable<string> sourcePaths,
         ISourcePathProvider sourcePathProvider,
         ISubjectFactory? subjectFactory = null)
     {
-        var cache = new Dictionary<string, (RegisteredSubjectProperty property, IInterceptorSubject? subject)>(
-            StringComparer.Ordinal);
-        
+        var cache = new Dictionary<string, (RegisteredSubjectProperty property, IInterceptorSubject? subject)>();
         foreach (var sourcePath in sourcePaths)
         {
             var segments = sourcePathProvider.ParsePathSegments(sourcePath).ToArray();
@@ -301,10 +300,8 @@ public static class PathExtensions
                 }
                 var prefix = sb.ToString();
 
-                // Begin inlined EnsureEntry
                 RegisteredSubjectProperty? property;
                 IInterceptorSubject? nextSubject;
-
                 if (cache.TryGetValue(prefix, out var entry))
                 {
                     property = entry.property;
@@ -364,16 +361,13 @@ public static class PathExtensions
                     }
                 }
 
-                if (!isLast)
+                if (isLast)
                 {
-                    currentSubject = nextSubject!;
+                    yield return (sourcePath, property, index);
                 }
                 else
                 {
-                    if (property is not null && index is null)
-                    {
-                        yield return (sourcePath, property);
-                    }
+                    currentSubject = nextSubject!;
                 }
 
                 parentProperty = property;
@@ -419,12 +413,5 @@ public static class PathExtensions
         }
 
         return nextSubject;
-    }
-
-    private class PathNode
-    {
-        public string? FullPath { get; set; }
-
-        public Dictionary<(string Segment, object? Index), PathNode> Children { get; } = new();
     }
 }
