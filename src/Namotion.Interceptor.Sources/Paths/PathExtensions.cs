@@ -211,7 +211,7 @@ public static class PathExtensions
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
     /// <returns>The found subject property or null if it is not found and factory was null.</returns>
-    public static RegisteredSubjectProperty? TryGetPropertyFromSourcePath(
+    public static (RegisteredSubjectProperty? property, object? index) TryGetPropertyFromSourcePath(
         this IInterceptorSubject subject, string sourcePath, ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
         var currentSubject = subject;
@@ -228,7 +228,7 @@ public static class PathExtensions
             var registeredSubject = currentSubject.TryGetRegisteredSubject();
             if (registeredSubject is null)
             {
-                return null;
+                return (null, null);
             }
 
             var registeredProperty = parentProperty?.IsAttribute == true
@@ -238,30 +238,24 @@ public static class PathExtensions
             if (registeredProperty is null ||
                 sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
             {
-                return null;
+                return (null, null);
             }
 
             if (isLastSegment)
             {
-                if (index is null)
-                {
-                    return registeredProperty;
-                }
-            }
-            else
-            {
-                currentSubject = TryGetNextSubject(registeredProperty, index, subjectFactory);
+                return (registeredProperty, index);
             }
 
+            currentSubject = TryGetPropertySubjectOrCreate(registeredProperty, index, subjectFactory);
             if (currentSubject is null)
             {
-                return null;
+                return (null, null);
             }
 
             parentProperty = registeredProperty;
         }
 
-        return null;
+        return (null, null);
     }
 
     /// <summary>
@@ -330,7 +324,7 @@ public static class PathExtensions
 
                 if (nextPathNode.Children.Count > 0)
                 {
-                    var childSubject = TryGetNextSubject(registeredProperty, index, subjectFactory);
+                    var childSubject = TryGetPropertySubjectOrCreate(registeredProperty, index, subjectFactory);
                     if (childSubject is not null)
                     {
                         stack.Push((childSubject, nextPathNode, registeredProperty));
@@ -340,7 +334,7 @@ public static class PathExtensions
         }
     }
 
-    private static IInterceptorSubject? TryGetNextSubject(RegisteredSubjectProperty registeredProperty, object? index, ISubjectFactory? subjectFactory)
+    private static IInterceptorSubject? TryGetPropertySubjectOrCreate(RegisteredSubjectProperty registeredProperty, object? index, ISubjectFactory? subjectFactory)
     {
         IInterceptorSubject? nextSubject;
         if (index is not null)
