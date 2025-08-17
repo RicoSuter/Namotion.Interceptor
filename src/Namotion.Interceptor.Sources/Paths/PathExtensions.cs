@@ -176,8 +176,8 @@ public static class PathExtensions
         {
             property = pathWithProperty.Value.Property;
             yield return (property ?? throw new InvalidOperationException("Property is null."), pathWithProperty.Value.Index);
-            pathWithProperty = property?.Parent?.Subject != rootSubject
-                ? property?.Parent?.Parents?.FirstOrDefault()
+            pathWithProperty = property?.Parent.Subject != rootSubject
+                ? property?.Parent.Parents.FirstOrDefault()
                 : null;
         } while (pathWithProperty?.Property is not null);
     }
@@ -201,7 +201,7 @@ public static class PathExtensions
         {
             if (property is not null)
             {
-                visitProperty(property!, path, index);
+                visitProperty(property, path, index);
                 visitedPaths.Add(path);
             }
         }
@@ -243,7 +243,10 @@ public static class PathExtensions
         ISubjectFactory? subjectFactory = null, 
         bool useCache = true)
     {
-        var pathCache = useCache ? new Dictionary<string, RegisteredSubjectProperty>() : null;
+        var pathValueCache = useCache 
+            ? new Dictionary<string, (RegisteredSubjectProperty property, IInterceptorSubject? subject)>() 
+            : null;
+
         foreach (var sourcePath in sourcePaths)
         {
             var segments = sourcePathProvider.ParsePathSegments(sourcePath).ToArray();
@@ -261,7 +264,7 @@ public static class PathExtensions
                 var isLastSegment = i == segments.Length - 1;
 
                 string? currentPathString = null;
-                if (pathCache is not null)
+                if (pathValueCache is not null)
                 {
                     if (currentPath.Length > 0) currentPath.Append(":/:.:");
                     currentPath.Append(segment);
@@ -272,23 +275,15 @@ public static class PathExtensions
                     currentPathString = currentPath.ToString();
                 }
 
+                RegisteredSubjectProperty? property;
                 IInterceptorSubject? nextSubject;
-                if (pathCache?.TryGetValue(currentPathString!, out var property) == true)
+                if (pathValueCache?.TryGetValue(currentPathString!, out var entry) == true)
                 {
                     // load property from cache
-                    if (!isLastSegment)
-                    {
-                        nextSubject = TryGetPropertySubjectOrCreate(property, index, subjectFactory);
-                        if (nextSubject is null)
-                        {
-                            yield return (sourcePath, null, null);
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        nextSubject = null;
-                    }
+                    property = entry.property;
+                    nextSubject = !isLastSegment
+                        ? entry.subject ?? TryGetPropertySubjectOrCreate(entry.property, index, subjectFactory)
+                        : null;
                 }
                 else
                 {
@@ -310,9 +305,7 @@ public static class PathExtensions
                         yield return (sourcePath, null, null);
                         break;
                     }
-
-                    pathCache?.Add(currentPathString!, property);
-
+                    
                     if (!isLastSegment)
                     {
                         nextSubject = TryGetPropertySubjectOrCreate(property, index, subjectFactory);
@@ -326,6 +319,8 @@ public static class PathExtensions
                     {
                         nextSubject = null;
                     }
+
+                    pathValueCache?.Add(currentPathString!, (property, nextSubject));
                 }
 
                 if (isLastSegment)
@@ -347,6 +342,11 @@ public static class PathExtensions
         IInterceptorSubject? nextSubject;
         if (index is not null)
         {
+            // TODO: Move to common value handle extension methods
+            // nextSubject = index is not int 
+            //     ? (registeredProperty.GetValue() as IDictionary)?[index] as IInterceptorSubject
+            //     : (registeredProperty.GetValue() as IList)?[(int)index] as IInterceptorSubject;
+
             nextSubject = registeredProperty
                 .Children
                 .SingleOrDefault(c => Equals(c.Index, index))
@@ -366,6 +366,7 @@ public static class PathExtensions
         }
         else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
         {
+            // TODO(perf): Use nextSubject = registeredProperty.GetValue() as IInterceptorSubject;
             nextSubject = registeredProperty.Children.SingleOrDefault().Subject;
 
             if (nextSubject is null && subjectFactory is not null)
