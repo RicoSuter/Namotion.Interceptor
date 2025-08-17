@@ -197,7 +197,7 @@ public static class PathExtensions
     {
         var visitedPaths = new List<string>();
         foreach (var (path, property, index) in 
-            GetPropertiesFromSourcePaths(subject, sourcePaths, sourcePathProvider, subjectFactory))
+            GetPropertiesFromSourcePaths(subject, sourcePaths, sourcePathProvider, subjectFactory, useCache: false))
         {
             if (property is not null)
             {
@@ -260,16 +260,20 @@ public static class PathExtensions
                 var (segment, index) = segments[i];
                 var isLastSegment = i == segments.Length - 1;
 
-                if (currentPath.Length > 0) currentPath.Append(":/:.:");
-                currentPath.Append(segment);
-                if (index is not null)
+                string? currentPathString = null;
+                if (pathCache is not null)
                 {
-                    currentPath.Append('[').Append(index).Append(']');
+                    if (currentPath.Length > 0) currentPath.Append(":/:.:");
+                    currentPath.Append(segment);
+                    if (index is not null)
+                    {
+                        currentPath.Append('[').Append(index).Append(']');
+                    }
+                    currentPathString = currentPath.ToString();
                 }
-                var currentPathString = currentPath.ToString();
 
                 IInterceptorSubject? nextSubject;
-                if (pathCache?.TryGetValue(currentPathString, out var property) == true)
+                if (pathCache?.TryGetValue(currentPathString!, out var property) == true)
                 {
                     // load property from cache
                     if (!isLastSegment)
@@ -307,7 +311,7 @@ public static class PathExtensions
                         break;
                     }
 
-                    pathCache?.Add(currentPathString, property);
+                    pathCache?.Add(currentPathString!, property);
 
                     if (!isLastSegment)
                     {
