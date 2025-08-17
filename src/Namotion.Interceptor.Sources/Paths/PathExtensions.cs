@@ -187,7 +187,7 @@ public static class PathExtensions
     /// <param name="sourcePaths">The source paths to apply values.</param>
     /// <param name="visitProperty">The callback to visit a property.</param>
     /// <param name="sourcePathProvider">The source path provider.</param>
-    /// <param name="subjectFactory">The subject factory.</param>
+    /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
     /// <returns>The list of visited paths.</returns>
     public static IReadOnlyCollection<string> VisitPropertiesFromSourcePaths(this IInterceptorSubject subject,
         IEnumerable<string> sourcePaths, Action<RegisteredSubjectProperty, string> visitProperty,
@@ -203,6 +203,14 @@ public static class PathExtensions
         return visitedPaths.AsReadOnly();
     }
 
+    /// <summary>
+    /// Tries to get a property from the source path.
+    /// </summary>
+    /// <param name="subject">The root subject.</param>
+    /// <param name="sourcePath">The source path of the property to look up.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
+    /// <returns>The found subject property or null if it is not found and factory was null.</returns>
     public static RegisteredSubjectProperty? TryGetPropertyFromSourcePath(
         this IInterceptorSubject subject, string sourcePath, ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
@@ -256,6 +264,14 @@ public static class PathExtensions
         return null;
     }
 
+    /// <summary>
+    /// Tries to get multiple properties from the source paths.
+    /// </summary>
+    /// <param name="subject">The root subject.</param>
+    /// <param name="sourcePaths">The source path of the property to look up.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
+    /// <returns>The found subject properties.</returns>
     public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetPropertiesFromSourcePaths(
         this IInterceptorSubject subject,
         IEnumerable<string> sourcePaths,
