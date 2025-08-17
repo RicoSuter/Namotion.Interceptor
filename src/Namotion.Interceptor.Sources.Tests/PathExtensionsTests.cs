@@ -161,7 +161,7 @@ public class PathExtensionsTests
         };
 
         // Act
-        var property = person.TryGetPropertyFromSourcePath(fullPath, DefaultSourcePathProvider.Instance);
+        var (property, _) = person.TryGetPropertyFromSourcePath(fullPath, DefaultSourcePathProvider.Instance);
 
         // Assert
         Assert.Equal(propertyName, property!.Name);
