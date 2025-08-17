@@ -1,3 +1,4 @@
+using System.Text;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
@@ -261,18 +262,20 @@ public static class PathExtensions
     /// <summary>
     /// Tries to get multiple properties from the source paths.
     /// </summary>
-    /// <param name="subject">The root subject.</param>
+    /// <param name="rootSubject">The root subject.</param>
     /// <param name="sourcePaths">The source path of the property to look up.</param>
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
     /// <returns>The found subject properties.</returns>
     public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetPropertiesFromSourcePaths(
-        this IInterceptorSubject subject,
+        this IInterceptorSubject rootSubject,
         IEnumerable<string> sourcePaths,
         ISourcePathProvider sourcePathProvider,
         ISubjectFactory? subjectFactory = null)
     {
-        var cache = new Dictionary<string, (RegisteredSubjectProperty property, IInterceptorSubject? subject)>(StringComparer.Ordinal);
+        var cache = new Dictionary<string, (RegisteredSubjectProperty property, IInterceptorSubject? subject)>(
+            StringComparer.Ordinal);
+        
         foreach (var sourcePath in sourcePaths)
         {
             var segments = sourcePathProvider.ParsePathSegments(sourcePath).ToArray();
@@ -281,12 +284,10 @@ public static class PathExtensions
                 continue;
             }
 
-            var currentSubject = subject;
+            var currentSubject = rootSubject;
             RegisteredSubjectProperty? parentProperty = null;
-            var broken = false;
 
-            var sb = new System.Text.StringBuilder();
-
+            var sb = new StringBuilder();
             for (var i = 0; i < segments.Length; i++)
             {
                 var (segment, index) = segments[i];
@@ -301,24 +302,22 @@ public static class PathExtensions
                 var prefix = sb.ToString();
 
                 // Begin inlined EnsureEntry
-                var needSubject = !isLast;
                 RegisteredSubjectProperty? property;
                 IInterceptorSubject? nextSubject;
 
                 if (cache.TryGetValue(prefix, out var entry))
                 {
                     property = entry.property;
-                    if (needSubject)
+                    if (!isLast)
                     {
-                        var subj = entry.subject ?? TryGetPropertySubjectOrCreate(entry.property, index, subjectFactory);
-                        if (!ReferenceEquals(subj, entry.subject))
+                        var subject = entry.subject ?? TryGetPropertySubjectOrCreate(entry.property, index, subjectFactory);
+                        if (!ReferenceEquals(subject, entry.subject))
                         {
-                            cache[prefix] = (entry.property, subj);
+                            cache[prefix] = (entry.property, subject);
                         }
-                        nextSubject = subj;
+                        nextSubject = subject;
                         if (nextSubject is null)
                         {
-                            broken = true;
                             break;
                         }
                     }
@@ -338,7 +337,6 @@ public static class PathExtensions
                         var registeredSubject = currentSubject.TryGetRegisteredSubject();
                         if (registeredSubject is null)
                         {
-                            broken = true;
                             break;
                         }
 
@@ -347,17 +345,15 @@ public static class PathExtensions
 
                     if (property is null || sourcePathProvider.IsPropertyIncluded(property) == false)
                     {
-                        broken = true;
                         break;
                     }
 
-                    if (needSubject)
+                    if (!isLast)
                     {
                         nextSubject = TryGetPropertySubjectOrCreate(property, index, subjectFactory);
                         cache[prefix] = (property, nextSubject);
                         if (nextSubject is null)
                         {
-                            broken = true;
                             break;
                         }
                     }
@@ -367,7 +363,6 @@ public static class PathExtensions
                         cache[prefix] = (property, null);
                     }
                 }
-                // End inlined EnsureEntry
 
                 if (!isLast)
                 {
@@ -383,8 +378,6 @@ public static class PathExtensions
 
                 parentProperty = property;
             }
-
-            _ = broken;
         }
     }
 
