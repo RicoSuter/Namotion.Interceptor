@@ -272,65 +272,119 @@ public static class PathExtensions
         ISourcePathProvider sourcePathProvider,
         ISubjectFactory? subjectFactory = null)
     {
-        var rootNode = new PathNode();
-        foreach (var sourcePath in sourcePaths.Distinct())
+        var cache = new Dictionary<string, (RegisteredSubjectProperty property, IInterceptorSubject? subject)>(StringComparer.Ordinal);
+        foreach (var sourcePath in sourcePaths)
         {
-            var currentNode = rootNode;
-            var segments = sourcePathProvider.ParsePathSegments(sourcePath);
-            foreach (var segment in segments)
-            {
-                if (!currentNode.Children.TryGetValue(segment, out var childNode))
-                {
-                    childNode = new PathNode();
-                    currentNode.Children[segment] = childNode;
-                }
-
-                currentNode = childNode;
-            }
-
-            currentNode.FullPath = sourcePath;
-        }
-
-        var stack = new Stack<(IInterceptorSubject Subject, PathNode Node, RegisteredSubjectProperty? ParentProperty)>();
-        stack.Push((subject, rootNode, null));
-
-        while (stack.Count > 0)
-        {
-            var (currentSubject, pathNode, parentProperty) = stack.Pop();
-            var registeredSubject = currentSubject.TryGetRegisteredSubject();
-            if (registeredSubject is null)
+            var segments = sourcePathProvider.ParsePathSegments(sourcePath).ToArray();
+            if (segments.Length == 0)
             {
                 continue;
             }
 
-            foreach (var childPathNode in pathNode.Children)
+            var currentSubject = subject;
+            RegisteredSubjectProperty? parentProperty = null;
+            var broken = false;
+
+            var sb = new System.Text.StringBuilder();
+
+            for (var i = 0; i < segments.Length; i++)
             {
-                var (segment, index) = childPathNode.Key;
-                var nextPathNode = childPathNode.Value;
+                var (segment, index) = segments[i];
+                var isLast = i == segments.Length - 1;
 
-                var registeredProperty = parentProperty?.IsAttribute == true
-                    ? sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment)
-                    : sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
-
-                if (registeredProperty is null || sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
+                if (sb.Length > 0) sb.Append('/');
+                sb.Append(segment);
+                if (index is not null)
                 {
-                    continue;
+                    sb.Append('[').Append(index).Append(']');
                 }
+                var prefix = sb.ToString();
 
-                if (nextPathNode.FullPath is not null && index is null)
-                {
-                    yield return (nextPathNode.FullPath, registeredProperty);
-                }
+                // Begin inlined EnsureEntry
+                var needSubject = !isLast;
+                RegisteredSubjectProperty? property;
+                IInterceptorSubject? nextSubject;
 
-                if (nextPathNode.Children.Count > 0)
+                if (cache.TryGetValue(prefix, out var entry))
                 {
-                    var childSubject = TryGetPropertySubjectOrCreate(registeredProperty, index, subjectFactory);
-                    if (childSubject is not null)
+                    property = entry.property;
+                    if (needSubject)
                     {
-                        stack.Push((childSubject, nextPathNode, registeredProperty));
+                        var subj = entry.subject ?? TryGetPropertySubjectOrCreate(entry.property, index, subjectFactory);
+                        if (!ReferenceEquals(subj, entry.subject))
+                        {
+                            cache[prefix] = (entry.property, subj);
+                        }
+                        nextSubject = subj;
+                        if (nextSubject is null)
+                        {
+                            broken = true;
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        nextSubject = null;
                     }
                 }
+                else
+                {
+                    if (parentProperty?.IsAttribute == true)
+                    {
+                        property = sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment);
+                    }
+                    else
+                    {
+                        var registeredSubject = currentSubject.TryGetRegisteredSubject();
+                        if (registeredSubject is null)
+                        {
+                            broken = true;
+                            break;
+                        }
+
+                        property = sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
+                    }
+
+                    if (property is null || sourcePathProvider.IsPropertyIncluded(property) == false)
+                    {
+                        broken = true;
+                        break;
+                    }
+
+                    if (needSubject)
+                    {
+                        nextSubject = TryGetPropertySubjectOrCreate(property, index, subjectFactory);
+                        cache[prefix] = (property, nextSubject);
+                        if (nextSubject is null)
+                        {
+                            broken = true;
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        nextSubject = null;
+                        cache[prefix] = (property, null);
+                    }
+                }
+                // End inlined EnsureEntry
+
+                if (!isLast)
+                {
+                    currentSubject = nextSubject!;
+                }
+                else
+                {
+                    if (property is not null && index is null)
+                    {
+                        yield return (sourcePath, property);
+                    }
+                }
+
+                parentProperty = property;
             }
+
+            _ = broken;
         }
     }
 
@@ -347,7 +401,7 @@ public static class PathExtensions
             if (nextSubject is null && subjectFactory is not null)
             {
                 // create missing item collection or item dictionary
-                            
+
                 throw new InvalidOperationException("Missing collection items cannot be created.");
                 // TODO: Implement collection or dictionary creation from paths (need to know all paths).
 
