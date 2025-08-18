@@ -118,7 +118,7 @@ internal class CustomNodeManager : CustomNodeManager2
         if (property is RegisteredSubjectAttribute attribute)
         {
             var attributedProperty = attribute.GetAttributedProperty();
-            var propertyName = _source.SourcePathProvider.TryGetPropertySegment(property);
+            var propertyName = _source.SourcePathProvider.TryGetPropertySegment(attribute);
             if (propertyName is null)
                 return null;
             
