@@ -4,7 +4,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWriteInterceptor
 {
-    private readonly Subject<SubjectPropertyChange> _subject = new();
+    private readonly ISubject<SubjectPropertyChange> _subject = Subject.Synchronize(new Subject<SubjectPropertyChange>());
 
     public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
     {
