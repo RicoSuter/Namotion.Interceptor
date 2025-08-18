@@ -118,14 +118,14 @@ internal class CustomNodeManager : CustomNodeManager2
         if (property.IsAttribute)
         {
             var attributedProperty = property.GetAttributedProperty();
-            var propertyName = _source.SourcePathProvider.TryGetPropertyName(property);
+            var propertyName = _source.SourcePathProvider.TryGetPropertySegment(property);
             if (propertyName is null)
                 return null;
             
             return GetPropertyName(attributedProperty) + "__" + propertyName;
         }
         
-        return _source.SourcePathProvider.TryGetPropertyName(property);
+        return _source.SourcePathProvider.TryGetPropertySegment(property);
     }
 
     private void CreateReferenceObjectNode(string propertyName, RegisteredSubjectProperty property, SubjectPropertyChild child, NodeId parentNodeId, string parentPath)

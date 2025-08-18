@@ -11,7 +11,7 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
     }
 
     /// <inheritdoc />
-    public virtual string? TryGetPropertyName(RegisteredSubjectProperty property)
+    public virtual string? TryGetPropertySegment(RegisteredSubjectProperty property)
     {
         return property.BrowseName;
     }
@@ -24,7 +24,7 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
     }
 
     /// <inheritdoc />
-    public virtual IEnumerable<(string path, object? index)> ParsePathSegments(string path)
+    public virtual IEnumerable<(string segment, object? index)> ParsePathSegments(string path)
     {
         return path
             .Split('.')
@@ -40,21 +40,21 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
     }
 
     /// <inheritdoc />
-    public RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string segment)
+    public RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string attributeSegment)
     {
         return property.Parent.Properties
             .Where(p => p.IsAttribute)
             .SingleOrDefault(p => p.AttributeMetadata.PropertyName == property.Name && 
-                                  p.AttributeMetadata.AttributeName == segment);
+                                  p.AttributeMetadata.AttributeName == attributeSegment);
     }
     
     /// <inheritdoc />
-    public virtual RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment)
+    public virtual RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string propertySegment)
     {
         // TODO(1, perf): Improve performance by caching the property name
 
         return subject
             .Properties
-            .SingleOrDefault(p => TryGetPropertyName(p) == segment);
+            .SingleOrDefault(p => TryGetPropertySegment(p) == propertySegment);
     }
 }

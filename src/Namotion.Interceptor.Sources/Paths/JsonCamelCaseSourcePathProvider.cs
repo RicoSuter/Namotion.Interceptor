@@ -13,10 +13,10 @@ public class JsonCamelCaseSourcePathProvider : SourcePathProviderBase
     }
 
     /// <inheritdoc />
-    public override IEnumerable<(string path, object? index)> ParsePathSegments(string path)
+    public override IEnumerable<(string segment, object? index)> ParsePathSegments(string path)
     {
         return base.ParsePathSegments(path)
-            .Select(t => (ConvertFromSourcePath(t.path), t.index));
+            .Select(t => (ConvertFromSourcePath(t.segment), t.index));
     }
 
     public static string ConvertToSourcePath(string path)
