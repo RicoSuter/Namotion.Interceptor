@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reactive.Concurrency;
 using Moq;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -23,7 +24,9 @@ public class SubjectMutationContextTests
         var propertyName = nameof(Person.FirstName);
         
         var changes = new List<SubjectPropertyChange>();
-        context.GetPropertyChangedObservable().Subscribe(c => changes.Add(c));
+        context
+            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c));
         
         var source = Mock.Of<ISubjectSource>();
         var propertyReference = new PropertyReference(person, propertyName);
