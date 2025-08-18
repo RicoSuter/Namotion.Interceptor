@@ -19,7 +19,7 @@ public interface ISourcePathProvider
     /// </summary>
     /// <param name="property">The property.</param>
     /// <returns>The property name.</returns>
-    string? TryGetPropertyName(RegisteredSubjectProperty property);
+    string? TryGetPropertySegment(RegisteredSubjectProperty property);
     
     /// <summary>
     /// Gets the full path of the property in the source.
@@ -33,21 +33,22 @@ public interface ISourcePathProvider
     /// </summary>
     /// <param name="path">The path to parse.</param>
     /// <returns>The segments.</returns>
-    IEnumerable<(string path, object? index)> ParsePathSegments(string path);
+    IEnumerable<(string segment, object? index)> ParsePathSegments(string path);
 
     /// <summary>
     /// Gets the attribute using the path segment name in the source.
     /// </summary>
     /// <param name="property">The property with the attribute.</param>
-    /// <param name="segment">The path segment name.</param>
+    /// <param name="attributeSegment">The path segment name with the attribute name.</param>
     /// <returns>The attribute property.</returns>
-    RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string segment);
+    RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string attributeSegment);
+    // TODO: Use RegisteredSubjectAttribute instead of RegisteredSubjectProperty
     
     /// <summary>
     /// Gets the property using the path segment name in the source.
     /// </summary>
     /// <param name="subject">The subject.</param>
-    /// <param name="segment">The path segment name.</param>
+    /// <param name="propertySegment">The path segment name with the property name.</param>
     /// <returns>The property.</returns>
-    RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment);
+    RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string propertySegment);
 }
