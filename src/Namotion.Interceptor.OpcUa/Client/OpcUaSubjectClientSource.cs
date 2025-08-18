@@ -317,7 +317,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         if (property is RegisteredSubjectAttribute attribute)
         {
             var attributedProperty = attribute.GetAttributedProperty();
-            var propertyName = _sourcePathProvider.TryGetPropertyName(property);
+            var propertyName = _sourcePathProvider.TryGetPropertySegment(attribute);
             if (propertyName is null)
                 return null;
             
@@ -325,7 +325,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             return GetPropertyName(attributedProperty) + "__" + propertyName;
         }
         
-        return _sourcePathProvider.TryGetPropertyName(property);
+        return _sourcePathProvider.TryGetPropertySegment(property);
     }
 
     public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)

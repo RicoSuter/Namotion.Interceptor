@@ -11,7 +11,7 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
     }
 
     /// <inheritdoc />
-    public virtual string? TryGetPropertyName(RegisteredSubjectProperty property)
+    public virtual string? TryGetPropertySegment(RegisteredSubjectProperty property)
     {
         return property.BrowseName;
     }
@@ -24,7 +24,7 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
     }
 
     /// <inheritdoc />
-    public virtual IEnumerable<(string path, object? index)> ParsePathSegments(string path)
+    public virtual IEnumerable<(string segment, object? index)> ParsePathSegments(string path)
     {
         return path
             .Split('.')
@@ -52,6 +52,6 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
 
         return subject
             .PropertiesAndAttributes
-            .SingleOrDefault(p => TryGetPropertyName(p) == segment);
+            .SingleOrDefault(p => TryGetPropertySegment(p) == segment);
     }
 }

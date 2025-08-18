@@ -25,7 +25,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
              property.Parent.Parents.Any(p => TryGetSourcePathAttribute(p.Property) is not null));
     }
     
-    public override IEnumerable<(string path, object? index)> ParsePathSegments(string path)
+    public override IEnumerable<(string segment, object? index)> ParsePathSegments(string path)
     {
         // remove prefix
         if (!string.IsNullOrEmpty(_pathPrefix))
@@ -56,7 +56,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
                 }));
     }
 
-    public override string? TryGetPropertyName(RegisteredSubjectProperty property)
+    public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
     {
         return TryGetSourcePathAttribute(property)?.Path;
     }
@@ -72,7 +72,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
         if (property is RegisteredSubjectAttribute attribute)
         {
             var attributedProperty = attribute.GetAttributedProperty();
-            return GetAttributeBasedSourcePropertyPath(attributedProperty) + _attributePathDelimiter + TryGetPropertyName(property);
+            return GetAttributeBasedSourcePropertyPath(attributedProperty) + _attributePathDelimiter + TryGetPropertySegment(property);
         }
         
         var sourcePath = TryGetSourcePathAttribute(property)?.Path;

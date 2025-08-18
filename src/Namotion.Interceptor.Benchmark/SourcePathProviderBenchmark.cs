@@ -1,6 +1,7 @@
 ﻿using System;
 using BenchmarkDotNet.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking;
 
@@ -24,7 +25,37 @@ public class SourcePathProviderBenchmark
         _car = new Car(context);
     }
 
-    // [Benchmark]
+    [Benchmark]
+    public void TryGetPropertyFromSourcePath()
+    {
+        var (property, _) = _car.TryGetPropertyFromSourcePath("Tires[1].Pressure", DefaultSourcePathProvider.Instance);
+        if (property is null)
+        {
+            throw new InvalidOperationException();
+        }
+    }
+    
+    [Benchmark]
+    public void VisitPropertiesFromSourcePaths()
+    {
+        RegisteredSubjectProperty? property = null;
+        _car.VisitPropertiesFromSourcePaths(
+            [
+                "Tires[1].Pressure", 
+                "Tires[3].Pressure"
+            ], 
+            (p, _, _) =>
+            {
+                property = p;
+            }, DefaultSourcePathProvider.Instance);
+       
+        if (property is null)
+        {
+            throw new InvalidOperationException();
+        }
+    }
+    
+    [Benchmark]
     public void TryGetPropertyFromSegment()
     {
         var subject = _car.TryGetRegisteredSubject();
@@ -38,7 +69,7 @@ public class SourcePathProviderBenchmark
         }
     }
 
-    // [Benchmark]
+    [Benchmark]
     public void TryGetSourcePath()
     {
         var property = _car.Tires[1].TryGetRegisteredSubject()?.TryGetProperty("Pressure");
