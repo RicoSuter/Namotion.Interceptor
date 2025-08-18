@@ -1,3 +1,4 @@
+using System.Reactive.Concurrency;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -21,7 +22,9 @@ public class TimestampTests
 
         var mother = new Person(context);
         var changes = new List<SubjectPropertyChange>();
-        context.GetPropertyChangedObservable().Subscribe(c => changes.Add(c));
+        context
+            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c));
        
         var timestamp = DateTimeOffset.Now.AddDays(-200);
 

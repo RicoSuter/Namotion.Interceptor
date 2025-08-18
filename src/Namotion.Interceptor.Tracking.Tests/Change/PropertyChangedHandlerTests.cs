@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Tracking.Change;
+﻿using System.Reactive.Concurrency;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
@@ -15,7 +16,7 @@ public class PropertyChangedHandlerTests
             .WithPropertyChangedObservable();
 
         context
-            .GetPropertyChangedObservable()
+            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
             .Subscribe(changes.Add);
 
         // Act

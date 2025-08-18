@@ -1,3 +1,4 @@
+using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Tracking;
@@ -74,7 +75,7 @@ public class AttributeTests
             .AddDerivedProperty("DynamicDerivedProperty", typeof(string), _ => "Mr. " + person.FirstName, null);
 
         context
-            .GetPropertyChangedObservable()
+            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property == dynamicDerivedProperty)
             .Subscribe(a => changes.Add(a));
 
@@ -108,7 +109,7 @@ public class AttributeTests
             .AddDerivedAttribute("DynamicDerivedAttribute", typeof(string), _ => "Mr. " + person.FirstName, null);
 
         context
-            .GetPropertyChangedObservable()
+            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property == dynamicDerivedAttribute)
             .Subscribe(a => changes.Add(a));
 
@@ -143,7 +144,7 @@ public class AttributeTests
             .AddProperty("DynamicProperty", typeof(string), _ => value, (_, v) => value = (string)v!);
 
         context
-            .GetPropertyChangedObservable()
+            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property == dynamicProperty)
             .Subscribe(a => changes.Add(a));
 
@@ -178,7 +179,7 @@ public class AttributeTests
             .AddAttribute("DynamicAttribute", typeof(string), _ => value, (_, v) => value = (string)v!);
 
         context
-            .GetPropertyChangedObservable()
+            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property == dynamicAttribute)
             .Subscribe(a => changes.Add(a));
 
