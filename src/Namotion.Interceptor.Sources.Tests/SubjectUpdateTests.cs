@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Registry;
+﻿using System.Reactive.Concurrency;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Sources.Updates;
@@ -190,7 +191,9 @@ public class SubjectUpdateTests
 
         // Act
         var changes = new List<SubjectPropertyChange>();
-        context.GetPropertyChangedObservable().Subscribe(c => changes.Add(c));
+        context
+            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c));
 
         person.Mother = new Person { FirstName = "MyMother" };
         person.Children = person.Children.Union([new Person { FirstName = "Child4" }]).ToList(); // add child4
