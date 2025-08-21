@@ -11,16 +11,15 @@ public static class Program
 #if DEBUG
         Run();
 #else
-        BenchmarkDotNet.Running.BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).RunAllJoined();
+        BenchmarkDotNet.Running.BenchmarkSwitcher
+            .FromAssembly(typeof(Program).Assembly)
+            .Run(args);
 #endif
     }
 
     private static void Run()
     {
-        var benchmark = new SubjectUpdateBenchmark()
-        {
-            // Type = "interceptor"
-        };
+        var benchmark = new SubjectUpdateBenchmark();
         benchmark.Setup();
         RunCode(benchmark);
     }
@@ -30,8 +29,8 @@ public static class Program
     {
         var watch = Stopwatch.StartNew();
 
-        const int outer = 100;
-        const int inner = 100000;
+        const int outer = 1;
+        const int inner = 10000;
         
         const int total = outer * inner;
         for (var i = 0; i < outer; ++i)
