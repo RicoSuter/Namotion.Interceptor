@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Tracking.Change;
+﻿using System.Reactive.Concurrency;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
@@ -16,7 +17,7 @@ public class DerivedPropertyChangeHandlerTests
             .WithPropertyChangedObservable();
 
         context
-            .GetPropertyChangedObservable()
+            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
             .Subscribe(changes.Add);
 
         // Act
@@ -57,7 +58,7 @@ public class DerivedPropertyChangeHandlerTests
         var car = new Car(context);
         
         context
-            .GetPropertyChangedObservable()
+            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
             .Subscribe(changes.Add);
         
         car.Tires[0].Pressure = 2.0m;       
