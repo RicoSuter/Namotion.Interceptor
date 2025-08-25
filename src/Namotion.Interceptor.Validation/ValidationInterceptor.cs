@@ -4,7 +4,7 @@ namespace Namotion.Interceptor.Validation;
 
 public class ValidationInterceptor : IWriteInterceptor
 {
-    public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
+    public TProperty WriteProperty<TProperty>(WritePropertyInterception context, Func<WritePropertyInterception, TProperty> next)
     {
         var errors = context.Property
             .Subject

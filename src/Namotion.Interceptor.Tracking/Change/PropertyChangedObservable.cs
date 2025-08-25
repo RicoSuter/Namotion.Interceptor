@@ -6,7 +6,7 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
 {
     private readonly ISubject<SubjectPropertyChange> _subject = Subject.Synchronize(new Subject<SubjectPropertyChange>());
 
-    public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
+    public TProperty WriteProperty<TProperty>(WritePropertyInterception context, Func<WritePropertyInterception, TProperty> next)
     {
         var currentValue = context.CurrentValue;
         var result = next(context);

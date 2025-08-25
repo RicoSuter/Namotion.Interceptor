@@ -2,5 +2,5 @@
 
 public interface IWriteInterceptor : IInterceptor
 {
-    object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next);
+    TProperty WriteProperty<TProperty>(WritePropertyInterception context, Func<WritePropertyInterception, TProperty> next);
 }
