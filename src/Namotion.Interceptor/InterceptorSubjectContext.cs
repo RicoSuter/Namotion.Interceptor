@@ -6,9 +6,8 @@ namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
-    private Lazy<Func<ReadPropertyInterception, Func<object?>, object?>> _readInterceptorFunction;
-
-    private Lazy<Func<WritePropertyInterception, Action<object?>, object?>> _writeInterceptorFunction;
+    private readonly ConcurrentDictionary<Type, object> _readInterceptorFunction = new();
+    private readonly ConcurrentDictionary<Type, object> _writeInterceptorFunction = new();
 
     private readonly ConcurrentDictionary<Type, IEnumerable> _serviceCache = new();
 
@@ -30,54 +29,76 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     private void ResetInterceptorFunctions()
+    { 
+        var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
+        if (noServicesSingleFallbackContext is not null)
+        {
+            return;
+        }
+        
+        _readInterceptorFunction.Clear();
+        _writeInterceptorFunction.Clear();
+    }
+
+    public TProperty ExecuteInterceptedRead<TProperty>(ReadPropertyInterception interception, Func<TProperty> readValue)
     {
-        _readInterceptorFunction = new Lazy<Func<ReadPropertyInterception, Func<object?>, object?>>(() =>
+        var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
+        if (noServicesSingleFallbackContext is not null)
         {
-            var returnReadValue = new Func<ReadPropertyInterception, Func<object?>, object?>(
-                (_, innerReadValue) => innerReadValue());
+            return noServicesSingleFallbackContext.ExecuteInterceptedRead(interception, readValue);
+        }
 
-            var readInterceptors = GetServices<IReadInterceptor>();
-            foreach (var handler in readInterceptors)
+        var func = (Func<ReadPropertyInterception, Func<TProperty>, TProperty>)
+            _readInterceptorFunction.GetOrAdd(typeof(TProperty), _ =>
             {
-                var previousReadValue = returnReadValue;
-                returnReadValue = (context, innerReadValue) =>
-                    handler.ReadProperty(context, ctx => previousReadValue(ctx, innerReadValue));
-            }
+                var returnReadValue = new Func<ReadPropertyInterception, Func<TProperty>, TProperty>(
+                    (_, innerReadValue) => innerReadValue());
 
-            return returnReadValue;
-        });
-
-        _writeInterceptorFunction = new Lazy<Func<WritePropertyInterception, Action<object?>, object?>>(() =>
-        {
-            var returnWriteValue = new Func<WritePropertyInterception, Action<object?>, object?>(
-                (value, innerWriteValue) =>
+                var readInterceptors = GetServices<IReadInterceptor>();
+                foreach (var handler in readInterceptors)
                 {
-                    innerWriteValue(value.NewValue);
-                    return value.NewValue;
-                });
+                    var previousReadValue = returnReadValue;
+                    returnReadValue = (context, innerReadValue) =>
+                        handler.ReadProperty(context, ctx => previousReadValue(ctx, innerReadValue));
+                }
 
-            var readInterceptors = GetServices<IWriteInterceptor>();
-            foreach (var handler in readInterceptors)
+                return returnReadValue;
+            });
+
+        return func(interception, readValue);
+    }
+
+    public void ExecuteInterceptedWrite<TProperty>(WritePropertyInterception interception, Action<TProperty> writeValue)
+    {
+        var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
+        if (noServicesSingleFallbackContext is not null)
+        {
+            noServicesSingleFallbackContext.ExecuteInterceptedWrite(interception, writeValue);
+            return;
+        }
+        
+        var func = (Func<WritePropertyInterception, Action<TProperty>, TProperty>)
+            _writeInterceptorFunction.GetOrAdd(typeof(TProperty), _ =>
             {
-                var previousWriteValue = returnWriteValue;
-                returnWriteValue = (context, innerWriteValue) =>
-                    handler.WriteProperty(context, ctx => previousWriteValue(ctx, innerWriteValue));
-            }
+                var returnWriteValue = new Func<WritePropertyInterception, Action<TProperty>, TProperty>(
+                    (value, innerWriteValue) =>
+                    {
+                        innerWriteValue((TProperty)value.NewValue!);
+                        return (TProperty)value.NewValue!;
+                    });
 
-            return returnWriteValue;
-        });
-    }
+                var readInterceptors = GetServices<IWriteInterceptor>();
+                foreach (var handler in readInterceptors)
+                {
+                    var previousWriteValue = returnWriteValue;
+                    returnWriteValue = (context, innerWriteValue) =>
+                        handler.WriteProperty(context, ctx => previousWriteValue(ctx, innerWriteValue));
+                }
 
-    public object? ExecuteInterceptedRead(ReadPropertyInterception interception, Func<object?> readValue)
-    {
-        return _readInterceptorFunction.Value(interception, readValue);
-    }
+                return returnWriteValue;
+            });
 
-    public void ExecuteInterceptedWrite(
-        WritePropertyInterception interception,
-        Action<object?> writeValue)
-    {
-        _writeInterceptorFunction.Value(interception, writeValue);
+        func(interception, writeValue);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -192,7 +213,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             ? _fallbackContexts.Single() : null;
 
         ResetInterceptorFunctions();
-
         foreach (var parent in _usedByContexts)
         {
             parent.OnContextChanged();

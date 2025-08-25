@@ -252,13 +252,13 @@ namespace {namespaceName}
                     generatedCode +=
     $@"
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private T GetPropertyValue<T>(string propertyName, Func<object?> readValue)
+        private TProperty GetPropertyValue<TProperty>(string propertyName, Func<TProperty> readValue)
         {{
-            return _context is not null ? (T?)_context.GetPropertyValue(propertyName, readValue)! : (T?)readValue()!;
+            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue()!;
         }}
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SetPropertyValue<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)
+        private void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<TProperty> readValue, Action<TProperty> setValue)
         {{
             if (_context is null)
             {{
