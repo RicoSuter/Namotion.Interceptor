@@ -6,9 +6,10 @@ namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
+    // TODO(perf): Do not initialize these dictionaries until they are needed
+
     private readonly ConcurrentDictionary<Type, object> _readInterceptorFunction = new();
     private readonly ConcurrentDictionary<Type, object> _writeInterceptorFunction = new();
-
     private readonly ConcurrentDictionary<Type, IEnumerable> _serviceCache = new();
 
     private readonly HashSet<object> _services = [];
@@ -16,12 +17,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private readonly HashSet<InterceptorSubjectContext> _usedByContexts = [];
     private readonly HashSet<InterceptorSubjectContext> _fallbackContexts = [];
     private InterceptorSubjectContext? _noServicesSingleFallbackContext;
-
-#pragma warning disable CS8618
-    public InterceptorSubjectContext()
-    {
-        ResetInterceptorFunctions();
-    }
 
     public static InterceptorSubjectContext Create()
     {
@@ -40,7 +35,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         _writeInterceptorFunction.Clear();
     }
 
-    public TProperty ExecuteInterceptedRead<TProperty>(ReadPropertyInterception interception, Func<TProperty> readValue)
+    public TProperty ExecuteInterceptedRead<TProperty>(ReadPropertyInterception interception, Func<IInterceptorSubject, TProperty> readValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
@@ -48,11 +43,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             return noServicesSingleFallbackContext.ExecuteInterceptedRead(interception, readValue);
         }
 
-        var func = (Func<ReadPropertyInterception, Func<TProperty>, TProperty>)
+        var func = (Func<ReadPropertyInterception, Func<IInterceptorSubject, TProperty>, TProperty>)
             _readInterceptorFunction.GetOrAdd(typeof(TProperty), _ =>
             {
-                var returnReadValue = new Func<ReadPropertyInterception, Func<TProperty>, TProperty>(
-                    (_, innerReadValue) => innerReadValue());
+                var returnReadValue = new Func<ReadPropertyInterception, Func<IInterceptorSubject, TProperty>, TProperty>(
+                    (i, innerReadValue) => innerReadValue(i.Property.Subject));
 
                 var readInterceptors = GetServices<IReadInterceptor>();
                 foreach (var handler in readInterceptors)
@@ -68,7 +63,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return func(interception, readValue);
     }
 
-    public void ExecuteInterceptedWrite<TProperty>(WritePropertyInterception interception, Action<TProperty> writeValue)
+    public void ExecuteInterceptedWrite<TProperty>(WritePropertyInterception interception, Action<IInterceptorSubject, TProperty> writeValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
@@ -77,14 +72,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             return;
         }
         
-        var func = (Func<WritePropertyInterception, Action<TProperty>, TProperty>)
+        var func = (Func<WritePropertyInterception, Action<IInterceptorSubject, TProperty>, TProperty>)
             _writeInterceptorFunction.GetOrAdd(typeof(TProperty), _ =>
             {
-                var returnWriteValue = new Func<WritePropertyInterception, Action<TProperty>, TProperty>(
-                    (value, innerWriteValue) =>
+                var returnWriteValue = new Func<WritePropertyInterception, Action<IInterceptorSubject, TProperty>, TProperty>(
+                    (i, innerWriteValue) =>
                     {
-                        innerWriteValue((TProperty)value.NewValue!);
-                        return (TProperty)value.NewValue!;
+                        innerWriteValue(i.Property.Subject, (TProperty)i.NewValue!);
+                        return (TProperty)i.NewValue!;
                     });
 
                 var readInterceptors = GetServices<IWriteInterceptor>();

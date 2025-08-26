@@ -120,21 +120,15 @@ public record RegisteredSubject
             name,
             type,
             attributes,
-
-            getValue is not null ? s => 
-                ((IInterceptorExecutor)s.Context).GetPropertyValue(name, () => getValue(s)) : null, 
-            setValue is not null ? (s, v) => 
-                ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, 
-                    getValue is not null ? () => getValue(s) : null, 
-                    v2 => setValue(s, v2)) : null, 
-            
+            getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null, 
+            setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue, setValue) : null, 
             isDynamic: true));
 
         var property = AddProperty(propertyReference, type, attributes);
         
         // trigger change event
         property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null, 
-            () => getValue?.Invoke(Subject), delegate {});
+            o => getValue?.Invoke(o), delegate {});
         
         return property;
     }

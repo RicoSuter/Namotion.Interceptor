@@ -189,7 +189,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} get => GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), () => _{propertyName});";
+            {modifiers} get => GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), (o) => (({baseClassName})o)._{propertyName});";
 
                         }
 
@@ -204,7 +204,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, () => _{propertyName}, v => _{propertyName} = ({fullyQualifiedName})v!);";
+            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, (o) => (({baseClassName})o)._{propertyName}, (o, v) => (({baseClassName})o)._{propertyName} = ({fullyQualifiedName})v!);";
                         }
 
                         generatedCode +=
@@ -252,17 +252,17 @@ namespace {namespaceName}
                     generatedCode +=
     $@"
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private TProperty GetPropertyValue<TProperty>(string propertyName, Func<TProperty> readValue)
+        private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
         {{
-            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue()!;
+            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
         }}
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<TProperty> readValue, Action<TProperty> setValue)
+        private void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
         {{
             if (_context is null)
             {{
-                setValue(newValue);
+                setValue(this, newValue);
             }}
             else
             {{

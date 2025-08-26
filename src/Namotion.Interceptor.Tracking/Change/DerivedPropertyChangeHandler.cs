@@ -70,7 +70,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                 // trigger change event (derived change has local process as source (null))
                 SubjectMutationContext.ApplyChangesWithSource(null, () =>
-                    usedByProperty.SetPropertyValueWithInterception(newValue, () => oldValue, delegate {})
+                    usedByProperty.SetPropertyValueWithInterception(newValue, _ => oldValue, delegate {})
                 );
             }
         }
