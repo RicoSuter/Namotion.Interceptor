@@ -6,6 +6,7 @@ public class ValidationInterceptor : IWriteInterceptor
 {
     public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, Action<WritePropertyInterception<TProperty>> next)
     {
+        // TODO(perf): Avoid linq to avoid ref copy
         var interception = context;
         var errors = context.Property
             .Subject
