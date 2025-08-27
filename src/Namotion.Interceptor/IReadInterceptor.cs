@@ -2,5 +2,5 @@
 
 public interface IReadInterceptor : IInterceptor
 {
-    TProperty ReadProperty<TProperty>(ReadPropertyInterception context, Func<ReadPropertyInterception, TProperty> next);
+    TProperty ReadProperty<TProperty>(ref ReadPropertyInterception context, Func<ReadPropertyInterception, TProperty> next);
 }
