@@ -215,7 +215,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 return (interception, innerReadValue) => innerReadValue(interception.Property.Subject);
             }
 
-            // Create a pre-built chain that uses a stateful executor to avoid allocations
             var chain = new AllocationFreeChain<ReadPropertyInterception, IReadInterceptor, TProperty>(
                 interceptorArray,
                 (interceptor, context, next) => interceptor.ReadProperty(context, next),
@@ -239,7 +238,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 };
             }
 
-            // Create a pre-built chain that uses a stateful executor to avoid allocations
             var chain = new AllocationFreeChain<WritePropertyInterception, IWriteInterceptor, TProperty>(
                 interceptorArray,
                 (interceptor, context, next) => interceptor.WriteProperty(context, next),
@@ -250,7 +248,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                     return (TProperty)interception.NewValue!;
                 }
             );
-            return chain.Execute; // Return the method directly, not wrapped in a lambda
+            return chain.Execute;
         }
     }
 
@@ -271,16 +269,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             _executeTerminal = executeTerminal;
             _nodes = new ChainNode[interceptors.Length];
             
-            // Pre-build the chain nodes with their continuation functions
-            for (int i = 0; i < interceptors.Length; i++)
+            for (var i = 0; i < interceptors.Length; i++)
             {
                 _nodes[i] = new ChainNode(this, i);
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public TProperty Execute(TContext context, object terminal)
         {
-            // Use the pre-built chain without creating any new delegates
             return ExecuteAtIndex(0, context, terminal);
         }
 
@@ -294,11 +291,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
             var interceptor = _interceptors[index];
             var node = _nodes[index];
-            
-            // Set the current execution context in the node
             node.SetContext(terminal);
             
-            // Execute the interceptor with the pre-built continuation
             return _executeInterceptor(interceptor, context, node.GetContinuation());
         }
 
@@ -314,7 +308,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             {
                 _chain = chain;
                 _nextIndex = currentIndex + 1;
-                _continuation = ExecuteNext; // Pre-build the continuation delegate
+                _continuation = ExecuteNext;
             }
 
             public void SetContext(object terminal)
