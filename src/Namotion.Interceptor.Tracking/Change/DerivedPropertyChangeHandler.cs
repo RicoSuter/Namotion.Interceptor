@@ -35,14 +35,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         return result;
     }
 
-    public TProperty WriteProperty<TProperty>(WritePropertyInterception<TProperty> context, Func<WritePropertyInterception<TProperty>, TProperty> next)
+    public void WriteProperty<TProperty>(WritePropertyInterception<TProperty> context, Action<WritePropertyInterception<TProperty>> next)
     {
-        var result = next.Invoke(context);
+        next(context);
 
         var usedByProperties = context.Property.GetUsedByProperties();
         if (usedByProperties.Count == 0)
         {
-            return result;
+            return;
         }
 
         lock (usedByProperties)
@@ -74,8 +74,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 );
             }
         }
-
-        return result;
     }
 
     private static void TryStartRecordTouchedProperties()
