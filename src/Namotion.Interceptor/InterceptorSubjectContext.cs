@@ -215,10 +215,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 return (interception, innerReadValue) => innerReadValue(interception.Property.Subject);
             }
 
-            var chain = new AllocationFreeChain<ReadPropertyInterception, IReadInterceptor, TProperty>(
+            var chain = new OptimizedInterceptorChain<ReadPropertyInterception, IReadInterceptor, TProperty>(
                 interceptorArray,
-                (interceptor, context, next) => interceptor.ReadProperty(context, next),
-                (interception, innerReadValue) => ((Func<IInterceptorSubject, TProperty>)innerReadValue)(interception.Property.Subject)
+                static (interceptor, context, next) => interceptor.ReadProperty(context, next),
+                static (interception, innerReadValue) => ((Func<IInterceptorSubject, TProperty>)innerReadValue)(interception.Property.Subject)
             );
             return chain.Execute;
         }
@@ -238,10 +238,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 };
             }
 
-            var chain = new AllocationFreeChain<WritePropertyInterception, IWriteInterceptor, TProperty>(
+            var chain = new OptimizedInterceptorChain<WritePropertyInterception, IWriteInterceptor, TProperty>(
                 interceptorArray,
-                (interceptor, context, next) => interceptor.WriteProperty(context, next),
-                (interception, innerWriteValue) =>
+                static (interceptor, context, next) => interceptor.WriteProperty(context, next),
+                static (interception, innerWriteValue) =>
                 {
                     var writeAction = (Action<IInterceptorSubject, TProperty>)innerWriteValue;
                     writeAction(interception.Property.Subject, (TProperty)interception.NewValue!);
@@ -252,14 +252,18 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
     }
 
-    private sealed class AllocationFreeChain<TContext, TInterceptor, TProperty>
+    /// <summary>
+    /// Allocation-free interceptor chain that pre-allocates all continuation delegates 
+    /// and reuses them across executions by updating their captured state.
+    /// </summary>
+    private sealed class OptimizedInterceptorChain<TContext, TInterceptor, TProperty>
     {
         private readonly TInterceptor[] _interceptors;
-        private readonly ChainNode[] _nodes;
         private readonly Func<TInterceptor, TContext, Func<TContext, TProperty>, TProperty> _executeInterceptor;
         private readonly Func<TContext, object, TProperty> _executeTerminal;
+        private readonly ContinuationNode[] _continuations;
 
-        public AllocationFreeChain(
+        public OptimizedInterceptorChain(
             TInterceptor[] interceptors,
             Func<TInterceptor, TContext, Func<TContext, TProperty>, TProperty> executeInterceptor,
             Func<TContext, object, TProperty> executeTerminal)
@@ -267,11 +271,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             _interceptors = interceptors;
             _executeInterceptor = executeInterceptor;
             _executeTerminal = executeTerminal;
-            _nodes = new ChainNode[interceptors.Length];
             
+            // Pre-allocate all continuation delegates to avoid any allocations during execution
+            _continuations = new ContinuationNode[interceptors.Length];
             for (var i = 0; i < interceptors.Length; i++)
             {
-                _nodes[i] = new ChainNode(this, i);
+                _continuations[i] = new ContinuationNode(this, i + 1);
             }
         }
 
@@ -290,37 +295,44 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             var interceptor = _interceptors[index];
-            var node = _nodes[index];
-            node.SetContext(terminal);
+            var continuation = _continuations[index];
             
-            return _executeInterceptor(interceptor, context, node.GetContinuation());
+            // Update the continuation's state without any allocations
+            continuation.SetState(terminal);
+            
+            return _executeInterceptor(interceptor, context, continuation.ContinuationDelegate);
         }
 
-        private sealed class ChainNode
+        /// <summary>
+        /// Represents a single node in the interceptor chain with pre-allocated continuation delegate.
+        /// The delegate is reused across all executions by updating the captured terminal state.
+        /// </summary>
+        private sealed class ContinuationNode
         {
-            private readonly AllocationFreeChain<TContext, TInterceptor, TProperty> _chain;
+            private readonly OptimizedInterceptorChain<TContext, TInterceptor, TProperty> _chain;
             private readonly int _nextIndex;
-            private readonly Func<TContext, TProperty> _continuation;
             
+            // Pre-allocated delegate that will be reused across all executions
+            public readonly Func<TContext, TProperty> ContinuationDelegate;
+            
+            // Mutable state that gets updated for each execution
             private object _currentTerminal = null!;
 
-            public ChainNode(AllocationFreeChain<TContext, TInterceptor, TProperty> chain, int currentIndex)
+            public ContinuationNode(OptimizedInterceptorChain<TContext, TInterceptor, TProperty> chain, int nextIndex)
             {
                 _chain = chain;
-                _nextIndex = currentIndex + 1;
-                _continuation = ExecuteNext;
+                _nextIndex = nextIndex;
+                // Pre-allocate the delegate once - this is the only allocation
+                ContinuationDelegate = ExecuteNext;
             }
 
-            public void SetContext(object terminal)
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public void SetState(object terminal)
             {
                 _currentTerminal = terminal;
             }
 
-            public Func<TContext, TProperty> GetContinuation()
-            {
-                return _continuation;
-            }
-
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             private TProperty ExecuteNext(TContext context)
             {
                 return _chain.ExecuteAtIndex(_nextIndex, context, _currentTerminal);
