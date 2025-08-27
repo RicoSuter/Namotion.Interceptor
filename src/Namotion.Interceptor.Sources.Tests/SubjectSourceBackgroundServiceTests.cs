@@ -101,12 +101,12 @@ public class SubjectSourceBackgroundServiceTests
 
         // Act
         var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance);
-
         await service.StartAsync(cancellationTokenSource.Token);
-        propertyChangedObservable.WriteProperty(
-            new WritePropertyInterception<string?>(
-                subject.GetPropertyReference(nameof(Person.FirstName)), null, "Bar"),
-                _ => { });
+        
+        var interception = new WritePropertyInterception<string?>(
+            subject.GetPropertyReference(nameof(Person.FirstName)), null, "Bar");
+
+        propertyChangedObservable.WriteProperty(ref interception, _ => { });
         
         await Task.Delay(1000, cancellationTokenSource.Token);
         await service.StopAsync(cancellationTokenSource.Token);

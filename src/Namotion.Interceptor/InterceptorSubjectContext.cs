@@ -217,7 +217,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
             var chain = new OptimizedInterceptorChain<ReadPropertyInterception, IReadInterceptor, TProperty>(
                 interceptorArray,
-                static (interceptor, context, next) => interceptor.ReadProperty(context, next),
+                static (interceptor, context, next) => interceptor.ReadProperty(ref context, next),
                 static (interception, innerReadValue) => ((Func<IInterceptorSubject, TProperty>)innerReadValue)(interception.Property.Subject)
             );
             return chain.Execute;
@@ -239,7 +239,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
             var chain = new OptimizedInterceptorChain2<WritePropertyInterception<TProperty>, IWriteInterceptor, TProperty>(
                 interceptorArray,
-                static (interceptor, context, next) => interceptor.WriteProperty(context, next),
+                static (interceptor, context, next) => interceptor.WriteProperty(ref context, next),
                 static (interception, innerWriteValue) =>
                 {
                     var writeAction = (Action<IInterceptorSubject, TProperty>)innerWriteValue;
