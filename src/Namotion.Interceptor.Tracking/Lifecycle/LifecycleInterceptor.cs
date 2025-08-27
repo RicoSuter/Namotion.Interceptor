@@ -104,10 +104,10 @@ public class LifecycleInterceptor : IWriteInterceptor
         }
     }
 
-    public TProperty WriteProperty<TProperty>(WritePropertyInterception<TProperty> context, Func<WritePropertyInterception<TProperty>, TProperty> next)
+    public void WriteProperty<TProperty>(WritePropertyInterception<TProperty> context, Action<WritePropertyInterception<TProperty>> next)
     {
         var currentValue = context.CurrentValue;
-        var result = next(context);
+        next(context);
         var newValue = context.NewValue;
         
         context.Property.SetWriteTimestamp(SubjectMutationContext.GetCurrentTimestamp());
@@ -147,8 +147,6 @@ public class LifecycleInterceptor : IWriteInterceptor
                 }
             }
         }
-
-        return result;
     }
 
     private void FindSubjectsInProperties(IInterceptorSubject subject,

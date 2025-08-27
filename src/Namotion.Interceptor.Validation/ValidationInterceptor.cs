@@ -4,7 +4,7 @@ namespace Namotion.Interceptor.Validation;
 
 public class ValidationInterceptor : IWriteInterceptor
 {
-    public TProperty WriteProperty<TProperty>(WritePropertyInterception<TProperty> context, Func<WritePropertyInterception<TProperty>, TProperty> next)
+    public void WriteProperty<TProperty>(WritePropertyInterception<TProperty> context, Action<WritePropertyInterception<TProperty>> next)
     {
         var errors = context.Property
             .Subject
@@ -18,7 +18,7 @@ public class ValidationInterceptor : IWriteInterceptor
             throw new ValidationException(string.Join("\n", errors.Select(e => e.ErrorMessage)));
         }
 
-        return next(context);
+        next(context);
     }
     
     public void AttachTo(IInterceptorSubject subject)

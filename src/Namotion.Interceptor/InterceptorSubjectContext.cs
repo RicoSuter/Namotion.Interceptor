@@ -49,11 +49,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Func<WritePropertyInterception<TProperty>, Action<IInterceptorSubject, TProperty>, TProperty> GetWriteInterceptorFunction<TProperty>()
+    private Action<WritePropertyInterception<TProperty>, Action<IInterceptorSubject, TProperty>> GetWriteInterceptorFunction<TProperty>()
     {
         if (_writeInterceptorFunction.TryGetValue(typeof(TProperty), out var cached))
         {
-            return (Func<WritePropertyInterception<TProperty>, Action<IInterceptorSubject, TProperty>, TProperty>)cached;
+            return (Action<WritePropertyInterception<TProperty>, Action<IInterceptorSubject, TProperty>>)cached;
         }
 
         var writeInterceptors = GetServices<IWriteInterceptor>();
@@ -226,7 +226,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private static class WriteInterceptorChain<TProperty>
     {
-        public static Func<WritePropertyInterception<TProperty>, Action<IInterceptorSubject, TProperty>, TProperty> Create(IEnumerable<IWriteInterceptor> interceptors)
+        public static Action<WritePropertyInterception<TProperty>, Action<IInterceptorSubject, TProperty>> Create(IEnumerable<IWriteInterceptor> interceptors)
         {
             var interceptorArray = interceptors.ToArray();
             if (interceptorArray.Length == 0)
@@ -234,11 +234,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 return (interception, innerWriteValue) =>
                 {
                     innerWriteValue(interception.Property.Subject, (TProperty)interception.NewValue!);
-                    return (TProperty)interception.NewValue!;
                 };
             }
 
-            var chain = new OptimizedInterceptorChain<WritePropertyInterception<TProperty>, IWriteInterceptor, TProperty>(
+            var chain = new OptimizedInterceptorChain2<WritePropertyInterception<TProperty>, IWriteInterceptor, TProperty>(
                 interceptorArray,
                 static (interceptor, context, next) => interceptor.WriteProperty(context, next),
                 static (interception, innerWriteValue) =>
@@ -249,6 +248,97 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 }
             );
             return chain.Execute;
+        }
+    }
+    
+    
+
+    /// <summary>
+    /// Allocation-free interceptor chain that pre-allocates all continuation delegates 
+    /// and reuses them across executions by updating their captured state.
+    /// </summary>
+    private sealed class OptimizedInterceptorChain2<TContext, TInterceptor, TProperty>
+    {
+        private readonly TInterceptor[] _interceptors;
+        private readonly Action<TInterceptor, TContext, Action<TContext>> _executeInterceptor;
+        private readonly Func<TContext, object, TProperty> _executeTerminal;
+        private readonly ContinuationNode2[] _continuations;
+
+        public OptimizedInterceptorChain2(
+            TInterceptor[] interceptors,
+            Action<TInterceptor, TContext, Action<TContext>> executeInterceptor,
+            Func<TContext, object, TProperty> executeTerminal)
+        {
+            _interceptors = interceptors;
+            _executeInterceptor = executeInterceptor;
+            _executeTerminal = executeTerminal;
+            
+            // Pre-allocate all continuation delegates to avoid any allocations during execution
+            _continuations = new ContinuationNode2[interceptors.Length];
+            for (var i = 0; i < interceptors.Length; i++)
+            {
+                _continuations[i] = new ContinuationNode2(this, i + 1);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Execute(TContext context, object terminal)
+        {
+            ExecuteAtIndex(0, context, terminal);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void ExecuteAtIndex(int index, TContext context, object terminal)
+        {
+            if (index >= _interceptors.Length)
+            {
+                _executeTerminal(context, terminal);
+                return;
+            }
+
+            var interceptor = _interceptors[index];
+            var continuation = _continuations[index];
+            
+            // Update the continuation's state without any allocations
+            continuation.SetState(terminal);
+            
+            _executeInterceptor(interceptor, context, continuation.ContinuationDelegate);
+        }
+
+        /// <summary>
+        /// Represents a single node in the interceptor chain with pre-allocated continuation delegate.
+        /// The delegate is reused across all executions by updating the captured terminal state.
+        /// </summary>
+        private sealed class ContinuationNode2
+        {
+            private readonly OptimizedInterceptorChain2<TContext, TInterceptor, TProperty> _chain;
+            private readonly int _nextIndex;
+            
+            // Pre-allocated delegate that will be reused across all executions
+            public readonly Action<TContext> ContinuationDelegate;
+            
+            // Mutable state that gets updated for each execution
+            private object _currentTerminal = null!;
+
+            public ContinuationNode2(OptimizedInterceptorChain2<TContext, TInterceptor, TProperty> chain, int nextIndex)
+            {
+                _chain = chain;
+                _nextIndex = nextIndex;
+                // Pre-allocate the delegate once - this is the only allocation
+                ContinuationDelegate = ExecuteNext;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public void SetState(object terminal)
+            {
+                _currentTerminal = terminal;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            private void ExecuteNext(TContext context)
+            {
+                _chain.ExecuteAtIndex(_nextIndex, context, _currentTerminal);
+            }
         }
     }
 
