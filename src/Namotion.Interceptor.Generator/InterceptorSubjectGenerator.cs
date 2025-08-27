@@ -204,7 +204,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, (o) => (({baseClassName})o)._{propertyName}, (o, v) => (({baseClassName})o)._{propertyName} = ({fullyQualifiedName})v!);";
+            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, (o) => (({baseClassName})o)._{propertyName}, (o, v) => (({baseClassName})o)._{propertyName} = v);";
                         }
 
                         generatedCode +=
