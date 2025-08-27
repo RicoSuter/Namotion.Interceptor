@@ -12,7 +12,7 @@ public interface IInterceptorSubjectContext
 
     TProperty ExecuteInterceptedRead<TProperty>(ReadPropertyInterception interception, Func<IInterceptorSubject, TProperty> readValue);
 
-    void ExecuteInterceptedWrite<TProperty>(WritePropertyInterception interception, Action<IInterceptorSubject, TProperty> writeValue);
+    void ExecuteInterceptedWrite<TProperty>(WritePropertyInterception<TProperty> interception, Action<IInterceptorSubject, TProperty> writeValue);
 
     bool AddFallbackContext(IInterceptorSubjectContext context);
 
