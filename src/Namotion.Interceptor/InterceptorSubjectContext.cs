@@ -7,7 +7,6 @@ namespace Namotion.Interceptor;
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
     // TODO(perf): Do not initialize these dictionaries until they are needed
-
     private readonly ConcurrentDictionary<Type, Delegate> _readInterceptorFunction = new();
     private readonly ConcurrentDictionary<Type, Delegate> _writeInterceptorFunction = new();
     private readonly ConcurrentDictionary<Type, IEnumerable> _serviceCache = new();
@@ -17,7 +16,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private readonly HashSet<InterceptorSubjectContext> _usedByContexts = [];
     private readonly HashSet<InterceptorSubjectContext> _fallbackContexts = [];
     private InterceptorSubjectContext? _noServicesSingleFallbackContext;
-
+    
     public static InterceptorSubjectContext Create()
     {
         return new InterceptorSubjectContext();
@@ -35,6 +34,34 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         _writeInterceptorFunction.Clear();
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Func<ReadPropertyInterception, Func<IInterceptorSubject, TProperty>, TProperty> GetReadInterceptorFunction<TProperty>()
+    {
+        if (_readInterceptorFunction.TryGetValue(typeof(TProperty), out var cached))
+        {
+            return (Func<ReadPropertyInterception, Func<IInterceptorSubject, TProperty>, TProperty>)cached;
+        }
+
+        var readInterceptors = GetServices<IReadInterceptor>();
+        var func = ReadInterceptorChain<TProperty>.Create(readInterceptors);
+        _readInterceptorFunction.TryAdd(typeof(TProperty), func);
+        return func;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Func<WritePropertyInterception, Action<IInterceptorSubject, TProperty>, TProperty> GetWriteInterceptorFunction<TProperty>()
+    {
+        if (_writeInterceptorFunction.TryGetValue(typeof(TProperty), out var cached))
+        {
+            return (Func<WritePropertyInterception, Action<IInterceptorSubject, TProperty>, TProperty>)cached;
+        }
+
+        var writeInterceptors = GetServices<IWriteInterceptor>();
+        var func = WriteInterceptorChain<TProperty>.Create(writeInterceptors);
+        _writeInterceptorFunction.TryAdd(typeof(TProperty), func);
+        return func;
+    }
+
     public TProperty ExecuteInterceptedRead<TProperty>(ReadPropertyInterception interception, Func<IInterceptorSubject, TProperty> readValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
@@ -43,13 +70,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             return noServicesSingleFallbackContext.ExecuteInterceptedRead(interception, readValue);
         }
 
-        var func = (Func<ReadPropertyInterception, Func<IInterceptorSubject, TProperty>, TProperty>)
-            _readInterceptorFunction.GetOrAdd(typeof(TProperty), _ =>
-            {
-                var readInterceptors = GetServices<IReadInterceptor>();
-                return ReadInterceptorChain<TProperty>.Create(readInterceptors);
-            });
-
+        var func = GetReadInterceptorFunction<TProperty>();
         return func(interception, readValue);
     }
 
@@ -62,13 +83,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             return;
         }
         
-        var func = (Func<WritePropertyInterception, Action<IInterceptorSubject, TProperty>, TProperty>)
-            _writeInterceptorFunction.GetOrAdd(typeof(TProperty), _ =>
-            {
-                var writeInterceptors = GetServices<IWriteInterceptor>();
-                return WriteInterceptorChain<TProperty>.Create(writeInterceptors);
-            });
-
+        var func = GetWriteInterceptorFunction<TProperty>();
         func(interception, writeValue);
     }
 
