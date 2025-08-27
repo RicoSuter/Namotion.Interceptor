@@ -8,8 +8,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
     // TODO(perf): Do not initialize these dictionaries until they are needed
 
-    private readonly ConcurrentDictionary<Type, object> _readInterceptorFunction = new();
-    private readonly ConcurrentDictionary<Type, object> _writeInterceptorFunction = new();
+    private readonly ConcurrentDictionary<Type, Delegate> _readInterceptorFunction = new();
+    private readonly ConcurrentDictionary<Type, Delegate> _writeInterceptorFunction = new();
     private readonly ConcurrentDictionary<Type, IEnumerable> _serviceCache = new();
 
     private readonly HashSet<object> _services = [];
