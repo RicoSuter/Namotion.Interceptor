@@ -19,9 +19,9 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
     {
         // TODO(perf): Reading current value (invoke getter) here might be a performance problem. 
 
-        var interception = new WritePropertyInterception(
+        var interception = new WritePropertyInterception<TProperty>(
             new PropertyReference(_subject, propertyName), 
-            readValue is not null ? readValue.Invoke(_subject) : default, 
+            readValue is not null ? readValue(_subject) : default!, 
             newValue); 
 
         _subject.Context.ExecuteInterceptedWrite(interception, writeValue);

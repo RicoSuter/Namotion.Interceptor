@@ -49,11 +49,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Func<WritePropertyInterception, Action<IInterceptorSubject, TProperty>, TProperty> GetWriteInterceptorFunction<TProperty>()
+    private Func<WritePropertyInterception<TProperty>, Action<IInterceptorSubject, TProperty>, TProperty> GetWriteInterceptorFunction<TProperty>()
     {
         if (_writeInterceptorFunction.TryGetValue(typeof(TProperty), out var cached))
         {
-            return (Func<WritePropertyInterception, Action<IInterceptorSubject, TProperty>, TProperty>)cached;
+            return (Func<WritePropertyInterception<TProperty>, Action<IInterceptorSubject, TProperty>, TProperty>)cached;
         }
 
         var writeInterceptors = GetServices<IWriteInterceptor>();
@@ -74,7 +74,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return func(interception, readValue);
     }
 
-    public void ExecuteInterceptedWrite<TProperty>(WritePropertyInterception interception, Action<IInterceptorSubject, TProperty> writeValue)
+    public void ExecuteInterceptedWrite<TProperty>(WritePropertyInterception<TProperty> interception, Action<IInterceptorSubject, TProperty> writeValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
@@ -226,7 +226,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private static class WriteInterceptorChain<TProperty>
     {
-        public static Func<WritePropertyInterception, Action<IInterceptorSubject, TProperty>, TProperty> Create(IEnumerable<IWriteInterceptor> interceptors)
+        public static Func<WritePropertyInterception<TProperty>, Action<IInterceptorSubject, TProperty>, TProperty> Create(IEnumerable<IWriteInterceptor> interceptors)
         {
             var interceptorArray = interceptors.ToArray();
             if (interceptorArray.Length == 0)
@@ -238,7 +238,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 };
             }
 
-            var chain = new OptimizedInterceptorChain<WritePropertyInterception, IWriteInterceptor, TProperty>(
+            var chain = new OptimizedInterceptorChain<WritePropertyInterception<TProperty>, IWriteInterceptor, TProperty>(
                 interceptorArray,
                 static (interceptor, context, next) => interceptor.WriteProperty(context, next),
                 static (interception, innerWriteValue) =>

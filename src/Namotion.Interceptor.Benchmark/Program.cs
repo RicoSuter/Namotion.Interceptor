@@ -41,7 +41,7 @@ public static class Program
             {
                 // benchmark.CreateCompleteUpdate();
                 // benchmark.CreatePartialUpdate();
-                benchmark.Read();
+                benchmark.Write();
             }
             Console.WriteLine($"{i * inner}/{total} ({watch.ElapsedMilliseconds / inner} ms)");
         }

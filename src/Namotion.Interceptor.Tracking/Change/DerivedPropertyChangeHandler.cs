@@ -35,7 +35,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         return result;
     }
 
-    public TProperty WriteProperty<TProperty>(WritePropertyInterception context, Func<WritePropertyInterception, TProperty> next)
+    public TProperty WriteProperty<TProperty>(WritePropertyInterception<TProperty> context, Func<WritePropertyInterception<TProperty>, TProperty> next)
     {
         var result = next.Invoke(context);
 
