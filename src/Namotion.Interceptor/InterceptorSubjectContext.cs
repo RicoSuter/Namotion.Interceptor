@@ -206,7 +206,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 (interceptor, context, next) => interceptor.ReadProperty(context, next),
                 (interception, innerReadValue) => ((Func<IInterceptorSubject, TProperty>)innerReadValue)(interception.Property.Subject)
             );
-            return (interception, innerReadValue) => chain.Execute(interception, innerReadValue);
+            return chain.Execute;
         }
     }
 
@@ -235,7 +235,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                     return (TProperty)interception.NewValue!;
                 }
             );
-            return (interception, innerWriteValue) => chain.Execute(interception, innerWriteValue);
+            return chain.Execute; // Return the method directly, not wrapped in a lambda
         }
     }
 
@@ -269,6 +269,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             return ExecuteAtIndex(0, context, terminal);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty ExecuteAtIndex(int index, TContext context, object terminal)
         {
             if (index >= _interceptors.Length)
