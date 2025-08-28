@@ -44,7 +44,7 @@ public class RegistryBenchmark
     public void AddLotsOfPreviousCars()
     {
         _object.PreviousCars = Enumerable.Range(0, 1000)
-            .Select(i => new Car())
+            .Select(_ => new Car())
             .ToArray();
     }
 
