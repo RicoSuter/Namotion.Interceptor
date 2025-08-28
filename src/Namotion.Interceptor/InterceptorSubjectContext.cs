@@ -34,13 +34,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         EnsureInitialized();
-        var services = _serviceCache!.GetOrAdd(
-            typeof(TInterface), _ =>
+        if (!_serviceCache!.TryGetValue(typeof(TInterface), out var services))
+        {
+            services = _serviceCache!.GetOrAdd(typeof(TInterface), _ =>
             {
                 lock (this)
+                {
                     return GetServicesWithoutCache<TInterface>().ToArray();
+                }
             });
-
+        }
+        
         return (TInterface[])services;
     }
 
