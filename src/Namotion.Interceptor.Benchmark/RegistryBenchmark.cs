@@ -35,7 +35,7 @@ public class RegistryBenchmark
                     .WithRegistry();
 
                 _object = new Car(_context);
-                //AddLotsOfPreviousCars();
+                AddLotsOfPreviousCars();
                 break;
         }
     }
