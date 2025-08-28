@@ -41,7 +41,7 @@ public static class Program
             {
                 // benchmark.CreateCompleteUpdate();
                 // benchmark.CreatePartialUpdate();
-                benchmark.Write();
+                benchmark.AddLotsOfPreviousCars();
             }
             Console.WriteLine($"{i * inner}/{total} ({watch.ElapsedMilliseconds / inner} ms)");
         }
