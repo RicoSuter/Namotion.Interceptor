@@ -12,7 +12,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
     public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
         var interception = new ReadPropertyInterception(new PropertyReference(_subject, propertyName));
-        return _subject.Context.ExecuteInterceptedRead(interception, readValue);
+        return _subject.Context.ExecuteInterceptedRead(ref interception, readValue);
     }
     
     public void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty>? readValue, Action<IInterceptorSubject, TProperty> writeValue)
@@ -24,7 +24,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
             readValue is not null ? readValue(_subject) : default!, 
             newValue); 
 
-        _subject.Context.ExecuteInterceptedWrite(interception, writeValue);
+        _subject.Context.ExecuteInterceptedWrite(ref interception, writeValue);
     }
 
     public object? InvokeMethod(string methodName, object?[] parameters, Func<object?[], object?> invokeMethod)

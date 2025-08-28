@@ -4,7 +4,7 @@ namespace Namotion.Interceptor.Validation;
 
 public class ValidationInterceptor : IWriteInterceptor
 {
-    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, Action<WritePropertyInterception<TProperty>> next)
+    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
     {
         // TODO(perf): Avoid linq to avoid ref copy
         var interception = context;
@@ -20,7 +20,7 @@ public class ValidationInterceptor : IWriteInterceptor
             throw new ValidationException(string.Join("\n", errors.Select(e => e.ErrorMessage)));
         }
 
-        next(context);
+        next(ref context);
     }
     
     public void AttachTo(IInterceptorSubject subject)

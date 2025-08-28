@@ -104,10 +104,10 @@ public class LifecycleInterceptor : IWriteInterceptor
         }
     }
 
-    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, Action<WritePropertyInterception<TProperty>> next)
+    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
     {
         var currentValue = context.CurrentValue;
-        next(context);
+        next(ref context);
         var newValue = context.NewValue;
         
         context.Property.SetWriteTimestamp(SubjectMutationContext.GetCurrentTimestamp());
