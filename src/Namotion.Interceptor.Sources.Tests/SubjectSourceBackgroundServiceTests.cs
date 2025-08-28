@@ -106,7 +106,7 @@ public class SubjectSourceBackgroundServiceTests
         var interception = new WritePropertyInterception<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Bar");
 
-        propertyChangedObservable.WriteProperty(ref interception, _ => { });
+        propertyChangedObservable.WriteProperty(ref interception, (ref _) => { });
         
         await Task.Delay(1000, cancellationTokenSource.Token);
         await service.StopAsync(cancellationTokenSource.Token);

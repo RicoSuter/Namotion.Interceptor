@@ -34,12 +34,39 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         _writeInterceptorFunction.Clear();
     }
 
+    public TProperty ExecuteInterceptedRead<TProperty>(ref ReadPropertyInterception interception, Func<IInterceptorSubject, TProperty> readValue)
+    {
+        var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
+        if (noServicesSingleFallbackContext is not null)
+        {
+            return noServicesSingleFallbackContext.ExecuteInterceptedRead(ref interception, readValue);
+        }
+
+        var func = GetReadInterceptorFunction<TProperty>();
+        return func(ref interception, readValue);
+    }
+
+    public void ExecuteInterceptedWrite<TProperty>(ref WritePropertyInterception<TProperty> interception, Action<IInterceptorSubject, TProperty> writeValue)
+    {
+        var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
+        if (noServicesSingleFallbackContext is not null)
+        {
+            noServicesSingleFallbackContext.ExecuteInterceptedWrite(ref interception, writeValue);
+            return;
+        }
+        
+        var action = GetWriteInterceptorFunction<TProperty>();
+        action(ref interception, writeValue);
+    }
+    
+    delegate TProperty ReadFunc<TProperty>(ref ReadPropertyInterception interception, Func<IInterceptorSubject, TProperty> func);
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Func<ReadPropertyInterception, Func<IInterceptorSubject, TProperty>, TProperty> GetReadInterceptorFunction<TProperty>()
+    private ReadFunc<TProperty> GetReadInterceptorFunction<TProperty>()
     {
         if (_readInterceptorFunction.TryGetValue(typeof(TProperty), out var cached))
         {
-            return (Func<ReadPropertyInterception, Func<IInterceptorSubject, TProperty>, TProperty>)cached;
+            return (ReadFunc<TProperty>)cached;
         }
 
         var readInterceptors = GetServices<IReadInterceptor>();
@@ -48,43 +75,20 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return func;
     }
 
+    delegate void WriteAction<TProperty>(ref WritePropertyInterception<TProperty> interception, Action<IInterceptorSubject, TProperty> action);
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Action<WritePropertyInterception<TProperty>, Action<IInterceptorSubject, TProperty>> GetWriteInterceptorFunction<TProperty>()
+    private WriteAction<TProperty> GetWriteInterceptorFunction<TProperty>()
     {
         if (_writeInterceptorFunction.TryGetValue(typeof(TProperty), out var cached))
         {
-            return (Action<WritePropertyInterception<TProperty>, Action<IInterceptorSubject, TProperty>>)cached;
+            return (WriteAction<TProperty>)cached;
         }
 
         var writeInterceptors = GetServices<IWriteInterceptor>();
-        var func = WriteInterceptorChain<TProperty>.Create(writeInterceptors);
-        _writeInterceptorFunction.TryAdd(typeof(TProperty), func);
-        return func;
-    }
-
-    public TProperty ExecuteInterceptedRead<TProperty>(ReadPropertyInterception interception, Func<IInterceptorSubject, TProperty> readValue)
-    {
-        var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
-        if (noServicesSingleFallbackContext is not null)
-        {
-            return noServicesSingleFallbackContext.ExecuteInterceptedRead(interception, readValue);
-        }
-
-        var func = GetReadInterceptorFunction<TProperty>();
-        return func(interception, readValue);
-    }
-
-    public void ExecuteInterceptedWrite<TProperty>(WritePropertyInterception<TProperty> interception, Action<IInterceptorSubject, TProperty> writeValue)
-    {
-        var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
-        if (noServicesSingleFallbackContext is not null)
-        {
-            noServicesSingleFallbackContext.ExecuteInterceptedWrite(interception, writeValue);
-            return;
-        }
-        
-        var func = GetWriteInterceptorFunction<TProperty>();
-        func(interception, writeValue);
+        var action = WriteInterceptorChain<TProperty>.Create(writeInterceptors);
+        _writeInterceptorFunction.TryAdd(typeof(TProperty), action);
+        return action;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -207,18 +211,18 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private static class ReadInterceptorChain<TProperty>
     {
-        public static Func<ReadPropertyInterception, Func<IInterceptorSubject, TProperty>, TProperty> Create(IEnumerable<IReadInterceptor> interceptors)
+        public static ReadFunc<TProperty> Create(IEnumerable<IReadInterceptor> interceptors)
         {
             var interceptorArray = interceptors.ToArray();
             if (interceptorArray.Length == 0)
             {
-                return (interception, innerReadValue) => innerReadValue(interception.Property.Subject);
+                return (ref interception, innerReadValue) => innerReadValue(interception.Property.Subject);
             }
 
-            var chain = new OptimizedInterceptorChain<ReadPropertyInterception, IReadInterceptor, TProperty>(
+            var chain = new ReadInterceptorChain<IReadInterceptor, TProperty>(
                 interceptorArray,
-                static (interceptor, context, next) => interceptor.ReadProperty(ref context, next),
-                static (interception, innerReadValue) => ((Func<IInterceptorSubject, TProperty>)innerReadValue)(interception.Property.Subject)
+                static (interceptor, ref interception, next) => interceptor.ReadProperty(ref interception, next),
+                static (ref interception, innerReadValue) => ((Func<IInterceptorSubject, TProperty>)innerReadValue)(interception.Property.Subject)
             );
             return chain.Execute;
         }
@@ -226,106 +230,93 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private static class WriteInterceptorChain<TProperty>
     {
-        public static Action<WritePropertyInterception<TProperty>, Action<IInterceptorSubject, TProperty>> Create(IEnumerable<IWriteInterceptor> interceptors)
+        public static WriteAction<TProperty> Create(IEnumerable<IWriteInterceptor> interceptors)
         {
             var interceptorArray = interceptors.ToArray();
             if (interceptorArray.Length == 0)
             {
-                return (interception, innerWriteValue) =>
+                return (ref interception, innerWriteValue) =>
                 {
-                    innerWriteValue(interception.Property.Subject, (TProperty)interception.NewValue!);
+                    innerWriteValue(interception.Property.Subject, interception.NewValue);
                 };
             }
 
-            var chain = new OptimizedInterceptorChain2<WritePropertyInterception<TProperty>, IWriteInterceptor, TProperty>(
+            var chain = new WriteInterceptorChain<IWriteInterceptor, TProperty>(
                 interceptorArray,
-                static (interceptor, context, next) => interceptor.WriteProperty(ref context, next),
-                static (interception, innerWriteValue) =>
+                static (interceptor, ref interception, next) => interceptor.WriteProperty(ref interception, next),
+                static (ref interception, innerWriteValue) =>
                 {
                     var writeAction = (Action<IInterceptorSubject, TProperty>)innerWriteValue;
-                    writeAction(interception.Property.Subject, (TProperty)interception.NewValue!);
-                    return (TProperty)interception.NewValue!;
+                    writeAction(interception.Property.Subject, interception.NewValue);
+                    return interception.NewValue;
                 }
             );
             return chain.Execute;
         }
     }
-    
-    
 
-    /// <summary>
-    /// Allocation-free interceptor chain that pre-allocates all continuation delegates 
-    /// and reuses them across executions by updating their captured state.
-    /// </summary>
-    private sealed class OptimizedInterceptorChain2<TContext, TInterceptor, TProperty>
+    private sealed class WriteInterceptorChain<TInterceptor, TProperty>
     {
+        public delegate TProperty ExecuteTerminalFunc(ref WritePropertyInterception<TProperty> interception, object obj);
+        public delegate void ExecuteInterceptorAction(TInterceptor interceptor, ref WritePropertyInterception<TProperty> interception, WriteInterceptionAction<TProperty> action);
+        
         private readonly TInterceptor[] _interceptors;
-        private readonly Action<TInterceptor, TContext, Action<TContext>> _executeInterceptor;
-        private readonly Func<TContext, object, TProperty> _executeTerminal;
-        private readonly ContinuationNode2[] _continuations;
+        private readonly ExecuteInterceptorAction _executeInterceptor;
+        private readonly ExecuteTerminalFunc _executeTerminal;
+        private readonly WriteContinuationNode[] _continuations;
 
-        public OptimizedInterceptorChain2(
+        public WriteInterceptorChain(
             TInterceptor[] interceptors,
-            Action<TInterceptor, TContext, Action<TContext>> executeInterceptor,
-            Func<TContext, object, TProperty> executeTerminal)
+            ExecuteInterceptorAction executeInterceptor,
+            ExecuteTerminalFunc executeTerminal)
         {
             _interceptors = interceptors;
             _executeInterceptor = executeInterceptor;
             _executeTerminal = executeTerminal;
             
-            // Pre-allocate all continuation delegates to avoid any allocations during execution
-            _continuations = new ContinuationNode2[interceptors.Length];
+            _continuations = new WriteContinuationNode[interceptors.Length];
             for (var i = 0; i < interceptors.Length; i++)
             {
-                _continuations[i] = new ContinuationNode2(this, i + 1);
+                _continuations[i] = new WriteContinuationNode(this, i + 1);
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Execute(TContext context, object terminal)
+        public void Execute(ref WritePropertyInterception<TProperty> interception, object terminal)
         {
-            ExecuteAtIndex(0, context, terminal);
+            ExecuteAtIndex(0, ref interception, terminal);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void ExecuteAtIndex(int index, TContext context, object terminal)
+        private void ExecuteAtIndex(int index, ref WritePropertyInterception<TProperty> interception, object terminal)
         {
             if (index >= _interceptors.Length)
             {
-                _executeTerminal(context, terminal);
+                _executeTerminal(ref interception, terminal);
                 return;
             }
 
             var interceptor = _interceptors[index];
             var continuation = _continuations[index];
             
-            // Update the continuation's state without any allocations
             continuation.SetState(terminal);
-            
-            _executeInterceptor(interceptor, context, continuation.ContinuationDelegate);
+            _executeInterceptor(interceptor, ref interception, continuation.ContinuationAction);
         }
 
-        /// <summary>
-        /// Represents a single node in the interceptor chain with pre-allocated continuation delegate.
-        /// The delegate is reused across all executions by updating the captured terminal state.
-        /// </summary>
-        private sealed class ContinuationNode2
+        private sealed class WriteContinuationNode
         {
-            private readonly OptimizedInterceptorChain2<TContext, TInterceptor, TProperty> _chain;
+            private readonly WriteInterceptorChain<TInterceptor, TProperty> _chain;
             private readonly int _nextIndex;
-            
-            // Pre-allocated delegate that will be reused across all executions
-            public readonly Action<TContext> ContinuationDelegate;
-            
-            // Mutable state that gets updated for each execution
             private object _currentTerminal = null!;
 
-            public ContinuationNode2(OptimizedInterceptorChain2<TContext, TInterceptor, TProperty> chain, int nextIndex)
+            public readonly WriteInterceptionAction<TProperty> ContinuationAction;
+
+            public WriteContinuationNode(WriteInterceptorChain<TInterceptor, TProperty> chain, int nextIndex)
             {
                 _chain = chain;
                 _nextIndex = nextIndex;
-                // Pre-allocate the delegate once - this is the only allocation
-                ContinuationDelegate = ExecuteNext;
+
+                ContinuationAction = ExecuteNext;
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -335,34 +326,32 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            private void ExecuteNext(TContext context)
+            private void ExecuteNext(ref WritePropertyInterception<TProperty> interception)
             {
-                _chain.ExecuteAtIndex(_nextIndex, context, _currentTerminal);
+                _chain.ExecuteAtIndex(_nextIndex, ref interception, _currentTerminal);
             }
         }
     }
 
-    /// <summary>
-    /// Allocation-free interceptor chain that pre-allocates all continuation delegates 
-    /// and reuses them across executions by updating their captured state.
-    /// </summary>
-    private sealed class OptimizedInterceptorChain<TContext, TInterceptor, TProperty>
+    private sealed class ReadInterceptorChain<TInterceptor, TProperty>
     {
+        public delegate TProperty ExecuteInterceptorFunc(TInterceptor interceptor, ref ReadPropertyInterception context, ReadInterceptionFunc<TProperty> a);
+        public delegate TProperty ReadInterceptionFunc(ref ReadPropertyInterception interception, object obj);
+        
         private readonly TInterceptor[] _interceptors;
-        private readonly Func<TInterceptor, TContext, Func<TContext, TProperty>, TProperty> _executeInterceptor;
-        private readonly Func<TContext, object, TProperty> _executeTerminal;
+        private readonly ExecuteInterceptorFunc _executeInterceptor;
+        private readonly ReadInterceptionFunc _executeTerminal;
         private readonly ContinuationNode[] _continuations;
 
-        public OptimizedInterceptorChain(
+        public ReadInterceptorChain(
             TInterceptor[] interceptors,
-            Func<TInterceptor, TContext, Func<TContext, TProperty>, TProperty> executeInterceptor,
-            Func<TContext, object, TProperty> executeTerminal)
+            ExecuteInterceptorFunc executeInterceptor,
+            ReadInterceptionFunc executeTerminal)
         {
             _interceptors = interceptors;
             _executeInterceptor = executeInterceptor;
             _executeTerminal = executeTerminal;
             
-            // Pre-allocate all continuation delegates to avoid any allocations during execution
             _continuations = new ContinuationNode[interceptors.Length];
             for (var i = 0; i < interceptors.Length; i++)
             {
@@ -371,49 +360,40 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public TProperty Execute(TContext context, object terminal)
+        public TProperty Execute(ref ReadPropertyInterception interception, object terminal)
         {
-            return ExecuteAtIndex(0, context, terminal);
+            return ExecuteAtIndex(0, ref interception, terminal);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private TProperty ExecuteAtIndex(int index, TContext context, object terminal)
+        private TProperty ExecuteAtIndex(int index, ref ReadPropertyInterception interception, object terminal)
         {
             if (index >= _interceptors.Length)
             {
-                return _executeTerminal(context, terminal);
+                return _executeTerminal(ref interception, terminal);
             }
 
             var interceptor = _interceptors[index];
             var continuation = _continuations[index];
             
-            // Update the continuation's state without any allocations
             continuation.SetState(terminal);
-            
-            return _executeInterceptor(interceptor, context, continuation.ContinuationDelegate);
+            return _executeInterceptor(interceptor, ref interception, continuation.ContinuationFunc);
         }
 
-        /// <summary>
-        /// Represents a single node in the interceptor chain with pre-allocated continuation delegate.
-        /// The delegate is reused across all executions by updating the captured terminal state.
-        /// </summary>
         private sealed class ContinuationNode
         {
-            private readonly OptimizedInterceptorChain<TContext, TInterceptor, TProperty> _chain;
+            private readonly ReadInterceptorChain<TInterceptor, TProperty> _chain;
             private readonly int _nextIndex;
-            
-            // Pre-allocated delegate that will be reused across all executions
-            public readonly Func<TContext, TProperty> ContinuationDelegate;
-            
-            // Mutable state that gets updated for each execution
             private object _currentTerminal = null!;
 
-            public ContinuationNode(OptimizedInterceptorChain<TContext, TInterceptor, TProperty> chain, int nextIndex)
+            public readonly ReadInterceptionFunc<TProperty> ContinuationFunc;
+
+            public ContinuationNode(ReadInterceptorChain<TInterceptor, TProperty> chain, int nextIndex)
             {
                 _chain = chain;
                 _nextIndex = nextIndex;
-                // Pre-allocate the delegate once - this is the only allocation
-                ContinuationDelegate = ExecuteNext;
+
+                ContinuationFunc = ExecuteNext;
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -423,9 +403,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            private TProperty ExecuteNext(TContext context)
+            private TProperty ExecuteNext(ref ReadPropertyInterception interception)
             {
-                return _chain.ExecuteAtIndex(_nextIndex, context, _currentTerminal);
+                return _chain.ExecuteAtIndex(_nextIndex, ref interception, _currentTerminal);
             }
         }
     }

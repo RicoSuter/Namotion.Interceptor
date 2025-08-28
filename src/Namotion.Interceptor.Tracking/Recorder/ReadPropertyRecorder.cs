@@ -4,7 +4,7 @@ public class ReadPropertyRecorder : IReadInterceptor
 {
     internal static AsyncLocal<IDictionary<ReadPropertyRecorder, List<HashSet<PropertyReference>>>> Scopes { get; } = new();
     
-    public TProperty ReadProperty<TProperty>(ref ReadPropertyInterception context, Func<ReadPropertyInterception, TProperty> next)
+    public TProperty ReadProperty<TProperty>(ref ReadPropertyInterception context, ReadInterceptionFunc<TProperty> next)
     {
         if (Scopes.Value is not null)
         {
@@ -21,7 +21,7 @@ public class ReadPropertyRecorder : IReadInterceptor
             }
         }
 
-        return next(context);
+        return next(ref context);
     }
     
     public void AttachTo(IInterceptorSubject subject)

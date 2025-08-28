@@ -28,16 +28,16 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
     }
 
-    public TProperty ReadProperty<TProperty>(ref ReadPropertyInterception context, Func<ReadPropertyInterception, TProperty> next)
+    public TProperty ReadProperty<TProperty>(ref ReadPropertyInterception context, ReadInterceptionFunc<TProperty> next)
     {
-        var result = next(context);
+        var result = next(ref context);
         TouchProperty(context.Property);
         return result;
     }
 
-    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, Action<WritePropertyInterception<TProperty>> next)
+    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
     {
-        next(context);
+        next(ref context);
 
         var usedByProperties = context.Property.GetUsedByProperties();
         if (usedByProperties.Count == 0)
