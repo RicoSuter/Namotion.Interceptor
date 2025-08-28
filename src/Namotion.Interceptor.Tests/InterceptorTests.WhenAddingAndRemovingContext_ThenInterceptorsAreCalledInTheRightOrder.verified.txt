@@ -1,0 +1,6 @@
+﻿[
+  a: Attached,
+  b: Attached,
+  a: Detached,
+  b: Detached
+]

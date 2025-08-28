@@ -82,4 +82,45 @@ public class InterceptorTests
             _logs.Add($"{_name}: After write {context.Property.Name}");
         }
     }
+    
+    [Fact]
+    public Task WhenAddingAndRemovingContext_ThenInterceptorsAreCalledInTheRightOrder()
+    {
+        // Arrange
+        var logs = new List<string>();
+        
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithService(() => new TestLifecycleInterceptor("a", logs), _ => false)
+            .WithService(() => new TestLifecycleInterceptor("b", logs), _ => false);
+        
+        // Act
+        var car = new Car(context);
+        ((IInterceptorSubject)car).Context.RemoveFallbackContext(context);
+
+        // Assert
+        return Verify(logs);
+    }
+
+    public class TestLifecycleInterceptor : ILifecycleInterceptor
+    {
+        private readonly string _name;
+        private readonly List<string> _logs;
+
+        public TestLifecycleInterceptor(string name, List<string> logs)
+        {
+            _name = name;
+            _logs = logs;
+        }
+
+        public void AttachTo(IInterceptorSubject subject)
+        {
+            _logs.Add($"{_name}: Attached");
+        }
+
+        public void DetachFrom(IInterceptorSubject subject)
+        {
+            _logs.Add($"{_name}: Detached");
+        }
+    }
 }
