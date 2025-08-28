@@ -9,12 +9,4 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
             next(ref context);
         }
     }
-    
-    public void AttachTo(IInterceptorSubject subject)
-    {
-    }
-
-    public void DetachFrom(IInterceptorSubject subject)
-    {
-    }
 }

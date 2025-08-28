@@ -24,14 +24,6 @@ public class InterceptorSubjectTests
     {
         public List<MethodInvocationInterception> Contexts { get; } = new();
         
-        public void AttachTo(IInterceptorSubject subject)
-        {
-        }
-
-        public void DetachFrom(IInterceptorSubject subject)
-        {
-        }
-
         public object? InvokeMethod(MethodInvocationInterception context, Func<MethodInvocationInterception, object?> next)
         {
             Contexts.Add(context);
@@ -46,7 +38,7 @@ public class InterceptorSubjectTests
         var interceptor = new TestMethodInterceptor();
         var context = InterceptorSubjectContext
             .Create()
-            .WithInterceptor(() => interceptor);
+            .WithService(() => interceptor);
         
         var calculator = new Calculator(context);
         

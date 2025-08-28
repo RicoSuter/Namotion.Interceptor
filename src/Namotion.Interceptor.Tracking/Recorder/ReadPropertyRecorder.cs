@@ -23,12 +23,4 @@ public class ReadPropertyRecorder : IReadInterceptor
 
         return next(ref context);
     }
-    
-    public void AttachTo(IInterceptorSubject subject)
-    {
-    }
-
-    public void DetachFrom(IInterceptorSubject subject)
-    {
-    }
 }
