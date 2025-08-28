@@ -4,7 +4,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
-public class LifecycleInterceptor : IWriteInterceptor
+public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
     private const string ReferenceCountKey = "Namotion.Interceptor.Tracking.ReferenceCount";
     

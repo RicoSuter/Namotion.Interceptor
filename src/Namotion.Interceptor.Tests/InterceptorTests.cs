@@ -40,14 +40,6 @@ public class InterceptorTests
             _logs.Add($"{_name}: After read {context.Property.Name}");
             return result;
         }
-        
-        public void AttachTo(IInterceptorSubject subject)
-        {
-        }
-
-        public void DetachFrom(IInterceptorSubject subject)
-        {
-        }
     }
     
     [Fact]
@@ -88,14 +80,6 @@ public class InterceptorTests
             context.NewValue = (TProperty)(object)((int)((object)context.NewValue!) + 1);
             next(ref context);
             _logs.Add($"{_name}: After write {context.Property.Name}");
-        }
-        
-        public void AttachTo(IInterceptorSubject subject)
-        {
-        }
-
-        public void DetachFrom(IInterceptorSubject subject)
-        {
         }
     }
 }

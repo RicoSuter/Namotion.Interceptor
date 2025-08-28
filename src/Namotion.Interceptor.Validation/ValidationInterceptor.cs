@@ -22,12 +22,4 @@ public class ValidationInterceptor : IWriteInterceptor
 
         next(ref context);
     }
-    
-    public void AttachTo(IInterceptorSubject subject)
-    {
-    }
-
-    public void DetachFrom(IInterceptorSubject subject)
-    {
-    }
 }
