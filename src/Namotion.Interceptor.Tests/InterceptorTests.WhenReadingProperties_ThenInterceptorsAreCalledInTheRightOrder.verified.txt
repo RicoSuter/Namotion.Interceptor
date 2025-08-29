@@ -1,0 +1,6 @@
+﻿[
+  a: Before read Speed,
+  b: Before read Speed,
+  b: After read Speed,
+  a: After read Speed
+]

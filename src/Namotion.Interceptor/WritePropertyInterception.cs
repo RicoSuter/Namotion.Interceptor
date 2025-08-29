@@ -1,14 +1,14 @@
 ﻿namespace Namotion.Interceptor;
 
-public readonly struct WritePropertyInterception
+public struct WritePropertyInterception<TProperty>
 {
     public PropertyReference Property { get; }
  
-    public object? CurrentValue { get; }
+    public TProperty CurrentValue { get; }
     
-    public object? NewValue { get; }
+    public TProperty NewValue { get; set; }
 
-    public WritePropertyInterception(PropertyReference property, object? currentValue, object? newValue)
+    public WritePropertyInterception(PropertyReference property, TProperty currentValue, TProperty newValue)
     {
         Property = property;
         CurrentValue = currentValue;

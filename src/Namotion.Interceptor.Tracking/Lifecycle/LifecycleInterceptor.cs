@@ -4,7 +4,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
-public class LifecycleInterceptor : IWriteInterceptor
+public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
     private const string ReferenceCountKey = "Namotion.Interceptor.Tracking.ReferenceCount";
     
@@ -104,10 +104,10 @@ public class LifecycleInterceptor : IWriteInterceptor
         }
     }
 
-    public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
+    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
     {
         var currentValue = context.CurrentValue;
-        var result = next(context);
+        next(ref context);
         var newValue = context.NewValue;
         
         context.Property.SetWriteTimestamp(SubjectMutationContext.GetCurrentTimestamp());
@@ -147,8 +147,6 @@ public class LifecycleInterceptor : IWriteInterceptor
                 }
             }
         }
-
-        return result;
     }
 
     private void FindSubjectsInProperties(IInterceptorSubject subject,
