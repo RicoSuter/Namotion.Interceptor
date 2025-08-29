@@ -1,4 +1,5 @@
 ﻿using System.Collections.Frozen;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
@@ -25,7 +26,7 @@ public record RegisteredSubject
         }
     }
 
-    public IEnumerable<RegisteredSubjectProperty> Properties
+    public ImmutableArray<RegisteredSubjectProperty> Properties
     {
         get
         {
