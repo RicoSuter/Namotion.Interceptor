@@ -2,21 +2,11 @@
 
 public class PropertyValueEqualityCheckHandler : IWriteInterceptor
 {
-    public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
+    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
     {
-        if (!Equals(context.CurrentValue, context.NewValue))
+        if (!EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue))
         {
-            return next(context);
+            next(ref context);
         }
-
-        return context.NewValue;
-    }
-    
-    public void AttachTo(IInterceptorSubject subject)
-    {
-    }
-
-    public void DetachFrom(IInterceptorSubject subject)
-    {
     }
 }

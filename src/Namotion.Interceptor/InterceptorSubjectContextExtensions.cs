@@ -2,13 +2,6 @@
 
 public static class InterceptorSubjectContextExtensions
 {
-    public static IInterceptorSubjectContext WithInterceptor<TService>(this IInterceptorSubjectContext context, Func<TService> factory)
-        where TService : IInterceptor
-    {
-        context.TryAddService(factory, _ => true);
-        return context;
-    }
-
     public static IInterceptorSubjectContext WithService<TService>(this IInterceptorSubjectContext context, Func<TService> factory)
     {
         context.TryAddService(factory, _ => true);

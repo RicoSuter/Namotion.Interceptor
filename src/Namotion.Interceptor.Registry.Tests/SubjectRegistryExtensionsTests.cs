@@ -32,6 +32,7 @@ public class SubjectRegistryExtensionsTests
         // Assert
         Assert.NotNull(registeredSubjectProperty);
         Assert.NotNull(registeredSubject);
+        Assert.Equal(person.Mother, registeredSubjectProperty.Subject);
 
         Assert.Equal("Mother", registeredSubjectProperty.GetValue());
     }
