@@ -1,4 +1,6 @@
-﻿namespace Namotion.Interceptor.Dynamic.Tests;
+﻿using Namotion.Interceptor.Registry;
+
+namespace Namotion.Interceptor.Dynamic.Tests;
 
 public interface IMotor
 {
@@ -29,6 +31,25 @@ public class DynamicSubjectTests
     }
     
     [Fact]
+    public void WhenCreatingDynamicSubject_ThenRegistryKnowsProperties()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var subject = DynamicSubject.Create(context, typeof(IMotor), typeof(ISensor));
+
+        // Act
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var properties = registeredSubject.Properties;
+
+        // Assert
+        Assert.Contains(properties, p => p.Name == "Speed");
+        Assert.Contains(properties, p => p.Name == "Temperature");
+    }
+    
+    [Fact]
     public Task WhenInterceptingDynamicSubject_ThenTheyAreCalled()
     {
         // Act
@@ -46,6 +67,9 @@ public class DynamicSubjectTests
         // Act
         motor.Speed = 100;
         sensor.Temperature = 25;
+        var speed = motor.Speed;
+        var temperature = sensor.Temperature;
+
         ((IInterceptorSubject)subject).Context.RemoveFallbackContext(context);
 
         // Assert & Act (read)

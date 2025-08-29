@@ -16,5 +16,7 @@
   a: Before read Temperature,
   b: Before read Temperature,
   b: After read Temperature,
-  a: After read Temperature
+  a: After read Temperature,
+  a: Detached,
+  b: Detached
 ]

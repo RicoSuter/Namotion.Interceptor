@@ -25,6 +25,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\Namotion.Interceptor.Dynamic\Namotion.Interceptor.Dynamic.csproj" />
+      <ProjectReference Include="..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
     </ItemGroup>
 
 </Project>
