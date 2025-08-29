@@ -104,16 +104,12 @@ namespace {namespaceName}
     public partial class {baseClassName} : IInterceptorSubject
     {{
         private IInterceptorExecutor? _context;
-        private ConcurrentDictionary<string, object?> _data = new ConcurrentDictionary<string, object?>();
 
         [JsonIgnore]
-        IInterceptorSubjectContext IInterceptorSubject.Context
-        {{
-            get => _context = _context ?? new InterceptorExecutor(this);
-        }}
+        IInterceptorSubjectContext IInterceptorSubject.Context => _context ??= new InterceptorExecutor(this);
 
         [JsonIgnore]
-        ConcurrentDictionary<string, object?> IInterceptorSubject.Data => _data;
+        ConcurrentDictionary<string, object?> IInterceptorSubject.Data {{ get; }} = new();
 
         [JsonIgnore]
         IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
