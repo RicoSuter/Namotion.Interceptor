@@ -7,6 +7,8 @@ namespace Namotion.Interceptor.Dynamic;
 
 public class DynamicSubject : IInterceptorSubject
 {
+    private static readonly ProxyGenerator ProxyGenerator = new();
+    
     private readonly ConcurrentDictionary<string, object?> _propertyValues = new();
     private readonly Dictionary<string, SubjectPropertyMetadata> _properties = new();
 
@@ -23,9 +25,7 @@ public class DynamicSubject : IInterceptorSubject
 
     public static DynamicSubject Create(IInterceptorSubjectContext? context, params Type[] interfaces)
     {
-        var generator = new ProxyGenerator();
-
-        var subject = (DynamicSubject)generator.CreateClassProxy(
+        var subject = (DynamicSubject)ProxyGenerator.CreateClassProxy(
             typeof(DynamicSubject),
             interfaces,
             [new DynamicSubjectInterceptor()]
