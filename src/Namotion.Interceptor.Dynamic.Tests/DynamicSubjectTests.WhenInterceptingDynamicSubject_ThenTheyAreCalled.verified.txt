@@ -1,0 +1,20 @@
+﻿[
+  a: Attached,
+  b: Attached,
+  a: Before write Speed,
+  b: Before write Speed,
+  b: After write Speed,
+  a: After write Speed,
+  a: Before write Temperature,
+  b: Before write Temperature,
+  b: After write Temperature,
+  a: After write Temperature,
+  a: Before read Speed,
+  b: Before read Speed,
+  b: After read Speed,
+  a: After read Speed,
+  a: Before read Temperature,
+  b: Before read Temperature,
+  b: After read Temperature,
+  a: After read Temperature
+]
