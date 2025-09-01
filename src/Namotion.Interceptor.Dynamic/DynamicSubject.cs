@@ -1,4 +1,6 @@
 ﻿using System.Collections.Concurrent;
+using System.Collections.Frozen;
+using System.Collections.ObjectModel;
 using System.Reflection;
 using System.Text.Json.Serialization;
 using Castle.DynamicProxy;
@@ -10,7 +12,8 @@ public class DynamicSubject : IInterceptorSubject
     private static readonly ProxyGenerator ProxyGenerator = new();
     
     private readonly ConcurrentDictionary<string, object?> _propertyValues = new();
-    private readonly Dictionary<string, SubjectPropertyMetadata> _properties = new();
+    private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties 
+        = ReadOnlyDictionary<string, SubjectPropertyMetadata>.Empty;
 
     private IInterceptorExecutor? _context;
 
@@ -31,13 +34,14 @@ public class DynamicSubject : IInterceptorSubject
             [new DynamicSubjectInterceptor()]
         );
         
+        var properties = new Dictionary<string, SubjectPropertyMetadata>();
         foreach (var interfaceType in interfaces)
         {
             foreach (var property in interfaceType.GetProperties(BindingFlags.Instance | BindingFlags.Public))
             {
-                if (!subject._properties.ContainsKey(property.Name))
+                if (!properties.ContainsKey(property.Name))
                 {
-                    subject._properties[property.Name] = new SubjectPropertyMetadata(
+                    properties[property.Name] = new SubjectPropertyMetadata(
                         property.Name,
                         property.PropertyType,
                         property.GetCustomAttributes().ToArray(),
@@ -47,6 +51,8 @@ public class DynamicSubject : IInterceptorSubject
                 }
             }
         }
+
+        subject._properties = properties.ToFrozenDictionary();
 
         if (context is not null)
         {
