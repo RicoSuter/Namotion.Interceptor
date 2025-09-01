@@ -40,21 +40,18 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
     }
 
     /// <inheritdoc />
-    public RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string attributeSegment)
+    public RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string segment)
     {
-        return property.Parent.Properties
-            .Where(p => p.IsAttribute)
-            .SingleOrDefault(p => p.AttributeMetadata.PropertyName == property.Name && 
-                                  p.AttributeMetadata.AttributeName == attributeSegment);
+        return property.Parent.TryGetPropertyAttribute(property.Name, segment);
     }
     
     /// <inheritdoc />
-    public virtual RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string propertySegment)
+    public virtual RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment)
     {
         // TODO(1, perf): Improve performance by caching the property name
 
         return subject
-            .Properties
-            .SingleOrDefault(p => TryGetPropertySegment(p) == propertySegment);
+            .PropertiesAndAttributes
+            .SingleOrDefault(p => TryGetPropertySegment(p) == segment);
     }
 }

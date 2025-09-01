@@ -33,16 +33,13 @@ public class DefaultSubjectFactoryTests
 
         var person = new Person(context);
         var subject = new RegisteredSubject(person, [
-            new RegisteredSubjectProperty(new PropertyReference(
-                    person,
-                    nameof(Person.Mother)),
+            RegisteredSubjectProperty.Create(
+                new PropertyReference(person, nameof(Person.Mother)),
+                typeof(MyClass),
                 [])
-            {
-                Type = typeof(MyClass)
-            }
         ]);
 
-        var property = subject.Properties.First();
+        var property = subject.PropertiesAndAttributes.First();
 
         // Act
         var subjectFactory = new DefaultSubjectFactory();
@@ -60,16 +57,13 @@ public class DefaultSubjectFactoryTests
         var context = new InterceptorSubjectContext();
         var person = new Person(context);
         var subject = new RegisteredSubject(person, [
-            new RegisteredSubjectProperty(new PropertyReference(
-                    person,
-                    nameof(Person.Mother)),
+            RegisteredSubjectProperty.Create(
+                new PropertyReference(person, nameof(Person.Mother)),
+                typeof(IList<MyClass>),
                 [])
-            {
-                Type = typeof(IList<MyClass>)
-            }
         ]);
 
-        var property = subject.Properties.First();
+        var property = subject.PropertiesAndAttributes.First();
 
         // Act
         var subjectFactory = new DefaultSubjectFactory();

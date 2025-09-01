@@ -123,7 +123,7 @@ public static class SubjectRegistryJsonExtensions
         {
             // add dynamic properties
             foreach (var property in registeredSubject
-                .Properties
+                .PropertiesAndAttributes
                 .Where(p => p.HasGetter && 
                             subject.Properties.ContainsKey(p.Name) == false))
             {
@@ -170,11 +170,11 @@ public static class SubjectRegistryJsonExtensions
 
     private static string GetJsonPropertyName(this RegisteredSubjectProperty property, JsonSerializerOptions jsonSerializerOptions)
     {
-        if (property.IsAttribute)
+        if (property is RegisteredSubjectAttribute attribute)
         {
-            return property
+            return attribute
                 .GetAttributedProperty()
-                .GetJsonPropertyName(jsonSerializerOptions) + "@" + property.AttributeMetadata.AttributeName;
+                .GetJsonPropertyName(jsonSerializerOptions) + "@" + attribute.AttributeMetadata.AttributeName;
         }
 
         return jsonSerializerOptions.PropertyNamingPolicy?
