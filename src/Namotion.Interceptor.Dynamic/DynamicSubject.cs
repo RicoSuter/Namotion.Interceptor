@@ -28,32 +28,41 @@ public class DynamicSubject : IInterceptorSubject
 
     public static DynamicSubject Create(IInterceptorSubjectContext? context, params Type[] interfaces)
     {
+        return Create<DynamicSubject>(context, interfaces);
+    }
+
+    public static TDynamicSubject Create<TDynamicSubject>(IInterceptorSubjectContext? context, params Type[] interfaces)
+        where TDynamicSubject : DynamicSubject
+    {
+        return (TDynamicSubject)Create(context, typeof(TDynamicSubject), interfaces);
+    }
+
+    public static DynamicSubject Create(IInterceptorSubjectContext? context, Type type, params Type[] interfaces)
+    {
+        // TODO: Should we allow any IInterceptorSubject based class?
+        // How to replace properties? Can we make it replaceable and also use for dynamic properties?
+
         var subject = (DynamicSubject)ProxyGenerator.CreateClassProxy(
-            typeof(DynamicSubject),
+            type,
             interfaces,
             [new DynamicSubjectInterceptor()]
         );
         
-        var properties = new Dictionary<string, SubjectPropertyMetadata>();
-        foreach (var interfaceType in interfaces)
-        {
-            foreach (var property in interfaceType.GetProperties(BindingFlags.Instance | BindingFlags.Public))
-            {
-                if (!properties.ContainsKey(property.Name))
-                {
-                    properties[property.Name] = new SubjectPropertyMetadata(
-                        property.Name,
-                        property.PropertyType,
-                        property.GetCustomAttributes().ToArray(),
-                        _ => subject.ReadProperty(property.Name, property.PropertyType),
-                        (_, value) => subject.WriteProperty(property.Name, value),
-                        isIntercepted: true,
-                        isDynamic: false);
-                }
-            }
-        }
-
-        subject._properties = properties.ToFrozenDictionary();
+        // TODO(perf): Cache and reuse properties for (TDynamicSubject, interfaces)
+        subject._properties = subject
+            .GetType()
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .DistinctBy(p => p.Name)
+            .Select(property => new SubjectPropertyMetadata(
+                property.Name,
+                property.PropertyType,
+                property.GetCustomAttributes().ToArray(),
+                _ => subject.ReadProperty(property.Name, property.PropertyType),
+                (_, value) => subject.WriteProperty(property.Name, value),
+                isIntercepted: true,
+                isDynamic: false))
+            .ToDictionary(p => p.Name, p => p)
+            .ToFrozenDictionary();
 
         if (context is not null)
         {
