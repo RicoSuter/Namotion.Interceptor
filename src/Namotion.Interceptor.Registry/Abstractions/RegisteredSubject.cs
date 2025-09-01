@@ -123,6 +123,7 @@ public record RegisteredSubject
             attributes,
             getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null, 
             setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue, setValue) : null, 
+            isIntercepted: true,
             isDynamic: true));
 
         var property = AddProperty(propertyReference, type, attributes);
