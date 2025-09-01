@@ -181,6 +181,10 @@ public partial class Car : IInterceptorSubject
 
 The generator runs during compilation and integrates with MSBuild, supporting incremental builds and design-time builds for optimal IDE experience.
 
+### [Namotion.Interceptor.Dynamic](docs/dynamic.md)
+
+Creates interceptor subjects from interfaces at runtime without requiring compile-time code generation. This enables dynamic object creation for plugin architectures, external interfaces, and scenarios where runtime flexibility is needed.
+
 ### Namotion.Interceptor.Hosting
 
 Automatically start and stop subjects which implement `IHostedService` based on object graph attachment and detachment, with support for attaching and detaching hosted services to subjects.
