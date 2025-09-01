@@ -91,6 +91,7 @@ using Namotion.Interceptor;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.Frozen;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -132,7 +133,7 @@ namespace {namespaceName}
 
                     generatedCode +=
     $@"
-        }};
+        }}.ToFrozenDictionary();
 ";
 
                     var firstConstructor = cls.SelectMany(c => c.ClassNode.Members)
