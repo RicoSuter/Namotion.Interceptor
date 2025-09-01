@@ -34,10 +34,10 @@ public class DynamicSubject : IInterceptorSubject
     public static TDynamicSubject Create<TDynamicSubject>(IInterceptorSubjectContext? context, params Type[] interfaces)
         where TDynamicSubject : DynamicSubject
     {
-        return (TDynamicSubject)Create(context, typeof(TDynamicSubject), interfaces);
+        return (TDynamicSubject)Create(typeof(TDynamicSubject), context, interfaces);
     }
 
-    public static DynamicSubject Create(IInterceptorSubjectContext? context, Type type, params Type[] interfaces)
+    public static DynamicSubject Create(Type type, IInterceptorSubjectContext? context, params Type[] interfaces)
     {
         // TODO: Should we allow any IInterceptorSubject based class?
         // How to replace properties? Can we make it replaceable and also use for dynamic properties?
