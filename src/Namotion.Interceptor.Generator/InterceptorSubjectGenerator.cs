@@ -33,10 +33,6 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                         ClassNode = (ClassDeclarationSyntax)ctx.Node,
                         Properties = classDeclaration.Members
                             .OfType<PropertyDeclarationSyntax>()
-                            .Where(p => p.Modifiers
-                                .Any(m => m.IsKind(
-                                    SyntaxKind.PartialKeyword)) || 
-                                    HasDerivedAttribute(p, model, ct))
                             .Select(p => new
                             {
                                 Property = p,
@@ -127,7 +123,14 @@ namespace {namespaceName}
     $@"
             {{
                 ""{propertyName}"",       
-                new SubjectPropertyMetadata(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")}, false)
+                new SubjectPropertyMetadata(
+                    nameof({propertyName}), 
+                    typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, 
+                    typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, 
+                    {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, 
+                    {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")}, 
+                    isIntercepted: {(property.IsPartial ? "true" : "false")},
+                    isDynamic: false)
             }},";
                     }
 

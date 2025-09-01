@@ -47,7 +47,8 @@ public class DynamicSubject : IInterceptorSubject
                         property.GetCustomAttributes().ToArray(),
                         _ => subject.ReadProperty(property.Name, property.PropertyType),
                         (_, value) => subject.WriteProperty(property.Name, value),
-                        true);
+                        isIntercepted: true,
+                        isDynamic: false);
                 }
             }
         }
