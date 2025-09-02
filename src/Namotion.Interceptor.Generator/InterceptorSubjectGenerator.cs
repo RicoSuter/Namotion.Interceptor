@@ -109,10 +109,18 @@ namespace {namespaceName}
         ConcurrentDictionary<string, object?> IInterceptorSubject.Data {{ get; }} = new();
 
         [JsonIgnore]
-        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
+        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? _defaultProperties;
 
-        private static IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties = new Dictionary<string, SubjectPropertyMetadata>
-        {{";
+        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+        {{
+            _properties = (_properties ?? _defaultProperties)
+                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                .ToFrozenDictionary();
+        }}
+
+        private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+        private static IReadOnlyDictionary<string, SubjectPropertyMetadata> _defaultProperties = new Dictionary<string, SubjectPropertyMetadata>
+            {{";
                     foreach (var property in cls.SelectMany(c => c.Properties))
                     {
                         //var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
@@ -121,22 +129,23 @@ namespace {namespaceName}
 
                         generatedCode +=
     $@"
-            {{
-                ""{propertyName}"",       
-                new SubjectPropertyMetadata(
-                    nameof({propertyName}), 
-                    typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, 
-                    typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, 
-                    {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, 
-                    {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")}, 
-                    isIntercepted: {(property.IsPartial ? "true" : "false")},
-                    isDynamic: false)
-            }},";
+                {{
+                    ""{propertyName}"",       
+                    new SubjectPropertyMetadata(
+                        nameof({propertyName}), 
+                        typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, 
+                        typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, 
+                        {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, 
+                        {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")}, 
+                        isIntercepted: {(property.IsPartial ? "true" : "false")},
+                        isDynamic: false)
+                }},";
                     }
 
                     generatedCode +=
     $@"
-        }}.ToFrozenDictionary();
+            }}
+            .ToFrozenDictionary();
 ";
 
                     var firstConstructor = cls.SelectMany(c => c.ClassNode.Members)

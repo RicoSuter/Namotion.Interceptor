@@ -116,8 +116,7 @@ public record RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue, 
         params Attribute[] attributes)
     {
-        var propertyReference = new PropertyReference(Subject, name);
-        propertyReference.SetPropertyMetadata(new SubjectPropertyMetadata(
+        Subject.AddProperties(new SubjectPropertyMetadata(
             name,
             type,
             attributes,
@@ -126,6 +125,7 @@ public record RegisteredSubject
             isIntercepted: true,
             isDynamic: true));
 
+        var propertyReference = new PropertyReference(Subject, name);
         var property = AddProperty(propertyReference, type, attributes);
         
         // trigger change event
