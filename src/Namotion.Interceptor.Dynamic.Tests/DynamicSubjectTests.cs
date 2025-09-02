@@ -18,7 +18,7 @@ public class DynamicSubjectTests
     public void WhenCreatingDynamicSubject_ThenItImplementsInterfaces()
     {
         // Act
-        var subject = DynamicSubject.Create(null, typeof(IMotor), typeof(ISensor));
+        var subject = DynamicSubjectFactory.CreateDynamicSubject(null, typeof(IMotor), typeof(ISensor));
         var motor = (IMotor)subject;
         var sensor = (ISensor)subject;
 
@@ -38,7 +38,7 @@ public class DynamicSubjectTests
             .Create()
             .WithRegistry();
 
-        var subject = DynamicSubject.Create(context, typeof(IMotor), typeof(ISensor));
+        var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor), typeof(ISensor));
 
         // Act
         var registeredSubject = subject.TryGetRegisteredSubject()!;
@@ -60,7 +60,7 @@ public class DynamicSubjectTests
             .WithService(() => new TestInterceptor("a", logs), _ => false)
             .WithService(() => new TestInterceptor("b", logs), _ => false);
 
-        var subject = DynamicSubject.Create(context, typeof(IMotor), typeof(ISensor));
+        var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor), typeof(ISensor));
         var motor = (IMotor)subject;
         var sensor = (ISensor)subject;
 
