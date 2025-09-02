@@ -26,30 +26,38 @@ public class DynamicSubject : IInterceptorSubject
     [JsonIgnore]
     IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
 
+    public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+    {
+        _properties = _properties
+            .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+            .ToFrozenDictionary();
+    }
+
     public static DynamicSubject Create(IInterceptorSubjectContext? context, params Type[] interfaces)
     {
         return Create<DynamicSubject>(context, interfaces);
     }
 
-    public static TDynamicSubject Create<TDynamicSubject>(IInterceptorSubjectContext? context, params Type[] interfaces)
-        where TDynamicSubject : DynamicSubject
+    public static TSubject Create<TSubject>(IInterceptorSubjectContext? context, params Type[] interfaces)
+        where TSubject : IInterceptorSubject
     {
-        return (TDynamicSubject)Create(typeof(TDynamicSubject), context, interfaces);
+        return (TSubject)Create(typeof(TSubject), context, interfaces);
     }
 
-    public static DynamicSubject Create(Type type, IInterceptorSubjectContext? context, params Type[] interfaces)
+    public static IInterceptorSubject Create(Type type, IInterceptorSubjectContext? context, params Type[] interfaces)
     {
         // TODO: Should we allow any IInterceptorSubject based class?
         // How to replace properties? Can we make it replaceable and also use for dynamic properties?
 
-        var subject = (DynamicSubject)ProxyGenerator.CreateClassProxy(
+        var subject = (IInterceptorSubject)ProxyGenerator.CreateClassProxy(
             type,
             interfaces,
             [new DynamicSubjectInterceptor()]
         );
         
         // TODO(perf): Cache and reuse properties for (TDynamicSubject, interfaces)
-        subject._properties = subject
+
+        subject.AddProperties(subject
             .GetType()
             .GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             .DistinctBy(p => p.Name)
@@ -57,12 +65,10 @@ public class DynamicSubject : IInterceptorSubject
                 property.Name,
                 property.PropertyType,
                 property.GetCustomAttributes().ToArray(),
-                _ => subject.ReadProperty(property.Name, property.PropertyType),
-                (_, value) => subject.WriteProperty(property.Name, value),
+                property.GetValue,
+                property.SetValue,
                 isIntercepted: true,
-                isDynamic: false))
-            .ToDictionary(p => p.Name, p => p)
-            .ToFrozenDictionary();
+                isDynamic: false)));
 
         if (context is not null)
         {
