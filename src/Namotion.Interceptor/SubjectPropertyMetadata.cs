@@ -13,7 +13,9 @@ public readonly record struct SubjectPropertyMetadata
     public Func<IInterceptorSubject, object?>? GetValue { get; }
     
     public Action<IInterceptorSubject, object?>? SetValue { get; }
-    
+
+    public bool IsIntercepted { get; }
+
     public bool IsDynamic { get; }
 
     public bool IsDerived { get; }
@@ -21,6 +23,7 @@ public readonly record struct SubjectPropertyMetadata
     public SubjectPropertyMetadata(
         string name, Type type, IReadOnlyCollection<Attribute> attributes, 
         Func<IInterceptorSubject, object?>? getValue, Action<IInterceptorSubject, object?>? setValue,
+        bool isIntercepted,
         bool isDynamic)
     {
         Name = name;
@@ -28,6 +31,7 @@ public readonly record struct SubjectPropertyMetadata
         Attributes = attributes;
         GetValue = getValue;
         SetValue = setValue;
+        IsIntercepted = isIntercepted;
         IsDynamic = isDynamic;
         IsDerived = attributes.Any(a => a is DerivedAttribute);
     }

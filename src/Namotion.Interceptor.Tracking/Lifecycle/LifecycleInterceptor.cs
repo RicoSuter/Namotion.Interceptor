@@ -81,10 +81,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             {
                 _attachedSubjects.Remove(subject);
             }
-
-            // Note: Dynamically added properties (IsDynamic) are detached in 
-            // SubjectRegistry.DetachSubject() and not here as this libraries
-            // does not know about this feature
+            
             foreach (var propertyName in subject.Properties.Keys)
             {
                 subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
