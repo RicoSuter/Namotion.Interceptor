@@ -1,4 +1,5 @@
 ﻿using System.Collections.Frozen;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
@@ -25,7 +26,7 @@ public record RegisteredSubject
         }
     }
 
-    public IEnumerable<RegisteredSubjectProperty> Properties
+    public ImmutableArray<RegisteredSubjectProperty> Properties
     {
         get
         {
@@ -115,15 +116,16 @@ public record RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue, 
         params Attribute[] attributes)
     {
-        var propertyReference = new PropertyReference(Subject, name);
-        propertyReference.SetPropertyMetadata(new SubjectPropertyMetadata(
+        Subject.AddProperties(new SubjectPropertyMetadata(
             name,
             type,
             attributes,
             getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null, 
             setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue, setValue) : null, 
+            isIntercepted: true,
             isDynamic: true));
 
+        var propertyReference = new PropertyReference(Subject, name);
         var property = AddProperty(propertyReference, type, attributes);
         
         // trigger change event

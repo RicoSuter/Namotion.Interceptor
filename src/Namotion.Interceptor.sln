@@ -76,6 +76,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.OpcUa.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.OpcUa.SampleModel", "Namotion.Interceptor.OpcUa.SampleModel\Namotion.Interceptor.OpcUa.SampleModel.csproj", "{D99E51C9-2F57-448C-B33C-3FCEA68058E9}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Dynamic", "Namotion.Interceptor.Dynamic\Namotion.Interceptor.Dynamic.csproj", "{DD4E4986-56F1-4A07-A857-B71CBF0C453C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Dynamic.Tests", "Namotion.Interceptor.Dynamic.Tests\Namotion.Interceptor.Dynamic.Tests.csproj", "{288013AC-398A-4ECC-B793-E223C2EDBAC4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -194,6 +198,14 @@ Global
 		{D99E51C9-2F57-448C-B33C-3FCEA68058E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D99E51C9-2F57-448C-B33C-3FCEA68058E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D99E51C9-2F57-448C-B33C-3FCEA68058E9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DD4E4986-56F1-4A07-A857-B71CBF0C453C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DD4E4986-56F1-4A07-A857-B71CBF0C453C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DD4E4986-56F1-4A07-A857-B71CBF0C453C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DD4E4986-56F1-4A07-A857-B71CBF0C453C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{288013AC-398A-4ECC-B793-E223C2EDBAC4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{288013AC-398A-4ECC-B793-E223C2EDBAC4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{288013AC-398A-4ECC-B793-E223C2EDBAC4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{288013AC-398A-4ECC-B793-E223C2EDBAC4}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -219,6 +231,7 @@ Global
 		{993D95D7-2BB6-4414-8F8A-C097B40173D4} = {D977E1EA-C167-4BEB-B7C5-4214DDD470D3}
 		{9AAB5E5D-B32D-440C-87DC-5BCB72F25E08} = {D977E1EA-C167-4BEB-B7C5-4214DDD470D3}
 		{D99E51C9-2F57-448C-B33C-3FCEA68058E9} = {D977E1EA-C167-4BEB-B7C5-4214DDD470D3}
+		{288013AC-398A-4ECC-B793-E223C2EDBAC4} = {31C2A126-61B9-402D-B2F4-9772341EBF09}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {D7E90F8C-B0AE-4ACF-9226-306D8EA3D35B}
