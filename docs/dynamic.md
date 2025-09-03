@@ -15,7 +15,7 @@ var context = InterceptorSubjectContext
     .WithFullPropertyTracking();
 
 // Create dynamic subjects from interfaces
-var subject = DynamicSubject.Create(context, typeof(IMotor), typeof(ISensor));
+var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor), typeof(ISensor));
 ```
 
 ## Creating dynamic subjects from interfaces
@@ -38,7 +38,7 @@ Create a dynamic subject that implements multiple interfaces:
 
 ```csharp
 // Create a subject that implements both interfaces
-var subject = DynamicSubject.Create(context, typeof(IMotor), typeof(ISensor));
+var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor), typeof(ISensor));
 
 // Cast to specific interfaces and use normally
 var motor = (IMotor)subject;
@@ -60,7 +60,7 @@ var context = InterceptorSubjectContext
     .Create()
     .WithRegistry();
 
-var subject = DynamicSubject.Create(context, typeof(IMotor), typeof(ISensor));
+var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor), typeof(ISensor));
 
 // Access registry information
 var registeredSubject = subject.TryGetRegisteredSubject()!;
@@ -82,9 +82,9 @@ var logs = new List<string>();
 
 var context = InterceptorSubjectContext
     .Create()
-    .WithService(() => new LoggingInterceptor("logger", logs), _ => false);
+    .WithService(() => new TestInterceptor("logger", logs), _ => false);
 
-var subject = DynamicSubject.Create(context, typeof(IMotor));
+var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor));
 var motor = (IMotor)subject;
 
 motor.Speed = 100; // Triggers write interceptors
@@ -107,7 +107,7 @@ public interface IConfiguration
     bool IsEnabled { get; set; }
 }
 
-var config = (IConfiguration)DynamicSubject.Create(null, typeof(IConfiguration));
+var config = (IConfiguration)DynamicSubjectFactory.CreateDynamicSubject(null, typeof(IConfiguration));
 
 // Default values are automatically provided
 Console.WriteLine(config.Name);      // Output: null
