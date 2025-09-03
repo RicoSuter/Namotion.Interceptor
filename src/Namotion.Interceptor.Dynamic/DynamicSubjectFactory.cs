@@ -7,6 +7,7 @@ namespace Namotion.Interceptor.Dynamic;
 public class DynamicSubjectFactory
 {
     private static readonly ProxyGenerator ProxyGenerator = new();
+    private static readonly ConcurrentDictionary<string, SubjectPropertyMetadata[]> PropertyCache = new();
 
     public static DynamicSubject CreateDynamicSubject(IInterceptorSubjectContext? context, params Type[] interfaces)
     {
@@ -18,32 +19,34 @@ public class DynamicSubjectFactory
     {
         return (TSubject)CreateSubject(context, typeof(TSubject), interfaces);
     }
-
+    
     public static IInterceptorSubject CreateSubject(IInterceptorSubjectContext? context, Type type, params Type[] interfaces)
     {
-        // TODO: Should we allow any IInterceptorSubject based class?
-        // How to replace properties? Can we make it replaceable and also use for dynamic properties?
-
-        // TODO(perf): Cache and reuse properties for (TDynamicSubject, interfaces)
-
         var subject = (IInterceptorSubject)ProxyGenerator
             .CreateClassProxy(type, interfaces, [new DynamicSubjectInterceptor()]);
+        
+        var key = type.FullName + "|" + string.Join("|", interfaces.Select(i => i.FullName));
+        var missingProperties = PropertyCache.GetOrAdd(key, static (_, newSubject) =>
+        {
+            var existingProperties = newSubject.Properties.Values;
+            return newSubject
+                .GetType()
+                .GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .Where(p => existingProperties.All(ep => ep.Name != p.Name))
+                .DistinctBy(p => p.Name)
+                .Select(property => new SubjectPropertyMetadata(
+                    property.Name,
+                    property.PropertyType,
+                    property.GetCustomAttributes().ToArray(),
+                    property.GetValue,
+                    property.SetValue,
+                    isIntercepted: true,
+                    isDynamic: false))
+                .ToArray();
+        }, subject);
 
-        var existingProperties = subject.Properties.Values;
-        subject.AddProperties(subject
-            .GetType()
-            .GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Where(p => existingProperties.All(ep => ep.Name != p.Name))
-            .DistinctBy(p => p.Name)
-            .Select(property => new SubjectPropertyMetadata(
-                property.Name,
-                property.PropertyType,
-                property.GetCustomAttributes().ToArray(),
-                property.GetValue,
-                property.SetValue,
-                isIntercepted: true,
-                isDynamic: false)));
-
+        subject.AddProperties(missingProperties);
+        
         if (context is not null)
         {
             subject.Context.AddFallbackContext(context);
