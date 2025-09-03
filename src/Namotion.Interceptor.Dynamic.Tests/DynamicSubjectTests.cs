@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Registry;
+﻿using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry;
 
 namespace Namotion.Interceptor.Dynamic.Tests;
 
@@ -10,6 +11,17 @@ public interface IMotor
 public interface ISensor
 {
     int Temperature { get; set; }
+}
+
+[InterceptorSubject]
+public partial class Motor : IMotor
+{
+    public Motor()
+    {
+        Speed = 100;
+    }
+    
+    public partial int Speed { get; set; }
 }
 
 public class DynamicSubjectTests
@@ -78,6 +90,28 @@ public class DynamicSubjectTests
         
         // Assert
         return Verify(logs);
+    }
+    
+    [Fact]
+    public void WhenCreatingDynamicSubjectForClass_ThenItImplementsInterfaces()
+    {
+        // Arrange
+        var motor = DynamicSubjectFactory.CreateSubject<Motor>(null, typeof(IMotor), typeof(ISensor));
+        var motorFromInterface = (IMotor)motor;
+        var sensor = (ISensor)motor;
+
+        // Act
+        sensor.Temperature = 5;
+        
+        // Assert
+        // 100 from class (direct call on class)
+        Assert.Equal(100, motor.Speed);
+
+        // 100 from class (should redirect interface call to class)
+        Assert.Equal(100, motorFromInterface.Speed); 
+        
+        // 5 from dynamic store (interface not implemented)
+        Assert.Equal(5, sensor.Temperature);
     }
 
     public class TestInterceptor : IReadInterceptor, IWriteInterceptor, ILifecycleInterceptor

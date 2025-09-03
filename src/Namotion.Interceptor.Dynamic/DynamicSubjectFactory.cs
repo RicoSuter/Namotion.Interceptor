@@ -23,7 +23,7 @@ public class DynamicSubjectFactory
     public static IInterceptorSubject CreateSubject(IInterceptorSubjectContext? context, Type type, params Type[] interfaces)
     {
         var subject = (IInterceptorSubject)ProxyGenerator
-            .CreateClassProxy(type, interfaces, [new DynamicSubjectInterceptor()]);
+            .CreateClassProxy(type, interfaces, new DynamicSubjectInterceptor());
         
         var key = type.FullName + "|" + string.Join("|", interfaces.Select(i => i.FullName));
         var missingProperties = PropertyCache.GetOrAdd(key, static (_, newSubject) =>
@@ -61,6 +61,12 @@ public class DynamicSubjectFactory
 
         public void Intercept(IInvocation invocation)
         {
+            if (invocation.MethodInvocationTarget is not null)
+            {
+                invocation.Proceed();
+                return;
+            }
+            
             var subject = (IInterceptorSubject)invocation.Proxy;
             var context = (IInterceptorExecutor)subject.Context;
 
