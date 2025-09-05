@@ -1,0 +1,12 @@
+﻿[
+  Attached:  ,
+  Attached property:  .FooBar,
+  Attached property:  .Id,
+  Attached property:  .FirstName,
+  Attached property:  .LastName,
+  Attached property:  .FullName,
+  Attached property:  .FullNameWithPrefix,
+  Attached property:  .Father,
+  Attached property:  .Mother,
+  Attached property:  .Children
+]
