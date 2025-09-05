@@ -53,6 +53,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
             var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
 
+            // keep original keys in case handlers add properties during attach (will be attached directly)
+            var properties = subject.Properties.Keys;
+            
             foreach (var handler in context.GetServices<ILifecycleHandler>())
             {
                 handler.AttachSubject(registryContext);
@@ -62,11 +65,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             {
                 lifecycleHandler.AttachSubject(registryContext);
             }
-
-            // Note: Dynamically added properties can only be added after
-            // the subject has been attached and thus we do not need to handle
-            // dynamic properties here
-            foreach (var propertyName in subject.Properties.Keys)
+            
+            foreach (var propertyName in properties)
             {
                 subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
             }
