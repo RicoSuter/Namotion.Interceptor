@@ -64,7 +64,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
 
             // Note: Dynamically added properties can only be added after
-            // the subject has been attached and thus we do not need to handle
+            // the subject has been attached, and thus we do not need to handle
             // dynamic properties here
             foreach (var propertyName in subject.Properties.Keys)
             {

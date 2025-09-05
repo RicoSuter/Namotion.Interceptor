@@ -23,7 +23,7 @@
     },
     "Tests": {
       "commandName": "DebugRoslynComponent",
-      "targetProject": "../Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj"
+      "targetProject": "../Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj"
     },
     "Generator.Tests": {
       "commandName": "DebugRoslynComponent",
