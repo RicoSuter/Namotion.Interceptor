@@ -227,6 +227,8 @@ public class LifecycleInterceptorTests
     [Fact]
     public Task WhenAddingPropertyInLifecycleHandlerAttach_ThenItIsAttachedOnlyOnce()
     {
+        // When a ILifecycleHandler adds a property in AttachSubject, the property should be attached only once
+        
         // Arrange
         var events = new List<string>();
         var context = CreateContextAndCollectLifecycleEvents(events);
