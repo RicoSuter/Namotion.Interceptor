@@ -64,9 +64,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
 
         context.RegisterSourceOutput(compilationAndClasses, (spc, source) =>
         {
-            var symbolDisplayFormat = new SymbolDisplayFormat(typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
-
-            var (compilation, classes) = source;
+            var (_, classes) = source;
             foreach (var cls in classes.GroupBy(c => c.ClassNode.Identifier.ValueText))
             {
                 var fileName = $"{cls.First().ClassNode.Identifier.Value}.g.cs";
@@ -78,7 +76,8 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                     var baseClass = cls.First().ClassNode.BaseList?.Types
                         .Select(t => semanticModel.GetTypeInfo(t.Type).Type as INamedTypeSymbol)
                         .FirstOrDefault(t => t != null && 
-                            (HasInterceptorSubjectAttribute(t) || ImplementsInterface(t, "IInterceptorSubject")));
+                            (HasInterceptorSubjectAttribute(t) || // <= needed when partial class with IInterceptorSubject is not yet generated
+                             ImplementsInterface(t, "Namotion.Interceptor.IInterceptorSubject")));
                     
                     var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
                     
@@ -134,7 +133,6 @@ namespace {namespaceName}
             {{";
                     foreach (var property in cls.SelectMany(c => c.Properties))
                     {
-                        //var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
                         var fullyQualifiedName = property.Type.Type!.ToString();
                         var propertyName = property.Property.Identifier.Value;
 
@@ -188,7 +186,6 @@ namespace {namespaceName}
 
                     foreach (var property in cls.SelectMany(c => c.Properties).Where(p => p.IsPartial))
                     {
-                        //var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
                         var fullyQualifiedName = property.Type.Type!.ToString();
                         var propertyName = property.Property.Identifier.Value;
                         var propertyModifier =
@@ -311,20 +308,12 @@ namespace {namespaceName}
 
     private bool HasDerivedAttribute(PropertyDeclarationSyntax property, SemanticModel semanticModel, CancellationToken ct)
     {
-        return HasAttribute(property.AttributeLists, "DerivedAttribute", semanticModel, ct);
+        return HasAttribute(property.AttributeLists, "Namotion.Interceptor.Attributes.DerivedAttribute", semanticModel, ct);
     }
 
     private bool HasInterceptorSubjectAttribute(ClassDeclarationSyntax classDeclaration, SemanticModel semanticModel, CancellationToken ct)
     {
-        return HasAttribute(classDeclaration.AttributeLists, "InterceptorSubjectAttribute", semanticModel, ct);
-    }
-
-    private static bool HasInterceptorSubjectAttribute(INamedTypeSymbol? type)
-    {
-        if (type is null) return false;
-        return type.GetAttributes().Any(a =>
-            string.Equals(a.AttributeClass?.Name, "InterceptorSubjectAttribute", StringComparison.Ordinal) ||
-            string.Equals(a.AttributeClass?.Name, "InterceptorSubject", StringComparison.Ordinal));
+        return HasAttribute(classDeclaration.AttributeLists, "Namotion.Interceptor.Attributes.InterceptorSubjectAttribute", semanticModel, ct);
     }
 
     private bool HasAttribute(SyntaxList<AttributeListSyntax> attributeLists, string baseTypeName, SemanticModel semanticModel, CancellationToken ct)
@@ -334,48 +323,57 @@ namespace {namespaceName}
             .Any(attr =>
             {
                 var attributeType = semanticModel.GetTypeInfo(attr, ct).Type as INamedTypeSymbol;
-                return attributeType != null && IsTypeOrInheritsFrom(attributeType, baseTypeName);
+                return attributeType is not null && IsTypeOrInheritsFrom(attributeType, baseTypeName);
             });
 
         return hasAttribute;
     }
     
-    private bool ImplementsInterface(ITypeSymbol? type, string interfaceTypeName)
+    private static bool HasInterceptorSubjectAttribute(INamedTypeSymbol? type)
     {
-        // Check if the symbol or any of its base types implements an interface with the given simple name
         if (type is null)
-            return false;
-
-        // If the type itself is an interface, compare by simple name
-        if (type.TypeKind == TypeKind.Interface && string.Equals(type.Name, interfaceTypeName, StringComparison.Ordinal))
-            return true;
-
-        // Check all interfaces implemented by the type
-        if (type.AllInterfaces.Any(i => string.Equals(i.Name, interfaceTypeName, StringComparison.Ordinal)))
-            return true;
-
-        // Walk base types and check their interfaces
-        var baseType = type.BaseType;
-        while (baseType is not null)
         {
-            if (baseType.TypeKind == TypeKind.Interface && string.Equals(baseType.Name, interfaceTypeName, StringComparison.Ordinal))
-                return true;
-
-            if (baseType.AllInterfaces.Any(i => string.Equals(i.Name, interfaceTypeName, StringComparison.Ordinal)))
-                return true;
-
-            baseType = baseType.BaseType;
+            return false;
         }
 
-        return false;
+        return type
+            .GetAttributes()
+            .Any(a => a.AttributeClass?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == 
+                "Namotion.Interceptor.Attributes.InterceptorSubjectAttribute");
+    }
+    
+    private bool ImplementsInterface(ITypeSymbol? type, string interfaceTypeName)
+    {
+        if (type is null)
+        {
+            return false;
+        }
+
+        if (type.TypeKind == TypeKind.Interface && 
+            type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName)
+        {
+            return true;
+        }
+
+        if (type
+            .AllInterfaces
+            .Any(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName))
+        {
+            return true;
+        }
+
+        return type.BaseType is { } baseType && 
+            ImplementsInterface(baseType, interfaceTypeName);
     }
 
-    private bool IsTypeOrInheritsFrom(ITypeSymbol? type, string baseTypeName)
+    private bool IsTypeOrInheritsFrom(ITypeSymbol? type, string fullTypeName)
     {
         do
         {
-            if (type?.Name == baseTypeName)
+            if (type?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == fullTypeName)
+            {
                 return true;
+            }
 
             type = type?.BaseType;
         } while (type is not null);
@@ -400,7 +398,7 @@ namespace {namespaceName}
 
     static string? GetFullTypeName(ITypeSymbol typeSymbol)
     {
-        if (typeSymbol is INamedTypeSymbol namedTypeSymbol && namedTypeSymbol.IsGenericType)
+        if (typeSymbol is INamedTypeSymbol { IsGenericType: true } namedTypeSymbol)
         {
             var genericArguments = string.Join(", ", namedTypeSymbol.TypeArguments.Select(GetFullTypeName));
             return $"{namedTypeSymbol.ContainingNamespace}.{namedTypeSymbol.Name}<{genericArguments}>";
