@@ -2,8 +2,6 @@
 
 public record struct PropertyReference
 {
-    private const string MetadataOverrideKey = "Namotion.Interceptor.Metadata";
-
     private SubjectPropertyMetadata? _metadata = null;
 
     public PropertyReference(IInterceptorSubject subject, string name)
@@ -26,8 +24,7 @@ public record struct PropertyReference
             }
 
             _metadata = 
-                Subject.Properties.TryGetValue(Name, out var md2) ? md2 : // static metadata
-                TryGetPropertyMetadata(out var md1) ? md1 : // dynamic metadata (overrides)
+                Subject.Properties.TryGetValue(Name, out var metadata) ? metadata :
                 throw new InvalidOperationException("No metadata found.");
 
             return _metadata!.Value;
@@ -52,19 +49,5 @@ public record struct PropertyReference
     public T GetOrAddPropertyData<T>(string key, Func<T> valueFactory)
     {
         return (T)Subject.Data.GetOrAdd($"{Name}:{key}", _ => valueFactory())!;
-    }
-
-    public bool TryGetPropertyMetadata(out SubjectPropertyMetadata? propertyMetadata)
-    {
-        propertyMetadata = 
-            TryGetPropertyData(MetadataOverrideKey, out var value) && 
-            value is SubjectPropertyMetadata resultPropertyMetadata ? resultPropertyMetadata : null;
-
-        return propertyMetadata is not null;
-    }
-    
-    public void SetPropertyMetadata(SubjectPropertyMetadata propertyMetadata)
-    {
-        SetPropertyData(MetadataOverrideKey, propertyMetadata);
     }
 }

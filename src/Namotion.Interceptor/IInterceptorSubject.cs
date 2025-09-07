@@ -18,4 +18,12 @@ public interface IInterceptorSubject
     /// Gets the reflected properties (should be cached).
     /// </summary>
     IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; }
+    
+    /// <summary>
+    /// Adds additional properties to this subject (e.g. from an inheriting class or dynamic context).
+    /// </summary>
+    /// <param name="properties">The additional properties.</param>
+    void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties);
+    
+    // TODO(perf): Use span here?
 }

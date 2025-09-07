@@ -47,7 +47,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithEqualityCheck(this IInterceptorSubjectContext context)
     {
         return context
-            .WithInterceptor(() => new PropertyValueEqualityCheckHandler());
+            .WithService(() => new PropertyValueEqualityCheckHandler());
     }
 
     /// <summary>
@@ -58,7 +58,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithDerivedPropertyChangeDetection(this IInterceptorSubjectContext context)
     {
         context
-            .WithInterceptor(() => new DerivedPropertyChangeHandler())
+            .WithService(() => new DerivedPropertyChangeHandler())
             .TryAddService(context.GetService<DerivedPropertyChangeHandler>, _ => true);
 
         return context
@@ -73,7 +73,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithReadPropertyRecorder(this IInterceptorSubjectContext context)
     {
         return context
-            .WithInterceptor(() => new ReadPropertyRecorder());
+            .WithService(() => new ReadPropertyRecorder());
     }
 
     /// <summary>
@@ -84,7 +84,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithPropertyChangedObservable(this IInterceptorSubjectContext context)
     {
         return context
-            .WithInterceptor(() => new PropertyChangedObservable());
+            .WithService(() => new PropertyChangedObservable());
     }
 
     /// <summary>
@@ -109,7 +109,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithLifecycle(this IInterceptorSubjectContext context)
     {
         return context
-            .WithInterceptor(() => new LifecycleInterceptor());
+            .WithService(() => new LifecycleInterceptor());
     }
     
     /// <summary>

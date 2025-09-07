@@ -9,18 +9,22 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         _subject = subject;
     }
     
-    public object? GetPropertyValue(string propertyName, Func<object?> readValue)
+    public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
         var interception = new ReadPropertyInterception(new PropertyReference(_subject, propertyName));
-        return _subject.Context.ExecuteInterceptedRead(interception, readValue);
+        return _subject.Context.ExecuteInterceptedRead(ref interception, readValue);
     }
     
-    public void SetPropertyValue(string propertyName, object? newValue, Func<object?>? readValue, Action<object?> writeValue)
+    public void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty>? readValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
         // TODO(perf): Reading current value (invoke getter) here might be a performance problem. 
-        var interception = new WritePropertyInterception(
-            new PropertyReference(_subject, propertyName), readValue?.Invoke(), newValue); 
-        _subject.Context.ExecuteInterceptedWrite(interception, writeValue);
+
+        var interception = new WritePropertyInterception<TProperty>(
+            new PropertyReference(_subject, propertyName), 
+            readValue is not null ? readValue(_subject) : default!, 
+            newValue); 
+
+        _subject.Context.ExecuteInterceptedWrite(ref interception, writeValue);
     }
 
     public object? InvokeMethod(string methodName, object?[] parameters, Func<object?[], object?> invokeMethod)
@@ -48,7 +52,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         var result = base.AddFallbackContext(context);
         if (result)
         {
-            foreach (var interceptor in context.GetServices<IInterceptor>())
+            foreach (var interceptor in context.GetServices<ILifecycleInterceptor>())
             {
                 interceptor.AttachTo(_subject);
             }
@@ -61,7 +65,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
     {
         if (HasFallbackContext(context))
         {
-            foreach (var interceptor in context.GetServices<IInterceptor>())
+            foreach (var interceptor in context.GetServices<ILifecycleInterceptor>())
             {
                 interceptor.DetachFrom(_subject);
             }

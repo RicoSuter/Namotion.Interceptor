@@ -1,6 +1,8 @@
 ﻿namespace Namotion.Interceptor;
 
-public interface IWriteInterceptor : IInterceptor
+public delegate void WriteInterceptionAction<TProperty>(ref WritePropertyInterception<TProperty> interception);
+
+public interface IWriteInterceptor
 {
-    object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next);
+    void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next);
 }

@@ -1,6 +1,8 @@
 ﻿namespace Namotion.Interceptor;
 
-public interface IReadInterceptor : IInterceptor
+public delegate TProperty ReadInterceptionFunc<out TProperty>(ref ReadPropertyInterception interception);
+
+public interface IReadInterceptor
 {
-    object? ReadProperty(ReadPropertyInterception context, Func<ReadPropertyInterception, object?> next);
+    TProperty ReadProperty<TProperty>(ref ReadPropertyInterception context, ReadInterceptionFunc<TProperty> next);
 }
