@@ -19,7 +19,7 @@ public class ContextInheritanceHandlerTests
         person.Mother = new Person { FirstName = "Mother" };
 
         // Assert
-        Assert.Equal(context.GetServices<IInterceptor>(), person.Mother.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.Mother.GetServices<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -49,9 +49,9 @@ public class ContextInheritanceHandlerTests
         };
 
         // Assert
-        Assert.Equal(context.GetServices<IInterceptor>(), person.GetServices<IInterceptor>());
-        Assert.Equal(context.GetServices<IInterceptor>(), mother.GetServices<IInterceptor>());
-        Assert.Equal(context.GetServices<IInterceptor>(), grandmother.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), mother.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), grandmother.GetServices<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -83,9 +83,9 @@ public class ContextInheritanceHandlerTests
         person.Mother = null;
 
         // Assert
-        Assert.Equal(context.GetServices<IInterceptor>(), person.GetServices<IInterceptor>());
-        Assert.Empty(mother.GetServices<IInterceptor>());
-        Assert.Empty(grandmother.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.GetServices<ILifecycleInterceptor>());
+        Assert.Empty(mother.GetServices<ILifecycleInterceptor>());
+        Assert.Empty(grandmother.GetServices<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -110,9 +110,9 @@ public class ContextInheritanceHandlerTests
         };
 
         // Assert
-        Assert.Equal(context.GetServices<IInterceptor>(), person.GetServices<IInterceptor>());
-        Assert.Equal(context.GetServices<IInterceptor>(), child1.GetServices<IInterceptor>());
-        Assert.Equal(context.GetServices<IInterceptor>(), child2.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child1.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child2.GetServices<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -133,9 +133,9 @@ public class ContextInheritanceHandlerTests
         child3.Mother = child1;
 
         // Assert
-        Assert.Equal(context.GetServices<IInterceptor>(), child1.GetServices<IInterceptor>());
-        Assert.Equal(context.GetServices<IInterceptor>(), child2.GetServices<IInterceptor>());
-        Assert.Equal(context.GetServices<IInterceptor>(), child3.GetServices<IInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child1.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child2.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child3.GetServices<ILifecycleInterceptor>());
     }
     
     [Fact]

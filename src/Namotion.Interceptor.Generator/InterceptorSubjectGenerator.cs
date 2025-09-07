@@ -33,10 +33,6 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                         ClassNode = (ClassDeclarationSyntax)ctx.Node,
                         Properties = classDeclaration.Members
                             .OfType<PropertyDeclarationSyntax>()
-                            .Where(p => p.Modifiers
-                                .Any(m => m.IsKind(
-                                    SyntaxKind.PartialKeyword)) || 
-                                    HasDerivedAttribute(p, model, ct))
                             .Select(p => new
                             {
                                 Property = p,
@@ -91,6 +87,7 @@ using Namotion.Interceptor;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.Frozen;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -104,22 +101,26 @@ namespace {namespaceName}
     public partial class {baseClassName} : IInterceptorSubject
     {{
         private IInterceptorExecutor? _context;
-        private ConcurrentDictionary<string, object?> _data = new ConcurrentDictionary<string, object?>();
 
         [JsonIgnore]
-        IInterceptorSubjectContext IInterceptorSubject.Context
+        IInterceptorSubjectContext IInterceptorSubject.Context => _context ??= new InterceptorExecutor(this);
+
+        [JsonIgnore]
+        ConcurrentDictionary<string, object?> IInterceptorSubject.Data {{ get; }} = new();
+
+        [JsonIgnore]
+        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? _defaultProperties;
+
+        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {{
-            get => _context = _context ?? new InterceptorExecutor(this);
+            _properties = (_properties ?? _defaultProperties)
+                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                .ToFrozenDictionary();
         }}
 
-        [JsonIgnore]
-        ConcurrentDictionary<string, object?> IInterceptorSubject.Data => _data;
-
-        [JsonIgnore]
-        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
-
-        private static IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties = new Dictionary<string, SubjectPropertyMetadata>
-        {{";
+        private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+        private static IReadOnlyDictionary<string, SubjectPropertyMetadata> _defaultProperties = new Dictionary<string, SubjectPropertyMetadata>
+            {{";
                     foreach (var property in cls.SelectMany(c => c.Properties))
                     {
                         //var fullyQualifiedName = property.Type.Type!.ToDisplayString(symbolDisplayFormat);
@@ -128,15 +129,23 @@ namespace {namespaceName}
 
                         generatedCode +=
     $@"
-            {{
-                ""{propertyName}"",       
-                new SubjectPropertyMetadata(nameof({propertyName}), typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")}, false)
-            }},";
+                {{
+                    ""{propertyName}"",       
+                    new SubjectPropertyMetadata(
+                        nameof({propertyName}), 
+                        typeof({baseClassName}).GetProperty(nameof({propertyName})).PropertyType!, 
+                        typeof({baseClassName}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, 
+                        {(property.HasGetter ? ($"(o) => (({baseClassName})o).{propertyName}") : "null")}, 
+                        {(property.HasSetter ? ($"(o, v) => (({baseClassName})o).{propertyName} = ({fullyQualifiedName})v") : "null")}, 
+                        isIntercepted: {(property.IsPartial ? "true" : "false")},
+                        isDynamic: false)
+                }},";
                     }
 
                     generatedCode +=
     $@"
-        }};
+            }}
+            .ToFrozenDictionary();
 ";
 
                     var firstConstructor = cls.SelectMany(c => c.ClassNode.Members)
@@ -189,7 +198,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} get => GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), () => _{propertyName});";
+            {modifiers} get => GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), (o) => (({baseClassName})o)._{propertyName});";
 
                         }
 
@@ -204,7 +213,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, () => _{propertyName}, v => _{propertyName} = ({fullyQualifiedName})v!);";
+            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, (o) => (({baseClassName})o)._{propertyName}, (o, v) => (({baseClassName})o)._{propertyName} = v);";
                         }
 
                         generatedCode +=
@@ -252,17 +261,17 @@ namespace {namespaceName}
                     generatedCode +=
     $@"
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private T GetPropertyValue<T>(string propertyName, Func<object?> readValue)
+        private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
         {{
-            return _context is not null ? (T?)_context.GetPropertyValue(propertyName, readValue)! : (T?)readValue()!;
+            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
         }}
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SetPropertyValue<T>(string propertyName, T? newValue, Func<object?> readValue, Action<object?> setValue)
+        private void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
         {{
             if (_context is null)
             {{
-                setValue(newValue);
+                setValue(this, newValue);
             }}
             else
             {{

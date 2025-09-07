@@ -1,6 +1,6 @@
 ﻿namespace Namotion.Interceptor;
 
-public interface IInterceptor
+public interface ILifecycleInterceptor
 {
     /// <summary>
     /// Called when the specified subject begins to be intercepted by this interceptor.

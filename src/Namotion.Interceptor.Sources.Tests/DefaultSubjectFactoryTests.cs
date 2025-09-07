@@ -17,8 +17,15 @@ public class DefaultSubjectFactoryTests
         }
 
         public IInterceptorSubjectContext Context { get; } = null!;
+
         public ConcurrentDictionary<string, object?> Data { get; } = null!;
+
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; } = null!;
+
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+        {
+            throw new NotImplementedException();
+        }
     }
     
     [Fact]

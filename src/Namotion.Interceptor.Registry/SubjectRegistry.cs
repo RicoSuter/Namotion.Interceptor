@@ -115,14 +115,6 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                     return;
                 }
 
-                foreach (var property in registeredSubject.PropertiesAndAttributes)
-                {
-                    if (property.Reference.Metadata.IsDynamic)
-                    {
-                        change.Subject.DetachSubjectProperty(property);
-                    }
-                }
-
                 if (change.Property is not null)
                 {
                     var property = TryGetRegisteredProperty(change.Property.Value);

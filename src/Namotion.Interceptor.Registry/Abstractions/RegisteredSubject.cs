@@ -24,7 +24,7 @@ public record RegisteredSubject
                 return _parents.ToArray();
         }
     }
-    
+
     public IEnumerable<RegisteredSubjectProperty> Properties
     {
         get
@@ -124,26 +124,21 @@ public record RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue, 
         params Attribute[] attributes)
     {
-        var propertyReference = new PropertyReference(Subject, name);
-        propertyReference.SetPropertyMetadata(new SubjectPropertyMetadata(
+        Subject.AddProperties(new SubjectPropertyMetadata(
             name,
             type,
             attributes,
-
-            getValue is not null ? s => 
-                ((IInterceptorExecutor)s.Context).GetPropertyValue(name, () => getValue(s)) : null, 
-            setValue is not null ? (s, v) => 
-                ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, 
-                    getValue is not null ? () => getValue(s) : null, 
-                    v2 => setValue(s, v2)) : null, 
-            
+            getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null, 
+            setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue, setValue) : null, 
+            isIntercepted: true,
             isDynamic: true));
 
+        var propertyReference = new PropertyReference(Subject, name);
         var property = AddProperty(propertyReference, type, attributes);
         
         // trigger change event
         property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null, 
-            () => getValue?.Invoke(Subject), delegate {});
+            o => getValue?.Invoke(o), delegate {});
         
         return property;
     }

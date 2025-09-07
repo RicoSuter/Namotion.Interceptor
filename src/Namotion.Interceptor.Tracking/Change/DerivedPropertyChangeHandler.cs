@@ -28,21 +28,21 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
     }
 
-    public object? ReadProperty(ReadPropertyInterception context, Func<ReadPropertyInterception, object?> next)
+    public TProperty ReadProperty<TProperty>(ref ReadPropertyInterception context, ReadInterceptionFunc<TProperty> next)
     {
-        var result = next(context);
+        var result = next(ref context);
         TouchProperty(context.Property);
         return result;
     }
 
-    public object? WriteProperty(WritePropertyInterception context, Func<WritePropertyInterception, object?> next)
+    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
     {
-        var result = next.Invoke(context);
+        next(ref context);
 
         var usedByProperties = context.Property.GetUsedByProperties();
         if (usedByProperties.Count == 0)
         {
-            return result;
+            return;
         }
 
         lock (usedByProperties)
@@ -70,12 +70,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                 // trigger change event (derived change has local process as source (null))
                 SubjectMutationContext.ApplyChangesWithSource(null, () =>
-                    usedByProperty.SetPropertyValueWithInterception(newValue, () => oldValue, delegate {})
+                    usedByProperty.SetPropertyValueWithInterception(newValue, _ => oldValue, delegate {})
                 );
             }
         }
-
-        return result;
     }
 
     private static void TryStartRecordTouchedProperties()
@@ -116,13 +114,5 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             _currentTouchedProperties = null;
         }
-    }
-    
-    public void AttachTo(IInterceptorSubject subject)
-    {
-    }
-
-    public void DetachFrom(IInterceptorSubject subject)
-    {
     }
 }

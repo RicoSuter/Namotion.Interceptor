@@ -10,7 +10,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithPropertyValidation(this IInterceptorSubjectContext context)
     {
         return context
-            .WithInterceptor(() => new ValidationInterceptor());
+            .WithService(() => new ValidationInterceptor());
     }
 
     /// <summary>
