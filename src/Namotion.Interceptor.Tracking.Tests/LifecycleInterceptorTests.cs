@@ -1,5 +1,4 @@
-﻿using Castle.Components.DictionaryAdapter.Xml;
-using Moq;
+﻿using Moq;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -217,12 +216,42 @@ public class LifecycleInterceptorTests
         person.Father = father;
         father
             .TryGetRegisteredSubject()!
-            .AddProperty("FooBar", typeof(string), subject => "MyValue", null);
+            .AddProperty("FooBar", typeof(string), _ => "MyValue", null);
 
         person.Father = null;
 
         // Assert
         return Verify(events);
+    }
+    
+    [Fact]
+    public Task WhenAddingPropertyInLifecycleHandlerAttach_ThenItIsAttachedOnlyOnce()
+    {
+        // When a ILifecycleHandler adds a property in AttachSubject, the property should be attached only once
+        
+        // Arrange
+        var events = new List<string>();
+        var context = CreateContextAndCollectLifecycleEvents(events);
+        context.AddService(new AddPropertyToSubjectHandler());
+
+        // Act
+        var person = new Person(context);
+        
+        // Assert
+        Assert.Single(events, e => e == "Attached property:  .FooBar"); // should attach FooBar only once
+        return Verify(events);
+    }
+
+    public class AddPropertyToSubjectHandler : ILifecycleHandler
+    {
+        public void AttachSubject(SubjectLifecycleChange change)
+        {
+            change.Subject.TryGetRegisteredSubject()!.AddProperty("FooBar", typeof(string), _ => "MyValue", null);
+        }
+
+        public void DetachSubject(SubjectLifecycleChange change)
+        {
+        }
     }
 
     private static IInterceptorSubjectContext CreateContextAndCollectLifecycleEvents(List<string> events)
