@@ -108,7 +108,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         var currentValue = context.CurrentValue;
         next(ref context);
-        var newValue = context.NewValue;
+        var newValue = context.GetCurrentValue();
         
         context.Property.SetWriteTimestamp(SubjectMutationContext.GetCurrentTimestamp());
         
