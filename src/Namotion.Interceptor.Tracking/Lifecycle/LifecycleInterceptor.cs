@@ -47,13 +47,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     private void AttachTo(IInterceptorSubject subject, IInterceptorSubjectContext context, PropertyReference? property, object? index)
     {
-        _attachedSubjects.TryAdd(subject, []);
+        var firstAttach = _attachedSubjects.TryAdd(subject, []);
         if (_attachedSubjects[subject].Add(property))
         {
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
             var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
 
-            // keep original keys in case handlers add properties during attach (will be attached directly)
+            // Keep original keys in case handlers add properties during attach (will be attached directly)
             var properties = subject.Properties.Keys;
             
             foreach (var handler in context.GetServices<ILifecycleHandler>())
@@ -66,12 +66,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 lifecycleHandler.AttachSubject(registryContext);
             }
 
-            // Note: Dynamically added properties can only be added after
-            // the subject has been attached, and thus we do not need to handle
-            // dynamic properties here
-            foreach (var propertyName in properties)
+            if (firstAttach)
             {
-                subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
+                // Ensure properties are attached only once
+                foreach (var propertyName in properties)
+                {
+                    subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
+                }
             }
         }
     }
@@ -83,11 +84,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             if (set.Count == 0)
             {
                 _attachedSubjects.Remove(subject);
-            }
-            
-            foreach (var propertyName in subject.Properties.Keys)
-            {
-                subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
+                
+                // Ensure properties are detached only when the last reference is removed
+                foreach (var propertyName in subject.Properties.Keys)
+                {
+                    subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
+                }
             }
             
             var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
@@ -153,8 +155,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects)
     {
-        // TODO: Also scan dynamic properties if available (registry), is this needed?
-        
         foreach (var property in subject.Properties)
         {
             if (property.Value.IsDerived)
