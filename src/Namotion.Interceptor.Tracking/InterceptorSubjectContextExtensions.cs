@@ -41,7 +41,7 @@ public static class InterceptorSubjectContextExtensions
     
     /// <summary>
     /// Registers an interceptor that checks if the new value is different from the current value and only calls inner interceptors when the property has changed.
-    /// Uses EqualityComparer.Default for value types and reference equality for reference types.
+    /// Uses EqualityComparer.Default for value types or strings and does nothing for reference types.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
@@ -59,8 +59,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithDerivedPropertyChangeDetection(this IInterceptorSubjectContext context)
     {
         context
-            .WithService(() => new DerivedPropertyChangeHandler())
-            .TryAddService(context.GetService<DerivedPropertyChangeHandler>, _ => true);
+            .WithService(() => new DerivedPropertyChangeHandler());
 
         return context
             .WithLifecycle();
@@ -97,7 +96,7 @@ public static class InterceptorSubjectContextExtensions
     {
         context
             .WithLifecycle()
-            .TryAddService(() => new ContextInheritanceHandler(), _ => true);
+            .WithService(() => new ContextInheritanceHandler());
 
         return context;
     }
@@ -121,7 +120,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithParents(this IInterceptorSubjectContext context)
     {
         context
-            .TryAddService(() => new ParentTrackingHandler(), _ => true);
+            .WithService(() => new ParentTrackingHandler());
 
         return context
             .WithLifecycle();
