@@ -14,8 +14,8 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
             context.Property, 
             SubjectMutationContext.GetCurrentSource(),
             SubjectMutationContext.GetCurrentTimestamp(),
-            context.CurrentValue, context.NewValue);
-
+            context.CurrentValue, context.GetCurrentValue());
+        
         _subject.OnNext(changedContext);
     }
 
