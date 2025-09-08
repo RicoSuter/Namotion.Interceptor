@@ -41,6 +41,7 @@ public static class InterceptorSubjectContextExtensions
     
     /// <summary>
     /// Registers an interceptor that checks if the new value is different from the current value and only calls inner interceptors when the property has changed.
+    /// Uses EqualityComparer.Default for value types and reference equality for reference types.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
