@@ -113,13 +113,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         var newValue = context.GetCurrentValue();
         
         context.Property.SetWriteTimestamp(SubjectMutationContext.GetCurrentTimestamp());
-        
-        if (!Equals(currentValue, newValue) &&
+
+        if (!typeof(TProperty).IsValueType &&
+            !ReferenceEquals(currentValue, newValue) &&
             (currentValue is IInterceptorSubject || 
-             currentValue is ICollection || 
-             currentValue is IDictionary ||
              newValue is IInterceptorSubject || 
+             currentValue is ICollection || 
              newValue is ICollection || 
+             currentValue is IDictionary ||
              newValue is IDictionary))
         {
             lock (_attachedSubjects)
