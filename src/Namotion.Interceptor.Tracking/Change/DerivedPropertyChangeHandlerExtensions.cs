@@ -13,7 +13,7 @@ public static class DerivedPropertyChangeHandlerExtensions
     /// <returns>The property list.</returns>
     public static HashSet<PropertyReference> GetUsedByProperties(this PropertyReference property)
     {
-        return property.GetOrAddPropertyData(UsedByPropertiesKey, () => new HashSet<PropertyReference>());
+        return property.GetOrAddPropertyData(UsedByPropertiesKey, static () => new HashSet<PropertyReference>());
     }
 
     /// <summary>
