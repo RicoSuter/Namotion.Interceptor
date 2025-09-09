@@ -7,14 +7,14 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
     private const string ReferenceCountKey = "Namotion.Interceptor.Tracking.ReferenceCount";
-    
+
     private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference?>> _attachedSubjects = [];
 
     public void AttachTo(IInterceptorSubject subject)
     {
         lock (_attachedSubjects)
         {
-            var collectedSubjects = new HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)>();
+            var collectedSubjects = new List<(IInterceptorSubject subject, PropertyReference property, object? index)>();
             FindSubjectsInProperties(subject, collectedSubjects, null);
 
             foreach (var child in collectedSubjects)
@@ -34,7 +34,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         lock (_attachedSubjects)
         {
-            var collectedSubjects = new HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)>();
+            var collectedSubjects = new List<(IInterceptorSubject subject, PropertyReference property, object? index)>();
             FindSubjectsInProperties(subject, collectedSubjects, null);
 
             DetachFrom(subject, subject.Context, null, null);
@@ -55,7 +55,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             // Keep original keys in case handlers add properties during attach (will be attached directly)
             var properties = subject.Properties.Keys;
-            
+
             foreach (var handler in context.GetServices<ILifecycleHandler>())
             {
                 handler.AttachSubject(registryContext);
@@ -84,14 +84,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             if (set.Count == 0)
             {
                 _attachedSubjects.Remove(subject);
-                
+
                 // Ensure properties are detached only when the last reference is removed
                 foreach (var propertyName in subject.Properties.Keys)
                 {
                     subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
                 }
             }
-            
+
             var count = subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, (_, count) => (int)count! - 1) as int?;
             var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
             if (subject is ILifecycleHandler lifecycleHandler)
@@ -111,41 +111,47 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         var currentValue = context.CurrentValue;
         next(ref context);
         var newValue = context.GetCurrentValue();
-        
+
         context.Property.SetWriteTimestamp(SubjectMutationContext.GetCurrentTimestamp());
 
         if (!typeof(TProperty).IsValueType &&
             !ReferenceEquals(currentValue, newValue) &&
-            (currentValue is IInterceptorSubject || 
-             newValue is IInterceptorSubject || 
-             currentValue is ICollection || 
-             newValue is ICollection || 
+            (currentValue is IInterceptorSubject ||
+             newValue is IInterceptorSubject ||
+             currentValue is ICollection ||
+             newValue is ICollection ||
              currentValue is IDictionary ||
              newValue is IDictionary))
         {
             lock (_attachedSubjects)
             {
                 var oldTouchedSubjects = new HashSet<IInterceptorSubject>();
-                var oldCollectedSubjects = new HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)>();
+                var oldCollectedSubjects = new List<(IInterceptorSubject subject, PropertyReference property, object? index)>();
                 FindSubjectsInProperty(context.Property, currentValue, null, oldCollectedSubjects, oldTouchedSubjects);
 
                 var newTouchedSubjects = new HashSet<IInterceptorSubject>();
-                var newCollectedSubjects = new HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)>();
+                var newCollectedSubjects = new List<(IInterceptorSubject subject, PropertyReference property, object? index)>();
                 FindSubjectsInProperty(context.Property, newValue, null, newCollectedSubjects, newTouchedSubjects);
 
                 if (oldCollectedSubjects.Count != 0 || newCollectedSubjects.Count != 0)
                 {
-                    foreach (var d in oldCollectedSubjects
-                        .Reverse()
-                        .Where(u => !newTouchedSubjects.Contains(u.subject)))
+                    // Detach old subjects that are not in new subjects (in reverse order)
+                    for (var i = oldCollectedSubjects.Count - 1; i >= 0; i--)
                     {
-                        DetachFrom(d.subject, context.Property.Subject.Context, d.property, d.index);
+                        var d = oldCollectedSubjects[i];
+                        if (!newTouchedSubjects.Contains(d.subject))
+                        {
+                            DetachFrom(d.subject, context.Property.Subject.Context, d.property, d.index);
+                        }
                     }
 
-                    foreach (var d in newCollectedSubjects
-                        .Where(u => !oldTouchedSubjects.Contains(u.subject)))
+                    // Attach new subjects that are not in old subjects
+                    foreach (var d in newCollectedSubjects)
                     {
-                        AttachTo(d.subject, context.Property.Subject.Context, d.property, d.index);
+                        if (!oldTouchedSubjects.Contains(d.subject))
+                        {
+                            AttachTo(d.subject, context.Property.Subject.Context, d.property, d.index);
+                        }
                     }
                 }
             }
@@ -153,7 +159,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     }
 
     private void FindSubjectsInProperties(IInterceptorSubject subject,
-        HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects)
     {
         foreach (var property in subject.Properties)
@@ -164,8 +170,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             var childValue = property.Value.GetValue?.Invoke(subject);
             if (childValue is not null)
             {
-                FindSubjectsInProperty(new PropertyReference(subject, property.Key), 
-                    childValue, null, collectedSubjects, touchedSubjects);
+                var propertyRef = new PropertyReference(subject, property.Key);
+                FindSubjectsInProperty(propertyRef, childValue, null, collectedSubjects, touchedSubjects);
             }
         }
     }
@@ -173,7 +179,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void FindSubjectsInProperty(PropertyReference property,
         object? value, object? index,
-        HashSet<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects)
     {
         if (value is IDictionary dictionary)
@@ -196,7 +202,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 {
                     collectedSubjects.Add((subject, property, i));
                 }
-
                 i++;
             }
         }
