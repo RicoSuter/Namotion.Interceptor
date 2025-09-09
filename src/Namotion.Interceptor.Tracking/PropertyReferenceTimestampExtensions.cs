@@ -11,11 +11,18 @@ public static class PropertyReferenceTimestampExtensions
     /// <returns>The timestamp.</returns>
     public static DateTimeOffset? TryGetWriteTimestamp(this PropertyReference property)
     {
-        return property.GetOrAddPropertyData(ChangedTimestampKey, () => (DateTimeOffset?)null);
+        return property.GetOrAddPropertyData(ChangedTimestampKey, () => new DateTimeOffsetWrapper()).Value;
     }
 
     internal static void SetWriteTimestamp(this PropertyReference property, DateTimeOffset timestamp)
     {
-        property.SetPropertyData(ChangedTimestampKey, timestamp);
+        property.AddOrUpdatePropertyData<DateTimeOffsetWrapper, DateTimeOffset>(
+            ChangedTimestampKey, static (wrapper, ts) => wrapper.Value = ts, timestamp);
+    }
+    
+    // Wrapper used to avoid boxing of DateTimeOffset and ensure allocation free timestamp tracking
+    private class DateTimeOffsetWrapper
+    {
+        public DateTimeOffset? Value { get; set; }
     }
 }
