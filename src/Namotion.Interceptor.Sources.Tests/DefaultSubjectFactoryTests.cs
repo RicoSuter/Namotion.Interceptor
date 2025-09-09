@@ -18,7 +18,7 @@ public class DefaultSubjectFactoryTests
 
         public IInterceptorSubjectContext Context { get; } = null!;
 
-        public ConcurrentDictionary<string, object?> Data { get; } = null!;
+        public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = null!;
 
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; } = null!;
 

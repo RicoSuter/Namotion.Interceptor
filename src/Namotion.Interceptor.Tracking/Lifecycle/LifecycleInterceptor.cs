@@ -50,7 +50,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         var firstAttach = _attachedSubjects.TryAdd(subject, []);
         if (_attachedSubjects[subject].Add(property))
         {
-            var count = subject.Data.AddOrUpdate(ReferenceCountKey, 1, (_, count) => (int)count! + 1) as int?;
+            var count = subject.Data.AddOrUpdate((null, ReferenceCountKey), 1, (_, count) => (int)count! + 1) as int?;
             var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
 
             // Keep original keys in case handlers add properties during attach (will be attached directly)
@@ -92,7 +92,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
             }
             
-            var count = subject.Data.AddOrUpdate(ReferenceCountKey, 0, (_, count) => (int)count! - 1) as int?;
+            var count = subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, (_, count) => (int)count! - 1) as int?;
             var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
             if (subject is ILifecycleHandler lifecycleHandler)
             {
