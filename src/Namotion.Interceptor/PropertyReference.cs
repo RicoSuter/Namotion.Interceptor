@@ -40,9 +40,4 @@ public record struct PropertyReference
     {
         return Subject.Data.TryGetValue($"{Name}:{key}", out value);
     }
-
-    public object? GetPropertyData(string key)
-    {
-        return Subject.Data[$"{Name}:{key}"];
-    }
 }
