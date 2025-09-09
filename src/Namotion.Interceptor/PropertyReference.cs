@@ -33,11 +33,11 @@ public record struct PropertyReference
 
     public void SetPropertyData(string key, object? value)
     {
-        Subject.Data[$"{Name}:{key}"] = value;
+        Subject.Data[(Name, key)] = value;
     }
 
     public bool TryGetPropertyData(string key, out object? value)
     {
-        return Subject.Data.TryGetValue($"{Name}:{key}", out value);
+        return Subject.Data.TryGetValue((Name, key), out value);
     }
 }
