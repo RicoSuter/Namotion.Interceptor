@@ -10,7 +10,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference?>> _attachedSubjects = [];
 
-    // Re-entrancy-safe, thread-local collection pooling
     [ThreadStatic]
     private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
 
@@ -209,17 +208,16 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         switch (value)
         {
             case IInterceptorSubject interceptorSubject:
-                if (touchedSubjects?.Add(interceptorSubject) != false)
-                {
-                    collectedSubjects.Add((interceptorSubject, property, index));
-                }
+                touchedSubjects?.Add(interceptorSubject);
+                collectedSubjects.Add((interceptorSubject, property, index));
                 break;
 
             case IDictionary dictionary:
                 foreach (DictionaryEntry entry in dictionary)
                 {
-                    if (entry.Value is IInterceptorSubject subjectItem && touchedSubjects?.Add(subjectItem) != false)
+                    if (entry.Value is IInterceptorSubject subjectItem)
                     {
+                        touchedSubjects?.Add(subjectItem);
                         collectedSubjects.Add((subjectItem, property, entry.Key));
                     }
                 }
@@ -229,8 +227,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 var i = 0;
                 foreach (var item in collection)
                 {
-                    if (item is IInterceptorSubject subject && touchedSubjects?.Add(subject) != false)
+                    if (item is IInterceptorSubject subject)
                     {
+                        touchedSubjects?.Add(subject);
                         collectedSubjects.Add((subject, property, i));
                     }
                     i++;
