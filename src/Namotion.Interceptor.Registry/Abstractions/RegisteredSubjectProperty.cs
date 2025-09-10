@@ -1,6 +1,6 @@
-﻿using System.Collections;
+﻿using System.Buffers;
+using System.Collections;
 using System.Collections.Concurrent;
-using System.Reactive.Subjects;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -14,7 +14,7 @@ public record RegisteredSubjectProperty
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
-    private HashSet<SubjectPropertyChild> _children = [];
+    private readonly HashSet<SubjectPropertyChild> _children = [];
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
     public RegisteredSubjectProperty(PropertyReference property, IReadOnlyCollection<Attribute> reflectionAttributes)
@@ -263,15 +263,44 @@ public record RegisteredSubjectProperty
         {
             if (IsSubjectCollection && _children.LastOrDefault() != parent)
             {
-                _children = _children
-                    .Where(c => c != parent)
-                    .Select((c, i) => new SubjectPropertyChild { Subject = c.Subject, Index = i })
-                    .ToHashSet();
+                _children.Remove(parent);
+                UpdateChildIndexes(_children);
             }
             else
             {
                 _children.Remove(parent);
             }
+        }
+    }
+    
+    static void UpdateChildIndexes(HashSet<SubjectPropertyChild> children)
+    {
+        var count = children.Count;
+        if (count == 0)
+            return;
+
+        var pool = ArrayPool<SubjectPropertyChild>.Shared;
+        var buffer = pool.Rent(count);
+        try
+        {
+            var span = buffer.AsSpan(0, count);
+            var index = 0;
+            foreach (var child in children)
+            {
+                span[index] = child with { Index = index };
+                index++;
+            }
+            
+            children.Clear();
+            children.EnsureCapacity(span.Length);
+            foreach (var child in span)
+            {
+                children.Add(child);
+            }
+        }
+        finally
+        {
+            pool.Return(buffer, clearArray: true);
         }
     }
 }
