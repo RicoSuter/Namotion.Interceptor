@@ -108,7 +108,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
             }
 
-            var count = subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, (_, count) => (int)count! - 1) as int?;
+            var count = subject.Data .AddOrUpdate((null, ReferenceCountKey), 0, 
+                (_, count) => (int)count! - 1) as int?;
+            
             var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
             if (subject is ILifecycleHandler lifecycleHandler)
             {
@@ -187,8 +189,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         foreach (var property in subject.Properties)
         {
-            if (property.Value.IsDerived || property.Value.Type.IsValueType || property.Value.Type == typeof(string))
+            if (property.Value.IsDerived || 
+                property.Value.Type.IsValueType || 
+                property.Value.Type == typeof(string))
+            {
                 continue;
+            }
 
             var propertyValue = property.Value.GetValue?.Invoke(subject);
             if (propertyValue is not null)
@@ -241,7 +247,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private static List<(IInterceptorSubject subject, PropertyReference property, object? index)> GetList()
     {
         _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
-        return _listPool.Count > 0 ? _listPool.Pop() : new List<(IInterceptorSubject, PropertyReference, object?)>();
+        return _listPool.Count > 0 ? _listPool.Pop() : [];
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static HashSet<IInterceptorSubject> GetHashSet()
+    {
+        _hashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
+        return _hashSetPool.Count > 0 ? _hashSetPool.Pop() : [];
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -252,16 +265,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static HashSet<IInterceptorSubject> GetHashSet()
+    private static void ReturnHashSet(HashSet<IInterceptorSubject> hashSet)
     {
-        _hashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
-        return _hashSetPool.Count > 0 ? _hashSetPool.Pop() : new HashSet<IInterceptorSubject>();
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ReturnHashSet(HashSet<IInterceptorSubject> set)
-    {
-        set.Clear();
-        _hashSetPool!.Push(set);
+        hashSet.Clear();
+        _hashSetPool!.Push(hashSet);
     }
 }
