@@ -130,7 +130,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         context.Property.SetWriteTimestamp(SubjectMutationContext.GetCurrentTimestamp());
 
-        if (typeof(TProperty).IsValueType || ReferenceEquals(currentValue, newValue))
+        if (typeof(TProperty).IsValueType || typeof(TProperty) == typeof(string))
         {
             return;
         }
@@ -187,14 +187,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         foreach (var property in subject.Properties)
         {
-            if (property.Value.IsDerived)
+            if (property.Value.IsDerived || property.Value.Type.IsValueType || property.Value.Type == typeof(string))
                 continue;
 
-            var childValue = property.Value.GetValue?.Invoke(subject);
-            if (childValue is not null)
+            var propertyValue = property.Value.GetValue?.Invoke(subject);
+            if (propertyValue is not null)
             {
-                var propertyRef = new PropertyReference(subject, property.Key);
-                FindSubjectsInProperty(propertyRef, childValue, null, collectedSubjects, touchedSubjects);
+                FindSubjectsInProperty(new PropertyReference(subject, property.Key), propertyValue, null, collectedSubjects, touchedSubjects);
             }
         }
     }
@@ -207,9 +206,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         switch (value)
         {
-            case IInterceptorSubject interceptorSubject:
-                touchedSubjects?.Add(interceptorSubject);
-                collectedSubjects.Add((interceptorSubject, property, index));
+            case IInterceptorSubject subject:
+                touchedSubjects?.Add(subject);
+                collectedSubjects.Add((subject, property, index));
                 break;
 
             case IDictionary dictionary:
