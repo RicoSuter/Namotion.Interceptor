@@ -17,10 +17,14 @@ public record RegisteredSubjectProperty
     private readonly HashSet<SubjectPropertyChild> _children = [];
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
-    public RegisteredSubjectProperty(PropertyReference property, IReadOnlyCollection<Attribute> reflectionAttributes)
+    public RegisteredSubjectProperty(RegisteredSubject parent, string name, 
+        Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
     {
-        Reference = property;
+        Parent = parent;
+        Reference = new PropertyReference(parent.Subject, name);
+        Type = type;
         ReflectionAttributes = reflectionAttributes;
+
         _attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
     }
 
@@ -33,6 +37,11 @@ public record RegisteredSubjectProperty
     /// Gets the name of the property.
     /// </summary>
     public string Name => Reference.Name;
+
+    /// <summary>
+    /// Gets the parent subject which contains the property.
+    /// </summary>
+    public RegisteredSubject Parent { get; }
     
     /// <summary>
     /// Gets the property reference.
@@ -42,7 +51,7 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets the type of the property.
     /// </summary>
-    public required Type Type { get; init; }
+    public Type Type { get; }
 
     /// <summary>
     /// Gets a list of all .NET reflection attributes.
@@ -109,11 +118,6 @@ public record RegisteredSubjectProperty
                         Namespace: "System.Collections.Generic"
                     } keyValueType && keyValueType.GenericTypeArguments[1].IsAssignableTo(typeof(IInterceptorSubject)));
         });
-
-    /// <summary>
-    /// Gets the parent subject which contains the property.
-    /// </summary>
-    public RegisteredSubject Parent { get; internal set; }
 
     /// <summary>
     /// Gets a value indicating whether the property has a getter.
@@ -264,10 +268,24 @@ public record RegisteredSubjectProperty
     {
         lock (_children)
         {
-            if (IsSubjectCollection && parent != _children.LastOrDefault())
+            if (IsSubjectCollection)
             {
-                _children.Remove(parent);
-                UpdateChildIndexes(_children);
+                // Manual iteration instead of LINQ LastOrDefault() for performance
+                SubjectPropertyChild? lastChild = null;
+                foreach (var child in _children)
+                {
+                    lastChild = child;
+                }
+                
+                if (parent != lastChild)
+                {
+                    _children.Remove(parent);
+                    UpdateChildIndexes(_children);
+                }
+                else
+                {
+                    _children.Remove(parent);
+                }
             }
             else
             {
@@ -296,10 +314,10 @@ public record RegisteredSubjectProperty
             }
             
             children.Clear();
-            children.EnsureCapacity(span.Length);
-            foreach (var child in span)
+            children.EnsureCapacity(count);
+            for (int i = 0; i < count; i++)
             {
-                children.Add(child);
+                children.Add(span[i]);
             }
         }
         finally

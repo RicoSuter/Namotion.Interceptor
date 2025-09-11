@@ -39,17 +39,11 @@ public class DefaultSubjectFactoryTests
         context.AddService(serviceCollection.BuildServiceProvider());
 
         var person = new Person(context);
-        var subject = new RegisteredSubject(person, [
-            new RegisteredSubjectProperty(new PropertyReference(
-                    person,
-                    nameof(Person.Mother)),
-                [])
-            {
-                Type = typeof(MyClass)
-            }
-        ]);
-
-        var property = subject.Properties.First();
+        var property = new RegisteredSubjectProperty(
+            new RegisteredSubject(person),
+            nameof(Person.Mother),
+            typeof(MyClass),
+            []);
 
         // Act
         var subjectFactory = new DefaultSubjectFactory();
@@ -65,18 +59,13 @@ public class DefaultSubjectFactoryTests
     {
         // Arrange
         var context = new InterceptorSubjectContext();
-        var person = new Person(context);
-        var subject = new RegisteredSubject(person, [
-            new RegisteredSubjectProperty(new PropertyReference(
-                    person,
-                    nameof(Person.Mother)),
-                [])
-            {
-                Type = typeof(IList<MyClass>)
-            }
-        ]);
 
-        var property = subject.Properties.First();
+        var person = new Person(context);
+        var property = new RegisteredSubjectProperty(
+            new RegisteredSubject(person),
+            nameof(Person.Mother),
+            typeof(IList<MyClass>),
+            []);
 
         // Act
         var subjectFactory = new DefaultSubjectFactory();

@@ -77,17 +77,15 @@ public record RegisteredSubject
             return _properties.GetValueOrDefault(propertyName);
     }
 
-    public RegisteredSubject(IInterceptorSubject subject, IEnumerable<RegisteredSubjectProperty> properties)
+    public RegisteredSubject(IInterceptorSubject subject)
     {
         Subject = subject;
-        _properties = properties
+        _properties = subject
+            .Properties
             .ToFrozenDictionary(
-                p => p.Name,
-                p =>
-                {
-                    p.Parent = this;
-                    return p;
-                });
+                p => p.Key,
+                p => new RegisteredSubjectProperty(
+                    this, p.Key, p.Value.Type, p.Value.Attributes));
     }
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
@@ -125,8 +123,7 @@ public record RegisteredSubject
             isIntercepted: true,
             isDynamic: true));
 
-        var propertyReference = new PropertyReference(Subject, name);
-        var property = AddProperty(propertyReference, type, attributes);
+        var property = AddProperty(name, type, attributes);
         
         // trigger change event
         property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null, 
@@ -152,14 +149,10 @@ public record RegisteredSubject
         return AddProperty(name, type, getValue, setValue, attributes.Concat([new DerivedAttribute()]).ToArray());
     }
 
-    private RegisteredSubjectProperty AddProperty(PropertyReference property, Type type, Attribute[] attributes)
+    private RegisteredSubjectProperty AddProperty(string name, Type type, Attribute[] attributes)
     {
-        var subjectProperty = new RegisteredSubjectProperty(property, attributes)
-        {
-            Parent = this,
-            Type = type,
-        };
-        
+        var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
+
         lock (_lock)
         {
             _properties = _properties
@@ -167,7 +160,7 @@ public record RegisteredSubject
                 .ToFrozenDictionary(p => p.Key, p => p.Value);
         }
 
-        Subject.AttachSubjectProperty(property);
+        Subject.AttachSubjectProperty(subjectProperty.Reference);
         return subjectProperty;
     }
 }
