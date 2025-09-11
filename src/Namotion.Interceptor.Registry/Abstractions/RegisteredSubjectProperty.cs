@@ -244,11 +244,13 @@ public record RegisteredSubjectProperty
             throw new InvalidOperationException($"The attributed property '{AttributeMetadata.PropertyName}' could not be found on the parent subject.");
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static implicit operator PropertyReference(RegisteredSubjectProperty property)
     {
-        return new PropertyReference(property.Subject, property.Name);
+        return property.Reference;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void AddChild(SubjectPropertyChild parent)
     {
         lock (_children)
@@ -257,11 +259,12 @@ public record RegisteredSubjectProperty
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void RemoveChild(SubjectPropertyChild parent)
     {
         lock (_children)
         {
-            if (IsSubjectCollection && _children.LastOrDefault() != parent)
+            if (IsSubjectCollection && parent != _children.LastOrDefault())
             {
                 _children.Remove(parent);
                 UpdateChildIndexes(_children);
@@ -273,6 +276,7 @@ public record RegisteredSubjectProperty
         }
     }
     
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static void UpdateChildIndexes(HashSet<SubjectPropertyChild> children)
     {
         var count = children.Count;
@@ -283,8 +287,8 @@ public record RegisteredSubjectProperty
         var buffer = pool.Rent(count);
         try
         {
-            var span = buffer.AsSpan(0, count);
             var index = 0;
+            var span = buffer.AsSpan(0, count);
             foreach (var child in children)
             {
                 span[index] = child with { Index = index };
