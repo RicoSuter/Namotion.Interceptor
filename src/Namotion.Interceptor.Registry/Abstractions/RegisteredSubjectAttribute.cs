@@ -5,22 +5,23 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public record RegisteredSubjectAttribute : RegisteredSubjectProperty
 {
-    private readonly PropertyAttributeAttribute? _attributeMetadata;
-
+    private RegisteredSubjectProperty? _parentPropertyCache;
+    
     internal RegisteredSubjectAttribute(
-        RegisteredSubject parent, string name, Type type, IReadOnlyCollection<Attribute> reflectionAttributes, PropertyAttributeAttribute attributeMetadata) 
+        RegisteredSubject parent, string name, Type type, 
+        IReadOnlyCollection<Attribute> reflectionAttributes, 
+        PropertyAttributeAttribute attributeMetadata) 
         : base(parent, name, type, reflectionAttributes)
     {
-        _attributeMetadata = attributeMetadata;
+        AttributeMetadata = attributeMetadata;
     }
     
     /// <summary>
     /// Gets the attribute with information about this attribute property.
     /// </summary>
-    /// <exception cref="InvalidOperationException">Thrown when this property is not an attribute.</exception>
-    public PropertyAttributeAttribute AttributeMetadata => _attributeMetadata 
-        ?? throw new InvalidOperationException("The property is not an attribute.");
-    
+    public PropertyAttributeAttribute AttributeMetadata { get; }
+
+    /// <inheritdoc />
     public override string BrowseName => AttributeMetadata.AttributeName;
     
     /// <summary>
@@ -32,7 +33,7 @@ public record RegisteredSubjectAttribute : RegisteredSubjectProperty
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty GetAttributedProperty()
     {
-        return Parent.TryGetProperty(AttributeMetadata.PropertyName) ??
-               throw new InvalidOperationException($"The attributed property '{AttributeMetadata.PropertyName}' could not be found on the parent subject.");
+        return _parentPropertyCache ??= Parent.TryGetProperty(AttributeMetadata.PropertyName) ??
+            throw new InvalidOperationException($"The attributed property '{AttributeMetadata.PropertyName}' could not be found on the parent subject.");
     }
 }
