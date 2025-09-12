@@ -21,9 +21,9 @@ public record RegisteredSubjectProperty
         Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
     {
         Parent = parent;
-        Reference = new PropertyReference(parent.Subject, name);
         Type = type;
         ReflectionAttributes = reflectionAttributes;
+        Reference = new PropertyReference(parent.Subject, name);
 
         _attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
     }
@@ -276,7 +276,7 @@ public record RegisteredSubjectProperty
                 {
                     lastChild = child;
                 }
-                
+
                 if (parent != lastChild)
                 {
                     _children.Remove(parent);
