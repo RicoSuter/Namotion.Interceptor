@@ -14,7 +14,7 @@ public record RegisteredSubjectProperty
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
-    private readonly HashSet<SubjectPropertyChild> _children = [];
+    private readonly List<SubjectPropertyChild> _children = [];
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name, 
@@ -255,11 +255,14 @@ public record RegisteredSubjectProperty
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void AddChild(SubjectPropertyChild parent)
+    internal void AddChild(SubjectPropertyChild child)
     {
         lock (_children)
         {
-            _children.Add(parent);
+            if (!_children.Contains(child))
+            {
+                _children.Add(child);
+            }
         }
     }
 
@@ -268,61 +271,22 @@ public record RegisteredSubjectProperty
     {
         lock (_children)
         {
-            if (IsSubjectCollection)
+            var index = _children.IndexOf(parent);
+            if (index == -1)
             {
-                // Manual iteration instead of LINQ LastOrDefault() for performance
-                SubjectPropertyChild? lastChild = null;
-                foreach (var child in _children)
-                {
-                    lastChild = child;
-                }
+                return;
+            }
 
-                if (parent != lastChild)
-                {
-                    _children.Remove(parent);
-                    UpdateChildIndexes(_children);
-                }
-                else
-                {
-                    _children.Remove(parent);
-                }
-            }
-            else
-            {
-                _children.Remove(parent);
-            }
-        }
-    }
-    
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static void UpdateChildIndexes(HashSet<SubjectPropertyChild> children)
-    {
-        var count = children.Count;
-        if (count == 0)
-            return;
+            _children.RemoveAt(index);
 
-        var pool = ArrayPool<SubjectPropertyChild>.Shared;
-        var buffer = pool.Rent(count);
-        try
-        {
-            var index = 0;
-            var span = buffer.AsSpan(0, count);
-            foreach (var child in children)
+            if (IsSubjectCollection && index < _children.Count)
             {
-                span[index] = child with { Index = index };
-                index++;
+                for (int i = index; i < _children.Count; i++)
+                {
+                    var child = _children[i];
+                    _children[i] = child with { Index = i };
+                }
             }
-            
-            children.Clear();
-            children.EnsureCapacity(count);
-            for (int i = 0; i < count; i++)
-            {
-                children.Add(span[i]);
-            }
-        }
-        finally
-        {
-            pool.Return(buffer, clearArray: true);
         }
     }
 }
