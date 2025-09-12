@@ -93,8 +93,7 @@ public record RegisteredSubject
             .Properties
             .ToFrozenDictionary(
                 p => p.Key,
-                p => new RegisteredSubjectProperty(
-                    this, p.Key, p.Value.Type, p.Value.Attributes));
+                p => RegisteredSubjectProperty.Create(this, p.Key, p.Value.Type, p.Value.Attributes));
     }
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)

@@ -8,8 +8,8 @@ public record RegisteredSubjectAttribute : RegisteredSubjectProperty
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
     internal RegisteredSubjectAttribute(
-        PropertyReference property, Type type, IReadOnlyCollection<Attribute> reflectionAttributes, PropertyAttributeAttribute attributeMetadata) 
-        : base(property, type, reflectionAttributes)
+        RegisteredSubject parent, string name, Type type, IReadOnlyCollection<Attribute> reflectionAttributes, PropertyAttributeAttribute attributeMetadata) 
+        : base(parent, name, type, reflectionAttributes)
     {
         _attributeMetadata = attributeMetadata;
     }

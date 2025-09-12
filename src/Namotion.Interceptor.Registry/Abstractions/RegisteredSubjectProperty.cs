@@ -30,12 +30,12 @@ public record RegisteredSubjectProperty
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static RegisteredSubjectProperty Create(PropertyReference property, Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
+    public static RegisteredSubjectProperty Create(RegisteredSubject parent, string name, Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
     {
         var attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
         return attributeMetadata is not null ? 
-            new RegisteredSubjectAttribute(property, type, reflectionAttributes, attributeMetadata) : 
-            new RegisteredSubjectProperty(property, type, reflectionAttributes);
+            new RegisteredSubjectAttribute(parent, name, type, reflectionAttributes, attributeMetadata) : 
+            new RegisteredSubjectProperty(parent, name, type, reflectionAttributes);
     }
 
     /// <summary>
@@ -216,7 +216,7 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
-    public IEnumerable<RegisteredSubjectProperty> Attributes
+    public IEnumerable<RegisteredSubjectAttribute> Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Parent.GetPropertyAttributes(Name);
