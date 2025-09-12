@@ -1,5 +1,4 @@
 ﻿using System.Collections.Frozen;
-using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
@@ -68,9 +67,9 @@ public record RegisteredSubject
         lock (_lock)
         {
             return _properties.Values
-                .OfType<RegisteredSubjectAttribute>()
-                .FirstOrDefault(p => p.AttributeMetadata.PropertyName == propertyName && 
-                                     p.AttributeMetadata.AttributeName == attributeName);
+                .FirstOrDefault(p => p is RegisteredSubjectAttribute attribute &&
+                                     attribute.AttributeMetadata.PropertyName == propertyName && 
+                                     attribute.AttributeMetadata.AttributeName == attributeName);
         }
     } 
 
