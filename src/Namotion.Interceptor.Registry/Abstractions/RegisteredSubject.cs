@@ -1,5 +1,4 @@
 ﻿using System.Collections.Frozen;
-using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
@@ -26,7 +25,16 @@ public record RegisteredSubject
         }
     }
 
-    public ImmutableArray<RegisteredSubjectProperty> Properties
+    public IEnumerable<RegisteredSubjectProperty> Properties
+    {
+        get
+        {
+            lock (_lock) // TODO(perf): Avoid linq?
+                return _properties.Values.Where(p => p is not RegisteredSubjectAttribute);
+        }
+    }
+    
+    public IEnumerable<RegisteredSubjectProperty> PropertiesAndAttributes
     {
         get
         {
@@ -38,13 +46,13 @@ public record RegisteredSubject
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
-    public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
+    public IEnumerable<RegisteredSubjectAttribute> GetPropertyAttributes(string propertyName)
     {
         lock (_lock)
         {
             return _properties.Values
-                .Where(p => p.IsAttribute &&
-                            p.AttributeMetadata.PropertyName == propertyName);
+                .OfType<RegisteredSubjectAttribute>()
+                .Where(p => p.AttributeMetadata.PropertyName == propertyName);
         }
     }
 
@@ -59,9 +67,9 @@ public record RegisteredSubject
         lock (_lock)
         {
             return _properties.Values
-                .FirstOrDefault(p => p.IsAttribute &&
-                                     p.AttributeMetadata.PropertyName == propertyName && 
-                                     p.AttributeMetadata.AttributeName == attributeName);
+                .FirstOrDefault(p => p is RegisteredSubjectAttribute attribute &&
+                                     attribute.AttributeMetadata.PropertyName == propertyName && 
+                                     attribute.AttributeMetadata.AttributeName == attributeName);
         }
     } 
 
@@ -84,8 +92,7 @@ public record RegisteredSubject
             .Properties
             .ToFrozenDictionary(
                 p => p.Key,
-                p => new RegisteredSubjectProperty(
-                    this, p.Key, p.Value.Type, p.Value.Attributes));
+                p => RegisteredSubjectProperty.Create(this, p.Key, p.Value.Type, p.Value.Attributes));
     }
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
@@ -151,8 +158,8 @@ public record RegisteredSubject
 
     private RegisteredSubjectProperty AddProperty(string name, Type type, Attribute[] attributes)
     {
-        var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
-
+        var subjectProperty = RegisteredSubjectProperty.Create(this, name, type, attributes);
+        
         lock (_lock)
         {
             _properties = _properties

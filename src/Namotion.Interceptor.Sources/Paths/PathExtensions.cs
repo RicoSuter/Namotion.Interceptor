@@ -295,7 +295,7 @@ public static class PathExtensions
                         break;
                     }
 
-                    property = parentProperty?.IsAttribute == true
+                    property = parentProperty is RegisteredSubjectAttribute
                         ? sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment) 
                         : sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
 

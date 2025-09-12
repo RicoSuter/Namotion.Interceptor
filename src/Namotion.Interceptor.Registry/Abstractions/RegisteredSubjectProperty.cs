@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
@@ -15,7 +14,6 @@ public record RegisteredSubjectProperty
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
     private readonly List<SubjectPropertyChild> _children = [];
-    private readonly PropertyAttributeAttribute? _attributeMetadata;
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name, 
         Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
@@ -24,8 +22,15 @@ public record RegisteredSubjectProperty
         Type = type;
         ReflectionAttributes = reflectionAttributes;
         Reference = new PropertyReference(parent.Subject, name);
+    }
 
-        _attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static RegisteredSubjectProperty Create(RegisteredSubject parent, string name, Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
+    {
+        var attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
+        return attributeMetadata is not null ? 
+            new RegisteredSubjectAttribute(parent, name, type, reflectionAttributes, attributeMetadata) : 
+            new RegisteredSubjectProperty(parent, name, type, reflectionAttributes);
     }
 
     /// <summary>
@@ -61,19 +66,7 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets the browse name of the property (either the property or attribute name).
     /// </summary>
-    public string BrowseName => IsAttribute ? AttributeMetadata.AttributeName : Name;
-    
-    /// <summary>
-    /// Specifies whether the property is an attribute property (property attached to another property).
-    /// </summary>
-    public bool IsAttribute => _attributeMetadata is not null;
-
-    /// <summary>
-    /// Gets the attribute with information about this attribute property.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">Thrown when this property is not an attribute.</exception>
-    public PropertyAttributeAttribute AttributeMetadata => _attributeMetadata 
-        ?? throw new InvalidOperationException("The property is not an attribute.");
+    public virtual string BrowseName => Name;
     
     /// <summary>
     /// Checks whether this property has child subjects, which can be either
@@ -218,7 +211,7 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
-    public IEnumerable<RegisteredSubjectProperty> Attributes
+    public IEnumerable<RegisteredSubjectAttribute> Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Parent.GetPropertyAttributes(Name);
@@ -235,34 +228,16 @@ public record RegisteredSubjectProperty
         return Parent.TryGetPropertyAttribute(Name, attributeName);
     } 
 
-    /// <summary>
-    /// Gets the attribute property this property is attached to.
-    /// </summary>
-    /// <returns>The property.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when this property is not an attribute.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the property this attribute is attached could not be found.</exception>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public RegisteredSubjectProperty GetAttributedProperty()
-    {
-        return Parent.TryGetProperty(AttributeMetadata.PropertyName) ??
-            throw new InvalidOperationException($"The attributed property '{AttributeMetadata.PropertyName}' could not be found on the parent subject.");
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static implicit operator PropertyReference(RegisteredSubjectProperty property)
     {
-        return property.Reference;
+        return new PropertyReference(property.Subject, property.Name);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void AddChild(SubjectPropertyChild child)
+    internal void AddChild(SubjectPropertyChild parent)
     {
         lock (_children)
         {
-            if (!_children.Contains(child))
-            {
-                _children.Add(child);
-            }
+            _children.Add(parent);
         }
     }
 
@@ -281,7 +256,7 @@ public record RegisteredSubjectProperty
 
             if (IsSubjectCollection && index < _children.Count)
             {
-                for (int i = index; i < _children.Count; i++)
+                for (var i = index; i < _children.Count; i++)
                 {
                     var child = _children[i];
                     _children[i] = child with { Index = i };
