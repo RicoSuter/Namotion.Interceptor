@@ -3,6 +3,10 @@ using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
+/// <summary>
+/// An attribute provides additional information about a property of a
+/// registered subject but is technical also a property on the subject.
+/// </summary>
 public record RegisteredSubjectAttribute : RegisteredSubjectProperty
 {
     private RegisteredSubjectProperty? _parentPropertyCache;

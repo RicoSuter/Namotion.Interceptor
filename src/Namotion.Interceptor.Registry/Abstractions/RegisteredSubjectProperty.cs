@@ -14,7 +14,6 @@ public record RegisteredSubjectProperty
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
     private readonly List<SubjectPropertyChild> _children = [];
-    private readonly PropertyAttributeAttribute? _attributeMetadata;
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name, 
         Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
@@ -23,8 +22,6 @@ public record RegisteredSubjectProperty
         Type = type;
         ReflectionAttributes = reflectionAttributes;
         Reference = new PropertyReference(parent.Subject, name);
-
-        _attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -259,7 +256,7 @@ public record RegisteredSubjectProperty
 
             if (IsSubjectCollection && index < _children.Count)
             {
-                for (int i = index; i < _children.Count; i++)
+                for (var i = index; i < _children.Count; i++)
                 {
                     var child = _children[i];
                     _children[i] = child with { Index = i };
