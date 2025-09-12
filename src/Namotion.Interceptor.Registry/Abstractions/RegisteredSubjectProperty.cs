@@ -1,7 +1,5 @@
-﻿using System.Buffers;
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Concurrent;
-using System.Reactive.Subjects;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -61,7 +59,7 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets the type of the property.
     /// </summary>
-    public Type Type { get; private set; }
+    public Type Type { get; }
 
     /// <summary>
     /// Gets a list of all .NET reflection attributes.
