@@ -10,9 +10,9 @@ public interface IInterceptorSubject
     IInterceptorSubjectContext Context { get; }
 
     /// <summary>
-    /// Gets the additional data of this proxy.
+    /// Gets the additional data of this subject.
     /// </summary>
-    ConcurrentDictionary<string, object?> Data { get; }
+    ConcurrentDictionary<(string? property, string key), object?> Data { get; }
 
     /// <summary>
     /// Gets the reflected properties (should be cached).

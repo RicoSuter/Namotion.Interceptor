@@ -42,19 +42,19 @@ public class DynamicSubjectBenchmark
             .WithRegistry();
     }
     
-    [Benchmark]
+    //[Benchmark]
     public void CreateDynamicSubject()
     {        
         var subject = DynamicSubjectFactory.CreateDynamicSubject(_iterationContext, typeof(IMotor), typeof(ISensor));
     }
     
-    [Benchmark]
+    //[Benchmark]
     public void ReadDynamicProperty()
     {
         _ = _motor!.Speed;
     }
     
-    [Benchmark]
+    //[Benchmark]
     public void WriteDynamicProperty()
     {
         _motor!.Speed = 100;

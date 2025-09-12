@@ -1,0 +1,11 @@
+﻿[
+  MainCourse,
+  Id,
+  FirstName,
+  LastName,
+  FullName,
+  FullNameWithPrefix,
+  Father,
+  Mother,
+  Children
+]

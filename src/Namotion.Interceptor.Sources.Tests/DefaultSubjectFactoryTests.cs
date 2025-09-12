@@ -18,7 +18,7 @@ public class DefaultSubjectFactoryTests
 
         public IInterceptorSubjectContext Context { get; } = null!;
 
-        public ConcurrentDictionary<string, object?> Data { get; } = null!;
+        public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = null!;
 
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; } = null!;
 
@@ -39,14 +39,11 @@ public class DefaultSubjectFactoryTests
         context.AddService(serviceCollection.BuildServiceProvider());
 
         var person = new Person(context);
-        var subject = new RegisteredSubject(person, [
-            RegisteredSubjectProperty.Create(
-                new PropertyReference(person, nameof(Person.Mother)),
-                typeof(MyClass),
-                [])
-        ]);
-
-        var property = subject.PropertiesAndAttributes.First();
+        var property = new RegisteredSubjectProperty(
+            new RegisteredSubject(person),
+            nameof(Person.Mother),
+            typeof(MyClass),
+            []);
 
         // Act
         var subjectFactory = new DefaultSubjectFactory();
@@ -62,15 +59,13 @@ public class DefaultSubjectFactoryTests
     {
         // Arrange
         var context = new InterceptorSubjectContext();
-        var person = new Person(context);
-        var subject = new RegisteredSubject(person, [
-            RegisteredSubjectProperty.Create(
-                new PropertyReference(person, nameof(Person.Mother)),
-                typeof(IList<MyClass>),
-                [])
-        ]);
 
-        var property = subject.PropertiesAndAttributes.First();
+        var person = new Person(context);
+        var property = new RegisteredSubjectProperty(
+            new RegisteredSubject(person),
+            nameof(Person.Mother),
+            typeof(IList<MyClass>),
+            []);
 
         // Act
         var subjectFactory = new DefaultSubjectFactory();
