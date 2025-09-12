@@ -1,10 +1,9 @@
 ﻿using System.Text.Json;
 using Namotion.Interceptor.AspNetCore.Extensions;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Lifecycle;
-using Person = Namotion.Interceptor.Registry.Tests.Models.Person;
 
 namespace Namotion.Interceptor.Registry.Tests;
 
@@ -258,5 +257,22 @@ public class SubjectRegistryTests
             });
 
         await Verify(children).DisableDateCounting();
+    }
+    
+    [Fact]
+    public async Task WhenCreatingSubjectWithInheritance_ThenAllPropertiesAreAvailable()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var teacher = new Teacher(context);
+
+        // Act
+        var properties = teacher.TryGetRegisteredSubject()!.Properties;
+        
+        // Assert
+        await Verify(properties.Select(p => p.Name));
     }
 }

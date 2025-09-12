@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using System.Buffers;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Reactive.Subjects;
 using System.Runtime.CompilerServices;
@@ -14,13 +15,18 @@ public record RegisteredSubjectProperty
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
-    private HashSet<SubjectPropertyChild> _children = [];
+    private readonly List<SubjectPropertyChild> _children = [];
+    private readonly PropertyAttributeAttribute? _attributeMetadata;
 
-    protected RegisteredSubjectProperty(PropertyReference property, Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
+    public RegisteredSubjectProperty(RegisteredSubject parent, string name, 
+        Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
     {
-        Reference = property;
+        Parent = parent;
         Type = type;
         ReflectionAttributes = reflectionAttributes;
+        Reference = new PropertyReference(parent.Subject, name);
+
+        _attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -41,6 +47,11 @@ public record RegisteredSubjectProperty
     /// Gets the name of the property.
     /// </summary>
     public string Name => Reference.Name;
+
+    /// <summary>
+    /// Gets the parent subject which contains the property.
+    /// </summary>
+    public RegisteredSubject Parent { get; }
     
     /// <summary>
     /// Gets the property reference.
@@ -74,7 +85,7 @@ public record RegisteredSubjectProperty
     /// </summary>
     public bool IsSubjectReference => 
         IsSubjectReferenceCache.GetOrAdd(Type, t => 
-            t.IsAssignableTo(typeof(IInterceptorSubject)));
+            t == typeof(object) || t.IsAssignableTo(typeof(IInterceptorSubject)));
     
     /// <summary>
     /// Gets a value indicating whether this property references multiple subject with a collection.
@@ -105,11 +116,6 @@ public record RegisteredSubjectProperty
                         Namespace: "System.Collections.Generic"
                     } keyValueType && keyValueType.GenericTypeArguments[1].IsAssignableTo(typeof(IInterceptorSubject)));
         });
-
-    /// <summary>
-    /// Gets the parent subject which contains the property.
-    /// </summary>
-    public RegisteredSubject Parent { get; internal set; }
 
     /// <summary>
     /// Gets a value indicating whether the property has a getter.
@@ -210,7 +216,7 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
-    public IEnumerable<RegisteredSubjectAttribute> Attributes
+    public IEnumerable<RegisteredSubjectProperty> Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Parent.GetPropertyAttributes(Name);
@@ -240,20 +246,26 @@ public record RegisteredSubjectProperty
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void RemoveChild(SubjectPropertyChild parent)
     {
         lock (_children)
         {
-            if (IsSubjectCollection && _children.LastOrDefault() != parent)
+            var index = _children.IndexOf(parent);
+            if (index == -1)
             {
-                _children = _children
-                    .Where(c => c != parent)
-                    .Select((c, i) => new SubjectPropertyChild { Subject = c.Subject, Index = i })
-                    .ToHashSet();
+                return;
             }
-            else
+
+            _children.RemoveAt(index);
+
+            if (IsSubjectCollection && index < _children.Count)
             {
-                _children.Remove(parent);
+                for (int i = index; i < _children.Count; i++)
+                {
+                    var child = _children[i];
+                    _children[i] = child with { Index = i };
+                }
             }
         }
     }

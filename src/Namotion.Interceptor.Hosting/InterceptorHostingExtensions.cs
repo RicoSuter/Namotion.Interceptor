@@ -8,7 +8,7 @@ public static class InterceptorHostingExtensions
 
     public static void AttachHostedService(this IInterceptorSubject subject, IHostedService hostedService)
     {
-        subject.Data.AddOrUpdate(AttachedHostedServicesKey, 
+        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey), 
             _ =>
             {
                 HandleAttachHostedService(subject, hostedService);
@@ -27,7 +27,7 @@ public static class InterceptorHostingExtensions
 
     public static void DetachHostedService(this IInterceptorSubject subject, IHostedService hostedService)
     {
-        subject.Data.AddOrUpdate(AttachedHostedServicesKey, 
+        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey), 
             _ => new HashSet<IHostedService>(),
             (_, value) =>
             {
@@ -54,6 +54,6 @@ public static class InterceptorHostingExtensions
 
     public static HashSet<IHostedService> GetAttachedHostedServices(this IInterceptorSubject subject)
     {
-        return subject.Data.GetOrAdd(AttachedHostedServicesKey, _ => null) as HashSet<IHostedService> ?? [];
+        return subject.Data.GetOrAdd((null, AttachedHostedServicesKey), _ => null) as HashSet<IHostedService> ?? [];
     }
 }

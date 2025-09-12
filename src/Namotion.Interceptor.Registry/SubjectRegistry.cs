@@ -94,11 +94,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
 
     private RegisteredSubject RegisterSubject(IInterceptorSubject subject)
     {
-        var registeredSubject = new RegisteredSubject(subject, subject
-            .Properties
-            .Select(p => RegisteredSubjectProperty.Create(
-                new PropertyReference(subject, p.Key), p.Value.Type, p.Value.Attributes)));
-
+        var registeredSubject = new RegisteredSubject(subject);
         _knownSubjects[subject] = registeredSubject;
         return registeredSubject;
     }
