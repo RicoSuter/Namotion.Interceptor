@@ -87,7 +87,7 @@ public record RegisteredSubjectProperty
     /// </summary>
     public bool IsSubjectReference => 
         IsSubjectReferenceCache.GetOrAdd(Type, t => 
-            t.IsAssignableTo(typeof(IInterceptorSubject)));
+            t == typeof(object) || t.IsAssignableTo(typeof(IInterceptorSubject)));
     
     /// <summary>
     /// Gets a value indicating whether this property references multiple subject with a collection.
