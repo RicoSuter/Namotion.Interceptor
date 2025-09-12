@@ -1,6 +1,6 @@
-﻿using System.Collections;
+﻿using System.Buffers;
+using System.Collections;
 using System.Collections.Concurrent;
-using System.Reactive.Subjects;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -14,13 +14,17 @@ public record RegisteredSubjectProperty
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
-    private HashSet<SubjectPropertyChild> _children = [];
+    private readonly List<SubjectPropertyChild> _children = [];
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
-    public RegisteredSubjectProperty(PropertyReference property, IReadOnlyCollection<Attribute> reflectionAttributes)
+    public RegisteredSubjectProperty(RegisteredSubject parent, string name, 
+        Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
     {
-        Reference = property;
+        Parent = parent;
+        Type = type;
         ReflectionAttributes = reflectionAttributes;
+        Reference = new PropertyReference(parent.Subject, name);
+
         _attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
     }
 
@@ -33,6 +37,11 @@ public record RegisteredSubjectProperty
     /// Gets the name of the property.
     /// </summary>
     public string Name => Reference.Name;
+
+    /// <summary>
+    /// Gets the parent subject which contains the property.
+    /// </summary>
+    public RegisteredSubject Parent { get; }
     
     /// <summary>
     /// Gets the property reference.
@@ -42,7 +51,7 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets the type of the property.
     /// </summary>
-    public required Type Type { get; init; }
+    public Type Type { get; }
 
     /// <summary>
     /// Gets a list of all .NET reflection attributes.
@@ -78,7 +87,7 @@ public record RegisteredSubjectProperty
     /// </summary>
     public bool IsSubjectReference => 
         IsSubjectReferenceCache.GetOrAdd(Type, t => 
-            t.IsAssignableTo(typeof(IInterceptorSubject)));
+            t == typeof(object) || t.IsAssignableTo(typeof(IInterceptorSubject)));
     
     /// <summary>
     /// Gets a value indicating whether this property references multiple subject with a collection.
@@ -109,11 +118,6 @@ public record RegisteredSubjectProperty
                         Namespace: "System.Collections.Generic"
                     } keyValueType && keyValueType.GenericTypeArguments[1].IsAssignableTo(typeof(IInterceptorSubject)));
         });
-
-    /// <summary>
-    /// Gets the parent subject which contains the property.
-    /// </summary>
-    public RegisteredSubject Parent { get; internal set; }
 
     /// <summary>
     /// Gets a value indicating whether the property has a getter.
@@ -244,33 +248,44 @@ public record RegisteredSubjectProperty
             throw new InvalidOperationException($"The attributed property '{AttributeMetadata.PropertyName}' could not be found on the parent subject.");
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static implicit operator PropertyReference(RegisteredSubjectProperty property)
     {
-        return new PropertyReference(property.Subject, property.Name);
+        return property.Reference;
     }
 
-    internal void AddChild(SubjectPropertyChild parent)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void AddChild(SubjectPropertyChild child)
     {
         lock (_children)
         {
-            _children.Add(parent);
+            if (!_children.Contains(child))
+            {
+                _children.Add(child);
+            }
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void RemoveChild(SubjectPropertyChild parent)
     {
         lock (_children)
         {
-            if (IsSubjectCollection && _children.LastOrDefault() != parent)
+            var index = _children.IndexOf(parent);
+            if (index == -1)
             {
-                _children = _children
-                    .Where(c => c != parent)
-                    .Select((c, i) => new SubjectPropertyChild { Subject = c.Subject, Index = i })
-                    .ToHashSet();
+                return;
             }
-            else
+
+            _children.RemoveAt(index);
+
+            if (IsSubjectCollection && index < _children.Count)
             {
-                _children.Remove(parent);
+                for (int i = index; i < _children.Count; i++)
+                {
+                    var child = _children[i];
+                    _children[i] = child with { Index = i };
+                }
             }
         }
     }

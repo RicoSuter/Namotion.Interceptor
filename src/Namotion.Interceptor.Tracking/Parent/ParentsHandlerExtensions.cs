@@ -18,6 +18,6 @@ public static class ParentsHandlerExtensions
     
     public static HashSet<SubjectParent> GetParents(this IInterceptorSubject subject)
     {
-        return (HashSet<SubjectParent>)subject.Data.GetOrAdd(ParentsKey, (_) => new HashSet<SubjectParent>())!;
+        return (HashSet<SubjectParent>)subject.Data.GetOrAdd((null, ParentsKey), (_) => new HashSet<SubjectParent>())!;
     }
 }

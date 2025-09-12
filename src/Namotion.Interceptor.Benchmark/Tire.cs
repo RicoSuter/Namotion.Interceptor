@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Benchmark
         public Tire()
         {
             Pressure_Minimum = 0.0m;
-            Pressure_Minimum = 4.0m;
+            Pressure_Maximum = 4.0m;
         }
 
         public partial decimal Pressure { get; set; }
