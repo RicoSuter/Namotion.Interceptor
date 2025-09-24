@@ -8,9 +8,9 @@ public partial class TestRoot
 {
     public TestRoot()
     {
-        // ScalarNumbers = [1, 2, 3, 4, 5];
-        // ScalarStrings = ["Hello", "World", "OPC", "UA"];
-        // NestedNumbers = [[1, 2, 3], [4, 5, 6]];
+        ScalarNumbers = [1, 2, 3, 4, 5];
+        ScalarStrings = ["Hello", "World", "OPC", "UA"];
+        NestedNumbers = [[1, 2, 3], [4, 5, 6]];
         People = [];
     }
 
@@ -23,14 +23,14 @@ public partial class TestRoot
     [SourcePath("opc", "Number")]
     public partial decimal Number { get; set; }
 
-    // [SourcePath("opc", "ScalarNumbers")]
-    // public partial int[] ScalarNumbers { get; set; }
-    //
-    // [SourcePath("opc", "ScalarStrings")]
-    // public partial string[] ScalarStrings { get; set; }
-    //
-    // [SourcePath("opc", "NestedNumbers")]
-    // public partial int[][] NestedNumbers { get; set; }
+    [SourcePath("opc", "ScalarNumbers")]
+    public partial int[] ScalarNumbers { get; set; }
+    
+    [SourcePath("opc", "ScalarStrings")]
+    public partial string[] ScalarStrings { get; set; }
+    
+    [SourcePath("opc", "NestedNumbers")]
+    public partial int[][] NestedNumbers { get; set; }
 
     [SourcePath("opc", "People")]
     public partial TestPerson[] People { get; set; }

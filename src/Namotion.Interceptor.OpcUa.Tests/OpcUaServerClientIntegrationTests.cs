@@ -30,34 +30,70 @@ public class OpcUaServerClientIntegrationTests : IAsyncDisposable
     [Fact]
     public async Task ServerClient_ReadWriteOperations_ShouldWork()
     {
-        // Arrange - Start Server
-        await StartServerAsync();
-        await Task.Delay(2000); // Additional server stabilization time
+        try
+        {
+            // Arrange
+            await StartServerAsync();
+            await StartClientAsync();
 
-        // Arrange - Start Client
-        await StartClientAsync();
-        await Task.Delay(2000); // Additional client connection time
+            // Act & Assert
+            Assert.NotNull(_serverRoot);
+            Assert.NotNull(_clientRoot);
 
-        // Act & Assert - Test only scalar properties for now
-        await TestScalarPropertiesAsync();
+            // Test string property
+            _serverRoot.Name = "Updated Server Name";
+            await Task.Delay(1000);
+            Assert.Equal("Updated Server Name", _clientRoot.Name);
+            
+            // Test numeric property
+            _serverRoot.Number = 123.45m;
+            await Task.Delay(1000);
+            Assert.Equal(123.45m, _clientRoot.Number);
+        }
+        finally
+        {
+            await (_serverHost?.StopAsync() ?? Task.CompletedTask);
+            await (_clientHost?.StopAsync() ?? Task.CompletedTask);
+        }
     }
 
     [Fact]
     public async Task ServerClient_ArrayValueRank_ShouldBeCorrect()
     {
-        // This test validates that the GetValueRank implementation works
-        // by checking that arrays sync properly (which would fail if valueRank was incorrect)
+        try
+        {
+            // Arrange - Start Server and Client
+            await StartServerAsync();
+            await StartClientAsync();
 
-        // Arrange - Start Server and Client
-        await StartServerAsync();
-        await Task.Delay(2000);
-        await StartClientAsync();
-        await Task.Delay(2000);
-
-        // Act & Assert - Test basic array synchronization to validate valueRank
-        // await TestBasicArraySyncAsync();
-
-        _output.WriteLine("Array valueRank validation passed through functional testing!");
+            // Act & Assert - Test basic array synchronization to validate valueRank
+            Assert.NotNull(_serverRoot);
+            Assert.NotNull(_clientRoot);
+    
+            // Test just one simple integer array
+            _output.WriteLine($"Server initial ScalarNumbers: [{string.Join(", ", _serverRoot.ScalarNumbers)}]");
+            _output.WriteLine($"Client initial ScalarNumbers: [{string.Join(", ", _clientRoot.ScalarNumbers)}]");
+    
+            var newNumbers = new[] { 100, 200, 300 };
+            _serverRoot.ScalarNumbers = newNumbers;
+            _output.WriteLine($"Server updated ScalarNumbers: [{string.Join(", ", _serverRoot.ScalarNumbers)}]");
+    
+            // Wait longer for synchronization
+            await Task.Delay(8000);
+    
+            _output.WriteLine($"Client ScalarNumbers after update: [{string.Join(", ", _clientRoot.ScalarNumbers)}]");
+    
+            // If this fails, it indicates that either:
+            // 1. Server-client sync is not working, OR
+            // 2. The valueRank is incorrect and arrays can't sync properly
+            Assert.Equal(newNumbers, _clientRoot.ScalarNumbers);
+            _output.WriteLine($"✓ Basic array sync: [{string.Join(", ", _clientRoot.ScalarNumbers)}]");
+        }
+        finally
+        {
+            await (_serverHost?.StopAsync() ?? Task.CompletedTask);
+            await (_clientHost?.StopAsync() ?? Task.CompletedTask);
+        }
     }
 
     private async Task StartServerAsync()
@@ -81,9 +117,9 @@ public class OpcUaServerClientIntegrationTests : IAsyncDisposable
         {
             Connected = true,
             Name = "Foo bar",
-            // ScalarNumbers = [10, 20, 30, 40, 50],
-            // ScalarStrings = ["Server", "Test", "Array"],
-            // NestedNumbers = [[100, 200], [300, 400]],
+            ScalarNumbers = [10, 20, 30, 40, 50],
+            ScalarStrings = ["Server", "Test", "Array"],
+            NestedNumbers = [[100, 200], [300, 400]],
             People =
             [
                 new TestPerson(_serverContext) { FirstName = "John", LastName = "Server", Scores = [85.5, 92.3] },
@@ -135,61 +171,6 @@ public class OpcUaServerClientIntegrationTests : IAsyncDisposable
         throw new XunitException("Could not sync with server.");
     }
 
-    private async Task TestScalarPropertiesAsync()
-    {
-        Assert.NotNull(_serverRoot);
-        Assert.NotNull(_clientRoot);
-
-        // Test string property
-        _output.WriteLine($"Server initial Name: {_serverRoot.Name}");
-        _output.WriteLine($"Client initial Name: {_clientRoot.Name}");
-
-        _serverRoot.Name = "Updated Server Name";
-        _output.WriteLine($"Server updated Name: {_serverRoot.Name}");
-        await Task.Delay(5000); // Allow much more time for propagation
-
-        _output.WriteLine($"Client Name after update: {_clientRoot.Name}");
-        Assert.Equal("Updated Server Name", _clientRoot.Name);
-        _output.WriteLine($"✓ String property sync: {_clientRoot.Name}");
-
-        // Test numeric property
-        _output.WriteLine($"Server initial Number: {_serverRoot.Number}");
-        _output.WriteLine($"Client initial Number: {_clientRoot.Number}");
-
-        _serverRoot.Number = 123.45m;
-        _output.WriteLine($"Server updated Number: {_serverRoot.Number}");
-        await Task.Delay(5000); // Allow much more time for propagation
-
-        _output.WriteLine($"Client Number after update: {_clientRoot.Number}");
-        Assert.Equal(123.45m, _clientRoot.Number);
-        _output.WriteLine($"✓ Numeric property sync: {_clientRoot.Number}");
-    }
-
-    // private async Task TestBasicArraySyncAsync()
-    // {
-    //     Assert.NotNull(_serverRoot);
-    //     Assert.NotNull(_clientRoot);
-    //
-    //     // Test just one simple integer array
-    //     _output.WriteLine($"Server initial ScalarNumbers: [{string.Join(", ", _serverRoot.ScalarNumbers)}]");
-    //     _output.WriteLine($"Client initial ScalarNumbers: [{string.Join(", ", _clientRoot.ScalarNumbers)}]");
-    //
-    //     var newNumbers = new[] { 100, 200, 300 };
-    //     _serverRoot.ScalarNumbers = newNumbers;
-    //     _output.WriteLine($"Server updated ScalarNumbers: [{string.Join(", ", _serverRoot.ScalarNumbers)}]");
-    //
-    //     // Wait longer for synchronization
-    //     await Task.Delay(8000);
-    //
-    //     _output.WriteLine($"Client ScalarNumbers after update: [{string.Join(", ", _clientRoot.ScalarNumbers)}]");
-    //
-    //     // If this fails, it indicates that either:
-    //     // 1. Server-client sync is not working, OR
-    //     // 2. The valueRank is incorrect and arrays can't sync properly
-    //     Assert.Equal(newNumbers, _clientRoot.ScalarNumbers);
-    //     _output.WriteLine($"✓ Basic array sync: [{string.Join(", ", _clientRoot.ScalarNumbers)}]");
-    // }
-    
     public async ValueTask DisposeAsync()
     {
         try
