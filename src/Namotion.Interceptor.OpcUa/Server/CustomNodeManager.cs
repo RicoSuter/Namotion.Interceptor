@@ -148,14 +148,14 @@ internal class CustomNodeManager : CustomNodeManager2
 
         var propertyNode = CreateFolder(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
 
-        var childPrefix = parentPath + propertyName + PathDelimiter;
+        // Child objects below the array folder use path: parentPath + propertyName + "[index]"
         var childReferenceTypeId = GetChildReferenceTypeId(property);
         foreach (var child in children)
         {
             var childBrowseName = new QualifiedName($"{propertyName}[{child.Index}]", NamespaceIndex);
-            var path = $"{childPrefix}{propertyName}[{child.Index}]";
+            var childPath = $"{parentPath}{propertyName}[{child.Index}]";
 
-            CreateChildObject(childBrowseName, child.Subject, path, propertyNode.NodeId, childReferenceTypeId);
+            CreateChildObject(childBrowseName, child.Subject, childPath, propertyNode.NodeId, childReferenceTypeId);
         }
     }
 
@@ -180,43 +180,85 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private void CreateVariableNode(string propertyName, RegisteredSubjectProperty property, NodeId parentNodeId, string parentPath)
     {
-        var value = property.GetValue();
-        var type = property.Type;
+        var rawValue = property.GetValue();
+        var propertyType = property.Type;
 
+        // Determine target .NET type for OPC UA and normalize value
+        object? value = rawValue;
+        Type type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+
+        // Decimal -> double for OPC UA
         if (type == typeof(decimal))
         {
             type = typeof(double);
-            value = Convert.ToDouble(value);
+            if (value is decimal dv)
+            {
+                value = (double)dv;
+            }
         }
 
-        // Handle array types - ensure we have a proper array instance
-        if (type.IsArray)
+        // Normalize IEnumerable<T> to T[] and handle decimal element type
+        var enumerableInterface = type.GetInterfaces().FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+        if (!type.IsArray && enumerableInterface != null && type != typeof(string))
         {
+            var elementType = enumerableInterface.GetGenericArguments()[0];
+            var targetElementType = elementType == typeof(decimal) ? typeof(double) : elementType;
+
+            // Convert value to array of targetElementType
+            if (value is IEnumerable enumerable)
+            {
+                var list = new List<object?>();
+                foreach (var item in enumerable)
+                {
+                    if (item is null)
+                    {
+                        list.Add(null);
+                    }
+                    else if (elementType == typeof(decimal))
+                    {
+                        list.Add(Convert.ToDouble(item));
+                    }
+                    else
+                    {
+                        list.Add(item);
+                    }
+                }
+
+                var convertedArray = Array.CreateInstance(targetElementType, list.Count);
+                for (int i = 0; i < list.Count; i++)
+                {
+                    convertedArray.SetValue(list[i], i);
+                }
+                value = convertedArray;
+                type = targetElementType.MakeArrayType();
+            }
+            else
+            {
+                // No value yet -> create empty array
+                type = targetElementType.MakeArrayType();
+                value = Array.CreateInstance(targetElementType, 0);
+            }
+        }
+        else if (type.IsArray)
+        {
+            var elementType = type.GetElementType()!;
             if (value == null)
             {
-                // Create an empty array of the correct type
-                var elementType = type.GetElementType()!;
-                if (elementType == typeof(decimal))
-                {
-                    elementType = typeof(double);
-                }
-                // For jagged arrays (like int[][]), create empty outer array
-                else if (elementType.IsArray)
-                {
-                    // OPC UA doesn't handle jagged arrays well, treat as variant array
-                    elementType = typeof(object);
-                }
-                value = Array.CreateInstance(elementType, 0);
+                // Create empty array
+                var targetElementType = elementType == typeof(decimal) ? typeof(double) : elementType;
+                value = Array.CreateInstance(targetElementType, 0);
+                type = targetElementType.MakeArrayType();
             }
-            else if (type.GetElementType() == typeof(decimal))
+            else if (elementType == typeof(decimal))
             {
-                // Convert decimal array to double array for OPC UA
+                // decimal[] -> double[]
                 var decimalArray = (decimal[])value;
                 value = decimalArray.Select(d => (double)d).ToArray();
+                type = typeof(double[]);
             }
-            else if (type.GetElementType()?.IsArray == true)
+            else if (elementType.IsArray)
             {
-                // Handle jagged arrays - convert to object array for OPC UA compatibility
+                // Jagged arrays -> object[] for OPC UA compatibility
                 if (value is Array jaggedArray)
                 {
                     var objectArray = new object[jaggedArray.Length];
@@ -225,29 +267,40 @@ internal class CustomNodeManager : CustomNodeManager2
                         objectArray[i] = jaggedArray.GetValue(i)!;
                     }
                     value = objectArray;
+                    type = typeof(object[]);
                 }
             }
         }
 
         var nodeId = new NodeId(parentPath + propertyName, NamespaceIndex);
         var browseName = GetBrowseName(propertyName, property, null);
-        var dataType = Opc.Ua.TypeInfo.Construct(type);
+
+        var dataTypeInfo = Opc.Ua.TypeInfo.Construct(type);
         var referenceTypeId = GetReferenceTypeId(property);
 
         var valueRank = GetValueRank(type);
-        var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataType, valueRank, referenceTypeId);
+        var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataTypeInfo, valueRank, referenceTypeId);
 
-        // Set array dimensions for arrays
-        if (type.IsArray && valueRank > 0)
+        // Adjust access according to property setter
+        if (!property.HasSetter)
         {
-            if (value is Array array)
-            {
-                variable.ArrayDimensions = new ReadOnlyList<uint>(
-                    Enumerable.Range(0, array.Rank)
-                        .Select(i => (uint)array.GetLength(i))
-                        .ToArray()
-                );
-            }
+            variable.AccessLevel = AccessLevels.CurrentRead;
+            variable.UserAccessLevel = AccessLevels.CurrentRead;
+        }
+        else
+        {
+            variable.AccessLevel = AccessLevels.CurrentReadOrWrite;
+            variable.UserAccessLevel = AccessLevels.CurrentReadOrWrite;
+        }
+
+        // Set array dimensions
+        if (type.IsArray && value is Array array)
+        {
+            variable.ArrayDimensions = new ReadOnlyList<uint>(
+                Enumerable.Range(0, array.Rank)
+                    .Select(i => (uint)array.GetLength(i))
+                    .ToArray()
+            );
         }
 
         variable.Value = value;

@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -9,6 +8,7 @@ using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 using Opc.Ua.Client;
+using System.Collections.Concurrent;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
@@ -24,7 +24,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     private readonly ISourcePathProvider _sourcePathProvider;
     private readonly ILogger _logger;
     private readonly string? _rootName;
-    private readonly Dictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
+    private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
 
     private ISubjectMutationDispatcher? _dispatcher;
     private Session? _session;
@@ -58,22 +58,18 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            await using var stream = typeof(OpcUaSubjectServerExtensions).Assembly
-                .GetManifestResourceStream("Namotion.Interceptor.OpcUa.MyOpcUaServer.Config.xml");
-
-            var application = new ApplicationInstance
-            {
-                ApplicationName = "MyOpcUaServer",
-                ApplicationType = ApplicationType.Client,
-                ApplicationConfiguration = await ApplicationConfiguration.Load(
-                    stream, ApplicationType.Server, typeof(ApplicationConfiguration), false),
-            };
-
-            application.ApplicationConfiguration.ClientConfiguration = new ClientConfiguration { DefaultSessionTimeout = 60000 };
-
             try
             {
-                await application.CheckApplicationInstanceCertificates(true);
+                var application = new ApplicationInstance
+                {
+                    ApplicationName = "Namotion.Interceptor.Client",
+                    ApplicationType = ApplicationType.Client
+                };
+
+                application.ApplicationConfiguration = BuildClientConfiguration(application.ApplicationName);
+
+                // Ensure app certificate and validator are ready
+                await application.CheckApplicationInstanceCertificates(false);
 
                 var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
                 var endpointDescription = CoreClientUtils.SelectEndpoint(application.ApplicationConfiguration, _serverUrl, false);
@@ -83,9 +79,9 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     application.ApplicationConfiguration,
                     endpoint,
                     false,
-                    "MyOpcUaClient",
+                    application.ApplicationName,
                     60000,
-                    new UserIdentity(), // Use anonymous authentication; adjust if needed
+                    new UserIdentity(),
                     null, stoppingToken);
 
                 var cancellationTokenSource = new CancellationTokenSource();
@@ -96,6 +92,9 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 {
                     cancellationTokenSource.Cancel();
                 };
+
+                // Clear client-handle map on (re)connect
+                _monitoredItems.Clear();
 
                 // Browse the Root folder
                 var (_, _, references, _) = await session.BrowseAsync(
@@ -109,7 +108,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
                     linked.Token);
 
-                var rootNode = references.SelectMany(c => c).FirstOrDefault(r => r.BrowseName == _rootName);
+                var rootNode = references.SelectMany(c => c).FirstOrDefault(r => r.BrowseName.Name == _rootName);
                 if (rootNode is not null)
                 {
                     var monitoredItems = new List<MonitoredItem>();
@@ -134,6 +133,66 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         }
     }
 
+    private static ApplicationConfiguration BuildClientConfiguration(string applicationName)
+    {
+        var host = System.Net.Dns.GetHostName();
+        var applicationUri = $"urn:{host}:Namotion.Interceptor:{applicationName}";
+
+        var config = new ApplicationConfiguration
+        {
+            ApplicationName = applicationName,
+            ApplicationType = ApplicationType.Client,
+            ApplicationUri = applicationUri,
+            ProductUri = "urn:Namotion.Interceptor",
+            SecurityConfiguration = new SecurityConfiguration
+            {
+                ApplicationCertificate = new CertificateIdentifier
+                {
+                    StoreType = "Directory",
+                    StorePath = "pki/own",
+                    SubjectName = $"CN={applicationName}, O=Namotion"
+                },
+                TrustedPeerCertificates = new CertificateTrustList
+                {
+                    StoreType = "Directory",
+                    StorePath = "pki/trusted"
+                },
+                RejectedCertificateStore = new CertificateTrustList
+                {
+                    StoreType = "Directory",
+                    StorePath = "pki/rejected"
+                },
+                AutoAcceptUntrustedCertificates = true,
+                AddAppCertToTrustedStore = true,
+            },
+            TransportQuotas = new TransportQuotas
+            {
+                OperationTimeout = 15000,
+                MaxStringLength = 1_048_576,
+                MaxByteStringLength = 1_048_576,
+                MaxMessageSize = 4_194_304,
+                ChannelLifetime = 600000,
+                SecurityTokenLifetime = 3600000
+            },
+            ClientConfiguration = new ClientConfiguration
+            {
+                DefaultSessionTimeout = 60000
+            },
+            DisableHiResClock = true,
+            TraceConfiguration = new TraceConfiguration
+            {
+                OutputFilePath = "Logs/UaClient.log",
+                TraceMasks = 0
+            }
+        };
+
+        // Initialize certificate validator
+        config.CertificateValidator = new CertificateValidator();
+        config.CertificateValidator.Update(config);
+
+        return config;
+    }
+
     private async Task CreateBatchedSubscriptionsAsync(List<MonitoredItem> monitoredItems, Session session, CancellationToken cancellationToken)
     {
         for (var i = 0; i < monitoredItems.Count; i += MaxItemsPerSubscription)
@@ -155,16 +214,72 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                              .Skip(i)
                              .Take(MaxItemsPerSubscription))
                 {
+                    // Add the item to the subscription first so the SDK assigns a ClientHandle
                     subscription.AddItem(item);
+
+                    // Map the assigned ClientHandle to our property for fast callbacks
+                    if (item.Handle is RegisteredSubjectProperty p)
+                    {
+                        _monitoredItems[item.ClientHandle] = p;
+                    }
                 }
 
-                await subscription.ApplyChangesAsync(cancellationToken);
+                try
+                {
+                    await subscription.ApplyChangesAsync(cancellationToken);
+                }
+                catch (ServiceResultException sre)
+                {
+                    _logger.LogWarning(sre, "ApplyChanges failed for a batch; attempting to keep valid monitored items by removing failed ones.");
+                }
+
+                // Remove any items that failed to create, keep the rest
+                var removed = await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken);
+                if (removed > 0)
+                {
+                    _logger.LogWarning("Removed {Removed} monitored items that failed to create in subscription {Id}.", removed, subscription.Id);
+                }
             }
             else
             {
                 throw new InvalidOperationException("Failed to add subscription.");
             }
         }
+    }
+
+    private async Task<int> FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
+    {
+        var toRemove = new List<MonitoredItem>();
+        foreach (var mi in subscription.MonitoredItems.ToList())
+        {
+            var statusCode = mi.Status?.Error?.StatusCode ?? StatusCodes.Good;
+            var failed = !mi.Created || StatusCode.IsBad(statusCode);
+            if (failed)
+            {
+                toRemove.Add(mi);
+                _monitoredItems.TryRemove(mi.ClientHandle, out _);
+                _logger.LogError("Monitored item creation failed for {DisplayName} (Handle={Handle}): {Status}", mi.DisplayName, mi.ClientHandle, statusCode);
+            }
+        }
+
+        if (toRemove.Count > 0)
+        {
+            foreach (var mi in toRemove)
+            {
+                subscription.RemoveItem(mi);
+            }
+
+            try
+            {
+                await subscription.ApplyChangesAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "ApplyChanges after removing failed items still failed. Continuing with remaining items.");
+            }
+        }
+
+        return toRemove.Count;
     }
 
     private async Task ReadAndApplyInitialValuesAsync(List<MonitoredItem> monitoredItems, Session session, CancellationToken cancellationToken)
@@ -188,7 +303,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     var dataValue = readResponse.Results[idx];
                     var monitoredItem = monitoredItems[idx];
 
-                    if (_monitoredItems.TryGetValue(monitoredItem.ClientHandle, out var property))
+                    if (monitoredItem.Handle is RegisteredSubjectProperty property)
                     {
                         var value = ConvertToPropertyValue(dataValue, property);
                         property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
@@ -196,7 +311,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 }
             }
 
-            _logger.LogInformation("Successfully read initial values for monitored items");
+            _logger.LogInformation("Successfully read initial values for {Count} monitored items", monitoredItems.Count);
         }
         catch (Exception ex)
         {
@@ -206,20 +321,25 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
     private void FastDataChangeCallback(Subscription subscription, DataChangeNotification notification, IList<string> stringtable)
     {
-        var changes = notification
-            .MonitoredItems
-            .Select(i =>
+        var changes = new List<SubjectPropertyChange>();
+        foreach (var i in notification.MonitoredItems)
+        {
+            if (_monitoredItems.TryGetValue(i.ClientHandle, out var property))
             {
-                var property = _monitoredItems[i.ClientHandle];
-                return new SubjectPropertyChange
+                changes.Add(new SubjectPropertyChange
                 {
                     Property = property,
                     NewValue = ConvertToPropertyValue(i.Value, property),
                     OldValue = null,
                     Timestamp = i.Value.SourceTimestamp
-                };
-            })
-            .ToList();
+                });
+            }
+        }
+        
+        if (changes.Count == 0)
+        {
+            return;
+        }
         
         _dispatcher?.EnqueueSubjectUpdate(() =>
         {
@@ -237,14 +357,19 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         });
     }
 
-    private static object ConvertToPropertyValue(DataValue dataValue, RegisteredSubjectProperty property)
+    private static object? ConvertToPropertyValue(DataValue dataValue, RegisteredSubjectProperty property)
     {
         var value = dataValue.Value;
 
-        // Handle decimal conversion for scalar values
-        if (typeof(decimal).IsAssignableTo(property.Type))
+        var targetType = Nullable.GetUnderlyingType(property.Type) ?? property.Type;
+
+        // Handle decimal conversion for scalar values (including nullable)
+        if (targetType == typeof(decimal))
         {
-            value = Convert.ToDecimal(value);
+            if (value is not null)
+            {
+                value = Convert.ToDecimal(value);
+            }
         }
         // Handle decimal array conversion
         else if (property.Type.IsArray && property.Type.GetElementType() == typeof(decimal))
@@ -338,7 +463,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                         var pathIndex = 0;
                         foreach (var child in childSubjectList)
                         {
-                            var fullPath = prefix + PathDelimiter + propertyName + PathDelimiter + propertyName;
+                            var fullPath = prefix + PathDelimiter + propertyName;
                             await LoadSubjectAsync(child.Subject, child.Node, monitoredItems, fullPath + $"[{pathIndex}]", cancellationToken);
                             pathIndex++;
                         }
@@ -358,27 +483,28 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     
     private void MonitorValueNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription node, List<MonitoredItem> monitoredItems)
     {
-        if (property.HasSetter)
+        // Monitor reads for all properties; write capability is enforced on server side via AccessLevel
+        var nodeId = new NodeId(fullPath, node.NodeId.NamespaceIndex);
+        var monitoredItem = new MonitoredItem
         {
-            var nodeId = new NodeId(fullPath, node.NodeId.NamespaceIndex);
-            var monitoredItem = new MonitoredItem
-            {
-                StartNodeId = nodeId,
-                MonitoringMode = MonitoringMode.Reporting,
-                AttributeId = Opc.Ua.Attributes.Value,
-                DisplayName = fullPath,
-                SamplingInterval = 0, // TODO: Set to a reasonable value
-                // QueueSize = 10,
-                // DiscardOldest = true
-            };
+            StartNodeId = nodeId,
+            MonitoringMode = MonitoringMode.Reporting,
+            AttributeId = Opc.Ua.Attributes.Value,
+            DisplayName = fullPath,
+            SamplingInterval = 0,
+            
+            // Delay ClientHandle mapping until after the item is added to a subscription.
+            // Store the property on the item itself for later reference.
+            Handle = property
 
-            _monitoredItems[monitoredItem.ClientHandle] = property;
+            // QueueSize = 10, // TODO: Set to a reasonable value
+            // DiscardOldest = true
+        };
 
-            property.Reference.SetPropertyData(OpcVariableKey, nodeId);
-            monitoredItems.Add(monitoredItem);
+        property.Reference.SetPropertyData(OpcVariableKey, nodeId);
+        monitoredItems.Add(monitoredItem);
 
-            _logger.LogInformation("Prepared monitoring for '{Path}'", nodeId);
-        }
+        _logger.LogInformation("Prepared monitoring for '{Path}'", nodeId);
     }
 
     public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
@@ -412,11 +538,16 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var value) && 
                 value is NodeId nodeId)
             {
-
                 var val = change.NewValue;
                 if (val?.GetType() == typeof(decimal))
                 {
                     val = Convert.ToDouble(val);
+                }
+                else if (val is Array && val.GetType().GetElementType() == typeof(decimal))
+                {
+                    // Convert decimal[] to double[] for OPC UA write
+                    var dec = (decimal[])val;
+                    val = dec.Select(d => (double)d).ToArray();
                 }
                 
                 var valueToWrite = new DataValue
