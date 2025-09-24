@@ -37,7 +37,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         foreach (var handler in methodInterceptors)
         {
             var previousInvokeMethod = returnInvokeMethod;
-            returnInvokeMethod = (context) =>
+            returnInvokeMethod = context =>
             {
                 return handler.InvokeMethod(context,
                     innerContext => previousInvokeMethod(innerContext));

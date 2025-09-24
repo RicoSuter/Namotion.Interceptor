@@ -226,7 +226,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             var interceptorArray = interceptors.ToArray();
             if (interceptorArray.Length == 0)
             {
-                return (ref interception, innerReadValue) => innerReadValue(interception.Property.Subject);
+                return static (ref interception, innerReadValue) => innerReadValue(interception.Property.Subject);
             }
 
             var chain = new ReadInterceptorChain<IReadInterceptor, TProperty>(
@@ -245,7 +245,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             var interceptorArray = interceptors.ToArray();
             if (interceptorArray.Length == 0)
             {
-                return (ref interception, innerWriteValue) =>
+                return static (ref interception, innerWriteValue) =>
                 {
                     innerWriteValue(interception.Property.Subject, interception.NewValue);
                 };

@@ -14,5 +14,7 @@ public interface IPropertyValidator
     /// <param name="value">The new property.</param>
     /// <returns>The validation result.</returns>
     IEnumerable<ValidationResult> Validate(PropertyReference property, object? value);
+    
+    // TODO(perf): Use TProperty instead of object? (generics) in IPropertyValidator interface
 }
 

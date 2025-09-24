@@ -325,10 +325,7 @@ internal class CustomNodeManager : CustomNodeManager2
             ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasComponent
         };
 
-        if (parentNode != null)
-        {
-            parentNode.AddChild(folder);
-        }
+        parentNode?.AddChild(folder);
 
         AddPredefinedNode(SystemContext, folder);
         return folder;
@@ -359,10 +356,7 @@ internal class CustomNodeManager : CustomNodeManager2
             ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasProperty
         };
 
-        if (parentNode != null)
-        {
-            parentNode.AddChild(variable);
-        }
+        parentNode?.AddChild(variable);
 
         AddPredefinedNode(SystemContext, variable);
         return variable;
