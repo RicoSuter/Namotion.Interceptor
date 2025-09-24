@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Collections;
+using System.Reflection;
 using Namotion.Interceptor.OpcUa.Annotations;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -188,13 +189,67 @@ internal class CustomNodeManager : CustomNodeManager2
             value = Convert.ToDouble(value);
         }
 
+        // Handle array types - ensure we have a proper array instance
+        if (type.IsArray)
+        {
+            if (value == null)
+            {
+                // Create an empty array of the correct type
+                var elementType = type.GetElementType()!;
+                if (elementType == typeof(decimal))
+                {
+                    elementType = typeof(double);
+                }
+                // For jagged arrays (like int[][]), create empty outer array
+                else if (elementType.IsArray)
+                {
+                    // OPC UA doesn't handle jagged arrays well, treat as variant array
+                    elementType = typeof(object);
+                }
+                value = Array.CreateInstance(elementType, 0);
+            }
+            else if (type.GetElementType() == typeof(decimal))
+            {
+                // Convert decimal array to double array for OPC UA
+                var decimalArray = (decimal[])value;
+                value = decimalArray.Select(d => (double)d).ToArray();
+            }
+            else if (type.GetElementType()?.IsArray == true)
+            {
+                // Handle jagged arrays - convert to object array for OPC UA compatibility
+                if (value is Array jaggedArray)
+                {
+                    var objectArray = new object[jaggedArray.Length];
+                    for (int i = 0; i < jaggedArray.Length; i++)
+                    {
+                        objectArray[i] = jaggedArray.GetValue(i)!;
+                    }
+                    value = objectArray;
+                }
+            }
+        }
+
         var nodeId = new NodeId(parentPath + propertyName, NamespaceIndex);
         var browseName = GetBrowseName(propertyName, property, null);
         var dataType = Opc.Ua.TypeInfo.Construct(type);
         var referenceTypeId = GetReferenceTypeId(property);
 
-        // TODO: Add support for arrays (valueRank >= 0)
-        var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataType, -1, referenceTypeId);
+        var valueRank = GetValueRank(type);
+        var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataType, valueRank, referenceTypeId);
+
+        // Set array dimensions for arrays
+        if (type.IsArray && valueRank > 0)
+        {
+            if (value is Array array)
+            {
+                variable.ArrayDimensions = new ReadOnlyList<uint>(
+                    Enumerable.Range(0, array.Rank)
+                        .Select(i => (uint)array.GetLength(i))
+                        .ToArray()
+                );
+            }
+        }
+
         variable.Value = value;
         variable.StateChanged += (_, _, changes) =>
         {
@@ -230,6 +285,35 @@ internal class CustomNodeManager : CustomNodeManager2
 
             _subjects[registeredSubject] = node;
         }
+    }
+
+    private static int GetValueRank(Type type)
+    {
+        // Check for string first - it implements IEnumerable<char> but should be treated as scalar
+        if (type == typeof(string))
+        {
+            return -1; // Scalar value
+        }
+
+        if (type.IsArray)
+        {
+            // Return the number of dimensions for multi-dimensional arrays
+            return type.GetArrayRank();
+        }
+
+        // Check if it's a generic IEnumerable<T> (like List<T>, IList<T>, etc.)
+        if (type.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>)))
+        {
+            return 1; // One-dimensional array equivalent
+        }
+
+        // Check if it implements IEnumerable (non-generic collections)
+        if (typeof(IEnumerable).IsAssignableFrom(type))
+        {
+            return 1; // One-dimensional array equivalent
+        }
+
+        return -1; // Scalar value
     }
 
     private static NodeId? GetReferenceTypeId(RegisteredSubjectProperty property)
