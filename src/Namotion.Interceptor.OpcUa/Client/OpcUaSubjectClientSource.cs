@@ -151,17 +151,10 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             .Select(i =>
             {
                 var property = _monitoredItems[i.ClientHandle];
-                
-                var value = i.Value.Value;
-                if (typeof(decimal).IsAssignableTo(property.Type))
-                {
-                    value = Convert.ToDecimal(value);
-                }
-                
                 return new SubjectPropertyChange
                 {
                     Property = property,
-                    NewValue = value,
+                    NewValue = ConvertToPropertyValue(i.Value, property),
                     OldValue = null,
                     Timestamp = i.Value.SourceTimestamp
                 };
@@ -182,6 +175,27 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 }
             }
         });
+    }
+
+    private static object ConvertToPropertyValue(DataValue dataValue, RegisteredSubjectProperty property)
+    {
+        var value = dataValue.Value;
+
+        // Handle decimal conversion for scalar values
+        if (typeof(decimal).IsAssignableTo(property.Type))
+        {
+            value = Convert.ToDecimal(value);
+        }
+        // Handle decimal array conversion
+        else if (property.Type.IsArray && property.Type.GetElementType() == typeof(decimal))
+        {
+            if (value is double[] doubleArray)
+            {
+                value = doubleArray.Select(d => (decimal)d).ToArray();
+            }
+        }
+
+        return value;
     }
 
     private async Task LoadSubjectAsync(IInterceptorSubject subject, ReferenceDescription node, Subscription subscription, string prefix, CancellationToken cancellationToken)
@@ -276,6 +290,32 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     else
                     {
                         MonitorValueNode(prefix + PathDelimiter + propertyName, property, node, subscription);
+
+                        // Read current value from the node
+                        try
+                        {
+                            var nodeId = new NodeId(prefix + PathDelimiter + propertyName, node.NodeId.NamespaceIndex);
+                            var readValues = new ReadValueId[]
+                            {
+                                new()
+                                {
+                                    NodeId = nodeId,
+                                    AttributeId = Opc.Ua.Attributes.Value
+                                }
+                            };
+
+                            var readResponse = await _session.ReadAsync(null, 0, TimestampsToReturn.Both, readValues, cancellationToken);
+                            if (readResponse.Results.Count > 0 && StatusCode.IsGood(readResponse.Results[0].StatusCode))
+                            {
+                                var dataValue = readResponse.Results[0];
+                                var value = ConvertToPropertyValue(dataValue, property);
+                                property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine(e);
+                        }
                     }
                 }
             }
