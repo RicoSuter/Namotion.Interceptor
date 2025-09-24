@@ -14,6 +14,8 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 {
+    private const int MaxItemsPerSubscription = 1000;
+
     private const string PathDelimiter = ".";
     private const string OpcVariableKey = "OpcVariable";
 
@@ -110,25 +112,13 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 var rootNode = references.SelectMany(c => c).FirstOrDefault(r => r.BrowseName == _rootName);
                 if (rootNode is not null)
                 {
-                    var subscription = new Subscription(session.DefaultSubscription)
-                    {
-                        PublishingEnabled = true,
-                        PublishingInterval = 0, // TODO: Set to a reasonable value
-                        DisableMonitoredItemCache = true,
-                        MinLifetimeInterval = 60_000,
-                    };
+                    var monitoredItems = new List<MonitoredItem>();
+                    await LoadSubjectAsync(_subject, rootNode, monitoredItems, _rootName ?? string.Empty, linked.Token);
 
-                    if (session.AddSubscription(subscription))
+                    if (monitoredItems.Count > 0)
                     {
-                        await subscription.CreateAsync(linked.Token);
-                        subscription.FastDataChangeCallback += FastDataChangeCallback;
-
-                        await LoadSubjectAsync(_subject, rootNode, subscription, _rootName ?? string.Empty, linked.Token);
-                        await subscription.ApplyChangesAsync(linked.Token);
-                    }
-                    else
-                    {
-                        throw new InvalidOperationException("Failed to add subscription.");
+                        await ReadAndApplyInitialValuesAsync(monitoredItems, session, linked.Token);
+                        await CreateBatchedSubscriptionsAsync(monitoredItems, session, linked.Token);
                     }
                 }
 
@@ -141,6 +131,76 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 Console.WriteLine($"Exception: {ex.Message}");
                 await Task.Delay(1000, stoppingToken);
             }
+        }
+    }
+
+    private async Task CreateBatchedSubscriptionsAsync(List<MonitoredItem> monitoredItems, Session session, CancellationToken cancellationToken)
+    {
+        for (var i = 0; i < monitoredItems.Count; i += MaxItemsPerSubscription)
+        {
+            var subscription = new Subscription(session.DefaultSubscription)
+            {
+                PublishingEnabled = true,
+                PublishingInterval = 0, // TODO: Set to a reasonable value
+                DisableMonitoredItemCache = true,
+                MinLifetimeInterval = 60_000,
+            };
+
+            if (session.AddSubscription(subscription))
+            {
+                await subscription.CreateAsync(cancellationToken);
+                subscription.FastDataChangeCallback += FastDataChangeCallback;
+
+                foreach (var item in monitoredItems
+                             .Skip(i)
+                             .Take(MaxItemsPerSubscription))
+                {
+                    subscription.AddItem(item);
+                }
+
+                await subscription.ApplyChangesAsync(cancellationToken);
+            }
+            else
+            {
+                throw new InvalidOperationException("Failed to add subscription.");
+            }
+        }
+    }
+
+    private async Task ReadAndApplyInitialValuesAsync(List<MonitoredItem> monitoredItems, Session session, CancellationToken cancellationToken)
+    {
+        var readValues = monitoredItems
+            .Select(item => new ReadValueId
+            {
+                NodeId = item.StartNodeId,
+                AttributeId = Opc.Ua.Attributes.Value
+            })
+            .ToArray();
+
+        try
+        {
+            var readResponse = await session.ReadAsync(null, 0, TimestampsToReturn.Source, readValues, cancellationToken);
+
+            for (int idx = 0; idx < readResponse.Results.Count && idx < monitoredItems.Count; idx++)
+            {
+                if (StatusCode.IsGood(readResponse.Results[idx].StatusCode))
+                {
+                    var dataValue = readResponse.Results[idx];
+                    var monitoredItem = monitoredItems[idx];
+
+                    if (_monitoredItems.TryGetValue(monitoredItem.ClientHandle, out var property))
+                    {
+                        var value = ConvertToPropertyValue(dataValue, property);
+                        property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
+                    }
+                }
+            }
+
+            _logger.LogInformation("Successfully read initial values for monitored items");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read initial values for monitored items");
         }
     }
 
@@ -198,7 +258,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         return value;
     }
 
-    private async Task LoadSubjectAsync(IInterceptorSubject subject, ReferenceDescription node, Subscription subscription, string prefix, CancellationToken cancellationToken)
+    private async Task LoadSubjectAsync(IInterceptorSubject subject, ReferenceDescription node, List<MonitoredItem> monitoredItems, string prefix, CancellationToken cancellationToken)
     {
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is not null && _session is not null)
@@ -215,7 +275,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                         var children = property.Children;
                         if (children.Any())
                         {
-                            await LoadSubjectAsync(children.Single().Subject, node, subscription, collectionPath, cancellationToken);
+                            await LoadSubjectAsync(children.Single().Subject, node, monitoredItems, collectionPath, cancellationToken);
                         }
                         else
                         {
@@ -239,7 +299,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                             {
                                 var newSubject = DefaultSubjectFactory.Instance.CreateSubject(property, null);
                                 newSubject.Context.AddFallbackContext(subject.Context);
-                                await LoadSubjectAsync(newSubject, nodeProperty, subscription, collectionPath, cancellationToken);
+                                await LoadSubjectAsync(newSubject, nodeProperty, monitoredItems, collectionPath, cancellationToken);
                                 property.SetValueFromSource(this, null, newSubject);
                             }
                         }
@@ -279,7 +339,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                         foreach (var child in childSubjectList)
                         {
                             var fullPath = prefix + PathDelimiter + propertyName + PathDelimiter + propertyName;
-                            await LoadSubjectAsync(child.Subject, child.Node, subscription, fullPath + $"[{pathIndex}]", cancellationToken);
+                            await LoadSubjectAsync(child.Subject, child.Node, monitoredItems, fullPath + $"[{pathIndex}]", cancellationToken);
                             pathIndex++;
                         }
                     }
@@ -289,40 +349,14 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     }
                     else
                     {
-                        MonitorValueNode(prefix + PathDelimiter + propertyName, property, node, subscription);
-
-                        // Read current value from the node
-                        try
-                        {
-                            var nodeId = new NodeId(prefix + PathDelimiter + propertyName, node.NodeId.NamespaceIndex);
-                            var readValues = new ReadValueId[]
-                            {
-                                new()
-                                {
-                                    NodeId = nodeId,
-                                    AttributeId = Opc.Ua.Attributes.Value
-                                }
-                            };
-
-                            var readResponse = await _session.ReadAsync(null, 0, TimestampsToReturn.Both, readValues, cancellationToken);
-                            if (readResponse.Results.Count > 0 && StatusCode.IsGood(readResponse.Results[0].StatusCode))
-                            {
-                                var dataValue = readResponse.Results[0];
-                                var value = ConvertToPropertyValue(dataValue, property);
-                                property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
-                            }
-                        }
-                        catch (Exception e)
-                        {
-                            Console.WriteLine(e);
-                        }
+                        MonitorValueNode(prefix + PathDelimiter + propertyName, property, node, monitoredItems);
                     }
                 }
             }
         }
     }
     
-    private void MonitorValueNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription node, Subscription subscription)
+    private void MonitorValueNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription node, List<MonitoredItem> monitoredItems)
     {
         if (property.HasSetter)
         {
@@ -337,13 +371,13 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 // QueueSize = 10,
                 // DiscardOldest = true
             };
-            
-            _monitoredItems[monitoredItem.ClientHandle] = property;
-            
-            property.Reference.SetPropertyData(OpcVariableKey, nodeId);
-            subscription.AddItem(monitoredItem);
 
-            _logger.LogInformation("Subscribed to '{Path}'", nodeId);
+            _monitoredItems[monitoredItem.ClientHandle] = property;
+
+            property.Reference.SetPropertyData(OpcVariableKey, nodeId);
+            monitoredItems.Add(monitoredItem);
+
+            _logger.LogInformation("Prepared monitoring for '{Path}'", nodeId);
         }
     }
 
