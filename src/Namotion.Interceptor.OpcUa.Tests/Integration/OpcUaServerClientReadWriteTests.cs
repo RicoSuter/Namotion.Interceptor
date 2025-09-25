@@ -16,7 +16,7 @@ public class OpcUaServerClientReadWriteTests
     }
 
     [Fact]
-    public async Task WriteAndReadPrimitivesOnServer_ShouldUpdateClient()
+    public async Task WriteAndReadPrimitives_ShouldUpdateClient()
     {
         try
         {
@@ -28,15 +28,25 @@ public class OpcUaServerClientReadWriteTests
             Assert.NotNull(_server?.Root);
             Assert.NotNull(_client?.Root);
 
-            // Test string property
+            // Test string property on server
             _server.Root.Name = "Updated Server Name";
             await Task.Delay(1000);
             Assert.Equal("Updated Server Name", _client.Root.Name);
 
-            // Test numeric property
+            // Test string property on client
+            _client.Root.Name = "Updated Client Name";
+            await Task.Delay(1000);
+            Assert.Equal("Updated Client Name", _server.Root.Name);
+
+            // Test numeric property on server
             _server.Root.Number = 123.45m;
             await Task.Delay(1000);
             Assert.Equal(123.45m, _client.Root.Number);
+
+            // Test numeric property on client
+            _client.Root.Number = 54.321m;
+            await Task.Delay(1000);
+            Assert.Equal(54.321m, _server.Root.Number);
         }
         finally
         {
