@@ -25,6 +25,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     private readonly ILogger _logger;
     private readonly string? _rootName;
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
+    private readonly List<Subscription> _activeSubscriptions = new();
 
     private ISubjectMutationDispatcher? _dispatcher;
     private Session? _session;
@@ -95,6 +96,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
                 // Clear client-handle map on (re)connect
                 _monitoredItems.Clear();
+                _activeSubscriptions.Clear();
 
                 // Browse the Root folder
                 var (_, _, references, _) = await session.BrowseAsync(
@@ -108,7 +110,17 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
                     linked.Token);
 
-                var rootNode = references.SelectMany(c => c).FirstOrDefault(r => r.BrowseName.Name == _rootName);
+                var rootNode = 
+                    _rootName is not null ?
+                    references
+                        .SelectMany(c => c)
+                        .FirstOrDefault(r => r.BrowseName.Name == _rootName) :
+                    new ReferenceDescription
+                    {
+                        NodeId = new ExpandedNodeId(ObjectIds.ObjectsFolder),
+                        BrowseName = new QualifiedName("Objects", 0)
+                    };
+
                 if (rootNode is not null)
                 {
                     var monitoredItems = new List<MonitoredItem>();
@@ -122,13 +134,25 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 }
 
                 await Task.Delay(-1, linked.Token);
-                _session = null;
             }
             catch (Exception ex)
             {
-                _session = null;
-                Console.WriteLine($"Exception: {ex.Message}");
+                _logger.LogWarning(ex, "Failed to connect to OPC UA server.");
                 await Task.Delay(1000, stoppingToken);
+            }
+            finally
+            {
+                // Explicitly detach callbacks to avoid holding references
+                foreach (var subscription in _activeSubscriptions)
+                {
+                    try
+                    {
+                        subscription.FastDataChangeCallback -= FastDataChangeCallback;
+                    }
+                    catch { /* ignore cleanup exceptions */ }
+                }
+                _activeSubscriptions.Clear();
+                _session = null;
             }
         }
     }
@@ -209,6 +233,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             {
                 await subscription.CreateAsync(cancellationToken);
                 subscription.FastDataChangeCallback += FastDataChangeCallback;
+                _activeSubscriptions.Add(subscription);
 
                 foreach (var item in monitoredItems
                              .Skip(i)
@@ -393,7 +418,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 var propertyName = GetPropertyName(property);
                 if (propertyName is not null)
                 {
-                    var collectionPath = prefix + PathDelimiter + propertyName;
+                    var collectionPath = JoinPath(prefix, propertyName);
                     // TODO: Do the same in the server
                     if (property.IsSubjectReference)
                     {
@@ -463,8 +488,8 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                         var pathIndex = 0;
                         foreach (var child in childSubjectList)
                         {
-                            var fullPath = prefix + PathDelimiter + propertyName;
-                            await LoadSubjectAsync(child.Subject, child.Node, monitoredItems, fullPath + $"[{pathIndex}]", cancellationToken);
+                            var fullPath = JoinPath(prefix, propertyName) + $"[{pathIndex}]";
+                            await LoadSubjectAsync(child.Subject, child.Node, monitoredItems, fullPath, cancellationToken);
                             pathIndex++;
                         }
                     }
@@ -474,11 +499,16 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     }
                     else
                     {
-                        MonitorValueNode(prefix + PathDelimiter + propertyName, property, node, monitoredItems);
+                        MonitorValueNode(JoinPath(prefix, propertyName), property, node, monitoredItems);
                     }
                 }
             }
         }
+    }
+
+    private static string JoinPath(string prefix, string segment)
+    {
+        return string.IsNullOrEmpty(prefix) ? segment : prefix + PathDelimiter + segment;
     }
     
     private void MonitorValueNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription node, List<MonitoredItem> monitoredItems)
