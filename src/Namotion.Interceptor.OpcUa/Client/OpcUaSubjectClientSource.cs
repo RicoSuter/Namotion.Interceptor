@@ -437,12 +437,12 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                                 BrowseDirection.Forward,
                                 ReferenceTypeIds.HierarchicalReferences,
                                 true,
-                                (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method, 
+                                (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
                                 cancellationToken);
-                            
+
                             var nodeProperty = nodeProperties
                                 .SelectMany(p => p)
-                                .SingleOrDefault(p => 
+                                .SingleOrDefault(p =>
                                     (string)p.NodeId.Identifier == collectionPath && p.NodeId.NamespaceIndex == node.NodeId.NamespaceIndex);
 
                             if (nodeProperty is not null)
@@ -464,7 +464,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                             BrowseDirection.Forward,
                             ReferenceTypeIds.HierarchicalReferences,
                             true,
-                            (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method, 
+                            (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
                             cancellationToken);
 
                         var childSubjectList = nodeProperties
@@ -510,7 +510,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     {
         return string.IsNullOrEmpty(prefix) ? segment : prefix + PathDelimiter + segment;
     }
-    
+
     private void MonitorValueNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription node, List<MonitoredItem> monitoredItems)
     {
         // Monitor reads for all properties; write capability is enforced on server side via AccessLevel
@@ -522,7 +522,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             AttributeId = Opc.Ua.Attributes.Value,
             DisplayName = fullPath,
             SamplingInterval = 0,
-            
+
             // Delay ClientHandle mapping until after the item is added to a subscription.
             // Store the property on the item itself for later reference.
             Handle = property
@@ -562,7 +562,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     {
         if (_session is null)
             return;
-            
+
         foreach (var change in changes)
         {
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var value) && 
@@ -579,7 +579,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     var dec = (decimal[])val;
                     val = dec.Select(d => (double)d).ToArray();
                 }
-                
+
                 var valueToWrite = new DataValue
                 {
                     Value = val,
@@ -597,7 +597,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
                 var writeValues = new WriteValueCollection { writeValue };
                 var writeResponse = await _session.WriteAsync(null, writeValues, cancellationToken);
-                
+
                 if (writeResponse.Results.Any(StatusCode.IsBad))
                 {
                     _logger.LogError("Failed to write some variables.");
@@ -616,3 +616,4 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         }
     }
 }
+
