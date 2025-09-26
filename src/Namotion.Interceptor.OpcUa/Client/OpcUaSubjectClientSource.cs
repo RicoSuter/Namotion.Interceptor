@@ -312,10 +312,11 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is not null && _session is not null)
         {
+            var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, _session.NamespaceUris);
             var (_, _ , nodeProperties, _) = await _session.BrowseAsync(
                 null,
                 null,
-                [(NodeId)node.NodeId],
+                [nodeId],
                 0u,
                 BrowseDirection.Forward,
                 ReferenceTypeIds.HierarchicalReferences,
@@ -368,10 +369,11 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     }
                     else if (property.IsSubjectCollection)
                     {
-                        var (_, _ , x, _) = await _session.BrowseAsync(
+                        var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, _session.NamespaceUris);
+                        var (_, _ , childNodeProperties, _) = await _session.BrowseAsync(
                             null,
                             null,
-                            [(NodeId)nodeRef.NodeId],
+                            [childNodeId],
                             0u,
                             BrowseDirection.Forward,
                             ReferenceTypeIds.HierarchicalReferences,
@@ -379,7 +381,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                             (uint)NodeClass.Variable | (uint)NodeClass.Object,
                             cancellationToken);
                         
-                        var childSubjectList = x
+                        var childSubjectList = childNodeProperties
                             .SelectMany(p => p)
                             .Select(p => new
                             {
