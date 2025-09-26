@@ -18,7 +18,9 @@ public class OpcUaClientConfiguration
     
     public bool AddDynamicProperties { get; init; } = true;
 
-    public required OpcUaTypeResolver TypeResolver { get; set; }
+    public required OpcUaTypeResolver TypeResolver { get; init; }
+    
+    public required OpcUaDataValueConverter ValueConverter { get; init; }
 
     public virtual ApplicationInstance CreateApplicationInstance()
     {

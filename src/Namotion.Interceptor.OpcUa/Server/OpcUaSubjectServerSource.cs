@@ -17,29 +17,24 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
-    private readonly string? _rootName;
+    private readonly OpcUaServerConfiguration _configuration;
 
     private OpcUaSubjectServer? _server;
     private ISubjectMutationDispatcher? _dispatcher;
-
-    internal ISourcePathProvider SourcePathProvider { get; }
-
+    
     public OpcUaSubjectServerSource(
         IInterceptorSubject subject,
-        ISourcePathProvider sourcePathProvider,
-        ILogger<OpcUaSubjectServerSource> logger,
-        string? rootName)
+        OpcUaServerConfiguration configuration,
+        ILogger<OpcUaSubjectServerSource> logger)
     {
         _subject = subject;
         _logger = logger;
-        _rootName = rootName;
-
-        SourcePathProvider = sourcePathProvider;
+        _configuration = configuration;
     }
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return SourcePathProvider.IsPropertyIncluded(property);
+        return _configuration.SourcePathProvider.IsPropertyIncluded(property);
     }
 
     public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
@@ -95,7 +90,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
             try
             {
-                _server = new OpcUaSubjectServer(_subject, this, _rootName);
+                _server = new OpcUaSubjectServer(_subject, this, _configuration);
 
                 await application.CheckApplicationInstanceCertificates(true);
                 await application.Start(_server);

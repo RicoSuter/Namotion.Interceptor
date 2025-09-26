@@ -15,7 +15,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private readonly IInterceptorSubject _subject;
     private readonly OpcUaSubjectServerSource _source;
-    private readonly string? _rootName;
+    private readonly OpcUaServerConfiguration _configuration;
 
     private readonly Dictionary<RegisteredSubject, FolderState> _subjects = new();
 
@@ -23,21 +23,20 @@ internal class CustomNodeManager : CustomNodeManager2
         IInterceptorSubject subject,
         OpcUaSubjectServerSource source,
         IServerInternal server,
-        ApplicationConfiguration configuration,
-        string? rootName) :
-        base(server, configuration, new[]
-        {
+        ApplicationConfiguration applicationConfiguration,
+        OpcUaServerConfiguration configuration) :
+        base(server, applicationConfiguration, [
             "https://foobar/",
             "http://opcfoundation.org/UA/",
             "http://opcfoundation.org/UA/DI/",
             "http://opcfoundation.org/UA/PADIM",
             "http://opcfoundation.org/UA/Machinery/",
             "http://opcfoundation.org/UA/Machinery/ProcessValues"
-        })
+        ])
     {
         _subject = subject;
         _source = source;
-        _rootName = rootName;
+        _configuration = configuration;
     }
 
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)
@@ -69,12 +68,12 @@ internal class CustomNodeManager : CustomNodeManager2
         var registeredSubject = _subject.TryGetRegisteredSubject();
         if (registeredSubject is not null)
         {
-            if (_rootName is not null)
+            if (_configuration.RootName is not null)
             {
                 var node = CreateFolder(ObjectIds.ObjectsFolder, 
-                    new NodeId(_rootName, NamespaceIndex), _rootName, null, null);
+                    new NodeId(_configuration.RootName, NamespaceIndex), _configuration.RootName, null, null);
 
-                CreateObjectNode(node.NodeId, registeredSubject, _rootName + PathDelimiter);
+                CreateObjectNode(node.NodeId, registeredSubject, _configuration.RootName + PathDelimiter);
             }
             else
             {
@@ -119,14 +118,14 @@ internal class CustomNodeManager : CustomNodeManager2
         if (property.IsAttribute)
         {
             var attributedProperty = property.GetAttributedProperty();
-            var propertyName = _source.SourcePathProvider.TryGetPropertySegment(property);
+            var propertyName = _configuration.SourcePathProvider.TryGetPropertySegment(property);
             if (propertyName is null)
                 return null;
             
             return GetPropertyName(attributedProperty) + "__" + propertyName;
         }
         
-        return _source.SourcePathProvider.TryGetPropertySegment(property);
+        return _configuration.SourcePathProvider.TryGetPropertySegment(property);
     }
 
     private void CreateReferenceObjectNode(string propertyName, RegisteredSubjectProperty property, SubjectPropertyChild child, NodeId parentNodeId, string parentPath)
@@ -180,97 +179,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private void CreateVariableNode(string propertyName, RegisteredSubjectProperty property, NodeId parentNodeId, string parentPath)
     {
-        var rawValue = property.GetValue();
-        var propertyType = property.Type;
-
-        // Determine target .NET type for OPC UA and normalize value
-        object? value = rawValue;
-        Type type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
-
-        // Decimal -> double for OPC UA
-        if (type == typeof(decimal))
-        {
-            type = typeof(double);
-            if (value is decimal dv)
-            {
-                value = (double)dv;
-            }
-        }
-
-        // Normalize IEnumerable<T> to T[] and handle decimal element type
-        var enumerableInterface = type.GetInterfaces().FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
-        if (!type.IsArray && enumerableInterface != null && type != typeof(string))
-        {
-            var elementType = enumerableInterface.GetGenericArguments()[0];
-            var targetElementType = elementType == typeof(decimal) ? typeof(double) : elementType;
-
-            // Convert value to array of targetElementType
-            if (value is IEnumerable enumerable)
-            {
-                var list = new List<object?>();
-                foreach (var item in enumerable)
-                {
-                    if (item is null)
-                    {
-                        list.Add(null);
-                    }
-                    else if (elementType == typeof(decimal))
-                    {
-                        list.Add(Convert.ToDouble(item));
-                    }
-                    else
-                    {
-                        list.Add(item);
-                    }
-                }
-
-                var convertedArray = Array.CreateInstance(targetElementType, list.Count);
-                for (int i = 0; i < list.Count; i++)
-                {
-                    convertedArray.SetValue(list[i], i);
-                }
-                value = convertedArray;
-                type = targetElementType.MakeArrayType();
-            }
-            else
-            {
-                // No value yet -> create empty array
-                type = targetElementType.MakeArrayType();
-                value = Array.CreateInstance(targetElementType, 0);
-            }
-        }
-        else if (type.IsArray)
-        {
-            var elementType = type.GetElementType()!;
-            if (value == null)
-            {
-                // Create empty array
-                var targetElementType = elementType == typeof(decimal) ? typeof(double) : elementType;
-                value = Array.CreateInstance(targetElementType, 0);
-                type = targetElementType.MakeArrayType();
-            }
-            else if (elementType == typeof(decimal))
-            {
-                // decimal[] -> double[]
-                var decimalArray = (decimal[])value;
-                value = decimalArray.Select(d => (double)d).ToArray();
-                type = typeof(double[]);
-            }
-            else if (elementType.IsArray)
-            {
-                // Jagged arrays -> object[] for OPC UA compatibility
-                if (value is Array jaggedArray)
-                {
-                    var objectArray = new object[jaggedArray.Length];
-                    for (int i = 0; i < jaggedArray.Length; i++)
-                    {
-                        objectArray[i] = jaggedArray.GetValue(i)!;
-                    }
-                    value = objectArray;
-                    type = typeof(object[]);
-                }
-            }
-        }
+        var (value, type) = _configuration.ValueConverter.ConvertToNodeValue(property.GetValue(), property.Type);
 
         var nodeId = new NodeId(parentPath + propertyName, NamespaceIndex);
         var browseName = GetBrowseName(propertyName, property, null);
@@ -314,7 +223,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
         property.Reference.SetPropertyData(OpcUaSubjectServerSource.OpcVariableKey, variable);
     }
-
+    
     private void CreateChildObject(
         QualifiedName browseName,
         IInterceptorSubject subject,
