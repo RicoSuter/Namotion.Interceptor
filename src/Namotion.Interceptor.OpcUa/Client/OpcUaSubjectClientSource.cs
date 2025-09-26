@@ -352,7 +352,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     // TODO: Do the same in the server
                     if (property.IsSubjectReference)
                     {
-                        var collectionPath = JoinPath(prefix, propertyName);
+                        var collectionPath = CombinePath(prefix, propertyName);
 
                         var children = property.Children;
                         if (children.Count != 0)
@@ -369,6 +369,8 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     }
                     else if (property.IsSubjectCollection)
                     {
+                        // TODO: Reuse property.Children?
+
                         var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, _session.NamespaceUris);
                         var (_, _ , childNodeProperties, _) = await _session.BrowseAsync(
                             null,
@@ -397,7 +399,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                         var pathIndex = 0;
                         foreach (var child in childSubjectList)
                         {
-                            var fullPath = JoinPath(prefix, propertyName) + $"[{pathIndex}]";
+                            var fullPath = CombinePath(prefix, propertyName) + $"[{pathIndex}]";
                             await LoadSubjectAsync(child.Subject, child.Node, monitoredItems, fullPath, cancellationToken);
                             pathIndex++;
                         }
@@ -408,14 +410,14 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     }
                     else
                     {
-                        MonitorValueNode(JoinPath(prefix, propertyName), property, node, monitoredItems);
+                        MonitorValueNode(CombinePath(prefix, propertyName), property, node, monitoredItems);
                     }
                 }
             }
         }
     }
 
-    private static string JoinPath(string prefix, string segment)
+    private static string CombinePath(string prefix, string segment)
     {
         return string.IsNullOrEmpty(prefix) ? segment : prefix + PathDelimiter + segment;
     }
@@ -474,34 +476,21 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
         foreach (var change in changes)
         {
-            if (change.Property.TryGetPropertyData(OpcVariableKey, out var value) && 
-                value is NodeId nodeId)
+            if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)
             {
-                var val = change.NewValue;
-                if (val?.GetType() == typeof(decimal))
-                {
-                    val = Convert.ToDouble(val);
-                }
-                else if (val is Array && val.GetType().GetElementType() == typeof(decimal))
-                {
-                    // Convert decimal[] to double[] for OPC UA write
-                    var dec = (decimal[])val;
-                    val = dec.Select(d => (double)d).ToArray();
-                }
-
-                var valueToWrite = new DataValue
-                {
-                    Value = val,
-                    StatusCode = StatusCodes.Good,
-                    //ServerTimestamp = DateTime.UtcNow,
-                    SourceTimestamp = change.Timestamp.UtcDateTime
-                };
-
+                var registeredProperty = change.Property.GetRegisteredProperty();
+                var (value, _) = _configuration.ValueConverter.ConvertToNodeValue(change.NewValue, registeredProperty.Type);
                 var writeValue = new WriteValue
                 {
                     NodeId = nodeId,
                     AttributeId = Opc.Ua.Attributes.Value,
-                    Value = valueToWrite
+                    Value = new DataValue
+                    {
+                        Value = value,
+                        StatusCode = StatusCodes.Good,
+                        //ServerTimestamp = DateTime.UtcNow,
+                        SourceTimestamp = change.Timestamp.UtcDateTime
+                    }
                 };
 
                 var writeValues = new WriteValueCollection { writeValue };
