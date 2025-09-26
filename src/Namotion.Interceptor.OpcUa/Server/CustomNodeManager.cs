@@ -202,14 +202,13 @@ internal class CustomNodeManager : CustomNodeManager2
             variable.UserAccessLevel = AccessLevels.CurrentReadOrWrite;
         }
 
-        // Set array dimensions
-        if (type.IsArray && value is Array array)
+        // Set array dimensions (works for 1D and multi-D)
+        if (value is Array arrayValue)
         {
             variable.ArrayDimensions = new ReadOnlyList<uint>(
-                Enumerable.Range(0, array.Rank)
-                    .Select(i => (uint)array.GetLength(i))
-                    .ToArray()
-            );
+                Enumerable.Range(0, arrayValue.Rank)
+                    .Select(i => (uint)arrayValue.GetLength(i))
+                    .ToArray());
         }
 
         variable.Value = value;
@@ -223,7 +222,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
         property.Reference.SetPropertyData(OpcUaSubjectServerSource.OpcVariableKey, variable);
     }
-    
+
     private void CreateChildObject(
         QualifiedName browseName,
         IInterceptorSubject subject,
@@ -251,31 +250,27 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private static int GetValueRank(Type type)
     {
-        // Check for string first - it implements IEnumerable<char> but should be treated as scalar
         if (type == typeof(string))
         {
-            return -1; // Scalar value
+            return -1;
         }
 
         if (type.IsArray)
         {
-            // Return the number of dimensions for multi-dimensional arrays
             return type.GetArrayRank();
         }
 
-        // Check if it's a generic IEnumerable<T> (like List<T>, IList<T>, etc.)
         if (type.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>)))
         {
-            return 1; // One-dimensional array equivalent
+            return 1;
         }
 
-        // Check if it implements IEnumerable (non-generic collections)
         if (typeof(IEnumerable).IsAssignableFrom(type))
         {
-            return 1; // One-dimensional array equivalent
+            return 1;
         }
 
-        return -1; // Scalar value
+        return -1;
     }
 
     private static NodeId? GetReferenceTypeId(RegisteredSubjectProperty property)
