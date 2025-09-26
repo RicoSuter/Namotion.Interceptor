@@ -199,24 +199,24 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
     private async Task<int> FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
     {
-        var toRemove = new List<MonitoredItem>();
-        foreach (var mi in subscription.MonitoredItems.ToList())
+        var itemsToRemove = new List<MonitoredItem>();
+        foreach (var monitoredItem in subscription.MonitoredItems.ToList())
         {
-            var statusCode = mi.Status?.Error?.StatusCode ?? StatusCodes.Good;
-            var failed = !mi.Created || StatusCode.IsBad(statusCode);
-            if (failed)
+            var statusCode = monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good;
+            var hasFailed = !monitoredItem.Created || StatusCode.IsBad(statusCode);
+            if (hasFailed)
             {
-                toRemove.Add(mi);
-                _monitoredItems.TryRemove(mi.ClientHandle, out _);
-                _logger.LogError("Monitored item creation failed for {DisplayName} (Handle={Handle}): {Status}", mi.DisplayName, mi.ClientHandle, statusCode);
+                itemsToRemove.Add(monitoredItem);
+                _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
+                _logger.LogError("Monitored item creation failed for {DisplayName} (Handle={Handle}): {Status}", monitoredItem.DisplayName, monitoredItem.ClientHandle, statusCode);
             }
         }
 
-        if (toRemove.Count > 0)
+        if (itemsToRemove.Count > 0)
         {
-            foreach (var mi in toRemove)
+            foreach (var monitoredItem in itemsToRemove)
             {
-                subscription.RemoveItem(mi);
+                subscription.RemoveItem(monitoredItem);
             }
 
             try
@@ -229,7 +229,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             }
         }
 
-        return toRemove.Count;
+        return itemsToRemove.Count;
     }
 
     private async Task ReadAndApplyInitialValuesAsync(List<MonitoredItem> monitoredItems, Session session, CancellationToken cancellationToken)
@@ -246,13 +246,13 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         {
             var readResponse = await session.ReadAsync(null, 0, TimestampsToReturn.Source, readValues, cancellationToken);
 
-            for (int idx = 0; idx < readResponse.Results.Count && idx < monitoredItems.Count; idx++)
+            for (var idx = 0; idx < readResponse.Results.Count && idx < monitoredItems.Count; idx++)
             {
                 if (StatusCode.IsGood(readResponse.Results[idx].StatusCode))
                 {
                     var dataValue = readResponse.Results[idx];
-                    var monitoredItem = monitoredItems[idx];
 
+                    var monitoredItem = monitoredItems[idx];
                     if (monitoredItem.Handle is RegisteredSubjectProperty property)
                     {
                         var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property.Type);
@@ -261,11 +261,11 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 }
             }
 
-            _logger.LogInformation("Successfully read initial values for {Count} monitored items", monitoredItems.Count);
+            _logger.LogInformation("Successfully read initial values for {Count} monitored items.", monitoredItems.Count);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to read initial values for monitored items");
+            _logger.LogError(ex, "Failed to read initial values for monitored items.");
         }
     }
 
