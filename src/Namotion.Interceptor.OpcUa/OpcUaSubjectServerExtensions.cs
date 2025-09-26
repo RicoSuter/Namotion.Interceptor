@@ -42,12 +42,18 @@ public static class OpcUaSubjectServerExtensions
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix);
+                var configuration = new OpcUaClientConfiguration
+                {
+                    ServerUrl = serverUrl,
+                    SourcePathProvider = sourcePathProvider,
+                    RootName = rootName,
+                    TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>())
+                };
+                
                 return new OpcUaSubjectClientSource(
                     subject,
-                    serverUrl,
-                    sourcePathProvider,
-                    sp.GetRequiredService<ILogger<OpcUaSubjectClientSource>>(),
-                    rootName);
+                    configuration,
+                    sp.GetRequiredService<ILogger<OpcUaSubjectClientSource>>());
             })
             .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key))
             .AddSingleton<IHostedService>(sp =>
