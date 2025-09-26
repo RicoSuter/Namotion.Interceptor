@@ -36,11 +36,20 @@
       }
     }
   ],
+  "Person": {
+    "FirstName": "John",
+    "LastName": "Smith",
+    "FullName": "John Smith",
+    "Scores": [
+      1,
+      2
+    ]
+  },
   "People": [
     {
       "FirstName": "John",
-      "LastName": "Server",
-      "FullName": "John Server",
+      "LastName": "Doe",
+      "FullName": "John Doe",
       "Scores": [
         85.5,
         92.3
@@ -48,8 +57,8 @@
     },
     {
       "FirstName": "Jane",
-      "LastName": "Test",
-      "FullName": "Jane Test",
+      "LastName": "Doe",
+      "FullName": "Jane Doe",
       "Scores": [
         88.1,
         95.7

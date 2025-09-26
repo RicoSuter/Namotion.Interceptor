@@ -58,17 +58,18 @@ public class OpcUaDynamicServerClientTests
         _server = new OpcUaTestServer<TestRoot>(_output);
         await _server.StartAsync(
             context => new TestRoot(context),
-            (context, root) =>
+            (_, root) =>
             {
                 root.Connected = true;
                 root.Name = "Foo bar";
                 root.ScalarNumbers = [10, 20, 30, 40, 50];
                 root.ScalarStrings = ["Server", "Test", "Array"];
                 root.NestedNumbers = [[100, 200], [300, 400]];
+                root.Person = new TestPerson { FirstName = "John", LastName = "Smith", Scores = [1, 2] };
                 root.People =
                 [
-                    new TestPerson(context!) { FirstName = "John", LastName = "Server", Scores = [85.5, 92.3] },
-                    new TestPerson(context!) { FirstName = "Jane", LastName = "Test", Scores = [88.1, 95.7] }
+                    new TestPerson { FirstName = "John", LastName = "Doe", Scores = [85.5, 92.3] },
+                    new TestPerson { FirstName = "Jane", LastName = "Doe", Scores = [88.1, 95.7] }
                 ];
             });
     }

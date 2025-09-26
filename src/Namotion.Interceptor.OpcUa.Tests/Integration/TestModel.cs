@@ -32,6 +32,9 @@ public partial class TestRoot
     [SourcePath("opc", "NestedNumbers")]
     public partial int[][] NestedNumbers { get; set; }
 
+    [SourcePath("opc", "Person")]
+    public partial TestPerson Person { get; set; }
+
     [SourcePath("opc", "People")]
     public partial TestPerson[] People { get; set; }
 }

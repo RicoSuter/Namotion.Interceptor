@@ -85,7 +85,7 @@ public class OpcUaServerClientReadWriteTests
             // 1. Server-client sync is not working, OR
             // 2. The valueRank is incorrect and arrays can't sync properly
             Assert.Equal(newNumbers, _client.Root.ScalarNumbers);
-            _output.WriteLine($"✓ Basic array sync: [{string.Join(", ", _client.Root.ScalarNumbers)}]");
+            _output.WriteLine($"Basic array sync: [{string.Join(", ", _client.Root.ScalarNumbers)}]");
         }
         finally
         {
@@ -106,10 +106,11 @@ public class OpcUaServerClientReadWriteTests
                 root.ScalarNumbers = [10, 20, 30, 40, 50];
                 root.ScalarStrings = ["Server", "Test", "Array"];
                 root.NestedNumbers = [[100, 200], [300, 400]];
+                root.Person = new TestPerson { FirstName = "John", LastName = "Smith", Scores = [1, 2] };
                 root.People =
                 [
-                    new TestPerson(context!) { FirstName = "John", LastName = "Server", Scores = [85.5, 92.3] },
-                    new TestPerson(context!) { FirstName = "Jane", LastName = "Test", Scores = [88.1, 95.7] }
+                    new TestPerson { FirstName = "John", LastName = "Doe", Scores = [85.5, 92.3] },
+                    new TestPerson { FirstName = "Jane", LastName = "Doe", Scores = [88.1, 95.7] }
                 ];
             });
     }
