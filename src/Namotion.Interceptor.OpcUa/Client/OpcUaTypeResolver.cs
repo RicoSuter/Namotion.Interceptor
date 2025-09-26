@@ -16,12 +16,14 @@ public class OpcUaTypeResolver
     
     public async Task<Type> GetTypeForNodeAsync(Session session, ReferenceDescription reference, CancellationToken cancellationToken)
     {
+        var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
+
         if (reference.NodeClass != NodeClass.Variable)
         {
             var (_, _ , nodeProperties, _) = await session.BrowseAsync(
                 null,
                 null,
-                [(NodeId)reference.NodeId],
+                [nodeId],
                 0u,
                 BrowseDirection.Forward,
                 ReferenceTypeIds.HierarchicalReferences,
@@ -30,14 +32,15 @@ public class OpcUaTypeResolver
                 cancellationToken);
 
             if (nodeProperties.SelectMany(p => p).Any(n => n.NodeClass == NodeClass.Variable))
+            {
                 return typeof(DynamicSubject);
-            
+            }
+
             return typeof(DynamicSubject[]);
         }
 
         try
         {
-            var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
             if (nodeId is null)
             {
                 return typeof(object);
