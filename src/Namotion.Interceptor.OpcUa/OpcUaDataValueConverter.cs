@@ -1,118 +1,70 @@
-﻿using System.Collections;
-using Opc.Ua;
-
-namespace Namotion.Interceptor.OpcUa;
+﻿namespace Namotion.Interceptor.OpcUa;
 
 public class OpcUaDataValueConverter
 {
-    public object? ConvertToPropertyValue(object? nodeValue, Type propertyType)
+    /// <summary>
+    /// Converts an OPC UA node value to the CLR property type while handling.
+    /// </summary>
+    public virtual object? ConvertToPropertyValue(object? nodeValue, Type propertyType)
     {
+        if (nodeValue is null)
+        {
+            return null;
+        }
+
         var targetType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
         if (targetType == typeof(decimal))
         {
-            if (nodeValue is not null)
+            if (nodeValue is not decimal)
             {
                 nodeValue = Convert.ToDecimal(nodeValue);
             }
+            return nodeValue;
         }
-        else if (propertyType.IsArray && propertyType.GetElementType() == typeof(decimal))
+
+        if (targetType.IsArray)
         {
-            if (nodeValue is double[] doubleArray)
+            var targetElement = targetType.GetElementType()!;
+            if (targetType.GetArrayRank() == 1 && 
+                targetElement == typeof(decimal) && 
+                nodeValue is double[] doubleArray)
             {
-                nodeValue = doubleArray.Select(d => (decimal)d).ToArray();
+                return doubleArray.Select(d => (decimal)d).ToArray();
             }
         }
 
         return nodeValue;
+
     }
 
-    public (object?, Type) ConvertToNodeValue(object? propertyValue, Type propertyType)
+    /// <summary>
+    /// Converts a CLR property value to an OPC UA compatible value + data type.
+    /// </summary>
+    public virtual (object? value, Type nodeType) ConvertToNodeValue(object? propertyValue, Type propertyType)
     {
         var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
-
-        // Decimal -> double for OPC UA
         if (type == typeof(decimal))
         {
-            type = typeof(double);
-            if (propertyValue is decimal dv)
-            {
-                propertyValue = (double)dv;
-            }
+            return (propertyValue is decimal dv ? (double)dv : propertyValue, typeof(double));
         }
 
-        // Normalize IEnumerable<T> to T[] and handle decimal element type
-        var enumerableInterface = type.GetInterfaces().FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
-        if (!type.IsArray && enumerableInterface != null && type != typeof(string))
-        {
-            var elementType = enumerableInterface.GetGenericArguments()[0];
-            var targetElementType = elementType == typeof(decimal) ? typeof(double) : elementType;
-
-            // Convert value to array of targetElementType
-            if (propertyValue is IEnumerable enumerable)
-            {
-                var list = new List<object?>();
-                foreach (var item in enumerable)
-                {
-                    if (item is null)
-                    {
-                        list.Add(null);
-                    }
-                    else if (elementType == typeof(decimal))
-                    {
-                        list.Add(Convert.ToDouble(item));
-                    }
-                    else
-                    {
-                        list.Add(item);
-                    }
-                }
-
-                var convertedArray = Array.CreateInstance(targetElementType, list.Count);
-                for (int i = 0; i < list.Count; i++)
-                {
-                    convertedArray.SetValue(list[i], i);
-                }
-                propertyValue = convertedArray;
-                type = targetElementType.MakeArrayType();
-            }
-            else
-            {
-                // No value yet -> create empty array
-                type = targetElementType.MakeArrayType();
-                propertyValue = Array.CreateInstance(targetElementType, 0);
-            }
-        }
-        else if (type.IsArray)
+        if (type.IsArray)
         {
             var elementType = type.GetElementType()!;
-            if (propertyValue == null)
+        
+            if (propertyValue is Array array)
             {
-                // Create empty array
-                var targetElementType = elementType == typeof(decimal) ? typeof(double) : elementType;
-                propertyValue = Array.CreateInstance(targetElementType, 0);
-                type = targetElementType.MakeArrayType();
-            }
-            else if (elementType == typeof(decimal))
-            {
-                // decimal[] -> double[]
-                var decimalArray = (decimal[])propertyValue;
-                propertyValue = decimalArray.Select(d => (double)d).ToArray();
-                type = typeof(double[]);
-            }
-            else if (elementType.IsArray)
-            {
-                // Jagged arrays -> object[] for OPC UA compatibility
-                if (propertyValue is Array jaggedArray)
+                if (elementType == typeof(decimal))
                 {
-                    var objectArray = new object[jaggedArray.Length];
-                    for (int i = 0; i < jaggedArray.Length; i++)
-                    {
-                        objectArray[i] = jaggedArray.GetValue(i)!;
-                    }
-                    propertyValue = objectArray;
-                    type = typeof(object[]);
+                    var decimals = (decimal[])array;
+                    var doubles = decimals.Select(d => (double)d).ToArray();
+                    return (doubles, typeof(double[]));
                 }
+
+                return (propertyValue, type);
             }
+
+            return (Array.CreateInstance(elementType, 0), elementType.MakeArrayType());
         }
 
         return (propertyValue, type);

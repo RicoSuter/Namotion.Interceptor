@@ -105,7 +105,6 @@ public class OpcUaServerClientReadWriteTests
                 root.Name = "Foo bar";
                 root.ScalarNumbers = [10, 20, 30, 40, 50];
                 root.ScalarStrings = ["Server", "Test", "Array"];
-                root.NestedNumbers = [[100, 200], [300, 400]];
                 root.Person = new TestPerson { FirstName = "John", LastName = "Smith", Scores = [1, 2] };
                 root.People =
                 [

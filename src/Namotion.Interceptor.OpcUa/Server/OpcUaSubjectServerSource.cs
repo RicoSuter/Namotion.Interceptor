@@ -105,8 +105,8 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     internal void UpdateProperty(PropertyReference property, DateTimeOffset timestamp, object? value)
     {
-        // TODO: Implement actual correct conversion based on the property type
-        var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
+        var targetType = property.GetRegisteredProperty().Type;
+        var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, targetType);
         
         _dispatcher?.EnqueueSubjectUpdate(() =>
         {
