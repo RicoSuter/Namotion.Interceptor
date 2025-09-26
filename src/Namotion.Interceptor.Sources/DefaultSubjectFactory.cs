@@ -27,6 +27,18 @@ public class DefaultSubjectFactory : ISubjectFactory
     /// <inheritdoc />
     public IEnumerable<IInterceptorSubject?> CreateSubjectCollection(RegisteredSubjectProperty property, params IEnumerable<IInterceptorSubject?> children)
     {
+        if (property.Type.IsArray)
+        {
+            var childSubjectList = new List<IInterceptorSubject?>(children);
+            var array = Array.CreateInstance(property.Type.GetElementType()!, childSubjectList.Count);
+            for (var arrayIndex = 0; arrayIndex < childSubjectList.Count; arrayIndex++)
+            {
+                array.SetValue(childSubjectList[arrayIndex], arrayIndex);
+            }
+
+            return (IEnumerable<IInterceptorSubject?>)array;
+        }
+        
         var itemType = property.Type.GenericTypeArguments[0];
         var collectionType = typeof(List<>).MakeGenericType(itemType);
 

@@ -500,12 +500,8 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                                     property.Type.IsArray ? property.Type.GetElementType()! : property.Type.GenericTypeArguments[0])!
                             })
                             .ToList();
-                        
-                        var childSubjectArray = Array.CreateInstance(property.Type.GetElementType()!, childSubjectList.Count);
-                        for (var arrayIndex = 0; arrayIndex < childSubjectList.Count; arrayIndex++)
-                        {
-                            childSubjectArray.SetValue(childSubjectList[arrayIndex].Subject, arrayIndex);
-                        }
+
+                        var childSubjectArray = DefaultSubjectFactory.Instance.CreateSubjectCollection(property, childSubjectList.Select(p => p.Subject));
 
                         property.SetValue(childSubjectArray);
 

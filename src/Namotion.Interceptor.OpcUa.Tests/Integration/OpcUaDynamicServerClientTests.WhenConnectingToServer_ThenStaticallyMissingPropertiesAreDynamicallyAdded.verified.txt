@@ -35,5 +35,25 @@
         "ValueRank": 1
       }
     }
+  ],
+  "People": [
+    {
+      "FirstName": "John",
+      "LastName": "Server",
+      "FullName": "John Server",
+      "Scores": [
+        85.5,
+        92.3
+      ]
+    },
+    {
+      "FirstName": "Jane",
+      "LastName": "Test",
+      "FullName": "Jane Test",
+      "Scores": [
+        88.1,
+        95.7
+      ]
+    }
   ]
 }
