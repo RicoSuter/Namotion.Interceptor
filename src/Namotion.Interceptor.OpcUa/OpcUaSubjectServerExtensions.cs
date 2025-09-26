@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
+using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Sources;
@@ -40,16 +41,16 @@ public static class OpcUaSubjectServerExtensions
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
             .AddKeyedSingleton(key, (sp, _) =>
             {
-                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix);
                 var configuration = new OpcUaClientConfiguration
                 {
                     ServerUrl = serverUrl,
-                    SourcePathProvider = sourcePathProvider,
                     RootName = rootName,
-                    TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>())
+                    SourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
+                    TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
+                    ValueConverter = new OpcUaDataValueConverter()
                 };
                 
+                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 return new OpcUaSubjectClientSource(
                     subject,
                     configuration,
@@ -92,13 +93,18 @@ public static class OpcUaSubjectServerExtensions
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
             .AddKeyedSingleton(key, (sp, _) =>
             {
+                var configuration = new OpcUaServerConfiguration
+                {
+                    RootName = rootName,
+                    SourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
+                    ValueConverter = new OpcUaDataValueConverter()
+                };
+
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                var sourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix);
                 return new OpcUaSubjectServerSource(
                     subject,
-                    sourcePathProvider,
-                    sp.GetRequiredService<ILogger<OpcUaSubjectServerSource>>(),
-                    rootName);
+                    configuration,
+                    sp.GetRequiredService<ILogger<OpcUaSubjectServerSource>>());
             })
             .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServerSource>(key))
             .AddSingleton<IHostedService>(sp =>

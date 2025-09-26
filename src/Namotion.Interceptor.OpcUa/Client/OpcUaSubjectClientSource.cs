@@ -255,7 +255,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
                     if (monitoredItem.Handle is RegisteredSubjectProperty property)
                     {
-                        var value = OpcUaDataValueConversion.ConvertToPropertyValue(dataValue, property.Type);
+                        var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property.Type);
                         property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
                     }
                 }
@@ -279,7 +279,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 changes.Add(new SubjectPropertyChange
                 {
                     Property = property,
-                    NewValue = OpcUaDataValueConversion.ConvertToPropertyValue(i.Value, property.Type),
+                    NewValue = _configuration.ValueConverter.ConvertToPropertyValue(i.Value.Value, property.Type),
                     OldValue = null,
                     Timestamp = i.Value.SourceTimestamp
                 });
