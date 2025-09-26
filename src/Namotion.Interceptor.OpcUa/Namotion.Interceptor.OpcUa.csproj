@@ -18,7 +18,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="MyOpcUaServer.Config.xml" />
     <EmbeddedResource Include="NodeSets\*" />
   </ItemGroup>
 
