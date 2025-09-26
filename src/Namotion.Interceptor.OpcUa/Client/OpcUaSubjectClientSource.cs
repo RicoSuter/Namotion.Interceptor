@@ -9,6 +9,7 @@ using Opc.Ua;
 using Opc.Ua.Configuration;
 using Opc.Ua.Client;
 using System.Collections.Concurrent;
+using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.Sources.Paths.Attributes;
 
 namespace Namotion.Interceptor.OpcUa.Client;
@@ -16,6 +17,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 {
     private const int MaxItemsPerSubscription = 1000;
+    private bool AddDynamicProperties = true;
 
     private const string PathDelimiter = ".";
     private const string OpcVariableKey = "OpcVariable";
@@ -417,7 +419,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             var (_, _ , nodeProperties, _) = await _session.BrowseAsync(
                 null,
                 null,
-                [new NodeId(node.NodeId.Identifier, node.NodeId.NamespaceIndex)],
+                [(NodeId)node.NodeId],
                 0u,
                 BrowseDirection.Forward,
                 ReferenceTypeIds.HierarchicalReferences,
@@ -430,6 +432,9 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 var property = _sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
                 if (property is null)
                 {
+                    if (!AddDynamicProperties)
+                        continue;
+                    
                     // Infer CLR type from OPC UA variable metadata if possible
                     var inferredType = await GetClrTypeForNodeAsync(nodeRef, cancellationToken);
                     if (inferredType == typeof(object))
@@ -458,6 +463,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                         }
                         else
                         {
+                            // TODO: Isnt this the same as nodeRef?
                             var nodeProperty = nodeProperties
                                 .SelectMany(p => p)
                                 .SingleOrDefault(p =>
@@ -474,7 +480,18 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     }
                     else if (property.IsSubjectCollection)
                     {
-                        var childSubjectList = nodeProperties
+                        var (_, _ , x, _) = await _session.BrowseAsync(
+                            null,
+                            null,
+                            [(NodeId)nodeRef.NodeId],
+                            0u,
+                            BrowseDirection.Forward,
+                            ReferenceTypeIds.HierarchicalReferences,
+                            true,
+                            (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
+                            cancellationToken);
+                        
+                        var childSubjectList = x
                             .SelectMany(p => p)
                             .Select(p => new
                             {
@@ -628,7 +645,21 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     {
         if (_session is null || reference.NodeClass != NodeClass.Variable)
         {
-            return typeof(object);
+            var (_, _ , nodeProperties, _) = await _session!.BrowseAsync(
+                null,
+                null,
+                [(NodeId)reference.NodeId],
+                0u,
+                BrowseDirection.Forward,
+                ReferenceTypeIds.HierarchicalReferences,
+                true,
+                (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
+                cancellationToken);
+
+            if (nodeProperties.SelectMany(p => p).Any(n => n.NodeClass == NodeClass.Variable))
+                return typeof(DynamicSubject);
+            
+            return typeof(DynamicSubject[]);
         }
 
         try
@@ -649,14 +680,13 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             if (response.Results.Count >= 2 && StatusCode.IsGood(response.Results[0].StatusCode))
             {
                 var dataTypeId = response.Results[0].Value as NodeId;
-                var valueRank = response.Results[1].Value is int vr ? vr : -1; // -1 => scalar
-
                 if (dataTypeId != null)
                 {
                     var builtIn = TypeInfo.GetBuiltInType(dataTypeId);
                     var elementType = MapBuiltInType(builtIn);
 
                     // If ValueRank >= 0 we treat it as (at least) an array - simplification for multi-dim arrays.
+                    var valueRank = response.Results[1].Value is int vr ? vr : -1; // -1 => scalar
                     if (valueRank >= 0)
                     {
                         try
