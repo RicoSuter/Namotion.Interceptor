@@ -3,53 +3,43 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
-using Opc.Ua.Configuration;
 using Opc.Ua.Client;
 using System.Collections.Concurrent;
-using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.Sources.Paths.Attributes;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
 internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 {
-    private const int MaxItemsPerSubscription = 1000;
-    private bool AddDynamicProperties = true;
-
     private const string PathDelimiter = ".";
     private const string OpcVariableKey = "OpcVariable";
 
     private readonly IInterceptorSubject _subject;
-    private readonly string _serverUrl;
-    private readonly ISourcePathProvider _sourcePathProvider;
     private readonly ILogger _logger;
-    private readonly string? _rootName;
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
     private readonly List<Subscription> _activeSubscriptions = [];
 
     private ISubjectMutationDispatcher? _dispatcher;
     private Session? _session;
 
+    private readonly OpcUaClientConfiguration _configuration;
+
     public OpcUaSubjectClientSource(
         IInterceptorSubject subject,
-        string serverUrl,
-        ISourcePathProvider sourcePathProvider,
-        ILogger<OpcUaSubjectClientSource> logger,
-        string? rootName)
+        OpcUaClientConfiguration configuration,
+        ILogger<OpcUaSubjectClientSource> logger)
     {
         _subject = subject;
-        _serverUrl = serverUrl;
-        _sourcePathProvider = sourcePathProvider;
         _logger = logger;
-        _rootName = rootName;
+
+        _configuration = configuration;
     }
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return _sourcePathProvider.IsPropertyIncluded(property);
+        return _configuration.SourcePathProvider.IsPropertyIncluded(property);
     }
 
     public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
@@ -64,19 +54,11 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         {
             try
             {
-                var application = new ApplicationInstance
-                {
-                    ApplicationName = "Namotion.Interceptor.Client",
-                    ApplicationType = ApplicationType.Client
-                };
-
-                application.ApplicationConfiguration = BuildClientConfiguration(application.ApplicationName);
-
-                // Ensure app certificate and validator are ready
+                var application = _configuration.CreateApplicationInstance();
                 await application.CheckApplicationInstanceCertificates(false);
 
                 var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
-                var endpointDescription = CoreClientUtils.SelectEndpoint(application.ApplicationConfiguration, _serverUrl, false);
+                var endpointDescription = CoreClientUtils.SelectEndpoint(application.ApplicationConfiguration, _configuration.ServerUrl, false);
                 var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
 
                 using var session = await Session.Create(
@@ -114,10 +96,10 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     linked.Token);
 
                 var rootNode = 
-                    _rootName is not null ?
+                    _configuration.RootName is not null ?
                     references
                         .SelectMany(c => c)
-                        .FirstOrDefault(r => r.BrowseName.Name == _rootName) :
+                        .FirstOrDefault(r => r.BrowseName.Name == _configuration.RootName) :
                     new ReferenceDescription
                     {
                         NodeId = new ExpandedNodeId(ObjectIds.ObjectsFolder),
@@ -127,7 +109,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 if (rootNode is not null)
                 {
                     var monitoredItems = new List<MonitoredItem>();
-                    await LoadSubjectAsync(_subject, rootNode, monitoredItems, _rootName ?? string.Empty, linked.Token);
+                    await LoadSubjectAsync(_subject, rootNode, monitoredItems, _configuration.RootName ?? string.Empty, linked.Token);
 
                     if (monitoredItems.Count > 0)
                     {
@@ -160,69 +142,9 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         }
     }
 
-    private static ApplicationConfiguration BuildClientConfiguration(string applicationName)
-    {
-        var host = System.Net.Dns.GetHostName();
-        var applicationUri = $"urn:{host}:Namotion.Interceptor:{applicationName}";
-
-        var config = new ApplicationConfiguration
-        {
-            ApplicationName = applicationName,
-            ApplicationType = ApplicationType.Client,
-            ApplicationUri = applicationUri,
-            ProductUri = "urn:Namotion.Interceptor",
-            SecurityConfiguration = new SecurityConfiguration
-            {
-                ApplicationCertificate = new CertificateIdentifier
-                {
-                    StoreType = "Directory",
-                    StorePath = "pki/own",
-                    SubjectName = $"CN={applicationName}, O=Namotion"
-                },
-                TrustedPeerCertificates = new CertificateTrustList
-                {
-                    StoreType = "Directory",
-                    StorePath = "pki/trusted"
-                },
-                RejectedCertificateStore = new CertificateTrustList
-                {
-                    StoreType = "Directory",
-                    StorePath = "pki/rejected"
-                },
-                AutoAcceptUntrustedCertificates = true,
-                AddAppCertToTrustedStore = true,
-            },
-            TransportQuotas = new TransportQuotas
-            {
-                OperationTimeout = 15000,
-                MaxStringLength = 1_048_576,
-                MaxByteStringLength = 1_048_576,
-                MaxMessageSize = 4_194_304,
-                ChannelLifetime = 600000,
-                SecurityTokenLifetime = 3600000
-            },
-            ClientConfiguration = new ClientConfiguration
-            {
-                DefaultSessionTimeout = 60000
-            },
-            DisableHiResClock = true,
-            TraceConfiguration = new TraceConfiguration
-            {
-                OutputFilePath = "Logs/UaClient.log",
-                TraceMasks = 0
-            }
-        };
-
-        // Initialize certificate validator
-        config.CertificateValidator = new CertificateValidator();
-        config.CertificateValidator.Update(config);
-
-        return config;
-    }
-
     private async Task CreateBatchedSubscriptionsAsync(List<MonitoredItem> monitoredItems, Session session, CancellationToken cancellationToken)
     {
-        for (var i = 0; i < monitoredItems.Count; i += MaxItemsPerSubscription)
+        for (var i = 0; i < monitoredItems.Count; i += _configuration.MaxItemsPerSubscription)
         {
             var subscription = new Subscription(session.DefaultSubscription)
             {
@@ -239,8 +161,8 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 _activeSubscriptions.Add(subscription);
 
                 foreach (var item in monitoredItems
-                             .Skip(i)
-                             .Take(MaxItemsPerSubscription))
+                    .Skip(i)
+                    .Take(_configuration.MaxItemsPerSubscription))
                 {
                     // Add the item to the subscription first so the SDK assigns a ClientHandle
                     subscription.AddItem(item);
@@ -333,7 +255,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
                     if (monitoredItem.Handle is RegisteredSubjectProperty property)
                     {
-                        var value = ConvertToPropertyValue(dataValue, property);
+                        var value = OpcUaDataValueConversion.ConvertToPropertyValue(dataValue, property.Type);
                         property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
                     }
                 }
@@ -357,7 +279,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 changes.Add(new SubjectPropertyChange
                 {
                     Property = property,
-                    NewValue = ConvertToPropertyValue(i.Value, property),
+                    NewValue = OpcUaDataValueConversion.ConvertToPropertyValue(i.Value, property.Type),
                     OldValue = null,
                     Timestamp = i.Value.SourceTimestamp
                 });
@@ -385,32 +307,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         });
     }
 
-    private static object? ConvertToPropertyValue(DataValue dataValue, RegisteredSubjectProperty property)
-    {
-        var value = dataValue.Value;
-
-        var targetType = Nullable.GetUnderlyingType(property.Type) ?? property.Type;
-
-        // Handle decimal conversion for scalar values (including nullable)
-        if (targetType == typeof(decimal))
-        {
-            if (value is not null)
-            {
-                value = Convert.ToDecimal(value);
-            }
-        }
-        // Handle decimal array conversion
-        else if (property.Type.IsArray && property.Type.GetElementType() == typeof(decimal))
-        {
-            if (value is double[] doubleArray)
-            {
-                value = doubleArray.Select(d => (decimal)d).ToArray();
-            }
-        }
-
-        return value;
-    }
-
     private async Task LoadSubjectAsync(IInterceptorSubject subject, ReferenceDescription node, List<MonitoredItem> monitoredItems, string prefix, CancellationToken cancellationToken)
     {
         var registeredSubject = subject.TryGetRegisteredSubject();
@@ -429,14 +325,14 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             
             foreach (var nodeRef in nodeProperties.SelectMany(p => p))
             {
-                var property = _sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
+                var property = _configuration.SourcePathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
                 if (property is null)
                 {
-                    if (!AddDynamicProperties)
+                    if (!_configuration.AddDynamicProperties)
                         continue;
                     
                     // Infer CLR type from OPC UA variable metadata if possible
-                    var inferredType = await GetClrTypeForNodeAsync(nodeRef, cancellationToken);
+                    var inferredType = await _configuration.TypeResolver.GetTypeForNodeAsync(_session, nodeRef, cancellationToken);
                     if (inferredType == typeof(object))
                         continue;
 
@@ -452,30 +348,22 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 var propertyName = GetPropertyName(property);
                 if (propertyName is not null)
                 {
-                    var collectionPath = JoinPath(prefix, propertyName);
                     // TODO: Do the same in the server
                     if (property.IsSubjectReference)
                     {
+                        var collectionPath = JoinPath(prefix, propertyName);
+
                         var children = property.Children;
-                        if (children.Any())
+                        if (children.Count != 0)
                         {
                             await LoadSubjectAsync(children.Single().Subject, node, monitoredItems, collectionPath, cancellationToken);
                         }
                         else
                         {
-                            // TODO: Isnt this the same as nodeRef?
-                            var nodeProperty = nodeProperties
-                                .SelectMany(p => p)
-                                .SingleOrDefault(p =>
-                                    (string)p.NodeId.Identifier == collectionPath && p.NodeId.NamespaceIndex == node.NodeId.NamespaceIndex);
-
-                            if (nodeProperty is not null)
-                            {
-                                var newSubject = DefaultSubjectFactory.Instance.CreateSubject(property, null);
-                                newSubject.Context.AddFallbackContext(subject.Context);
-                                await LoadSubjectAsync(newSubject, nodeProperty, monitoredItems, collectionPath, cancellationToken);
-                                property.SetValueFromSource(this, null, newSubject);
-                            }
+                            var newSubject = DefaultSubjectFactory.Instance.CreateSubject(property, null);
+                            newSubject.Context.AddFallbackContext(subject.Context);
+                            await LoadSubjectAsync(newSubject, nodeRef, monitoredItems, collectionPath, cancellationToken);
+                            property.SetValueFromSource(this, null, newSubject);
                         }
                     }
                     else if (property.IsSubjectCollection)
@@ -488,7 +376,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                             BrowseDirection.Forward,
                             ReferenceTypeIds.HierarchicalReferences,
                             true,
-                            (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
+                            (uint)NodeClass.Variable | (uint)NodeClass.Object,
                             cancellationToken);
                         
                         var childSubjectList = x
@@ -501,9 +389,8 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                             })
                             .ToList();
 
-                        var childSubjectArray = DefaultSubjectFactory.Instance.CreateSubjectCollection(property, childSubjectList.Select(p => p.Subject));
-
-                        property.SetValue(childSubjectArray);
+                        var collection = DefaultSubjectFactory.Instance.CreateSubjectCollection(property, childSubjectList.Select(p => p.Subject));
+                        property.SetValue(collection);
 
                         var pathIndex = 0;
                         foreach (var child in childSubjectList)
@@ -567,7 +454,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         if (property.IsAttribute)
         {
             var attributedProperty = property.GetAttributedProperty();
-            var propertyName = _sourcePathProvider.TryGetPropertySegment(property);
+            var propertyName = _configuration.SourcePathProvider.TryGetPropertySegment(property);
             if (propertyName is null)
                 return null;
             
@@ -575,7 +462,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             return GetPropertyName(attributedProperty) + "__" + propertyName;
         }
         
-        return _sourcePathProvider.TryGetPropertySegment(property);
+        return _configuration.SourcePathProvider.TryGetPropertySegment(property);
     }
 
     public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
@@ -635,103 +522,4 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             }
         }
     }
-
-    // Infer CLR type for an OPC UA variable node using DataType and ValueRank attributes.
-    private async Task<Type> GetClrTypeForNodeAsync(ReferenceDescription reference, CancellationToken cancellationToken)
-    {
-        if (_session is null || reference.NodeClass != NodeClass.Variable)
-        {
-            var (_, _ , nodeProperties, _) = await _session!.BrowseAsync(
-                null,
-                null,
-                [(NodeId)reference.NodeId],
-                0u,
-                BrowseDirection.Forward,
-                ReferenceTypeIds.HierarchicalReferences,
-                true,
-                (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
-                cancellationToken);
-
-            if (nodeProperties.SelectMany(p => p).Any(n => n.NodeClass == NodeClass.Variable))
-                return typeof(DynamicSubject);
-            
-            return typeof(DynamicSubject[]);
-        }
-
-        try
-        {
-            var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, _session.NamespaceUris);
-            if (nodeId is null)
-            {
-                return typeof(object);
-            }
-
-            var nodesToRead = new ReadValueIdCollection
-            {
-                new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.DataType },
-                new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.ValueRank }
-            };
-
-            var response = await _session.ReadAsync(null, 0, TimestampsToReturn.Neither, nodesToRead, cancellationToken);
-            if (response.Results.Count >= 2 && StatusCode.IsGood(response.Results[0].StatusCode))
-            {
-                var dataTypeId = response.Results[0].Value as NodeId;
-                if (dataTypeId != null)
-                {
-                    var builtIn = TypeInfo.GetBuiltInType(dataTypeId);
-                    var elementType = MapBuiltInType(builtIn);
-
-                    // If ValueRank >= 0 we treat it as (at least) an array - simplification for multi-dim arrays.
-                    var valueRank = response.Results[1].Value is int vr ? vr : -1; // -1 => scalar
-                    if (valueRank >= 0)
-                    {
-                        try
-                        {
-                            return elementType.MakeArrayType();
-                        }
-                        catch
-                        {
-                            return typeof(object[]);
-                        }
-                    }
-
-                    return elementType;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to infer CLR type for node {BrowseName}", reference.BrowseName.Name);
-        }
-
-        return typeof(object);
-    }
-
-    private static Type MapBuiltInType(BuiltInType builtInType) => builtInType switch
-    {
-        BuiltInType.Boolean => typeof(bool),
-        BuiltInType.SByte => typeof(sbyte),
-        BuiltInType.Byte => typeof(byte),
-        BuiltInType.Int16 => typeof(short),
-        BuiltInType.UInt16 => typeof(ushort),
-        BuiltInType.Int32 => typeof(int),
-        BuiltInType.UInt32 => typeof(uint),
-        BuiltInType.Int64 => typeof(long),
-        BuiltInType.UInt64 => typeof(ulong),
-        BuiltInType.Float => typeof(float),
-        BuiltInType.Double => typeof(double),
-        BuiltInType.String => typeof(string),
-        BuiltInType.DateTime => typeof(DateTime),
-        BuiltInType.Guid => typeof(Guid),
-        BuiltInType.ByteString => typeof(byte[]),
-        BuiltInType.NodeId => typeof(NodeId),
-        BuiltInType.ExpandedNodeId => typeof(ExpandedNodeId),
-        BuiltInType.StatusCode => typeof(StatusCode),
-        BuiltInType.QualifiedName => typeof(QualifiedName),
-        BuiltInType.LocalizedText => typeof(LocalizedText),
-        BuiltInType.DiagnosticInfo => typeof(DiagnosticInfo),
-        BuiltInType.DataValue => typeof(DataValue),
-        BuiltInType.Enumeration => typeof(int), // map enum to underlying Int32
-        _ => typeof(object)
-    };
 }
