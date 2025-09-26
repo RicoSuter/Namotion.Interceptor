@@ -12,6 +12,15 @@ public class DynamicSubject : IInterceptorSubject
 
     private IInterceptorExecutor? _context;
 
+    public DynamicSubject()
+    {
+    }
+
+    public DynamicSubject(IInterceptorSubjectContext context) : this()
+    {
+        ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+    }
+    
     [JsonIgnore] IInterceptorSubjectContext IInterceptorSubject.Context => _context ??= new InterceptorExecutor(this);
 
     [JsonIgnore] ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();

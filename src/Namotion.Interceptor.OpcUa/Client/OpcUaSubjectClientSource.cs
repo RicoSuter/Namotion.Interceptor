@@ -9,6 +9,7 @@ using Opc.Ua;
 using Opc.Ua.Configuration;
 using Opc.Ua.Client;
 using System.Collections.Concurrent;
+using Namotion.Interceptor.Sources.Paths.Attributes;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
@@ -25,7 +26,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     private readonly ILogger _logger;
     private readonly string? _rootName;
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
-    private readonly List<Subscription> _activeSubscriptions = new();
+    private readonly List<Subscription> _activeSubscriptions = [];
 
     private ISubjectMutationDispatcher? _dispatcher;
     private Session? _session;
@@ -413,8 +414,36 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is not null && _session is not null)
         {
-            foreach (var property in registeredSubject.Properties)
+            var (_, _ , nodeProperties, _) = await _session.BrowseAsync(
+                null,
+                null,
+                [new NodeId(node.NodeId.Identifier, node.NodeId.NamespaceIndex)],
+                0u,
+                BrowseDirection.Forward,
+                ReferenceTypeIds.HierarchicalReferences,
+                true,
+                (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
+                cancellationToken);
+            
+            foreach (var nodeRef in nodeProperties.SelectMany(p => p))
             {
+                var property = _sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
+                if (property is null)
+                {
+                    // Infer CLR type from OPC UA variable metadata if possible
+                    var inferredType = await GetClrTypeForNodeAsync(nodeRef, cancellationToken);
+                    if (inferredType == typeof(object))
+                        continue;
+
+                    object? value = null;
+                    property = registeredSubject.AddProperty(
+                        nodeRef.BrowseName.Name,
+                        inferredType,
+                        _ => value,
+                        (_, o) => value = o,
+                        new SourcePathAttribute("opc", nodeRef.BrowseName.Name));
+                }
+                
                 var propertyName = GetPropertyName(property);
                 if (propertyName is not null)
                 {
@@ -429,17 +458,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                         }
                         else
                         {
-                            var (_, _ , nodeProperties, _) = await _session.BrowseAsync(
-                                null,
-                                null,
-                                [new NodeId(node.NodeId.Identifier, node.NodeId.NamespaceIndex)],
-                                0u,
-                                BrowseDirection.Forward,
-                                ReferenceTypeIds.HierarchicalReferences,
-                                true,
-                                (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
-                                cancellationToken);
-
                             var nodeProperty = nodeProperties
                                 .SelectMany(p => p)
                                 .SingleOrDefault(p =>
@@ -456,17 +474,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     }
                     else if (property.IsSubjectCollection)
                     {
-                        var (_, _ , nodeProperties, _) = await _session.BrowseAsync(
-                            null,
-                            null,
-                            [new NodeId(collectionPath, node.NodeId.NamespaceIndex)],
-                            0u,
-                            BrowseDirection.Forward,
-                            ReferenceTypeIds.HierarchicalReferences,
-                            true,
-                            (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
-                            cancellationToken);
-
                         var childSubjectList = nodeProperties
                             .SelectMany(p => p)
                             .Select(p => new
@@ -615,5 +622,90 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             }
         }
     }
-}
 
+    // Infer CLR type for an OPC UA variable node using DataType and ValueRank attributes.
+    private async Task<Type> GetClrTypeForNodeAsync(ReferenceDescription reference, CancellationToken cancellationToken)
+    {
+        if (_session is null || reference.NodeClass != NodeClass.Variable)
+        {
+            return typeof(object);
+        }
+
+        try
+        {
+            var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, _session.NamespaceUris);
+            if (nodeId is null)
+            {
+                return typeof(object);
+            }
+
+            var nodesToRead = new ReadValueIdCollection
+            {
+                new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.DataType },
+                new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.ValueRank }
+            };
+
+            var response = await _session.ReadAsync(null, 0, TimestampsToReturn.Neither, nodesToRead, cancellationToken);
+            if (response.Results.Count >= 2 && StatusCode.IsGood(response.Results[0].StatusCode))
+            {
+                var dataTypeId = response.Results[0].Value as NodeId;
+                var valueRank = response.Results[1].Value is int vr ? vr : -1; // -1 => scalar
+
+                if (dataTypeId != null)
+                {
+                    var builtIn = TypeInfo.GetBuiltInType(dataTypeId);
+                    var elementType = MapBuiltInType(builtIn);
+
+                    // If ValueRank >= 0 we treat it as (at least) an array - simplification for multi-dim arrays.
+                    if (valueRank >= 0)
+                    {
+                        try
+                        {
+                            return elementType.MakeArrayType();
+                        }
+                        catch
+                        {
+                            return typeof(object[]);
+                        }
+                    }
+
+                    return elementType;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to infer CLR type for node {BrowseName}", reference.BrowseName.Name);
+        }
+
+        return typeof(object);
+    }
+
+    private static Type MapBuiltInType(BuiltInType builtInType) => builtInType switch
+    {
+        BuiltInType.Boolean => typeof(bool),
+        BuiltInType.SByte => typeof(sbyte),
+        BuiltInType.Byte => typeof(byte),
+        BuiltInType.Int16 => typeof(short),
+        BuiltInType.UInt16 => typeof(ushort),
+        BuiltInType.Int32 => typeof(int),
+        BuiltInType.UInt32 => typeof(uint),
+        BuiltInType.Int64 => typeof(long),
+        BuiltInType.UInt64 => typeof(ulong),
+        BuiltInType.Float => typeof(float),
+        BuiltInType.Double => typeof(double),
+        BuiltInType.String => typeof(string),
+        BuiltInType.DateTime => typeof(DateTime),
+        BuiltInType.Guid => typeof(Guid),
+        BuiltInType.ByteString => typeof(byte[]),
+        BuiltInType.NodeId => typeof(NodeId),
+        BuiltInType.ExpandedNodeId => typeof(ExpandedNodeId),
+        BuiltInType.StatusCode => typeof(StatusCode),
+        BuiltInType.QualifiedName => typeof(QualifiedName),
+        BuiltInType.LocalizedText => typeof(LocalizedText),
+        BuiltInType.DiagnosticInfo => typeof(DiagnosticInfo),
+        BuiltInType.DataValue => typeof(DataValue),
+        BuiltInType.Enumeration => typeof(int), // map enum to underlying Int32
+        _ => typeof(object)
+    };
+}

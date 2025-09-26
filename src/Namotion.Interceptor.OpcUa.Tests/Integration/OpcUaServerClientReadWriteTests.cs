@@ -97,16 +97,9 @@ public class OpcUaServerClientReadWriteTests
     private async Task StartServerAsync()
     {
         _server = new OpcUaTestServer<TestRoot>(_output);
-
-        IInterceptorSubjectContext? serverContext = null;
-
         await _server.StartAsync(
-            context =>
-            {
-                serverContext = context;
-                return new TestRoot(context);
-            },
-            root =>
+            context => new TestRoot(context),
+            (context, root) =>
             {
                 root.Connected = true;
                 root.Name = "Foo bar";
@@ -115,8 +108,8 @@ public class OpcUaServerClientReadWriteTests
                 root.NestedNumbers = [[100, 200], [300, 400]];
                 root.People =
                 [
-                    new TestPerson(serverContext!) { FirstName = "John", LastName = "Server", Scores = [85.5, 92.3] },
-                    new TestPerson(serverContext!) { FirstName = "Jane", LastName = "Test", Scores = [88.1, 95.7] }
+                    new TestPerson(context!) { FirstName = "John", LastName = "Server", Scores = [85.5, 92.3] },
+                    new TestPerson(context!) { FirstName = "Jane", LastName = "Test", Scores = [88.1, 95.7] }
                 ];
             });
     }

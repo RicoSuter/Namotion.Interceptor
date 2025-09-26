@@ -1,0 +1,39 @@
+﻿{
+  "Connected": true,
+  "Name": "Foo bar",
+  "Number": 0,
+  "ScalarNumbers": [
+    10,
+    20,
+    30,
+    40,
+    50
+  ],
+  "ScalarStrings": [
+    "Server",
+    "Test",
+    "Array"
+  ],
+  "NestedNumbers": [
+    {
+      "Value": [
+        100,
+        200
+      ],
+      "TypeInfo": {
+        "BuiltInType": 6,
+        "ValueRank": 1
+      }
+    },
+    {
+      "Value": [
+        300,
+        400
+      ],
+      "TypeInfo": {
+        "BuiltInType": 6,
+        "ValueRank": 1
+      }
+    }
+  ]
+}

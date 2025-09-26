@@ -23,7 +23,9 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         _output = output;
     }
 
-    public async Task StartAsync(Func<IInterceptorSubjectContext, TRoot> createRoot, Action<TRoot>? initializeDefaults = null)
+    public async Task StartAsync(
+        Func<IInterceptorSubjectContext, TRoot> createRoot, 
+        Action<IInterceptorSubjectContext, TRoot>? initializeDefaults = null)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddLogging(logging =>
@@ -42,7 +44,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
         Root = createRoot(_context);
 
-        initializeDefaults?.Invoke(Root);
+        initializeDefaults?.Invoke(_context, Root);
 
         builder.Services.AddSingleton(Root);
         builder.Services.AddOpcUaSubjectServer<TRoot>("opc", rootName: "Root");
