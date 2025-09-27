@@ -376,3 +376,4 @@ FodyWeavers.xsd
 *.png.bkp
 **/.DS_Store
 /.idea/*
+/src/.claude/
