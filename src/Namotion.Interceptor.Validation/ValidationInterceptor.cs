@@ -1,10 +1,11 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Validation;
 
 public class ValidationInterceptor : IWriteInterceptor
 {
-    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         // TODO(perf): Avoid linq to avoid ref copy
         var interception = context;

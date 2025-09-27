@@ -21,8 +21,11 @@ public readonly record struct SubjectPropertyMetadata
     public bool IsDerived { get; }
 
     public SubjectPropertyMetadata(
-        string name, Type type, IReadOnlyCollection<Attribute> attributes, 
-        Func<IInterceptorSubject, object?>? getValue, Action<IInterceptorSubject, object?>? setValue,
+        string name, 
+        Type type, 
+        IReadOnlyCollection<Attribute> attributes, 
+        Func<IInterceptorSubject, object?>? getValue, 
+        Action<IInterceptorSubject, object?>? setValue,
         bool isIntercepted,
         bool isDynamic)
     {

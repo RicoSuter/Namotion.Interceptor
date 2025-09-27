@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor;
 
@@ -136,34 +137,34 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         };
     }
 
-    public TProperty ExecuteInterceptedRead<TProperty>(ref ReadPropertyInterception interception, Func<IInterceptorSubject, TProperty> readValue)
+    public TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> readValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
         {
-            return noServicesSingleFallbackContext.ExecuteInterceptedRead(ref interception, readValue);
+            return noServicesSingleFallbackContext.ExecuteInterceptedRead(ref context, readValue);
         }
 
         EnsureInitialized();
         var func = GetReadInterceptorFunction<TProperty>();
-        return func(ref interception, readValue);
+        return func(ref context, readValue);
     }
 
-    public void ExecuteInterceptedWrite<TProperty>(ref WritePropertyInterception<TProperty> interception, Action<IInterceptorSubject, TProperty> writeValue)
+    public void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
         {
-            noServicesSingleFallbackContext.ExecuteInterceptedWrite(ref interception, writeValue);
+            noServicesSingleFallbackContext.ExecuteInterceptedWrite(ref context, writeValue);
             return;
         }
         
         EnsureInitialized();
         var action = GetWriteInterceptorFunction<TProperty>();
-        action(ref interception, writeValue);
+        action(ref context, writeValue);
     }
     
-    delegate TProperty ReadFunc<TProperty>(ref ReadPropertyInterception interception, Func<IInterceptorSubject, TProperty> func);
+    delegate TProperty ReadFunc<TProperty>(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> func);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadFunc<TProperty> GetReadInterceptorFunction<TProperty>()
@@ -179,7 +180,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return func;
     }
 
-    delegate void WriteAction<TProperty>(ref WritePropertyInterception<TProperty> interception, Action<IInterceptorSubject, TProperty> action);
+    delegate void WriteAction<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> action);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private WriteAction<TProperty> GetWriteInterceptorFunction<TProperty>()
@@ -253,7 +254,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
             var chain = new WriteInterceptorChain<IWriteInterceptor, TProperty>(
                 interceptorArray,
-                static (interceptor, ref interception, next) => interceptor.WriteProperty(ref interception, next),
+                static (interceptor, ref context, next) => interceptor.WriteProperty(ref context, next),
                 static (ref interception, innerWriteValue) =>
                 {
                     var writeAction = (Action<IInterceptorSubject, TProperty>)innerWriteValue;
@@ -267,8 +268,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private sealed class WriteInterceptorChain<TInterceptor, TProperty>
     {
-        public delegate TProperty ExecuteTerminalFunc(ref WritePropertyInterception<TProperty> interception, object obj);
-        public delegate void ExecuteInterceptorAction(TInterceptor interceptor, ref WritePropertyInterception<TProperty> interception, WriteInterceptionAction<TProperty> action);
+        public delegate TProperty ExecuteTerminalFunc(ref PropertyWriteContext<TProperty> context, object obj);
+        public delegate void ExecuteInterceptorAction(TInterceptor interceptor, ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> @delegate);
         
         private readonly TInterceptor[] _interceptors;
         private readonly ExecuteInterceptorAction _executeInterceptor;
@@ -292,17 +293,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Execute(ref WritePropertyInterception<TProperty> interception, object terminal)
+        public void Execute(ref PropertyWriteContext<TProperty> context, object terminal)
         {
-            ExecuteAtIndex(0, ref interception, terminal);
+            ExecuteAtIndex(0, ref context, terminal);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void ExecuteAtIndex(int index, ref WritePropertyInterception<TProperty> interception, object terminal)
+        private void ExecuteAtIndex(int index, ref PropertyWriteContext<TProperty> context, object terminal)
         {
             if (index >= _interceptors.Length)
             {
-                _executeTerminal(ref interception, terminal);
+                _executeTerminal(ref context, terminal);
                 return;
             }
 
@@ -310,7 +311,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             var continuation = _continuations[index];
             
             continuation.SetState(terminal);
-            _executeInterceptor(interceptor, ref interception, continuation.ContinuationAction);
+            _executeInterceptor(interceptor, ref context, continuation.ContinuationDelegate);
         }
 
         private sealed class WriteContinuationNode
@@ -319,14 +320,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             private readonly int _nextIndex;
             private object _currentTerminal = null!;
 
-            public readonly WriteInterceptionAction<TProperty> ContinuationAction;
+            public readonly WriteInterceptionDelegate<TProperty> ContinuationDelegate;
 
             public WriteContinuationNode(WriteInterceptorChain<TInterceptor, TProperty> chain, int nextIndex)
             {
                 _chain = chain;
                 _nextIndex = nextIndex;
 
-                ContinuationAction = ExecuteNext;
+                ContinuationDelegate = ExecuteNext;
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -336,17 +337,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            private void ExecuteNext(ref WritePropertyInterception<TProperty> interception)
+            private void ExecuteNext(ref PropertyWriteContext<TProperty> context)
             {
-                _chain.ExecuteAtIndex(_nextIndex, ref interception, _currentTerminal);
+                _chain.ExecuteAtIndex(_nextIndex, ref context, _currentTerminal);
             }
         }
     }
 
     private sealed class ReadInterceptorChain<TInterceptor, TProperty>
     {
-        public delegate TProperty ExecuteInterceptorFunc(TInterceptor interceptor, ref ReadPropertyInterception context, ReadInterceptionFunc<TProperty> a);
-        public delegate TProperty ReadInterceptionFunc(ref ReadPropertyInterception interception, object obj);
+        public delegate TProperty ExecuteInterceptorFunc(TInterceptor interceptor, ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> a);
+        public delegate TProperty ReadInterceptionFunc(ref PropertyReadContext context, object obj);
         
         private readonly TInterceptor[] _interceptors;
         private readonly ExecuteInterceptorFunc _executeInterceptor;
@@ -370,24 +371,24 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public TProperty Execute(ref ReadPropertyInterception interception, object terminal)
+        public TProperty Execute(ref PropertyReadContext context, object terminal)
         {
-            return ExecuteAtIndex(0, ref interception, terminal);
+            return ExecuteAtIndex(0, ref context, terminal);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private TProperty ExecuteAtIndex(int index, ref ReadPropertyInterception interception, object terminal)
+        private TProperty ExecuteAtIndex(int index, ref PropertyReadContext context, object terminal)
         {
             if (index >= _interceptors.Length)
             {
-                return _executeTerminal(ref interception, terminal);
+                return _executeTerminal(ref context, terminal);
             }
 
             var interceptor = _interceptors[index];
             var continuation = _continuations[index];
             
             continuation.SetState(terminal);
-            return _executeInterceptor(interceptor, ref interception, continuation.ContinuationFunc);
+            return _executeInterceptor(interceptor, ref context, continuation.ContinuationDelegate);
         }
 
         private sealed class ContinuationNode
@@ -396,14 +397,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             private readonly int _nextIndex;
             private object _currentTerminal = null!;
 
-            public readonly ReadInterceptionFunc<TProperty> ContinuationFunc;
+            public readonly ReadInterceptionDelegate<TProperty> ContinuationDelegate;
 
             public ContinuationNode(ReadInterceptorChain<TInterceptor, TProperty> chain, int nextIndex)
             {
                 _chain = chain;
                 _nextIndex = nextIndex;
 
-                ContinuationFunc = ExecuteNext;
+                ContinuationDelegate = ExecuteNext;
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -413,9 +414,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            private TProperty ExecuteNext(ref ReadPropertyInterception interception)
+            private TProperty ExecuteNext(ref PropertyReadContext context)
             {
-                return _chain.ExecuteAtIndex(_nextIndex, ref interception, _currentTerminal);
+                return _chain.ExecuteAtIndex(_nextIndex, ref context, _currentTerminal);
             }
         }
     }
