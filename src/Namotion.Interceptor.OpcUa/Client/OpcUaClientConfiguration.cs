@@ -21,6 +21,8 @@ public class OpcUaClientConfiguration
     public required OpcUaTypeResolver TypeResolver { get; init; }
     
     public required OpcUaDataValueConverter ValueConverter { get; init; }
+    
+    public required OpcUaSubjectFactory SubjectFactory { get; init; }
 
     public virtual ApplicationInstance CreateApplicationInstance()
     {
