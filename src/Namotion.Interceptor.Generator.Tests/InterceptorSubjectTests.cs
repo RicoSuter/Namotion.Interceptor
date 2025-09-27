@@ -23,12 +23,12 @@ public class InterceptorSubjectTests
 
     public class TestMethodInterceptor : IMethodInterceptor
     {
-        public List<MethodInvocationContext> Contexts { get; } = new();
+        public List<MethodInvocationContext> Contexts { get; } = [];
         
-        public object? InvokeMethod(MethodInvocationContext context, Func<MethodInvocationContext, object?> next)
+        public object? InvokeMethod(MethodInvocationContext context, InvokeMethodInterceptionDelegate next)
         {
             Contexts.Add(context);
-            return next(context);
+            return next(ref context);
         }
     }
     
