@@ -1,4 +1,4 @@
-﻿namespace Namotion.Interceptor;
+﻿namespace Namotion.Interceptor.Interceptors;
 
 public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecutor
 {
@@ -11,40 +11,39 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
     
     public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
-        var interception = new ReadPropertyInterception(new PropertyReference(_subject, propertyName));
-        return _subject.Context.ExecuteInterceptedRead(ref interception, readValue);
+        var context = new PropertyReadContext(new PropertyReference(_subject, propertyName));
+        return _subject.Context.ExecuteInterceptedRead(ref context, readValue);
     }
     
     public void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty>? readValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
         // TODO(perf): Reading current value (invoke getter) here might be a performance problem. 
 
-        var interception = new WritePropertyInterception<TProperty>(
+        var context = new PropertyWriteContext<TProperty>(
             new PropertyReference(_subject, propertyName), 
             readValue is not null ? readValue(_subject) : default!, 
             newValue); 
 
-        _subject.Context.ExecuteInterceptedWrite(ref interception, writeValue);
+        _subject.Context.ExecuteInterceptedWrite(ref context, writeValue);
     }
 
     public object? InvokeMethod(string methodName, object?[] parameters, Func<object?[], object?> invokeMethod)
     {
         var methodInterceptors = _subject.Context.GetServices<IMethodInterceptor>();
-        var interception = new MethodInvocationInterception(_subject, methodName, parameters);
 
-        var returnInvokeMethod = new Func<MethodInvocationInterception, object?>(context => invokeMethod(context.Parameters));
-    
+        var returnInvokeMethod = new InvokeMethodInterceptionDelegate((ref context) => invokeMethod(context.Parameters));
         foreach (var handler in methodInterceptors)
         {
             var previousInvokeMethod = returnInvokeMethod;
-            returnInvokeMethod = context =>
+            returnInvokeMethod = (ref innerContext) =>
             {
-                return handler.InvokeMethod(context,
-                    innerContext => previousInvokeMethod(innerContext));
+                return handler.InvokeMethod(innerContext,
+                    (ref innerInnerContext) => previousInvokeMethod(ref innerInnerContext));
             };
         }
 
-        return returnInvokeMethod(interception);
+        var context = new MethodInvocationContext(_subject, methodName, parameters); 
+        return returnInvokeMethod(ref context);
     }
 
     public override bool AddFallbackContext(IInterceptorSubjectContext context)

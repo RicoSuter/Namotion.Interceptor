@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using Castle.DynamicProxy;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Dynamic;
 

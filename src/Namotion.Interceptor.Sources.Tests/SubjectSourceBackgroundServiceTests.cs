@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Tests.Models;
@@ -103,10 +104,10 @@ public class SubjectSourceBackgroundServiceTests
         var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance);
         await service.StartAsync(cancellationTokenSource.Token);
         
-        var interception = new WritePropertyInterception<string?>(
+        var writeContext = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Bar");
 
-        propertyChangedObservable.WriteProperty(ref interception, (ref _) => { });
+        propertyChangedObservable.WriteProperty(ref writeContext, (ref _) => { });
         
         await Task.Delay(1000, cancellationTokenSource.Token);
         await service.StopAsync(cancellationTokenSource.Token);
