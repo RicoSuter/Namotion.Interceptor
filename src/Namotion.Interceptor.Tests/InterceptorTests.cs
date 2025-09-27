@@ -35,7 +35,7 @@ public class InterceptorTests
             _logs = logs;
         }
 
-        public TProperty ReadProperty<TProperty>(ref ReadPropertyContext context, ReadInterceptionFunc<TProperty> next)
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionFunc<TProperty> next)
         {
             _logs.Add($"{_name}: Before read {context.Property.Name}");
             var result = next(ref context);
@@ -76,7 +76,7 @@ public class InterceptorTests
             _logs = logs;
         }
 
-        public void WriteProperty<TProperty>(ref WritePropertyContext<TProperty> context, WriteInterceptionAction<TProperty> next)
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionAction<TProperty> next)
         {
             _logs.Add($"{_name}: Before write {context.Property.Name}");
             context.NewValue = (TProperty)(object)((int)((object)context.NewValue!) + 1);

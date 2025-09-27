@@ -104,7 +104,7 @@ public class SubjectSourceBackgroundServiceTests
         var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance);
         await service.StartAsync(cancellationTokenSource.Token);
         
-        var writeContext = new WritePropertyContext<string?>(
+        var writeContext = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Bar");
 
         propertyChangedObservable.WriteProperty(ref writeContext, (ref _) => { });
