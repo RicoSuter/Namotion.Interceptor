@@ -254,7 +254,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
             var chain = new WriteInterceptorChain<IWriteInterceptor, TProperty>(
                 interceptorArray,
-                static (interceptor, ref interception, next) => interceptor.WriteProperty(ref interception, next),
+                static (interceptor, ref context, next) => interceptor.WriteProperty(ref context, next),
                 static (ref interception, innerWriteValue) =>
                 {
                     var writeAction = (Action<IInterceptorSubject, TProperty>)innerWriteValue;
@@ -269,7 +269,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private sealed class WriteInterceptorChain<TInterceptor, TProperty>
     {
         public delegate TProperty ExecuteTerminalFunc(ref PropertyWriteContext<TProperty> context, object obj);
-        public delegate void ExecuteInterceptorAction(TInterceptor interceptor, ref PropertyWriteContext<TProperty> context, WriteInterceptionAction<TProperty> action);
+        public delegate void ExecuteInterceptorAction(TInterceptor interceptor, ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> @delegate);
         
         private readonly TInterceptor[] _interceptors;
         private readonly ExecuteInterceptorAction _executeInterceptor;
@@ -311,7 +311,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             var continuation = _continuations[index];
             
             continuation.SetState(terminal);
-            _executeInterceptor(interceptor, ref context, continuation.ContinuationAction);
+            _executeInterceptor(interceptor, ref context, continuation.ContinuationDelegate);
         }
 
         private sealed class WriteContinuationNode
@@ -320,14 +320,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             private readonly int _nextIndex;
             private object _currentTerminal = null!;
 
-            public readonly WriteInterceptionAction<TProperty> ContinuationAction;
+            public readonly WriteInterceptionDelegate<TProperty> ContinuationDelegate;
 
             public WriteContinuationNode(WriteInterceptorChain<TInterceptor, TProperty> chain, int nextIndex)
             {
                 _chain = chain;
                 _nextIndex = nextIndex;
 
-                ContinuationAction = ExecuteNext;
+                ContinuationDelegate = ExecuteNext;
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -346,7 +346,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private sealed class ReadInterceptorChain<TInterceptor, TProperty>
     {
-        public delegate TProperty ExecuteInterceptorFunc(TInterceptor interceptor, ref PropertyReadContext context, ReadInterceptionFunc<TProperty> a);
+        public delegate TProperty ExecuteInterceptorFunc(TInterceptor interceptor, ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> a);
         public delegate TProperty ReadInterceptionFunc(ref PropertyReadContext context, object obj);
         
         private readonly TInterceptor[] _interceptors;
@@ -388,7 +388,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             var continuation = _continuations[index];
             
             continuation.SetState(terminal);
-            return _executeInterceptor(interceptor, ref context, continuation.ContinuationFunc);
+            return _executeInterceptor(interceptor, ref context, continuation.ContinuationDelegate);
         }
 
         private sealed class ContinuationNode
@@ -397,14 +397,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             private readonly int _nextIndex;
             private object _currentTerminal = null!;
 
-            public readonly ReadInterceptionFunc<TProperty> ContinuationFunc;
+            public readonly ReadInterceptionDelegate<TProperty> ContinuationDelegate;
 
             public ContinuationNode(ReadInterceptorChain<TInterceptor, TProperty> chain, int nextIndex)
             {
                 _chain = chain;
                 _nextIndex = nextIndex;
 
-                ContinuationFunc = ExecuteNext;
+                ContinuationDelegate = ExecuteNext;
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
