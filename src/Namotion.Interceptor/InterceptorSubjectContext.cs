@@ -137,7 +137,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         };
     }
 
-    public TProperty ExecuteInterceptedRead<TProperty>(ref ReadPropertyContext context, Func<IInterceptorSubject, TProperty> readValue)
+    public TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> readValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
@@ -150,7 +150,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return func(ref context, readValue);
     }
 
-    public void ExecuteInterceptedWrite<TProperty>(ref WritePropertyContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
+    public void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
@@ -164,7 +164,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         action(ref context, writeValue);
     }
     
-    delegate TProperty ReadFunc<TProperty>(ref ReadPropertyContext context, Func<IInterceptorSubject, TProperty> func);
+    delegate TProperty ReadFunc<TProperty>(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> func);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadFunc<TProperty> GetReadInterceptorFunction<TProperty>()
@@ -180,7 +180,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return func;
     }
 
-    delegate void WriteAction<TProperty>(ref WritePropertyContext<TProperty> context, Action<IInterceptorSubject, TProperty> action);
+    delegate void WriteAction<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> action);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private WriteAction<TProperty> GetWriteInterceptorFunction<TProperty>()
@@ -268,8 +268,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private sealed class WriteInterceptorChain<TInterceptor, TProperty>
     {
-        public delegate TProperty ExecuteTerminalFunc(ref WritePropertyContext<TProperty> context, object obj);
-        public delegate void ExecuteInterceptorAction(TInterceptor interceptor, ref WritePropertyContext<TProperty> context, WriteInterceptionAction<TProperty> action);
+        public delegate TProperty ExecuteTerminalFunc(ref PropertyWriteContext<TProperty> context, object obj);
+        public delegate void ExecuteInterceptorAction(TInterceptor interceptor, ref PropertyWriteContext<TProperty> context, WriteInterceptionAction<TProperty> action);
         
         private readonly TInterceptor[] _interceptors;
         private readonly ExecuteInterceptorAction _executeInterceptor;
@@ -293,13 +293,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Execute(ref WritePropertyContext<TProperty> context, object terminal)
+        public void Execute(ref PropertyWriteContext<TProperty> context, object terminal)
         {
             ExecuteAtIndex(0, ref context, terminal);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void ExecuteAtIndex(int index, ref WritePropertyContext<TProperty> context, object terminal)
+        private void ExecuteAtIndex(int index, ref PropertyWriteContext<TProperty> context, object terminal)
         {
             if (index >= _interceptors.Length)
             {
@@ -337,7 +337,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            private void ExecuteNext(ref WritePropertyContext<TProperty> context)
+            private void ExecuteNext(ref PropertyWriteContext<TProperty> context)
             {
                 _chain.ExecuteAtIndex(_nextIndex, ref context, _currentTerminal);
             }
@@ -346,8 +346,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private sealed class ReadInterceptorChain<TInterceptor, TProperty>
     {
-        public delegate TProperty ExecuteInterceptorFunc(TInterceptor interceptor, ref ReadPropertyContext context, ReadInterceptionFunc<TProperty> a);
-        public delegate TProperty ReadInterceptionFunc(ref ReadPropertyContext context, object obj);
+        public delegate TProperty ExecuteInterceptorFunc(TInterceptor interceptor, ref PropertyReadContext context, ReadInterceptionFunc<TProperty> a);
+        public delegate TProperty ReadInterceptionFunc(ref PropertyReadContext context, object obj);
         
         private readonly TInterceptor[] _interceptors;
         private readonly ExecuteInterceptorFunc _executeInterceptor;
@@ -371,13 +371,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public TProperty Execute(ref ReadPropertyContext context, object terminal)
+        public TProperty Execute(ref PropertyReadContext context, object terminal)
         {
             return ExecuteAtIndex(0, ref context, terminal);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private TProperty ExecuteAtIndex(int index, ref ReadPropertyContext context, object terminal)
+        private TProperty ExecuteAtIndex(int index, ref PropertyReadContext context, object terminal)
         {
             if (index >= _interceptors.Length)
             {
@@ -414,7 +414,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            private TProperty ExecuteNext(ref ReadPropertyContext context)
+            private TProperty ExecuteNext(ref PropertyReadContext context)
             {
                 return _chain.ExecuteAtIndex(_nextIndex, ref context, _currentTerminal);
             }

@@ -11,7 +11,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
     
     public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
-        var interception = new ReadPropertyContext(new PropertyReference(_subject, propertyName));
+        var interception = new PropertyReadContext(new PropertyReference(_subject, propertyName));
         return _subject.Context.ExecuteInterceptedRead(ref interception, readValue);
     }
     
@@ -19,7 +19,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
     {
         // TODO(perf): Reading current value (invoke getter) here might be a performance problem. 
 
-        var interception = new WritePropertyContext<TProperty>(
+        var interception = new PropertyWriteContext<TProperty>(
             new PropertyReference(_subject, propertyName), 
             readValue is not null ? readValue(_subject) : default!, 
             newValue); 

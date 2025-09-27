@@ -7,7 +7,7 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
 {
     private readonly ISubject<SubjectPropertyChange> _subject = Subject.Synchronize(new Subject<SubjectPropertyChange>());
 
-    public void WriteProperty<TProperty>(ref WritePropertyContext<TProperty> context, WriteInterceptionAction<TProperty> next)
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionAction<TProperty> next)
     {
         next(ref context);
 
@@ -15,7 +15,7 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
             context.Property, 
             SubjectMutationContext.GetCurrentSource(),
             SubjectMutationContext.GetCurrentTimestamp(),
-            context.CurrentValue, context.GetCurrentValue());
+            context.CurrentValue, context.GetFinalValue());
         
         _subject.OnNext(changedContext);
     }
