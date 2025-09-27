@@ -1,4 +1,5 @@
 ﻿using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 
 namespace Namotion.Interceptor.Dynamic.Tests;

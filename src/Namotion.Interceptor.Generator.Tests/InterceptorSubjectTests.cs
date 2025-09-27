@@ -1,5 +1,6 @@
 using Moq;
 using Namotion.Interceptor.Generator.Tests.Models;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Generator.Tests;
 

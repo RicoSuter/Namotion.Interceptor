@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Interceptors;
+
 namespace Namotion.Interceptor.Tests;
 
 public class InterceptorTests

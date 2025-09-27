@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Validation;
 

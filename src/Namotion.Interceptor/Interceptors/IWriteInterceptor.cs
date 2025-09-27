@@ -1,4 +1,11 @@
-﻿namespace Namotion.Interceptor;
+﻿namespace Namotion.Interceptor.Interceptors;
+
+public delegate void WriteInterceptionAction<TProperty>(ref WritePropertyInterception<TProperty> interception);
+
+public interface IWriteInterceptor
+{
+    void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next);
+}
 
 public struct WritePropertyInterception<TProperty>
 {

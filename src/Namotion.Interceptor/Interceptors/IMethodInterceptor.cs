@@ -1,4 +1,9 @@
-namespace Namotion.Interceptor;
+namespace Namotion.Interceptor.Interceptors;
+
+public interface IMethodInterceptor
+{
+    object? InvokeMethod(MethodInvocationInterception context, Func<MethodInvocationInterception, object?> next);
+}
 
 public readonly struct MethodInvocationInterception
 {

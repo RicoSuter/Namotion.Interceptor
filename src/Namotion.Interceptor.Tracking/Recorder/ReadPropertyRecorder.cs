@@ -1,4 +1,6 @@
-﻿namespace Namotion.Interceptor.Tracking.Recorder;
+﻿using Namotion.Interceptor.Interceptors;
+
+namespace Namotion.Interceptor.Tracking.Recorder;
 
 public class ReadPropertyRecorder : IReadInterceptor
 {
