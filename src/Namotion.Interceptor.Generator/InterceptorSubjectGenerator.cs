@@ -92,6 +92,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
 // </auto-generated>
 
 using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
 
 using System;
 using System.Collections.Concurrent;

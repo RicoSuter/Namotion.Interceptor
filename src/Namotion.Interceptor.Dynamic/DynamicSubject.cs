@@ -2,6 +2,7 @@
 using System.Collections.Frozen;
 using System.Collections.ObjectModel;
 using System.Text.Json.Serialization;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Dynamic;
 

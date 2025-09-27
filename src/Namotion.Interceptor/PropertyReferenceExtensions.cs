@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Interceptors;
+
 namespace Namotion.Interceptor;
 
 public static class PropertyReferenceExtensions

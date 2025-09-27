@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;

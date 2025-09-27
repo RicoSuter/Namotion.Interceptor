@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor;
 

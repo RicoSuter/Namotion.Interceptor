@@ -1,4 +1,6 @@
-﻿namespace Namotion.Interceptor.Tracking;
+﻿using Namotion.Interceptor.Interceptors;
+
+namespace Namotion.Interceptor.Tracking;
 
 public class PropertyValueEqualityCheckHandler : IWriteInterceptor
 {

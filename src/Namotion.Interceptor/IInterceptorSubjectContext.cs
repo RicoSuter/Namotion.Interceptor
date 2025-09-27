@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Interceptors;
+
 namespace Namotion.Interceptor;
 
 public interface IInterceptorSubjectContext
