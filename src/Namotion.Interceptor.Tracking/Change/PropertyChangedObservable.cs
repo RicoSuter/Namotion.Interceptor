@@ -1,4 +1,5 @@
 ﻿using System.Reactive.Subjects;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -6,7 +7,7 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
 {
     private readonly ISubject<SubjectPropertyChange> _subject = Subject.Synchronize(new Subject<SubjectPropertyChange>());
 
-    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         next(ref context);
 
@@ -14,7 +15,7 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
             context.Property, 
             SubjectMutationContext.GetCurrentSource(),
             SubjectMutationContext.GetCurrentTimestamp(),
-            context.CurrentValue, context.GetCurrentValue());
+            context.CurrentValue, context.GetFinalValue());
         
         _subject.OnNext(changedContext);
     }

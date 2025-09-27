@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor;
+namespace Namotion.Interceptor.Interceptors;
 
 public interface IInterceptorExecutor : IInterceptorSubjectContext
 {

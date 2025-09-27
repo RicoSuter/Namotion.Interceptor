@@ -1,4 +1,5 @@
 ﻿using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 
 namespace Namotion.Interceptor.Dynamic.Tests;
@@ -125,7 +126,7 @@ public class DynamicSubjectTests
             _logs = logs;
         }
 
-        public TProperty ReadProperty<TProperty>(ref ReadPropertyInterception context, ReadInterceptionFunc<TProperty> next)
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
         {
             _logs.Add($"{_name}: Before read {context.Property.Name}");
             var result = next(ref context);
@@ -133,7 +134,7 @@ public class DynamicSubjectTests
             return result;
         }
 
-        public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
             _logs.Add($"{_name}: Before write {context.Property.Name}");
             context.NewValue = (TProperty)(object)((int)((object)context.NewValue!) + 1);
