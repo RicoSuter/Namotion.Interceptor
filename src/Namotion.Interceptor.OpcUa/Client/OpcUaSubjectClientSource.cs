@@ -321,7 +321,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 BrowseDirection.Forward,
                 ReferenceTypeIds.HierarchicalReferences,
                 true,
-                (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
+                (uint)NodeClass.Variable | (uint)NodeClass.Object,
                 cancellationToken);
             
             foreach (var nodeRef in nodeProperties.SelectMany(p => p))
@@ -361,7 +361,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                         }
                         else
                         {
-                            var newSubject = DefaultSubjectFactory.Instance.CreateSubject(property, null);
+                            var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeRef, _session, cancellationToken);
                             newSubject.Context.AddFallbackContext(subject.Context);
                             await LoadSubjectAsync(newSubject, nodeRef, monitoredItems, collectionPath, cancellationToken);
                             property.SetValueFromSource(this, null, newSubject);
@@ -393,7 +393,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                             })
                             .ToList();
 
-                        var collection = DefaultSubjectFactory.Instance.CreateSubjectCollection(property, childSubjectList.Select(p => p.Subject));
+                        var collection = DefaultSubjectFactory.Instance.CreateSubjectCollection(property.Type, childSubjectList.Select(p => p.Subject));
                         property.SetValue(collection);
 
                         var pathIndex = 0;

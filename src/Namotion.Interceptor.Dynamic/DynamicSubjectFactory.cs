@@ -9,6 +9,8 @@ public class DynamicSubjectFactory
     private static readonly ProxyGenerator ProxyGenerator = new();
     private static readonly ConcurrentDictionary<string, SubjectPropertyMetadata[]> PropertyCache = new();
 
+    // TODO: Remove context in all methods?
+
     public static DynamicSubject CreateDynamicSubject(IInterceptorSubjectContext? context, params Type[] interfaces)
     {
         return CreateSubject<DynamicSubject>(context, interfaces);
