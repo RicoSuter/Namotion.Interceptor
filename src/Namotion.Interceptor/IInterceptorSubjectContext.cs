@@ -12,9 +12,9 @@ public interface IInterceptorSubjectContext
 
     IEnumerable<TInterface> GetServices<TInterface>();
 
-    TProperty ExecuteInterceptedRead<TProperty>(ref ReadPropertyInterception interception, Func<IInterceptorSubject, TProperty> readValue);
+    TProperty ExecuteInterceptedRead<TProperty>(ref ReadPropertyContext context, Func<IInterceptorSubject, TProperty> readValue);
 
-    void ExecuteInterceptedWrite<TProperty>(ref WritePropertyInterception<TProperty> interception, Action<IInterceptorSubject, TProperty> writeValue);
+    void ExecuteInterceptedWrite<TProperty>(ref WritePropertyContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue);
 
     bool AddFallbackContext(IInterceptorSubjectContext context);
 

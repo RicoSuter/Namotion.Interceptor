@@ -23,9 +23,9 @@ public class InterceptorSubjectTests
 
     public class TestMethodInterceptor : IMethodInterceptor
     {
-        public List<MethodInvocationInterception> Contexts { get; } = new();
+        public List<MethodInvocationContext> Contexts { get; } = new();
         
-        public object? InvokeMethod(MethodInvocationInterception context, Func<MethodInvocationInterception, object?> next)
+        public object? InvokeMethod(MethodInvocationContext context, Func<MethodInvocationContext, object?> next)
         {
             Contexts.Add(context);
             return next(context);

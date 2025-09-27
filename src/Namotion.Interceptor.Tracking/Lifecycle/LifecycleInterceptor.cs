@@ -125,7 +125,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
-    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
+    public void WriteProperty<TProperty>(ref WritePropertyContext<TProperty> context, WriteInterceptionAction<TProperty> next)
     {
         var currentValue = context.CurrentValue;
         next(ref context);

@@ -1,13 +1,13 @@
 ﻿namespace Namotion.Interceptor.Interceptors;
 
-public delegate void WriteInterceptionAction<TProperty>(ref WritePropertyInterception<TProperty> interception);
+public delegate void WriteInterceptionAction<TProperty>(ref WritePropertyContext<TProperty> context);
 
 public interface IWriteInterceptor
 {
-    void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next);
+    void WriteProperty<TProperty>(ref WritePropertyContext<TProperty> context, WriteInterceptionAction<TProperty> next);
 }
 
-public struct WritePropertyInterception<TProperty>
+public struct WritePropertyContext<TProperty>
 {
     /// <summary>
     /// Gets the property to write a value to.
@@ -25,7 +25,7 @@ public struct WritePropertyInterception<TProperty>
     /// </summary>
     public TProperty NewValue { get; set; }
 
-    public WritePropertyInterception(PropertyReference property, TProperty currentValue, TProperty newValue)
+    public WritePropertyContext(PropertyReference property, TProperty currentValue, TProperty newValue)
     {
         Property = property;
         CurrentValue = currentValue;

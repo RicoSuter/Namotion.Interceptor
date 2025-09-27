@@ -2,10 +2,10 @@ namespace Namotion.Interceptor.Interceptors;
 
 public interface IMethodInterceptor
 {
-    object? InvokeMethod(MethodInvocationInterception context, Func<MethodInvocationInterception, object?> next);
+    object? InvokeMethod(MethodInvocationContext context, Func<MethodInvocationContext, object?> next);
 }
 
-public readonly struct MethodInvocationInterception
+public readonly struct MethodInvocationContext
 {
     public IInterceptorSubject Subject { get; }
     
@@ -13,7 +13,7 @@ public readonly struct MethodInvocationInterception
 
     public object?[] Parameters { get; }
     
-    public MethodInvocationInterception(IInterceptorSubject subject, string methodName, object?[] parameters)
+    public MethodInvocationContext(IInterceptorSubject subject, string methodName, object?[] parameters)
     {
         Subject = subject;
         MethodName = methodName;
