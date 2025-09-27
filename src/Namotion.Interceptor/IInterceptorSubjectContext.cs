@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Interceptors;
+
 namespace Namotion.Interceptor;
 
 public interface IInterceptorSubjectContext
@@ -10,9 +12,9 @@ public interface IInterceptorSubjectContext
 
     IEnumerable<TInterface> GetServices<TInterface>();
 
-    TProperty ExecuteInterceptedRead<TProperty>(ref ReadPropertyInterception interception, Func<IInterceptorSubject, TProperty> readValue);
+    TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> readValue);
 
-    void ExecuteInterceptedWrite<TProperty>(ref WritePropertyInterception<TProperty> interception, Action<IInterceptorSubject, TProperty> writeValue);
+    void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue);
 
     bool AddFallbackContext(IInterceptorSubjectContext context);
 

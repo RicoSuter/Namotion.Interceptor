@@ -1,6 +1,13 @@
-﻿namespace Namotion.Interceptor;
+﻿namespace Namotion.Interceptor.Interceptors;
 
-public struct WritePropertyInterception<TProperty>
+public interface IWriteInterceptor
+{
+    void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next);
+}
+
+public delegate void WriteInterceptionDelegate<TProperty>(ref PropertyWriteContext<TProperty> context);
+
+public struct PropertyWriteContext<TProperty>
 {
     /// <summary>
     /// Gets the property to write a value to.
@@ -14,11 +21,11 @@ public struct WritePropertyInterception<TProperty>
     
     /// <summary>
     /// Gets the new value to write (might be different than the value returned by calling the
-    /// getter after the write, use <see cref="GetCurrentValue"/> for that).
+    /// getter after the write, use <see cref="GetFinalValue"/> for that).
     /// </summary>
     public TProperty NewValue { get; set; }
 
-    public WritePropertyInterception(PropertyReference property, TProperty currentValue, TProperty newValue)
+    public PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue)
     {
         Property = property;
         CurrentValue = currentValue;
@@ -30,7 +37,7 @@ public struct WritePropertyInterception<TProperty>
     /// Must only be used after the 'next()' call in the write interceptor.
     /// </summary>
     /// <returns>The property value.</returns>
-    public TProperty GetCurrentValue() => Property.Metadata.IsDerived ? 
+    public TProperty GetFinalValue() => Property.Metadata.IsDerived ? 
         (TProperty)Property.Metadata.GetValue?.Invoke(Property.Subject)! : 
         NewValue;
 }

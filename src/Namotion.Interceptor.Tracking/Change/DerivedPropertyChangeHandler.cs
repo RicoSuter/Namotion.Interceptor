@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Tracking.Lifecycle;
+﻿using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -28,14 +29,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
     }
 
-    public TProperty ReadProperty<TProperty>(ref ReadPropertyInterception context, ReadInterceptionFunc<TProperty> next)
+    public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
         var result = next(ref context);
         TouchProperty(context.Property);
         return result;
     }
 
-    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         next(ref context);
 
