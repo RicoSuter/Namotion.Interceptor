@@ -1,6 +1,6 @@
 ﻿namespace Namotion.Interceptor.OpcUa;
 
-public class OpcUaDataValueConverter
+public class OpcUaValueConverter
 {
     /// <summary>
     /// Converts an OPC UA node value to the CLR property type while handling.
@@ -51,7 +51,6 @@ public class OpcUaDataValueConverter
         if (type.IsArray)
         {
             var elementType = type.GetElementType()!;
-        
             if (propertyValue is Array array)
             {
                 if (elementType == typeof(decimal))
@@ -64,7 +63,7 @@ public class OpcUaDataValueConverter
                 return (propertyValue, type);
             }
 
-            return (Array.CreateInstance(elementType, 0), elementType.MakeArrayType());
+            return (Array.CreateInstance(elementType, 0), type); // value is null => empty array
         }
 
         return (propertyValue, type);

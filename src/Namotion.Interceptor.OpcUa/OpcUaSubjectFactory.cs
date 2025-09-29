@@ -14,10 +14,8 @@ public class OpcUaSubjectFactory
         _subjectFactory = subjectFactory;
     }
 
-    public Task<IInterceptorSubject> CreateSubjectAsync(RegisteredSubjectProperty property, ReferenceDescription node, Session session, CancellationToken cancellationToken)
+    public virtual Task<IInterceptorSubject> CreateSubjectAsync(RegisteredSubjectProperty property, ReferenceDescription node, Session session, CancellationToken cancellationToken)
     {
-        var newSubject = _subjectFactory.CreateSubject(property);
-        // TODO: Look up HasTypeDefinition, resolve type and create dynamic subject if mapping available
-        return Task.FromResult(newSubject);
+        return Task.FromResult(_subjectFactory.CreateSubject(property));
     }
 }

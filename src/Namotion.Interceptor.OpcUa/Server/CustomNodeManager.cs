@@ -25,14 +25,7 @@ internal class CustomNodeManager : CustomNodeManager2
         IServerInternal server,
         ApplicationConfiguration applicationConfiguration,
         OpcUaServerConfiguration configuration) :
-        base(server, applicationConfiguration, [
-            "https://foobar/",
-            "http://opcfoundation.org/UA/",
-            "http://opcfoundation.org/UA/DI/",
-            "http://opcfoundation.org/UA/PADIM",
-            "http://opcfoundation.org/UA/Machinery/",
-            "http://opcfoundation.org/UA/Machinery/ProcessValues"
-        ])
+        base(server, applicationConfiguration, configuration.GetNamespaceUris())
     {
         _subject = subject;
         _source = source;
@@ -42,25 +35,10 @@ internal class CustomNodeManager : CustomNodeManager2
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)
     {
         var collection = base.LoadPredefinedNodes(context);
-
-        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.NodeSet2.xml", context, collection);
-        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Di.NodeSet2.xml", context, collection);
-        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.PADIM.NodeSet2.xml", context, collection);
-        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Machinery.NodeSet2.xml", context, collection);
-        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Machinery.ProcessValues.NodeSet2.xml", context, collection);
-
+        _configuration.LoadPredefinedNodes(collection, context);
         return collection;
     }
-
-    private static void LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name, ISystemContext context, NodeStateCollection nodes)
-    {
-        var assembly = typeof(TAssemblyType).Assembly;
-        using var stream = assembly.GetManifestResourceStream($"{assembly.FullName!.Split(',')[0]}.{name}");
-
-        var nodeSet = UANodeSet.Read(stream ?? throw new ArgumentException("Embedded resource could not be found.", nameof(name)));
-        nodeSet.Import(context, nodes);
-    }
-
+    
     public override void CreateAddressSpace(IDictionary<NodeId, IList<IReference>> externalReferences)
     {
         base.CreateAddressSpace(externalReferences);

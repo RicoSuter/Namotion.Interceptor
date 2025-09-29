@@ -1,18 +1,22 @@
-﻿using Namotion.Interceptor.Sources.Paths;
+﻿using Namotion.Interceptor.OpcUa.Annotations;
+using Namotion.Interceptor.Sources.Paths;
 using Opc.Ua;
 using Opc.Ua.Configuration;
+using Opc.Ua.Export;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
 public class OpcUaServerConfiguration
 {
+    public string? RootName { get; init; }
+    
     public string ApplicationName { get; init; } = "Namotion.Interceptor.Server";
 
-    public string? RootName { get; init; }
+    public string NamespaceUri { get; init; } = "http://namotion.com/Interceptor/";
     
     public required ISourcePathProvider SourcePathProvider { get; init; }
 
-    public required OpcUaDataValueConverter ValueConverter { get; init; }
+    public required OpcUaValueConverter ValueConverter { get; init; }
     
     public virtual ApplicationInstance CreateApplicationInstance()
     {
@@ -138,5 +142,35 @@ public class OpcUaServerConfiguration
 
         application.ApplicationConfiguration = config;
         return application;
+    }
+
+    public virtual string[] GetNamespaceUris()
+    {
+        return [
+            NamespaceUri,
+            "http://opcfoundation.org/UA/",
+            "http://opcfoundation.org/UA/DI/",
+            "http://opcfoundation.org/UA/PADIM",
+            "http://opcfoundation.org/UA/Machinery/",
+            "http://opcfoundation.org/UA/Machinery/ProcessValues"
+        ];
+    }
+
+    public virtual void LoadPredefinedNodes(NodeStateCollection collection, ISystemContext context)
+    {
+        LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.NodeSet2.xml", collection, context);
+        LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.Di.NodeSet2.xml", collection, context);
+        LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.PADIM.NodeSet2.xml", collection, context);
+        LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.Machinery.NodeSet2.xml", collection, context);
+        LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.Machinery.ProcessValues.NodeSet2.xml", collection, context);
+    } 
+
+    protected void LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name, NodeStateCollection nodes, ISystemContext context)
+    {
+        var assembly = typeof(TAssemblyType).Assembly;
+        using var stream = assembly.GetManifestResourceStream($"{assembly.FullName!.Split(',')[0]}.{name}");
+
+        var nodeSet = UANodeSet.Read(stream ?? throw new ArgumentException("Embedded resource could not be found.", nameof(name)));
+        nodeSet.Import(context, nodes);
     }
 }
