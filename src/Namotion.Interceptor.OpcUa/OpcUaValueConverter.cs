@@ -1,4 +1,6 @@
-﻿namespace Namotion.Interceptor.OpcUa;
+﻿using Opc.Ua;
+
+namespace Namotion.Interceptor.OpcUa;
 
 public class OpcUaValueConverter
 {
@@ -38,14 +40,14 @@ public class OpcUaValueConverter
     }
 
     /// <summary>
-    /// Converts a CLR property value to an OPC UA compatible value + data type.
+    /// Converts a CLR property value to an OPC UA compatible value.
     /// </summary>
-    public virtual (object? value, Type nodeType) ConvertToNodeValue(object? propertyValue, Type propertyType)
+    public virtual object? ConvertToNodeValue(object? propertyValue, Type propertyType)
     {
         var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
         if (type == typeof(decimal))
         {
-            return (propertyValue is decimal dv ? (double)dv : propertyValue, typeof(double));
+            return propertyValue is decimal dv ? (double)dv : propertyValue;
         }
 
         if (type.IsArray)
@@ -56,16 +58,34 @@ public class OpcUaValueConverter
                 if (elementType == typeof(decimal))
                 {
                     var decimals = (decimal[])array;
-                    var doubles = decimals.Select(d => (double)d).ToArray();
-                    return (doubles, typeof(double[]));
+                    return decimals.Select(d => (double)d).ToArray();
                 }
 
-                return (propertyValue, type);
+                return propertyValue;
             }
 
-            return (Array.CreateInstance(elementType, 0), type); // value is null => empty array
+            return Array.CreateInstance(elementType, 0); // value is null => empty array
         }
 
-        return (propertyValue, type);
+        return propertyValue;
+    }
+    
+    /// <summary>
+    /// Converts a CLR property value to an OPC UA compatible value + data type.
+    /// </summary>
+    public virtual TypeInfo GetNodeTypeInfo(Type propertyType)
+    {
+        var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        if (type == typeof(decimal))
+        {
+            return TypeInfo.Construct(typeof(double));
+        }
+
+        if (type.IsArray && type.GetElementType() == typeof(decimal))
+        {
+            return TypeInfo.Construct(typeof(double[]));
+        }
+
+        return TypeInfo.Construct(type);
     }
 }
