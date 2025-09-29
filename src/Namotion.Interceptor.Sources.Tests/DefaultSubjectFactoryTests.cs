@@ -47,7 +47,7 @@ public class DefaultSubjectFactoryTests
 
         // Act
         var subjectFactory = new DefaultSubjectFactory();
-        var myClass = subjectFactory.CreateSubject(property, null) as MyClass;
+        var myClass = subjectFactory.CreateSubject(property) as MyClass;
         
         // Assert
         Assert.NotNull(myClass);
@@ -69,7 +69,7 @@ public class DefaultSubjectFactoryTests
 
         // Act
         var subjectFactory = new DefaultSubjectFactory();
-        var myClassCollection = subjectFactory.CreateSubjectCollection(property, new MyClass(1), new MyClass(2)) as IList<MyClass>;
+        var myClassCollection = subjectFactory.CreateSubjectCollection(property.Type, new MyClass(1), new MyClass(2)) as IList<MyClass>;
         
         // Assert
         Assert.NotNull(myClassCollection);

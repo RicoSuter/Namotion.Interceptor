@@ -1,0 +1,46 @@
+﻿{
+  "Connected": true,
+  "Name": "Foo bar",
+  "Number": 0,
+  "ScalarNumbers": [
+    10,
+    20,
+    30,
+    40,
+    50
+  ],
+  "ScalarStrings": [
+    "Server",
+    "Test",
+    "Array"
+  ],
+  "Person": {
+    "FirstName": "John",
+    "LastName": "Smith",
+    "FullName": "John Smith",
+    "Scores": [
+      1,
+      2
+    ]
+  },
+  "People": [
+    {
+      "FirstName": "John",
+      "LastName": "Doe",
+      "FullName": "John Doe",
+      "Scores": [
+        85.5,
+        92.3
+      ]
+    },
+    {
+      "FirstName": "Jane",
+      "LastName": "Doe",
+      "FullName": "Jane Doe",
+      "Scores": [
+        88.1,
+        95.7
+      ]
+    }
+  ]
+}

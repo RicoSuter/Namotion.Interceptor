@@ -17,29 +17,24 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
-    private readonly string? _rootName;
+    private readonly OpcUaServerConfiguration _configuration;
 
     private OpcUaSubjectServer? _server;
     private ISubjectMutationDispatcher? _dispatcher;
-
-    internal ISourcePathProvider SourcePathProvider { get; }
-
+    
     public OpcUaSubjectServerSource(
         IInterceptorSubject subject,
-        ISourcePathProvider sourcePathProvider,
-        ILogger<OpcUaSubjectServerSource> logger,
-        string? rootName)
+        OpcUaServerConfiguration configuration,
+        ILogger<OpcUaSubjectServerSource> logger)
     {
         _subject = subject;
         _logger = logger;
-        _rootName = rootName;
-
-        SourcePathProvider = sourcePathProvider;
+        _configuration = configuration;
     }
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return SourcePathProvider.IsPropertyIncluded(property);
+        return _configuration.SourcePathProvider.IsPropertyIncluded(property);
     }
 
     public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
@@ -81,21 +76,10 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            using var stream = typeof(OpcUaSubjectServerExtensions).Assembly
-                .GetManifestResourceStream("Namotion.Interceptor.OpcUa.MyOpcUaServer.Config.xml")
-                ?? throw new InvalidOperationException("Config.xml not found.");
-
-            var application = new ApplicationInstance
-            {
-                ApplicationName = "MyOpcUaServer",
-                ApplicationType = ApplicationType.Server,
-                ApplicationConfiguration = await ApplicationConfiguration.Load(
-                    stream, ApplicationType.Server, typeof(ApplicationConfiguration), false)
-            };
-
+            var application = _configuration.CreateApplicationInstance();
             try
             {
-                _server = new OpcUaSubjectServer(_subject, this, _rootName);
+                _server = new OpcUaSubjectServer(_subject, this, _configuration);
 
                 await application.CheckApplicationInstanceCertificates(true);
                 await application.Start(_server);
@@ -121,8 +105,8 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     internal void UpdateProperty(PropertyReference property, DateTimeOffset timestamp, object? value)
     {
-        // TODO: Implement actual correct conversion based on the property type
-        var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
+        var targetType = property.GetRegisteredProperty().Type;
+        var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, targetType);
         
         _dispatcher?.EnqueueSubjectUpdate(() =>
         {

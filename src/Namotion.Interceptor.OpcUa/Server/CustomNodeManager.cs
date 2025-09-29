@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Collections;
+using System.Reflection;
 using Namotion.Interceptor.OpcUa.Annotations;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -14,7 +15,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private readonly IInterceptorSubject _subject;
     private readonly OpcUaSubjectServerSource _source;
-    private readonly string? _rootName;
+    private readonly OpcUaServerConfiguration _configuration;
 
     private readonly Dictionary<RegisteredSubject, FolderState> _subjects = new();
 
@@ -22,45 +23,22 @@ internal class CustomNodeManager : CustomNodeManager2
         IInterceptorSubject subject,
         OpcUaSubjectServerSource source,
         IServerInternal server,
-        ApplicationConfiguration configuration,
-        string? rootName) :
-        base(server, configuration, new[]
-        {
-            "https://foobar/",
-            "http://opcfoundation.org/UA/",
-            "http://opcfoundation.org/UA/DI/",
-            "http://opcfoundation.org/UA/PADIM",
-            "http://opcfoundation.org/UA/Machinery/",
-            "http://opcfoundation.org/UA/Machinery/ProcessValues"
-        })
+        ApplicationConfiguration applicationConfiguration,
+        OpcUaServerConfiguration configuration) :
+        base(server, applicationConfiguration, configuration.GetNamespaceUris())
     {
         _subject = subject;
         _source = source;
-        _rootName = rootName;
+        _configuration = configuration;
     }
 
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)
     {
         var collection = base.LoadPredefinedNodes(context);
-
-        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.NodeSet2.xml", context, collection);
-        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Di.NodeSet2.xml", context, collection);
-        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.PADIM.NodeSet2.xml", context, collection);
-        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Machinery.NodeSet2.xml", context, collection);
-        LoadNodeSetFromEmbeddedResource<OpcUaNodeAttribute>("NodeSets.Opc.Ua.Machinery.ProcessValues.NodeSet2.xml", context, collection);
-
+        _configuration.LoadPredefinedNodes(collection, context);
         return collection;
     }
-
-    private static void LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name, ISystemContext context, NodeStateCollection nodes)
-    {
-        var assembly = typeof(TAssemblyType).Assembly;
-        using var stream = assembly.GetManifestResourceStream($"{assembly.FullName!.Split(',')[0]}.{name}");
-
-        var nodeSet = UANodeSet.Read(stream ?? throw new ArgumentException("Embedded resource could not be found.", nameof(name)));
-        nodeSet.Import(context, nodes);
-    }
-
+    
     public override void CreateAddressSpace(IDictionary<NodeId, IList<IReference>> externalReferences)
     {
         base.CreateAddressSpace(externalReferences);
@@ -68,12 +46,12 @@ internal class CustomNodeManager : CustomNodeManager2
         var registeredSubject = _subject.TryGetRegisteredSubject();
         if (registeredSubject is not null)
         {
-            if (_rootName is not null)
+            if (_configuration.RootName is not null)
             {
                 var node = CreateFolder(ObjectIds.ObjectsFolder, 
-                    new NodeId(_rootName, NamespaceIndex), _rootName, null, null);
+                    new NodeId(_configuration.RootName, NamespaceIndex), _configuration.RootName, null, null);
 
-                CreateObjectNode(node.NodeId, registeredSubject, _rootName + PathDelimiter);
+                CreateObjectNode(node.NodeId, registeredSubject, _configuration.RootName + PathDelimiter);
             }
             else
             {
@@ -118,14 +96,14 @@ internal class CustomNodeManager : CustomNodeManager2
         if (property.IsAttribute)
         {
             var attributedProperty = property.GetAttributedProperty();
-            var propertyName = _source.SourcePathProvider.TryGetPropertySegment(property);
+            var propertyName = _configuration.SourcePathProvider.TryGetPropertySegment(property);
             if (propertyName is null)
                 return null;
             
             return GetPropertyName(attributedProperty) + "__" + propertyName;
         }
         
-        return _source.SourcePathProvider.TryGetPropertySegment(property);
+        return _configuration.SourcePathProvider.TryGetPropertySegment(property);
     }
 
     private void CreateReferenceObjectNode(string propertyName, RegisteredSubjectProperty property, SubjectPropertyChild child, NodeId parentNodeId, string parentPath)
@@ -147,14 +125,14 @@ internal class CustomNodeManager : CustomNodeManager2
 
         var propertyNode = CreateFolder(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
 
-        var childPrefix = parentPath + propertyName + PathDelimiter;
+        // Child objects below the array folder use path: parentPath + propertyName + "[index]"
         var childReferenceTypeId = GetChildReferenceTypeId(property);
         foreach (var child in children)
         {
             var childBrowseName = new QualifiedName($"{propertyName}[{child.Index}]", NamespaceIndex);
-            var path = $"{childPrefix}{propertyName}[{child.Index}]";
+            var childPath = $"{parentPath}{propertyName}[{child.Index}]";
 
-            CreateChildObject(childBrowseName, child.Subject, path, propertyNode.NodeId, childReferenceTypeId);
+            CreateChildObject(childBrowseName, child.Subject, childPath, propertyNode.NodeId, childReferenceTypeId);
         }
     }
 
@@ -179,22 +157,38 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private void CreateVariableNode(string propertyName, RegisteredSubjectProperty property, NodeId parentNodeId, string parentPath)
     {
-        var value = property.GetValue();
-        var type = property.Type;
-
-        if (type == typeof(decimal))
-        {
-            type = typeof(double);
-            value = Convert.ToDouble(value);
-        }
+        var (value, type) = _configuration.ValueConverter.ConvertToNodeValue(property.GetValue(), property.Type);
 
         var nodeId = new NodeId(parentPath + propertyName, NamespaceIndex);
         var browseName = GetBrowseName(propertyName, property, null);
-        var dataType = Opc.Ua.TypeInfo.Construct(type);
+
+        var dataTypeInfo = Opc.Ua.TypeInfo.Construct(type);
         var referenceTypeId = GetReferenceTypeId(property);
 
-        // TODO: Add support for arrays (valueRank >= 0)
-        var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataType, -1, referenceTypeId);
+        var valueRank = GetValueRank(type);
+        var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataTypeInfo, valueRank, referenceTypeId);
+
+        // Adjust access according to property setter
+        if (!property.HasSetter)
+        {
+            variable.AccessLevel = AccessLevels.CurrentRead;
+            variable.UserAccessLevel = AccessLevels.CurrentRead;
+        }
+        else
+        {
+            variable.AccessLevel = AccessLevels.CurrentReadOrWrite;
+            variable.UserAccessLevel = AccessLevels.CurrentReadOrWrite;
+        }
+
+        // Set array dimensions (works for 1D and multi-D)
+        if (value is Array arrayValue)
+        {
+            variable.ArrayDimensions = new ReadOnlyList<uint>(
+                Enumerable.Range(0, arrayValue.Rank)
+                    .Select(i => (uint)arrayValue.GetLength(i))
+                    .ToArray());
+        }
+
         variable.Value = value;
         variable.StateChanged += (_, _, changes) =>
         {
@@ -230,6 +224,31 @@ internal class CustomNodeManager : CustomNodeManager2
 
             _subjects[registeredSubject] = node;
         }
+    }
+
+    private static int GetValueRank(Type type)
+    {
+        if (type == typeof(string))
+        {
+            return -1;
+        }
+
+        if (type.IsArray)
+        {
+            return type.GetArrayRank();
+        }
+
+        if (type.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>)))
+        {
+            return 1;
+        }
+
+        if (typeof(IEnumerable).IsAssignableFrom(type))
+        {
+            return 1;
+        }
+
+        return -1;
     }
 
     private static NodeId? GetReferenceTypeId(RegisteredSubjectProperty property)
@@ -325,10 +344,7 @@ internal class CustomNodeManager : CustomNodeManager2
             ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasComponent
         };
 
-        if (parentNode != null)
-        {
-            parentNode.AddChild(folder);
-        }
+        parentNode?.AddChild(folder);
 
         AddPredefinedNode(SystemContext, folder);
         return folder;
@@ -359,10 +375,7 @@ internal class CustomNodeManager : CustomNodeManager2
             ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasProperty
         };
 
-        if (parentNode != null)
-        {
-            parentNode.AddChild(variable);
-        }
+        parentNode?.AddChild(variable);
 
         AddPredefinedNode(SystemContext, variable);
         return variable;
