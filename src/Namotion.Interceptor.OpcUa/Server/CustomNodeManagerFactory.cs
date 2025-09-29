@@ -9,14 +9,7 @@ internal class CustomNodeManagerFactory : INodeManagerFactory
     private readonly OpcUaSubjectServerSource _source;
     private readonly OpcUaServerConfiguration _configuration;
 
-    public StringCollection NamespacesUris => new([
-        "https://foobar/",
-        "http://opcfoundation.org/UA/",
-        "http://opcfoundation.org/UA/DI/",
-        "http://opcfoundation.org/UA/PADIM",
-        "http://opcfoundation.org/UA/Machinery/",
-        "http://opcfoundation.org/UA/Machinery/ProcessValues"
-    ]);
+    public StringCollection NamespacesUris => new(_configuration.GetNamespaceUris());
 
     public CustomNodeManagerFactory(IInterceptorSubject subject, OpcUaSubjectServerSource source, OpcUaServerConfiguration configuration)
     {

@@ -47,7 +47,7 @@ public static class OpcUaSubjectServerExtensions
                     RootName = rootName,
                     SourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
                     TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
-                    ValueConverter = new OpcUaDataValueConverter(),
+                    ValueConverter = new OpcUaValueConverter(),
                     SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)
                 };
                 
@@ -98,7 +98,7 @@ public static class OpcUaSubjectServerExtensions
                 {
                     RootName = rootName,
                     SourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
-                    ValueConverter = new OpcUaDataValueConverter()
+                    ValueConverter = new OpcUaValueConverter()
                 };
 
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);

@@ -329,7 +329,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 var property = _configuration.SourcePathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
                 if (property is null)
                 {
-                    if (!_configuration.AddDynamicProperties)
+                    if (!_configuration.AddUnknownNodesAsDynamicProperties)
                         continue;
                     
                     // Infer CLR type from OPC UA variable metadata if possible

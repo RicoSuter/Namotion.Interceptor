@@ -10,17 +10,17 @@ public class OpcUaClientConfiguration
 
     public string? RootName { get; init; }
     
-    public required ISourcePathProvider SourcePathProvider { get; init; }
-
     public string ApplicationName { get; init; } = "Namotion.Interceptor.Client";
     
     public int MaxItemsPerSubscription { get; init; } = 1000;
     
-    public bool AddDynamicProperties { get; init; } = true;
+    public bool AddUnknownNodesAsDynamicProperties { get; init; } = true;
+
+    public required ISourcePathProvider SourcePathProvider { get; init; }
 
     public required OpcUaTypeResolver TypeResolver { get; init; }
     
-    public required OpcUaDataValueConverter ValueConverter { get; init; }
+    public required OpcUaValueConverter ValueConverter { get; init; }
     
     public required OpcUaSubjectFactory SubjectFactory { get; init; }
 
