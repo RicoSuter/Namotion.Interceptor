@@ -1,6 +1,5 @@
 ﻿using System.Collections.Concurrent;
 using System.Collections.Frozen;
-using System.Collections.ObjectModel;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Interceptors;
 
@@ -18,12 +17,12 @@ public class DynamicSubject : IInterceptorSubject
 
     public DynamicSubject()
     {
-        _properties = ReadOnlyDictionary<string, SubjectPropertyMetadata>.Empty;
+        _properties = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
     }
     
     protected DynamicSubject(IEnumerable<SubjectPropertyMetadata> properties)
     {
-        _properties = properties.ToDictionary(p => p.Name, p => p);
+        _properties = properties.ToFrozenDictionary(p => p.Name, p => p);
     }
     
     [JsonIgnore] IInterceptorSubjectContext IInterceptorSubject.Context => _context ??= new InterceptorExecutor(this);
