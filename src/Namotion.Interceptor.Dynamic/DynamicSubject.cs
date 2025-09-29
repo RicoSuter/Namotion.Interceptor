@@ -8,18 +8,22 @@ namespace Namotion.Interceptor.Dynamic;
 
 public class DynamicSubject : IInterceptorSubject
 {
-    private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties
-        = ReadOnlyDictionary<string, SubjectPropertyMetadata>.Empty;
-
     private IInterceptorExecutor? _context;
-
-    public DynamicSubject()
-    {
-    }
+    private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties;
 
     public DynamicSubject(IInterceptorSubjectContext context) : this()
     {
         ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+    }
+
+    public DynamicSubject()
+    {
+        _properties = ReadOnlyDictionary<string, SubjectPropertyMetadata>.Empty;
+    }
+    
+    protected DynamicSubject(IEnumerable<SubjectPropertyMetadata> properties)
+    {
+        _properties = properties.ToDictionary(p => p.Name, p => p);
     }
     
     [JsonIgnore] IInterceptorSubjectContext IInterceptorSubject.Context => _context ??= new InterceptorExecutor(this);
