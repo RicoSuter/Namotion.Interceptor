@@ -17,7 +17,7 @@ public static class InterceptorSubjectContextExtensions
     /// <returns>The observable.</returns>
     public static IObservable<SubjectPropertyChange> GetPropertyChangedObservable(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
     {
-        scheduler = scheduler ?? Scheduler.Default;
+        scheduler ??= Scheduler.Default;
         return context
             .GetService<PropertyChangedObservable>()
             .Publish()
