@@ -479,7 +479,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)
             {
                 var registeredProperty = change.Property.GetRegisteredProperty();
-                var (value, _) = _configuration.ValueConverter.ConvertToNodeValue(change.NewValue, registeredProperty.Type);
+                var value = _configuration.ValueConverter.ConvertToNodeValue(change.NewValue, registeredProperty.Type);
                 var writeValue = new WriteValue
                 {
                     NodeId = nodeId,

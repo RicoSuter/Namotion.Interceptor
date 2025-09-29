@@ -157,16 +157,14 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private void CreateVariableNode(string propertyName, RegisteredSubjectProperty property, NodeId parentNodeId, string parentPath)
     {
-        var (value, type) = _configuration.ValueConverter.ConvertToNodeValue(property.GetValue(), property.Type);
+        var value = _configuration.ValueConverter.ConvertToNodeValue(property.GetValue(), property.Type);
+        var typeInfo = _configuration.ValueConverter.GetNodeTypeInfo(property.Type);
 
         var nodeId = new NodeId(parentPath + propertyName, NamespaceIndex);
         var browseName = GetBrowseName(propertyName, property, null);
 
-        var dataTypeInfo = Opc.Ua.TypeInfo.Construct(type);
         var referenceTypeId = GetReferenceTypeId(property);
-
-        var valueRank = GetValueRank(type);
-        var variable = CreateVariableNode(parentNodeId, nodeId, browseName, dataTypeInfo, valueRank, referenceTypeId);
+        var variable = CreateVariableNode(parentNodeId, nodeId, browseName, typeInfo, referenceTypeId);
 
         // Adjust access according to property setter
         if (!property.HasSetter)
@@ -224,31 +222,6 @@ internal class CustomNodeManager : CustomNodeManager2
 
             _subjects[registeredSubject] = node;
         }
-    }
-
-    private static int GetValueRank(Type type)
-    {
-        if (type == typeof(string))
-        {
-            return -1;
-        }
-
-        if (type.IsArray)
-        {
-            return type.GetArrayRank();
-        }
-
-        if (type.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>)))
-        {
-            return 1;
-        }
-
-        if (typeof(IEnumerable).IsAssignableFrom(type))
-        {
-            return 1;
-        }
-
-        return -1;
     }
 
     private static NodeId? GetReferenceTypeId(RegisteredSubjectProperty property)
@@ -352,7 +325,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private BaseDataVariableState CreateVariableNode(
         NodeId parentNodeId, NodeId nodeId, QualifiedName browseName,
-        Opc.Ua.TypeInfo dataType, int valueRank, NodeId? referenceType)
+        Opc.Ua.TypeInfo dataType, NodeId? referenceType)
     {
         var parentNode = FindNodeInAddressSpace(parentNodeId);
 
@@ -366,7 +339,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
             TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
             DataType = Opc.Ua.TypeInfo.GetDataTypeId(dataType),
-            ValueRank = valueRank,
+            ValueRank = dataType.ValueRank,
             AccessLevel = AccessLevels.CurrentReadOrWrite,
             UserAccessLevel = AccessLevels.CurrentReadOrWrite,
             StatusCode = StatusCodes.Good,
