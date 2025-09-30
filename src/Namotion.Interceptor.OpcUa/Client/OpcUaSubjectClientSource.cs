@@ -420,7 +420,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             if (p.ReflectionAttributes.OfType<OpcUaNodeAttribute>().SingleOrDefault() is { } opcUaNodeAttribute 
                 && opcUaNodeAttribute.NodeIdentifier == nodeId)
             {
-                var propertyNodeNamespaceUri = opcUaNodeAttribute.NodeNamespaceUri ?? _session!.NamespaceUris.ToArray().First(); // TODO: Find better way to get default namespace URI
+                var propertyNodeNamespaceUri = opcUaNodeAttribute.NodeNamespaceUri ?? _session!.NamespaceUris.GetString(0);
                 if (propertyNodeNamespaceUri == nodeNamespaceUri)
                 {
                     return p;
