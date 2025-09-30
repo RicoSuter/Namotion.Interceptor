@@ -2,23 +2,23 @@
 
 namespace Namotion.Interceptor.OpcUa.Annotations;
 
-public class OpcUaNodeAttribute : SourcePathAttribute, IOpcUaBrowseNameProvider
+public class OpcUaNodeAttribute : SourcePathAttribute
 {
-    public OpcUaNodeAttribute(string browseName, string browseNamespace, string? sourceName = null, string? path = null)
-        : base(sourceName ?? "opc", path ?? browseName)
+    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri, string? sourceName = null)
+        : base(sourceName ?? "opc", browseName)
     {
         BrowseName = browseName;
-        BrowseNamespace = browseNamespace;
+        BrowseNamespaceUri = browseNamespaceUri;
     }
 
     public string BrowseName { get; }
 
-    public string BrowseNamespace { get; }
-}
+    /// <summary>
+    /// Gets the namespace URI of the BrowseName (uses default namespace when null).
+    /// </summary>
+    public string? BrowseNamespaceUri { get; }
 
-public interface IOpcUaBrowseNameProvider
-{
-    string BrowseName { get; }
+    public string? NodeIdentifier { get; set; }
 
-    string BrowseNamespace { get; }
+    public string? NodeNamespaceUri { get; set; }
 }
