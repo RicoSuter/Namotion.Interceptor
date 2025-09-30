@@ -25,13 +25,13 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     public TProperty NewValue { get; set; }
 
-    public PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue)
+    public PropertyWriteContext(IInterceptorSubject property, string propertyName, Func<IInterceptorSubject, TProperty>? readValue, TProperty newValue)
     {
-        Property = property;
-        CurrentValue = currentValue;
+        Property = new PropertyReference(property, propertyName);
+        CurrentValue = readValue is not null ? readValue(property) : default!;
         NewValue = newValue;
     }
-    
+
     /// <summary>
     /// Reads the current property value (might be different from <see cref="NewValue"/> if the property is derived).
     /// Must only be used after the 'next()' call in the write interceptor.
