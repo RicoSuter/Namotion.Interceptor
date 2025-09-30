@@ -381,20 +381,19 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                             (uint)NodeClass.Variable | (uint)NodeClass.Object,
                             cancellationToken);
                         
-                        var childSubjectList = childNodeProperties
+                        var children = childNodeProperties
                             .SelectMany(p => p)
-                            .Select(p => new
+                            .Select((p, i) => new
                             {
-                                Node = p, // TODO: Use ISubjectFactory to create the subject
-                                Subject = (IInterceptorSubject)Activator.CreateInstance(
-                                    property.Type.IsArray ? property.Type.GetElementType()! : property.Type.GenericTypeArguments[0])!
+                                Node = p,
+                                Subject = DefaultSubjectFactory.Instance.CreateCollectionSubject(property, i)
                             })
                             .ToList();
 
-                        var collection = DefaultSubjectFactory.Instance.CreateSubjectCollection(property.Type, childSubjectList.Select(p => p.Subject));
+                        var collection = DefaultSubjectFactory.Instance.CreateSubjectCollection(property.Type, children.Select(p => p.Subject));
                         property.SetValue(collection);
 
-                        foreach (var child in childSubjectList)
+                        foreach (var child in children)
                         {
                             await LoadSubjectAsync(child.Subject, child.Node, monitoredItems, cancellationToken);
                         }
