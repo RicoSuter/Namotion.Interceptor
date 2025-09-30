@@ -17,7 +17,7 @@ internal class CustomNodeManager : CustomNodeManager2
     private readonly OpcUaSubjectServerSource _source;
     private readonly OpcUaServerConfiguration _configuration;
 
-    private readonly Dictionary<RegisteredSubject, FolderState> _subjects = new();
+    private readonly Dictionary<RegisteredSubject, NodeState> _subjects = new();
 
     public CustomNodeManager(
         IInterceptorSubject subject,
@@ -48,7 +48,7 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             if (_configuration.RootName is not null)
             {
-                var node = CreateFolder(ObjectIds.ObjectsFolder, 
+                var node = CreateFolderNode(ObjectIds.ObjectsFolder, 
                     new NodeId(_configuration.RootName, NamespaceIndex), _configuration.RootName, null, null);
 
                 CreateObjectNode(node.NodeId, registeredSubject, _configuration.RootName + PathDelimiter);
@@ -123,7 +123,7 @@ internal class CustomNodeManager : CustomNodeManager2
         var typeDefinitionId = GetTypeDefinitionId(property);
         var referenceTypeId = GetReferenceTypeId(property);
 
-        var propertyNode = CreateFolder(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
+        var propertyNode = CreateFolderNode(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
 
         // Child objects below the array folder use path: parentPath + propertyName + "[index]"
         var childReferenceTypeId = GetChildReferenceTypeId(property);
@@ -144,7 +144,7 @@ internal class CustomNodeManager : CustomNodeManager2
         var typeDefinitionId = GetTypeDefinitionId(property);
         var referenceTypeId = GetReferenceTypeId(property);
 
-        var propertyNode = CreateFolder(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
+        var propertyNode = CreateFolderNode(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
         var childReferenceTypeId = GetChildReferenceTypeId(property);
         foreach (var child in children)
         {
@@ -228,7 +228,7 @@ internal class CustomNodeManager : CustomNodeManager2
             var nodeId = GetNodeId(property, path);
             var typeDefinitionId = GetTypeDefinitionId(subject);
 
-            var node = CreateFolder(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
+            var node = CreateObjectNode(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
             CreateObjectNode(node.NodeId, registeredSubject, path + PathDelimiter);
 
             _subjects[registeredSubject] = node;
@@ -307,7 +307,7 @@ internal class CustomNodeManager : CustomNodeManager2
         return new QualifiedName(browseNameProvider.BrowseName, NamespaceIndex);
     }
 
-    private FolderState CreateFolder(
+    private FolderState CreateFolderNode(
         NodeId parentNodeId,
         NodeId nodeId,
         QualifiedName browseName,
@@ -316,7 +316,7 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         var parentNode = FindNodeInAddressSpace(parentNodeId);
 
-        var folder = new FolderState(parentNode)
+        var folderNode = new FolderState(parentNode)
         {
             NodeId = nodeId,
             BrowseName = browseName,
@@ -327,10 +327,36 @@ internal class CustomNodeManager : CustomNodeManager2
             ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasComponent
         };
 
-        parentNode?.AddChild(folder);
+        parentNode?.AddChild(folderNode);
 
-        AddPredefinedNode(SystemContext, folder);
-        return folder;
+        AddPredefinedNode(SystemContext, folderNode);
+        return folderNode;
+    }
+    
+    private BaseObjectState CreateObjectNode(
+        NodeId parentNodeId,
+        NodeId nodeId,
+        QualifiedName browseName,
+        NodeId? typeDefinition,
+        NodeId? referenceType)
+    {
+        var parentNode = FindNodeInAddressSpace(parentNodeId);
+
+        var objectNode = new BaseObjectState(parentNode)
+        {
+            NodeId = nodeId,
+            BrowseName = browseName,
+            DisplayName = new Opc.Ua.LocalizedText(browseName.Name),
+            TypeDefinitionId = typeDefinition ?? ObjectTypeIds.BaseObjectType,
+            WriteMask = AttributeWriteMask.None,
+            UserWriteMask = AttributeWriteMask.None,
+            ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasComponent
+        };
+
+        parentNode?.AddChild(objectNode);
+
+        AddPredefinedNode(SystemContext, objectNode);
+        return objectNode;
     }
 
     private BaseDataVariableState CreateVariableNode(
