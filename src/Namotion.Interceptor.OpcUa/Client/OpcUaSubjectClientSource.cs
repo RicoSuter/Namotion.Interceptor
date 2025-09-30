@@ -7,13 +7,13 @@ using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
 using System.Collections.Concurrent;
+using Namotion.Interceptor.OpcUa.Annotations;
 using Namotion.Interceptor.Sources.Paths.Attributes;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
 internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 {
-    private const string PathDelimiter = ".";
     private const string OpcVariableKey = "OpcVariable";
 
     private readonly IInterceptorSubject _subject;
@@ -109,7 +109,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 if (rootNode is not null)
                 {
                     var monitoredItems = new List<MonitoredItem>();
-                    await LoadSubjectAsync(_subject, rootNode, monitoredItems, _configuration.RootName ?? string.Empty, linked.Token);
+                    await LoadSubjectAsync(_subject, rootNode, monitoredItems, linked.Token);
 
                     if (monitoredItems.Count > 0)
                     {
@@ -307,7 +307,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         });
     }
 
-    private async Task LoadSubjectAsync(IInterceptorSubject subject, ReferenceDescription node, List<MonitoredItem> monitoredItems, string prefix, CancellationToken cancellationToken)
+    private async Task LoadSubjectAsync(IInterceptorSubject subject, ReferenceDescription node, List<MonitoredItem> monitoredItems, CancellationToken cancellationToken)
     {
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is not null && _session is not null)
@@ -326,7 +326,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             
             foreach (var nodeRef in nodeProperties.SelectMany(p => p))
             {
-                var property = _configuration.SourcePathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
+                var property = FindSubjectProperty(registeredSubject, nodeRef);
                 if (property is null)
                 {
                     if (!_configuration.AddUnknownNodesAsDynamicProperties)
@@ -349,21 +349,20 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 var propertyName = GetPropertyName(property);
                 if (propertyName is not null)
                 {
+                    var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, _session.NamespaceUris);
                     // TODO: Do the same in the server
                     if (property.IsSubjectReference)
                     {
-                        var collectionPath = CombinePath(prefix, propertyName);
-
                         var children = property.Children;
                         if (children.Count != 0)
                         {
-                            await LoadSubjectAsync(children.Single().Subject, node, monitoredItems, collectionPath, cancellationToken);
+                            await LoadSubjectAsync(children.Single().Subject, node, monitoredItems, cancellationToken);
                         }
                         else
                         {
                             var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeRef, _session, cancellationToken);
                             newSubject.Context.AddFallbackContext(subject.Context);
-                            await LoadSubjectAsync(newSubject, nodeRef, monitoredItems, collectionPath, cancellationToken);
+                            await LoadSubjectAsync(newSubject, nodeRef, monitoredItems, cancellationToken);
                             property.SetValueFromSource(this, null, newSubject);
                         }
                     }
@@ -371,7 +370,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     {
                         // TODO: Reuse property.Children?
 
-                        var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, _session.NamespaceUris);
                         var (_, _ , childNodeProperties, _) = await _session.BrowseAsync(
                             null,
                             null,
@@ -396,12 +394,9 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                         var collection = DefaultSubjectFactory.Instance.CreateSubjectCollection(property.Type, childSubjectList.Select(p => p.Subject));
                         property.SetValue(collection);
 
-                        var pathIndex = 0;
                         foreach (var child in childSubjectList)
                         {
-                            var fullPath = CombinePath(prefix, propertyName) + $"[{pathIndex}]";
-                            await LoadSubjectAsync(child.Subject, child.Node, monitoredItems, fullPath, cancellationToken);
-                            pathIndex++;
+                            await LoadSubjectAsync(child.Subject, child.Node, monitoredItems, cancellationToken);
                         }
                     }
                     else if (property.IsSubjectDictionary)
@@ -410,28 +405,41 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     }
                     else
                     {
-                        MonitorValueNode(CombinePath(prefix, propertyName), property, node, monitoredItems);
+                        MonitorValueNode(childNodeId, property, monitoredItems);
                     }
                 }
             }
         }
     }
 
-    private static string CombinePath(string prefix, string segment)
+    private RegisteredSubjectProperty? FindSubjectProperty(RegisteredSubject registeredSubject, ReferenceDescription nodeRef)
     {
-        return string.IsNullOrEmpty(prefix) ? segment : prefix + PathDelimiter + segment;
+        var nodeId = nodeRef.NodeId.Identifier.ToString();
+        var nodeNamespaceUri = nodeRef.NodeId.NamespaceUri;
+        foreach (var p in registeredSubject.Properties)
+        {
+            if (p.ReflectionAttributes.OfType<OpcUaNodeAttribute>().SingleOrDefault() is { } opcUaNodeAttribute 
+                && opcUaNodeAttribute.NodeIdentifier == nodeId)
+            {
+                var propertyNodeNamespaceUri = opcUaNodeAttribute.NodeNamespaceUri ?? _session!.NamespaceUris.ToArray().First(); // TODO: Find better way to get default namespace URI
+                if (propertyNodeNamespaceUri == nodeNamespaceUri)
+                {
+                    return p;
+                }
+            }
+        }
+
+        return _configuration.SourcePathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
     }
 
-    private void MonitorValueNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription node, List<MonitoredItem> monitoredItems)
+    private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
     {
-        // Monitor reads for all properties; write capability is enforced on server side via AccessLevel
-        var nodeId = new NodeId(fullPath, node.NodeId.NamespaceIndex);
         var monitoredItem = new MonitoredItem
         {
             StartNodeId = nodeId,
             MonitoringMode = MonitoringMode.Reporting,
             AttributeId = Opc.Ua.Attributes.Value,
-            DisplayName = fullPath,
+            // DisplayName = nodeId.Identifier.ToString(),
             SamplingInterval = 0,
 
             // Delay ClientHandle mapping until after the item is added to a subscription.
@@ -472,15 +480,19 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (_session is null)
+        {
+            // TODO: What to do here? Store and write with the next write?
             return;
+        }
 
+        var writeValues = new WriteValueCollection();
         foreach (var change in changes)
         {
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)
             {
                 var registeredProperty = change.Property.GetRegisteredProperty();
                 var value = _configuration.ValueConverter.ConvertToNodeValue(change.NewValue, registeredProperty.Type);
-                var writeValue = new WriteValue
+                writeValues.Add(new WriteValue
                 {
                     NodeId = nodeId,
                     AttributeId = Opc.Ua.Attributes.Value,
@@ -491,26 +503,24 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                         //ServerTimestamp = DateTime.UtcNow,
                         SourceTimestamp = change.Timestamp.UtcDateTime
                     }
-                };
-
-                var writeValues = new WriteValueCollection { writeValue };
-                var writeResponse = await _session.WriteAsync(null, writeValues, cancellationToken);
-
-                if (writeResponse.Results.Any(StatusCode.IsBad))
-                {
-                    _logger.LogError("Failed to write some variables.");
-
-                    // var badVariableStatusCodes = writeResponse.Results
-                    //     .Where(StatusCode.IsBad)
-                    //     .ToDictionary(wr => , wr => wr.Code);
-                    //
-                    // throw new ConnectionException(_connectionOptions,
-                    //     $"Unexpected Error during writing variables. Variables: {badVariableStatusCodes.Keys.Join(Environment.NewLine)}")
-                    // {
-                    //     Data = { ["BadVariableStatusCodeDictionary"] = badVariableStatusCodes }
-                    // };
-                }
+                });
             }
+        }
+        
+        var writeResponse = await _session.WriteAsync(null, writeValues, cancellationToken);
+        if (writeResponse.Results.Any(StatusCode.IsBad))
+        {
+            _logger.LogError("Failed to write some variables.");
+
+            // var badVariableStatusCodes = writeResponse.Results
+            //     .Where(StatusCode.IsBad)
+            //     .ToDictionary(wr => , wr => wr.Code);
+            //
+            // throw new ConnectionException(_connectionOptions,
+            //     $"Unexpected Error during writing variables. Variables: {badVariableStatusCodes.Keys.Join(Environment.NewLine)}")
+            // {
+            //     Data = { ["BadVariableStatusCodeDictionary"] = badVariableStatusCodes }
+            // };
         }
     }
 }

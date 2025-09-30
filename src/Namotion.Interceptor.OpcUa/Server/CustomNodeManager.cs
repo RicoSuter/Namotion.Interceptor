@@ -282,16 +282,15 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private QualifiedName GetBrowseName(string propertyName, RegisteredSubjectProperty property, object? index)
     {
-        var browseNameProvider = property.ReflectionAttributes.OfType<IOpcUaBrowseNameProvider>().SingleOrDefault();
+        var browseNameProvider = property.ReflectionAttributes.OfType<OpcUaNodeAttribute>().SingleOrDefault();
         if (browseNameProvider is null)
         {
             return new QualifiedName(propertyName + (index is not null ? $"[{index}]" : string.Empty), NamespaceIndex);
         }
 
-        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
-        if (browseNameProvider.BrowseNamespace is not null)
+        if (browseNameProvider.BrowseNamespaceUri is not null)
         {
-            return new QualifiedName(browseNameProvider.BrowseName, (ushort)SystemContext.NamespaceUris.GetIndex(browseNameProvider.BrowseNamespace));
+            return new QualifiedName(browseNameProvider.BrowseName, (ushort)SystemContext.NamespaceUris.GetIndex(browseNameProvider.BrowseNamespaceUri));
         }
 
         return new QualifiedName(browseNameProvider.BrowseName, NamespaceIndex);
