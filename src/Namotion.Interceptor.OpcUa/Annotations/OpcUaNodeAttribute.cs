@@ -13,6 +13,9 @@ public class OpcUaNodeAttribute : SourcePathAttribute
 
     public string BrowseName { get; }
 
+    /// <summary>
+    /// Gets the namespace URI of the BrowseName (uses default namespace when null).
+    /// </summary>
     public string? BrowseNamespaceUri { get; }
 
     public string? NodeIdentifier { get; set; }
