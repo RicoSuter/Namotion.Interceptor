@@ -273,19 +273,26 @@ namespace {namespaceName}
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
         {{
-            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+            if (_context is not null)
+            {{
+                var readContext = new PropertyReadContext(this, propertyName);
+                return _context.ExecuteInterceptedRead(ref readContext, readValue);
+            }}
+
+            return readValue(this);
         }}
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
         {{
-            if (_context is null)
+            if (_context is not null)
             {{
-                setValue(this, newValue);
+                var writeContext = new PropertyWriteContext<TProperty>(this, propertyName, readValue, newValue);
+                _context.ExecuteInterceptedWrite(ref writeContext, setValue);
             }}
             else
             {{
-                _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                setValue(this, newValue);
             }}
         }}
 

@@ -8,18 +8,6 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
     {
         _subject = subject;
     }
-    
-    public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
-    {
-        var context = new PropertyReadContext(_subject, propertyName);
-        return _subject.Context.ExecuteInterceptedRead(ref context, readValue);
-    }
-    
-    public void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty>? readValue, Action<IInterceptorSubject, TProperty> writeValue)
-    {
-        var context = new PropertyWriteContext<TProperty>(_subject, propertyName, readValue, newValue); 
-        _subject.Context.ExecuteInterceptedWrite(ref context, writeValue);
-    }
 
     public object? InvokeMethod(string methodName, object?[] parameters, Func<object?[], object?> invokeMethod)
     {
