@@ -1,5 +1,4 @@
-﻿using Namotion.Interceptor.OpcUa.Annotations;
-using Namotion.Interceptor.Sources.Paths;
+﻿using Namotion.Interceptor.Sources.Paths;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 using Opc.Ua.Export;
@@ -79,9 +78,8 @@ public class OpcUaServerConfiguration
             {
                 // Base addresses kept minimal (tcp only). Add https if required later.
                 BaseAddresses = { "opc.tcp://localhost:4840/" },
-                SecurityPolicies = new ServerSecurityPolicyCollection
-                {
-                    // Order matches typical preference: strong -> none at end.
+                SecurityPolicies =
+                [
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.Sign, SecurityPolicyUri = SecurityPolicies.Basic256Sha256 },
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.SignAndEncrypt, SecurityPolicyUri = SecurityPolicies.Basic256Sha256 },
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.Sign, SecurityPolicyUri = SecurityPolicies.Aes128_Sha256_RsaOaep },
@@ -89,13 +87,13 @@ public class OpcUaServerConfiguration
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.Sign, SecurityPolicyUri = SecurityPolicies.Aes256_Sha256_RsaPss },
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.SignAndEncrypt, SecurityPolicyUri = SecurityPolicies.Aes256_Sha256_RsaPss },
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.None, SecurityPolicyUri = SecurityPolicies.None }
-                },
-                UserTokenPolicies = new UserTokenPolicyCollection
-                {
+                ],
+                UserTokenPolicies =
+                [
                     new UserTokenPolicy(UserTokenType.Anonymous) { SecurityPolicyUri = SecurityPolicies.None },
                     new UserTokenPolicy(UserTokenType.UserName) { SecurityPolicyUri = SecurityPolicies.Basic256Sha256 },
                     new UserTokenPolicy(UserTokenType.Certificate) { SecurityPolicyUri = SecurityPolicies.Basic256Sha256 }
-                },
+                ],
                 DiagnosticsEnabled = true,
                 MaxSessionCount = 100,
                 MinSessionTimeout = 10_000,
@@ -125,7 +123,7 @@ public class OpcUaServerConfiguration
                     MaxMonitoredItemsPerCall = 1000
                 },
                 // Minimal capability list (DA) to reflect XML ServerCapabilities.
-                ServerCapabilities = new StringCollection { "DA" }
+                ServerCapabilities = ["DA"]
             },
             DisableHiResClock = true,
             TraceConfiguration = new TraceConfiguration
