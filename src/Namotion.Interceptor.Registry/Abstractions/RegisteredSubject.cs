@@ -122,13 +122,13 @@ public record RegisteredSubject
             getValue is not null ? s =>
                 {
                     var readContext = new PropertyReadContext(Subject, name);
-                    return ((IInterceptorExecutor)s.Context).ExecuteInterceptedRead(ref readContext, getValue);
+                    return s.Context.ExecuteInterceptedRead(ref readContext, getValue);
                 }
                 : null, 
             setValue is not null ? (s, v) =>
                 {
                     var writeContext = new PropertyWriteContext<object?>(Subject, name, getValue, v);
-                    ((IInterceptorExecutor)s.Context).ExecuteInterceptedWrite(ref writeContext, setValue);
+                    s.Context.ExecuteInterceptedWrite(ref writeContext, setValue);
                 }
                 : null, 
             isIntercepted: true,
