@@ -164,24 +164,24 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         action(ref context, writeValue);
     }
 
-    // public object? InvokeMethod(IInterceptorSubject subject, string methodName, object?[] parameters, Func<object?[], object?> invokeMethod)
-    // {
-    //     var methodInterceptors = GetServices<IMethodInterceptor>();
-    //
-    //     var returnInvokeMethod = new InvokeMethodInterceptionDelegate((ref context) => invokeMethod(context.Parameters));
-    //     foreach (var handler in methodInterceptors)
-    //     {
-    //         var previousInvokeMethod = returnInvokeMethod;
-    //         returnInvokeMethod = (ref innerContext) =>
-    //         {
-    //             return handler.InvokeMethod(innerContext,
-    //                 (ref innerInnerContext) => previousInvokeMethod(ref innerInnerContext));
-    //         };
-    //     }
-    //
-    //     var context = new MethodInvocationContext(subject, methodName, parameters); 
-    //     return returnInvokeMethod(ref context);
-    // }
+    public object? InvokeMethod(IInterceptorSubject subject, string methodName, object?[] parameters, Func<object?[], object?> invokeMethod)
+    {
+        var methodInterceptors = GetServices<IMethodInterceptor>();
+
+        var returnInvokeMethod = new InvokeMethodInterceptionDelegate((ref context) => invokeMethod(context.Parameters));
+        foreach (var handler in methodInterceptors)
+        {
+            var previousInvokeMethod = returnInvokeMethod;
+            returnInvokeMethod = (ref innerContext) =>
+            {
+                return handler.InvokeMethod(innerContext,
+                    (ref innerInnerContext) => previousInvokeMethod(ref innerInnerContext));
+            };
+        }
+
+        var context = new MethodInvocationContext(subject, methodName, parameters); 
+        return returnInvokeMethod(ref context);
+    }
     
     delegate TProperty ReadFunc<TProperty>(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> func);
 

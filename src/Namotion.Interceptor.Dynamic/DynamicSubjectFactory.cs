@@ -71,7 +71,7 @@ public class DynamicSubjectFactory
             }
             
             var subject = (IInterceptorSubject)invocation.Proxy;
-            var context = (IInterceptorExecutor)subject.Context;
+            var context = subject.Context;
 
             if (invocation.Method.IsSpecialName &&
                 invocation.Method.Name.StartsWith("get_"))
@@ -99,6 +99,7 @@ public class DynamicSubjectFactory
             else
             {
                 invocation.ReturnValue = context.InvokeMethod(
+                    subject,
                     invocation.Method.Name, invocation.Arguments, parameters =>
                     {
                         parameters.CopyTo(invocation.Arguments, 0);

@@ -110,7 +110,7 @@ namespace {namespaceName}
 {{
     public partial class {className} : IInterceptorSubject
     {{
-        private IInterceptorExecutor? _context;
+        private IInterceptorSubjectContext? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
         [JsonIgnore]
@@ -299,7 +299,7 @@ namespace {namespaceName}
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
         {{
-            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(parameters);
+            return _context is not null ? _context.InvokeMethod(this, methodName, parameters, invokeMethod) : invokeMethod(parameters);
         }}
     }}
 }}
