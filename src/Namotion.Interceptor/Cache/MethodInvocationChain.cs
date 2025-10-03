@@ -15,6 +15,7 @@ internal sealed class MethodInvocationChain<TInterceptor>
     private readonly InvocationContinuationNode[] _continuations;
 
     [ThreadStatic]
+    // ReSharper disable once StaticMemberInGenericType
     private static Func<IInterceptorSubject, object?[], object?>? _threadLocalTerminal;
 
     public MethodInvocationChain(
