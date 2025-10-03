@@ -15,6 +15,7 @@ internal sealed class ReadInterceptorChain<TInterceptor, TProperty>
     private readonly ContinuationNode[] _continuations;
 
     [ThreadStatic]
+    // ReSharper disable once StaticMemberInGenericType
     private static Func<IInterceptorSubject, TProperty>? _threadLocalTerminal;
 
     public ReadInterceptorChain(

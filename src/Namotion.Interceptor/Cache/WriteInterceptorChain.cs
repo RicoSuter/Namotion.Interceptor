@@ -17,6 +17,7 @@ internal sealed class WriteInterceptorChain<TInterceptor, TProperty>
     // Using thread static per generic type instantiation, one per TProperty type,
     // this is required to make this is thread-safe
     [ThreadStatic]
+    // ReSharper disable once StaticMemberInGenericType
     private static Action<IInterceptorSubject, TProperty>? _threadLocalTerminal;
 
     public WriteInterceptorChain(
