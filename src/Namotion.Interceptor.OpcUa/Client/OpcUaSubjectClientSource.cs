@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
 using System.Collections.Concurrent;
-using Namotion.Interceptor.OpcUa.Annotations;
+using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Sources.Paths.Attributes;
 
 namespace Namotion.Interceptor.OpcUa.Client;
@@ -330,12 +330,21 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 if (property is null)
                 {
                     if (!_configuration.AddUnknownNodesAsDynamicProperties)
+                    {
                         continue;
+                    }
+
+                    if (registeredSubject.Properties.Any(p => p.Name == nodeRef.BrowseName.Name))
+                    {
+                        continue;
+                    }
                     
                     // Infer CLR type from OPC UA variable metadata if possible
                     var inferredType = await _configuration.TypeResolver.GetTypeForNodeAsync(_session, nodeRef, cancellationToken);
                     if (inferredType == typeof(object))
+                    {
                         continue;
+                    }
 
                     object? value = null;
                     property = registeredSubject.AddProperty(
@@ -414,13 +423,13 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     private RegisteredSubjectProperty? FindSubjectProperty(RegisteredSubject registeredSubject, ReferenceDescription nodeRef)
     {
         var nodeId = nodeRef.NodeId.Identifier.ToString();
-        var nodeNamespaceUri = nodeRef.NodeId.NamespaceUri;
+        var nodeNamespaceUri = _session!.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex);
         foreach (var p in registeredSubject.Properties)
         {
             if (p.ReflectionAttributes.OfType<OpcUaNodeAttribute>().SingleOrDefault() is { } opcUaNodeAttribute 
                 && opcUaNodeAttribute.NodeIdentifier == nodeId)
             {
-                var propertyNodeNamespaceUri = opcUaNodeAttribute.NodeNamespaceUri ?? _session!.NamespaceUris.GetString(0);
+                var propertyNodeNamespaceUri = opcUaNodeAttribute.NodeNamespaceUri ?? _configuration.DefaultNamespaceUri;
                 if (propertyNodeNamespaceUri == nodeNamespaceUri)
                 {
                     return p;

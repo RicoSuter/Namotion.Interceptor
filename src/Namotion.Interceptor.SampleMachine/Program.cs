@@ -1,5 +1,5 @@
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.OpcUa.Annotations;
+using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
