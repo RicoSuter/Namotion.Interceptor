@@ -208,7 +208,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} get => GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), (o) => (({className})o)._{propertyName});";
+            {modifiers} get => GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), static (o) => (({className})o)._{propertyName});";
 
                         }
 
@@ -223,7 +223,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, (o) => (({className})o)._{propertyName}, (o, v) => (({className})o)._{propertyName} = v);";
+            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, static (o) => (({className})o)._{propertyName}, static (o, v) => (({className})o)._{propertyName} = v);";
                         }
 
                         generatedCode +=
@@ -252,7 +252,7 @@ namespace {namespaceName}
     $@"
         public {returnType} {methodName}({string.Join(", ", parameters.Select(p => p.Type + " " + p.Name))})
         {{
-            return ({returnType})InvokeMethod(""{methodName}"", p => {fullMethodName}({directParameterCode}){invokeParameterCode})!;
+            return ({returnType})InvokeMethod(""{methodName}"", static (s, p) => (({className})s).{fullMethodName}({directParameterCode}){invokeParameterCode})!;
         }}
 ";
                         }
@@ -262,7 +262,7 @@ namespace {namespaceName}
     $@"
         public {returnType} {methodName}({string.Join(", ", parameters.Select(p => p.Type + " " + p.Name))})
         {{
-            InvokeMethod(""{methodName}"", p => {{ {fullMethodName}({directParameterCode}); return null; }}{invokeParameterCode});
+            InvokeMethod(""{methodName}"", static (s, p) => {{ (({className})s).{fullMethodName}({directParameterCode}); return null; }}{invokeParameterCode});
         }}
 ";
                         }
@@ -290,9 +290,9 @@ namespace {namespaceName}
         }}
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
+        private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
         {{
-            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(parameters);
+            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }}
     }}
 }}

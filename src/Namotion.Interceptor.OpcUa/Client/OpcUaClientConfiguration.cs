@@ -19,7 +19,7 @@ public class OpcUaClientConfiguration
     
     public int MaxItemsPerSubscription { get; init; } = 1000;
     
-    public bool AddUnknownNodesAsDynamicProperties { get; init; } = true;
+    public Func<ReferenceDescription, CancellationToken, Task<bool>>? AddUnknownNodesAsDynamicProperties { get; init; } = (_, _) => Task.FromResult(true);
 
     public required ISourcePathProvider SourcePathProvider { get; init; }
 

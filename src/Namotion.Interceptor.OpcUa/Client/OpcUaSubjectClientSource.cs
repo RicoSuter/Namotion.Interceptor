@@ -329,12 +329,15 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 var property = FindSubjectProperty(registeredSubject, nodeRef);
                 if (property is null)
                 {
-                    if (!_configuration.AddUnknownNodesAsDynamicProperties)
+                    if (registeredSubject.Properties.Any(p => p.Name == nodeRef.BrowseName.Name))
                     {
                         continue;
                     }
-
-                    if (registeredSubject.Properties.Any(p => p.Name == nodeRef.BrowseName.Name))
+                    
+                    var addAsDynamic = _configuration.AddUnknownNodesAsDynamicProperties is not null &&
+                        await _configuration.AddUnknownNodesAsDynamicProperties(nodeRef, cancellationToken);
+                
+                    if (!addAsDynamic)
                     {
                         continue;
                     }
