@@ -6,5 +6,5 @@ public interface IInterceptorExecutor : IInterceptorSubjectContext
 
     void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty>? readValue, Action<IInterceptorSubject, TProperty> writeValue);
     
-    object? InvokeMethod(string methodName, object?[] parameters, Func<object?[], object?> invokeMethod);
+    object? InvokeMethod(string methodName, object?[] parameters, Func<IInterceptorSubject, object?[], object?> invokeMethod);
 }
