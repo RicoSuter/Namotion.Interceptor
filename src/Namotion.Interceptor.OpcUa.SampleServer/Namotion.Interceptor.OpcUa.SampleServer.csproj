@@ -4,6 +4,7 @@
         <OutputType>Exe</OutputType>
         <TargetFramework>net9.0</TargetFramework>
         <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
         <ImplicitUsings>enable</ImplicitUsings>
         <UserSecretsId>dotnet-Namotion.Interceptor.OpcUa.SampleServer-411de461-5f00-4856-8d5f-25517d201d1b</UserSecretsId>
     </PropertyGroup>
