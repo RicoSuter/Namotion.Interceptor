@@ -295,30 +295,32 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Execute(ref PropertyWriteContext<TProperty> context, object terminal)
         {
-            ExecuteAtIndex(0, ref context, terminal);
+            WriteContinuationNode.CurrentTerminal = terminal;
+            ExecuteAtIndex(0, ref context);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void ExecuteAtIndex(int index, ref PropertyWriteContext<TProperty> context, object terminal)
+        private void ExecuteAtIndex(int index, ref PropertyWriteContext<TProperty> context)
         {
             if (index >= _interceptors.Length)
             {
-                _executeTerminal(ref context, terminal);
+                _executeTerminal(ref context, WriteContinuationNode.CurrentTerminal);
                 return;
             }
 
             var interceptor = _interceptors[index];
             var continuation = _continuations[index];
             
-            continuation.SetState(terminal);
             _executeInterceptor(interceptor, ref context, continuation.ContinuationDelegate);
         }
 
         private sealed class WriteContinuationNode
         {
+            [ThreadStatic]
+            internal static object CurrentTerminal = null!;
+            
             private readonly WriteInterceptorChain<TInterceptor, TProperty> _chain;
             private readonly int _nextIndex;
-            private object _currentTerminal = null!;
 
             public readonly WriteInterceptionDelegate<TProperty> ContinuationDelegate;
 
@@ -331,15 +333,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void SetState(object terminal)
-            {
-                _currentTerminal = terminal;
-            }
-
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             private void ExecuteNext(ref PropertyWriteContext<TProperty> context)
             {
-                _chain.ExecuteAtIndex(_nextIndex, ref context, _currentTerminal);
+                _chain.ExecuteAtIndex(_nextIndex, ref context);
             }
         }
     }
@@ -373,29 +369,31 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public TProperty Execute(ref PropertyReadContext context, object terminal)
         {
-            return ExecuteAtIndex(0, ref context, terminal);
+            ContinuationNode.CurrentTerminal = terminal;
+            return ExecuteAtIndex(0, ref context);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private TProperty ExecuteAtIndex(int index, ref PropertyReadContext context, object terminal)
+        private TProperty ExecuteAtIndex(int index, ref PropertyReadContext context)
         {
             if (index >= _interceptors.Length)
             {
-                return _executeTerminal(ref context, terminal);
+                return _executeTerminal(ref context, ContinuationNode.CurrentTerminal);
             }
 
             var interceptor = _interceptors[index];
             var continuation = _continuations[index];
             
-            continuation.SetState(terminal);
             return _executeInterceptor(interceptor, ref context, continuation.ContinuationDelegate);
         }
 
         private sealed class ContinuationNode
         {
+            [ThreadStatic]
+            internal static object CurrentTerminal = null!;
+            
             private readonly ReadInterceptorChain<TInterceptor, TProperty> _chain;
             private readonly int _nextIndex;
-            private object _currentTerminal = null!;
 
             public readonly ReadInterceptionDelegate<TProperty> ContinuationDelegate;
 
@@ -408,15 +406,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void SetState(object terminal)
-            {
-                _currentTerminal = terminal;
-            }
-
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             private TProperty ExecuteNext(ref PropertyReadContext context)
             {
-                return _chain.ExecuteAtIndex(_nextIndex, ref context, _currentTerminal);
+                return _chain.ExecuteAtIndex(_nextIndex, ref context);
             }
         }
     }
