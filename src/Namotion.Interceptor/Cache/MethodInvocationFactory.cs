@@ -15,7 +15,7 @@ internal static class MethodInvocationFactory
         var chain = new MethodInvocationChain<IMethodInterceptor>(
             interceptorArray,
             static (interceptor, context, next) => interceptor.InvokeMethod(context, next),
-            static (ref context, innerInvokeMethod) => ((Func<IInterceptorSubject, object?[], object?>)innerInvokeMethod)(context.Subject, context.Parameters)
+            static (ref context, innerInvokeMethod) => innerInvokeMethod(context.Subject, context.Parameters)
         );
         return chain.Execute;
     }

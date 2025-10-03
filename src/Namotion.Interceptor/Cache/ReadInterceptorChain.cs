@@ -7,7 +7,7 @@ internal sealed class ReadInterceptorChain<TInterceptor, TProperty>
 {
     public delegate TProperty ExecuteInterceptorFunc(TInterceptor interceptor, ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> a);
 
-    public delegate TProperty ReadInterceptionFunc(ref PropertyReadContext context, object obj);
+    public delegate TProperty ReadInterceptionFunc(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> terminal);
 
     private readonly TInterceptor[] _interceptors;
     private readonly ExecuteInterceptorFunc _executeInterceptor;
@@ -15,8 +15,7 @@ internal sealed class ReadInterceptorChain<TInterceptor, TProperty>
     private readonly ContinuationNode[] _continuations;
 
     [ThreadStatic]
-    // ReSharper disable once StaticMemberInGenericType
-    private static object? _threadLocalTerminal;
+    private static Func<IInterceptorSubject, TProperty>? _threadLocalTerminal;
 
     public ReadInterceptorChain(
         TInterceptor[] interceptors,
@@ -35,7 +34,7 @@ internal sealed class ReadInterceptorChain<TInterceptor, TProperty>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TProperty Execute(ref PropertyReadContext context, object terminal)
+    public TProperty Execute(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> terminal)
     {
         _threadLocalTerminal = terminal;
         return ExecuteAtIndex(0, ref context);

@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Cache;
 
 internal sealed class WriteInterceptorChain<TInterceptor, TProperty>
 {
-    public delegate TProperty ExecuteTerminalFunc(ref PropertyWriteContext<TProperty> context, object obj);
+    public delegate TProperty ExecuteTerminalFunc(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> terminal);
 
     public delegate void ExecuteInterceptorAction(TInterceptor interceptor, ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> @delegate);
 
@@ -17,8 +17,7 @@ internal sealed class WriteInterceptorChain<TInterceptor, TProperty>
     // Using thread static per generic type instantiation, one per TProperty type,
     // this is required to make this is thread-safe
     [ThreadStatic]
-    // ReSharper disable once StaticMemberInGenericType
-    private static object? _threadLocalTerminal;
+    private static Action<IInterceptorSubject, TProperty>? _threadLocalTerminal;
 
     public WriteInterceptorChain(
         TInterceptor[] interceptors,
@@ -37,7 +36,7 @@ internal sealed class WriteInterceptorChain<TInterceptor, TProperty>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Execute(ref PropertyWriteContext<TProperty> context, object terminal)
+    public void Execute(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> terminal)
     {
         _threadLocalTerminal = terminal;
         ExecuteAtIndex(0, ref context);

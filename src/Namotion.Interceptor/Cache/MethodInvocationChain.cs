@@ -7,7 +7,7 @@ internal sealed class MethodInvocationChain<TInterceptor>
 {
     public delegate object? ExecuteInterceptorFunc(TInterceptor interceptor, MethodInvocationContext context, InvokeMethodInterceptionDelegate next);
 
-    public delegate object? ExecuteTerminalFunc(ref MethodInvocationContext context, object obj);
+    public delegate object? ExecuteTerminalFunc(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> terminal);
 
     private readonly TInterceptor[] _interceptors;
     private readonly ExecuteInterceptorFunc _executeInterceptor;
@@ -15,8 +15,7 @@ internal sealed class MethodInvocationChain<TInterceptor>
     private readonly InvocationContinuationNode[] _continuations;
 
     [ThreadStatic]
-    // ReSharper disable once StaticMemberInGenericType
-    private static object? _threadLocalTerminal;
+    private static Func<IInterceptorSubject, object?[], object?>? _threadLocalTerminal;
 
     public MethodInvocationChain(
         TInterceptor[] interceptors,
@@ -35,7 +34,7 @@ internal sealed class MethodInvocationChain<TInterceptor>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public object? Execute(ref MethodInvocationContext context, object terminal)
+    public object? Execute(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> terminal)
     {
         _threadLocalTerminal = terminal;
         return ExecuteAtIndex(0, ref context);
