@@ -12,6 +12,11 @@ public class OpcUaClientConfiguration
     
     public string ApplicationName { get; init; } = "Namotion.Interceptor.Client";
     
+    /// <summary>
+    /// Gets the default namespace URI to use when a [OpcUaNode] attribute defines a NodeIdentifier but no NodeNamespaceUri.
+    /// </summary>
+    public string? DefaultNamespaceUri { get; init; }
+    
     public int MaxItemsPerSubscription { get; init; } = 1000;
     
     public bool AddUnknownNodesAsDynamicProperties { get; init; } = true;
