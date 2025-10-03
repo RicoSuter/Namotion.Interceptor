@@ -15,7 +15,7 @@ internal static class ReadInterceptorFactory<TProperty>
         var chain = new ReadInterceptorChain<IReadInterceptor, TProperty>(
             interceptorArray,
             static (interceptor, ref interception, next) => interceptor.ReadProperty(ref interception, next),
-            static (ref interception, innerReadValue) => ((Func<IInterceptorSubject, TProperty>)innerReadValue)(interception.Property.Subject)
+            static (ref interception, innerReadValue) => innerReadValue(interception.Property.Subject)
         );
         return chain.Execute;
     }

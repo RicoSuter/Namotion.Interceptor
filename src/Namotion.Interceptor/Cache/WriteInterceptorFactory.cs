@@ -9,7 +9,7 @@ internal static class WriteInterceptorFactory<TProperty>
         var interceptorArray = interceptors.ToArray();
         if (interceptorArray.Length == 0)
         {
-            return static (ref interception, innerWriteValue) => { innerWriteValue(interception.Property.Subject, interception.NewValue); };
+            return static (ref interception, innerWriteValue) => innerWriteValue(interception.Property.Subject, interception.NewValue);
         }
 
         var chain = new WriteInterceptorChain<IWriteInterceptor, TProperty>(
@@ -17,8 +17,7 @@ internal static class WriteInterceptorFactory<TProperty>
             static (interceptor, ref context, next) => interceptor.WriteProperty(ref context, next),
             static (ref interception, innerWriteValue) =>
             {
-                var writeAction = (Action<IInterceptorSubject, TProperty>)innerWriteValue;
-                writeAction(interception.Property.Subject, interception.NewValue);
+                innerWriteValue(interception.Property.Subject, interception.NewValue);
                 return interception.NewValue;
             }
         );
