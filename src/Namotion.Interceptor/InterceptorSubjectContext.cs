@@ -275,6 +275,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         private readonly ExecuteInterceptorAction _executeInterceptor;
         private readonly ExecuteTerminalFunc _executeTerminal;
         private readonly WriteContinuationNode[] _continuations;
+        
+        // Using thread static per generic type instantiation, one per TProperty type,
+        // this is required to make this is thread-safe
+        [ThreadStatic]
+        // ReSharper disable once StaticMemberInGenericType
+        private static object? _threadLocalTerminal;
 
         public WriteInterceptorChain(
             TInterceptor[] interceptors,
@@ -295,7 +301,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Execute(ref PropertyWriteContext<TProperty> context, object terminal)
         {
-            WriteContinuationNode.CurrentTerminal = terminal;
+            _threadLocalTerminal = terminal;
             ExecuteAtIndex(0, ref context);
         }
 
@@ -304,7 +310,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (index >= _interceptors.Length)
             {
-                _executeTerminal(ref context, WriteContinuationNode.CurrentTerminal);
+                _executeTerminal(ref context, _threadLocalTerminal!);
                 return;
             }
 
@@ -316,9 +322,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         private sealed class WriteContinuationNode
         {
-            [ThreadStatic]
-            internal static object CurrentTerminal = null!;
-            
             private readonly WriteInterceptorChain<TInterceptor, TProperty> _chain;
             private readonly int _nextIndex;
 
@@ -328,7 +331,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             {
                 _chain = chain;
                 _nextIndex = nextIndex;
-
                 ContinuationDelegate = ExecuteNext;
             }
 
@@ -349,6 +351,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         private readonly ExecuteInterceptorFunc _executeInterceptor;
         private readonly ReadInterceptionFunc _executeTerminal;
         private readonly ContinuationNode[] _continuations;
+        
+        [ThreadStatic]
+        // ReSharper disable once StaticMemberInGenericType
+        private static object? _threadLocalTerminal;
 
         public ReadInterceptorChain(
             TInterceptor[] interceptors,
@@ -369,7 +375,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public TProperty Execute(ref PropertyReadContext context, object terminal)
         {
-            ContinuationNode.CurrentTerminal = terminal;
+            _threadLocalTerminal = terminal;
             return ExecuteAtIndex(0, ref context);
         }
 
@@ -378,7 +384,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (index >= _interceptors.Length)
             {
-                return _executeTerminal(ref context, ContinuationNode.CurrentTerminal);
+                return _executeTerminal(ref context, _threadLocalTerminal!);
             }
 
             var interceptor = _interceptors[index];
@@ -389,9 +395,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         private sealed class ContinuationNode
         {
-            [ThreadStatic]
-            internal static object CurrentTerminal = null!;
-            
             private readonly ReadInterceptorChain<TInterceptor, TProperty> _chain;
             private readonly int _nextIndex;
 
