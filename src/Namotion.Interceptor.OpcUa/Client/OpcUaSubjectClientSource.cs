@@ -144,7 +144,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
     private async Task CreateBatchedSubscriptionsAsync(List<MonitoredItem> monitoredItems, Session session, CancellationToken cancellationToken)
     {
-        for (var i = 0; i < monitoredItems.Count; i += _configuration.MaxItemsPerSubscription)
+        for (var i = 0; i < monitoredItems.Count; i += _configuration.MaximumItemsPerSubscription)
         {
             var subscription = new Subscription(session.DefaultSubscription)
             {
@@ -162,7 +162,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
                 foreach (var item in monitoredItems
                     .Skip(i)
-                    .Take(_configuration.MaxItemsPerSubscription))
+                    .Take(_configuration.MaximumItemsPerSubscription))
                 {
                     // Add the item to the subscription first so the SDK assigns a ClientHandle
                     subscription.AddItem(item);
@@ -334,8 +334,8 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                         continue;
                     }
                     
-                    var addAsDynamic = _configuration.AddUnknownNodesAsDynamicProperties is not null &&
-                        await _configuration.AddUnknownNodesAsDynamicProperties(nodeRef, cancellationToken);
+                    var addAsDynamic = _configuration.ShouldAddDynamicProperties is not null &&
+                        await _configuration.ShouldAddDynamicProperties(nodeRef, cancellationToken);
                 
                     if (!addAsDynamic)
                     {
@@ -432,7 +432,10 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             if (p.ReflectionAttributes.OfType<OpcUaNodeAttribute>().SingleOrDefault() is { } opcUaNodeAttribute 
                 && opcUaNodeAttribute.NodeIdentifier == nodeId)
             {
-                var propertyNodeNamespaceUri = opcUaNodeAttribute.NodeNamespaceUri ?? _configuration.DefaultNamespaceUri;
+                var propertyNodeNamespaceUri = opcUaNodeAttribute.NodeNamespaceUri 
+                   ?? _configuration.DefaultNamespaceUri
+                   ?? throw new InvalidOperationException("No default namespace URI configured.");
+
                 if (propertyNodeNamespaceUri == nodeNamespaceUri)
                 {
                     return p;
