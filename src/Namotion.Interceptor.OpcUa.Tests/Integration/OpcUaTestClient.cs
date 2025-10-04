@@ -58,7 +58,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
             if (Root != null && isConnected(Root))
                 return;
 
-            await Task.Delay(1000);
+            await Task.Delay(200);
         }
 
         throw new XunitException("Could not sync with server.");
