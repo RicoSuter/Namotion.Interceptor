@@ -197,6 +197,8 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             {
                 _logger.LogWarning("Removed {Removed} monitored items that failed to create in subscription {Id}.", removed, subscription.Id);
             }
+            
+            _logger.LogInformation("Created subscription {SubscriptionId} with {Count} monitored items.", subscription.Id, subscription.MonitoredItems.Count());
         }
     }
 
@@ -275,7 +277,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 }
             }
 
-            _logger.LogInformation("Successfully read initial values for {Count} monitored items.", itemCount);
+            _logger.LogInformation("Successfully read initial values of {Count} nodes.", itemCount);
         }
         catch (Exception ex)
         {
