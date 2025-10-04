@@ -1,10 +1,9 @@
-﻿using System.Collections;
-using System.Reflection;
+﻿using System.Reflection;
 using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Common;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
-using Opc.Ua.Export;
 using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
@@ -64,7 +63,7 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         foreach (var property in subject.Properties)
         {
-            var propertyName = GetPropertyName(property);
+            var propertyName = property.ResolvePropertyName(_configuration.SourcePathProvider);
             if (propertyName is not null)
             {
                 if (property.IsSubjectReference)
@@ -89,21 +88,6 @@ internal class CustomNodeManager : CustomNodeManager2
                 }
             }
         }
-    }
-
-    private string? GetPropertyName(RegisteredSubjectProperty property)
-    {
-        if (property.IsAttribute)
-        {
-            var attributedProperty = property.GetAttributedProperty();
-            var propertyName = _configuration.SourcePathProvider.TryGetPropertySegment(property);
-            if (propertyName is null)
-                return null;
-            
-            return GetPropertyName(attributedProperty) + "__" + propertyName;
-        }
-        
-        return _configuration.SourcePathProvider.TryGetPropertySegment(property);
     }
 
     private void CreateReferenceObjectNode(string propertyName, RegisteredSubjectProperty property, SubjectPropertyChild child, NodeId parentNodeId, string parentPath)
@@ -201,7 +185,8 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private NodeId GetNodeId(RegisteredSubjectProperty property, string fullPath)
     {
-        if (property.ReflectionAttributes.OfType<OpcUaNodeAttribute>().SingleOrDefault() is { NodeIdentifier: not null } opcUaNodeAttribute)
+        var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
+        if (opcUaNodeAttribute is { NodeIdentifier: not null })
         {
             return opcUaNodeAttribute.NodeNamespaceUri is not null ? 
                 NodeId.Create(opcUaNodeAttribute.NodeIdentifier, opcUaNodeAttribute.NodeNamespaceUri, SystemContext.NamespaceUris) : 
@@ -293,7 +278,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private QualifiedName GetBrowseName(string propertyName, RegisteredSubjectProperty property, object? index)
     {
-        var browseNameProvider = property.ReflectionAttributes.OfType<OpcUaNodeAttribute>().SingleOrDefault();
+        var browseNameProvider = property.TryGetOpcUaNodeAttribute();
         if (browseNameProvider is null)
         {
             return new QualifiedName(propertyName + (index is not null ? $"[{index}]" : string.Empty), NamespaceIndex);
@@ -320,7 +305,7 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             NodeId = nodeId,
             BrowseName = browseName,
-            DisplayName = new Opc.Ua.LocalizedText(browseName.Name),
+            DisplayName = new LocalizedText(browseName.Name),
             TypeDefinitionId = typeDefinition ?? ObjectTypeIds.FolderType,
             WriteMask = AttributeWriteMask.None,
             UserWriteMask = AttributeWriteMask.None,
@@ -346,7 +331,7 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             NodeId = nodeId,
             BrowseName = browseName,
-            DisplayName = new Opc.Ua.LocalizedText(browseName.Name),
+            DisplayName = new LocalizedText(browseName.Name),
             TypeDefinitionId = typeDefinition ?? ObjectTypeIds.BaseObjectType,
             WriteMask = AttributeWriteMask.None,
             UserWriteMask = AttributeWriteMask.None,
@@ -371,7 +356,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
             SymbolicName = browseName.Name,
             BrowseName = browseName,
-            DisplayName = new Opc.Ua.LocalizedText(browseName.Name),
+            DisplayName = new LocalizedText(browseName.Name),
 
             TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
             DataType = Opc.Ua.TypeInfo.GetDataTypeId(dataType),
