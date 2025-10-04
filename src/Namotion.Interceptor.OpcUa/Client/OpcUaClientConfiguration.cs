@@ -34,6 +34,11 @@ public class OpcUaClientConfiguration
     public int MaximumItemsPerSubscription { get; init; } = 1000;
     
     /// <summary>
+    /// Gets the delay before attempting to reconnect after a disconnect. Default is 5 seconds.
+    /// </summary>
+    public TimeSpan ReconnectDelay { get; init; } = TimeSpan.FromSeconds(5);
+    
+    /// <summary>
     /// Gets or sets an async predicate that is called when an unknown (not statically typed) OPC UA node or variable is found during browsing.
     /// If the function returns true, the node is added as a dynamic property to the given subject.
     /// Default is add all missing as dynamic properties.
