@@ -14,8 +14,8 @@ public readonly struct PropertyReadContext
     /// </summary>
     public PropertyReference Property { get; }
 
-    public PropertyReadContext(PropertyReference property)
+    public PropertyReadContext(IInterceptorSubject subject, string name)
     {
-        Property = property;
+        Property = new PropertyReference(subject, name);
     }
 }
