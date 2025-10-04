@@ -527,19 +527,22 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)
             {
                 var registeredProperty = change.Property.GetRegisteredProperty();
-                var value = _configuration.ValueConverter.ConvertToNodeValue(change.NewValue, registeredProperty.Type);
-                writeValues.Add(new WriteValue
+                if (registeredProperty.HasSetter)
                 {
-                    NodeId = nodeId,
-                    AttributeId = Opc.Ua.Attributes.Value,
-                    Value = new DataValue
+                    var value = _configuration.ValueConverter.ConvertToNodeValue(change.NewValue, registeredProperty.Type);
+                    writeValues.Add(new WriteValue
                     {
-                        Value = value,
-                        StatusCode = StatusCodes.Good,
-                        //ServerTimestamp = DateTime.UtcNow,
-                        SourceTimestamp = change.Timestamp.UtcDateTime
-                    }
-                });
+                        NodeId = nodeId,
+                        AttributeId = Opc.Ua.Attributes.Value,
+                        Value = new DataValue
+                        {
+                            Value = value,
+                            StatusCode = StatusCodes.Good,
+                            //ServerTimestamp = DateTime.UtcNow,
+                            SourceTimestamp = change.Timestamp.UtcDateTime
+                        }
+                    });
+                }
             }
         }
         
