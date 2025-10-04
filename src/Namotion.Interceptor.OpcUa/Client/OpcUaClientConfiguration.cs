@@ -6,10 +6,21 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 public class OpcUaClientConfiguration
 {
+    /// <summary>
+    /// Gets the OPC UA server endpoint URL to connect to (e.g., "opc.tcp://localhost:4840").
+    /// </summary>
     public required string ServerUrl { get; init; }
 
+    /// <summary>
+    /// Gets the optional root node name to start browsing from under the Objects folder.
+    /// If not specified, browsing starts from the ObjectsFolder root.
+    /// </summary>
     public string? RootName { get; init; }
     
+    /// <summary>
+    /// Gets the OPC UA client application name used for identification and certificate generation.
+    /// Default is "Namotion.Interceptor.Client".
+    /// </summary>
     public string ApplicationName { get; init; } = "Namotion.Interceptor.Client";
     
     /// <summary>
@@ -17,16 +28,37 @@ public class OpcUaClientConfiguration
     /// </summary>
     public string? DefaultNamespaceUri { get; init; }
     
-    public int MaxItemsPerSubscription { get; init; } = 1000;
+    /// <summary>
+    /// Gets the maximum number of monitored items per subscription. Default is 1000.
+    /// </summary>
+    public int MaximumItemsPerSubscription { get; init; } = 1000;
     
-    public Func<ReferenceDescription, CancellationToken, Task<bool>>? AddUnknownNodesAsDynamicProperties { get; init; } = (_, _) => Task.FromResult(true);
-
+    /// <summary>
+    /// Gets or sets an async predicate that is called when an unknown (not statically typed) OPC UA node or variable is found during browsing.
+    /// If the function returns true, the node is added as a dynamic property to the given subject.
+    /// </summary>
+    public Func<ReferenceDescription, CancellationToken, Task<bool>>? ShouldAddDynamicProperties { get; init; } = (_, _) => Task.FromResult(true);
+    
+    /// <summary>
+    /// Gets the source path provider used to map between OPC UA node browse names and C# property names.
+    /// This provider determines which properties are included and how their names are translated.
+    /// </summary>
     public required ISourcePathProvider SourcePathProvider { get; init; }
 
+    /// <summary>
+    /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
+    /// </summary>
     public required OpcUaTypeResolver TypeResolver { get; init; }
     
+    /// <summary>
+    /// Gets the value converter used to convert between OPC UA node values and C# property values.
+    /// Handles type conversions such as decimal to double for OPC UA compatibility.
+    /// </summary>
     public required OpcUaValueConverter ValueConverter { get; init; }
     
+    /// <summary>
+    /// Gets the subject factory used to create interceptor subject instances for OPC UA object nodes.
+    /// </summary>
     public required OpcUaSubjectFactory SubjectFactory { get; init; }
 
     public virtual ApplicationInstance CreateApplicationInstance()
