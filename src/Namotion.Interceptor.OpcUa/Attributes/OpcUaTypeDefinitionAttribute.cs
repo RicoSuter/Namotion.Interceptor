@@ -1,4 +1,4 @@
-﻿namespace Namotion.Interceptor.OpcUa.Annotations;
+﻿namespace Namotion.Interceptor.OpcUa.Attributes;
 
 public class OpcUaTypeDefinitionAttribute : Attribute
 {

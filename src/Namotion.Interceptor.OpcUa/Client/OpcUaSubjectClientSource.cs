@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
 using System.Collections.Concurrent;
-using Namotion.Interceptor.OpcUa.Annotations;
+using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Sources.Paths.Attributes;
 
 namespace Namotion.Interceptor.OpcUa.Client;
@@ -144,7 +144,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
     private async Task CreateBatchedSubscriptionsAsync(List<MonitoredItem> monitoredItems, Session session, CancellationToken cancellationToken)
     {
-        for (var i = 0; i < monitoredItems.Count; i += _configuration.MaxItemsPerSubscription)
+        for (var i = 0; i < monitoredItems.Count; i += _configuration.MaximumItemsPerSubscription)
         {
             var subscription = new Subscription(session.DefaultSubscription)
             {
@@ -162,7 +162,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
                 foreach (var item in monitoredItems
                     .Skip(i)
-                    .Take(_configuration.MaxItemsPerSubscription))
+                    .Take(_configuration.MaximumItemsPerSubscription))
                 {
                     // Add the item to the subscription first so the SDK assigns a ClientHandle
                     subscription.AddItem(item);
@@ -329,13 +329,25 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 var property = FindSubjectProperty(registeredSubject, nodeRef);
                 if (property is null)
                 {
-                    if (!_configuration.AddUnknownNodesAsDynamicProperties)
+                    if (registeredSubject.Properties.Any(p => p.Name == nodeRef.BrowseName.Name))
+                    {
                         continue;
+                    }
+                    
+                    var addAsDynamic = _configuration.ShouldAddDynamicProperties is not null &&
+                        await _configuration.ShouldAddDynamicProperties(nodeRef, cancellationToken);
+                
+                    if (!addAsDynamic)
+                    {
+                        continue;
+                    }
                     
                     // Infer CLR type from OPC UA variable metadata if possible
                     var inferredType = await _configuration.TypeResolver.GetTypeForNodeAsync(_session, nodeRef, cancellationToken);
                     if (inferredType == typeof(object))
+                    {
                         continue;
+                    }
 
                     object? value = null;
                     property = registeredSubject.AddProperty(
@@ -414,13 +426,16 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     private RegisteredSubjectProperty? FindSubjectProperty(RegisteredSubject registeredSubject, ReferenceDescription nodeRef)
     {
         var nodeId = nodeRef.NodeId.Identifier.ToString();
-        var nodeNamespaceUri = nodeRef.NodeId.NamespaceUri;
+        var nodeNamespaceUri = _session!.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex);
         foreach (var p in registeredSubject.Properties)
         {
             if (p.ReflectionAttributes.OfType<OpcUaNodeAttribute>().SingleOrDefault() is { } opcUaNodeAttribute 
                 && opcUaNodeAttribute.NodeIdentifier == nodeId)
             {
-                var propertyNodeNamespaceUri = opcUaNodeAttribute.NodeNamespaceUri ?? _session!.NamespaceUris.GetString(0);
+                var propertyNodeNamespaceUri = opcUaNodeAttribute.NodeNamespaceUri 
+                   ?? _configuration.DefaultNamespaceUri
+                   ?? throw new InvalidOperationException("No default namespace URI configured.");
+
                 if (propertyNodeNamespaceUri == nodeNamespaceUri)
                 {
                     return p;

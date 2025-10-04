@@ -1,6 +1,6 @@
 ﻿using Namotion.Interceptor.Sources.Paths.Attributes;
 
-namespace Namotion.Interceptor.OpcUa.Annotations;
+namespace Namotion.Interceptor.OpcUa.Attributes;
 
 public class OpcUaNodeAttribute : SourcePathAttribute
 {
@@ -11,6 +11,9 @@ public class OpcUaNodeAttribute : SourcePathAttribute
         BrowseNamespaceUri = browseNamespaceUri;
     }
 
+    /// <summary>
+    /// Gets the BrowseName of the node to browse for (relative to the parent node).
+    /// </summary>
     public string BrowseName { get; }
 
     /// <summary>
@@ -18,7 +21,13 @@ public class OpcUaNodeAttribute : SourcePathAttribute
     /// </summary>
     public string? BrowseNamespaceUri { get; }
 
+    /// <summary>
+    /// Gets the node identifier to enforce an exact, global Node ID match when connecting.
+    /// </summary>
     public string? NodeIdentifier { get; set; }
 
+    /// <summary>
+    /// Gets the node namespace URI (uses default namespace from client configuration when null).
+    /// </summary>
     public string? NodeNamespaceUri { get; set; }
 }

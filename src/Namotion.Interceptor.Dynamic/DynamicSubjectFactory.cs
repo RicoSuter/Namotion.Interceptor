@@ -98,7 +98,8 @@ public class DynamicSubjectFactory
             else
             {
                 invocation.ReturnValue = context.InvokeMethod(
-                    invocation.Method.Name, invocation.Arguments, parameters =>
+                    // TODO: Should we really throw away subject here?
+                    invocation.Method.Name, invocation.Arguments, (_, parameters) =>
                     {
                         parameters.CopyTo(invocation.Arguments, 0);
                         invocation.Proceed();
