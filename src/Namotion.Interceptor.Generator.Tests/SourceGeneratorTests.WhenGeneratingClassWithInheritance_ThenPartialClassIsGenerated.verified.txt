@@ -82,16 +82,16 @@ namespace YourDefaultNamespace
 
         public partial string FirstName
         {
-             get => GetPropertyValue<string>(nameof(FirstName), (o) => ((Person)o)._FirstName);
-             set => SetPropertyValue(nameof(FirstName), value, (o) => ((Person)o)._FirstName, (o, v) => ((Person)o)._FirstName = v);
+             get => GetPropertyValue<string>(nameof(FirstName), static (o) => ((Person)o)._FirstName);
+             set => SetPropertyValue(nameof(FirstName), value, static (o) => ((Person)o)._FirstName, static (o, v) => ((Person)o)._FirstName = v);
         }
 
         private string _LastName;
 
         public partial string LastName
         {
-             get => GetPropertyValue<string>(nameof(LastName), (o) => ((Person)o)._LastName);
-             set => SetPropertyValue(nameof(LastName), value, (o) => ((Person)o)._LastName, (o, v) => ((Person)o)._LastName = v);
+             get => GetPropertyValue<string>(nameof(LastName), static (o) => ((Person)o)._LastName);
+             set => SetPropertyValue(nameof(LastName), value, static (o) => ((Person)o)._LastName, static (o, v) => ((Person)o)._LastName = v);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -114,9 +114,9 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
+        private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
         {
-            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(parameters);
+            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }
     }
 }
@@ -195,8 +195,8 @@ namespace YourDefaultNamespace
 
         public partial string MainCourse
         {
-             get => GetPropertyValue<string>(nameof(MainCourse), (o) => ((Teacher)o)._MainCourse);
-             set => SetPropertyValue(nameof(MainCourse), value, (o) => ((Teacher)o)._MainCourse, (o, v) => ((Teacher)o)._MainCourse = v);
+             get => GetPropertyValue<string>(nameof(MainCourse), static (o) => ((Teacher)o)._MainCourse);
+             set => SetPropertyValue(nameof(MainCourse), value, static (o) => ((Teacher)o)._MainCourse, static (o, v) => ((Teacher)o)._MainCourse = v);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -219,9 +219,9 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
+        private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
         {
-            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(parameters);
+            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }
     }
 }

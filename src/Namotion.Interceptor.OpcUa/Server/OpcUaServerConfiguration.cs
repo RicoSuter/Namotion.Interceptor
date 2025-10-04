@@ -7,14 +7,34 @@ namespace Namotion.Interceptor.OpcUa.Server;
 
 public class OpcUaServerConfiguration
 {
+    /// <summary>
+    /// Gets the optional root folder name to create under the Objects folder for organizing server nodes.
+    /// If not specified, nodes are created directly under the ObjectsFolder.
+    /// </summary>
     public string? RootName { get; init; }
     
+    /// <summary>
+    /// Gets the OPC UA server application name used for identification and certificate generation.
+    /// Default is "Namotion.Interceptor.Server".
+    /// </summary>
     public string ApplicationName { get; init; } = "Namotion.Interceptor.Server";
 
+    /// <summary>
+    /// Gets the primary namespace URI for the OPC UA server used to identify custom nodes.
+    /// Default is "http://namotion.com/Interceptor/".
+    /// </summary>
     public string NamespaceUri { get; init; } = "http://namotion.com/Interceptor/";
     
+    /// <summary>
+    /// Gets the source path provider used to map between OPC UA node browse names and C# property names.
+    /// This provider determines which properties are included and how their names are translated.
+    /// </summary>
     public required ISourcePathProvider SourcePathProvider { get; init; }
 
+    /// <summary>
+    /// Gets the value converter used to convert between OPC UA node values and C# property values.
+    /// Handles type conversions such as decimal to double for OPC UA compatibility.
+    /// </summary>
     public required OpcUaValueConverter ValueConverter { get; init; }
     
     public virtual ApplicationInstance CreateApplicationInstance()
