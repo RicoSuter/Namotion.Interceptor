@@ -543,6 +543,11 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             }
         }
         
+        if (writeValues.Count == 0)
+        {
+            return;
+        }
+        
         var writeResponse = await _session.WriteAsync(null, writeValues, cancellationToken);
         if (writeResponse.Results.Any(StatusCode.IsBad))
         {
