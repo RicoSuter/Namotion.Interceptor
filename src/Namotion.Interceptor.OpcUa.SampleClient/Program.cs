@@ -29,13 +29,9 @@ builder.Services.AddHostedService<Worker>();
 
 var allLatencies = new List<double>();
 var allThroughputSamples = new List<double>();
-var e2eLatencies = new List<double>();
-var e2eThroughputSamples = new List<double>();
 var windowStartTime = DateTimeOffset.UtcNow;
 var lastAllThroughputTime = DateTimeOffset.UtcNow;
-var lastE2EThroughputTime = Stopwatch.GetTimestamp();
 var allUpdatesSinceLastSample = 0;
-var e2eUpdatesSinceLastSample = 0;
 var hasShownIntermediateStats = false;
 
 void PrintStats(string title, List<double> latencyData, List<double> throughputData)
@@ -74,36 +70,10 @@ context.GetPropertyChangedObservable().Subscribe(change =>
         lastAllThroughputTime = now;
     }
 
-    if (long.TryParse(change.NewValue?.ToString(), out var beforeTimestamp))
-    {
-        var nowTicks = Stopwatch.GetTimestamp();
-        var ticksElapsed = nowTicks - beforeTimestamp;
-
-        if (ticksElapsed > 0 && ticksElapsed < Stopwatch.Frequency * 10)
-        {
-            var e2eLatencyMs = (double)ticksElapsed / Stopwatch.Frequency * 1000;
-            e2eLatencies.Add(e2eLatencyMs);
-            e2eUpdatesSinceLastSample++;
-
-            var timeSinceLastE2ESample = (double)(nowTicks - lastE2EThroughputTime) / Stopwatch.Frequency;
-            if (timeSinceLastE2ESample >= 1.0)
-            {
-                e2eThroughputSamples.Add(e2eUpdatesSinceLastSample / timeSinceLastE2ESample);
-                e2eUpdatesSinceLastSample = 0;
-                lastE2EThroughputTime = nowTicks;
-            }
-        }
-    }
-
     var timeSinceStart = (now - windowStartTime).TotalSeconds;
-
     if (timeSinceStart >= 10.0 && !hasShownIntermediateStats && allLatencies.Count > 0)
     {
         PrintStats("All Changes - Intermediate (10 seconds)", allLatencies.ToList(), allThroughputSamples.ToList());
-        if (e2eLatencies.Count > 0)
-        {
-            PrintStats("E2E (FirstName) - Intermediate (10 seconds)", e2eLatencies.ToList(), e2eThroughputSamples.ToList());
-        }
         hasShownIntermediateStats = true;
     }
 
@@ -111,19 +81,11 @@ context.GetPropertyChangedObservable().Subscribe(change =>
     {
         Console.WriteLine($"\n[{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss.fff}]");
         PrintStats("All Changes - 1 minute", allLatencies, allThroughputSamples);
-        if (e2eLatencies.Count > 0)
-        {
-            PrintStats("E2E (FirstName) - 1 minute", e2eLatencies, e2eThroughputSamples);
-        }
         allLatencies.Clear();
         allThroughputSamples.Clear();
-        e2eLatencies.Clear();
-        e2eThroughputSamples.Clear();
         allUpdatesSinceLastSample = 0;
-        e2eUpdatesSinceLastSample = 0;
         windowStartTime = now;
         lastAllThroughputTime = now;
-        lastE2EThroughputTime = Stopwatch.GetTimestamp();
     }
 });
 
