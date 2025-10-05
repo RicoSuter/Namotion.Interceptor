@@ -176,8 +176,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     {
         if (_configuration.RootName is not null)
         {
-            var references = await BrowseNodeAsync(ObjectIds.ObjectsFolder, cancellationToken);
-            foreach (var reference in references[0])
+            foreach (var reference in await BrowseNodeAsync(ObjectIds.ObjectsFolder, cancellationToken))
             {
                 if (reference.BrowseName.Name == _configuration.RootName)
                 {
@@ -407,8 +406,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         }
 
         var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, _session.NamespaceUris);
-        var nodeProperties = await BrowseNodeAsync(nodeId, cancellationToken);
-        foreach (var nodeRef in nodeProperties.SelectMany(p => p))
+        foreach (var nodeRef in await BrowseNodeAsync(nodeId, cancellationToken))
         {
             var property = FindSubjectProperty(registeredSubject, nodeRef);
             if (property is null)
@@ -497,10 +495,9 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     {
         // TODO: Reuse property.Children?
         var childNodeProperties = await BrowseNodeAsync(childNodeId, cancellationToken);
-
-        var childNodes = childNodeProperties.SelectMany(p => p).ToList();
+        var childNodes = childNodeProperties.ToList();
+        
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childNodes.Count);
-
         for (var i = 0; i < childNodes.Count; i++)
         {
             var childNode = childNodes[i];
@@ -508,9 +505,8 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             children.Add((childNode, childSubject));
         }
 
-        var collection = DefaultSubjectFactory.Instance.CreateSubjectCollection(
-            property.Type, 
-            children.Select(c => c.Subject));
+        var collection = DefaultSubjectFactory.Instance
+            .CreateSubjectCollection(property.Type, children.Select(c => c.Subject));
 
         property.SetValue(collection);
 
@@ -520,7 +516,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         }
     }
 
-    private async Task<IList<ReferenceDescriptionCollection>> BrowseNodeAsync(
+    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
         NodeId nodeId, 
         CancellationToken cancellationToken)
     {
@@ -535,7 +531,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             NodeClassMask,
             cancellationToken);
 
-        return nodeProperties;
+        return nodeProperties[0];
     }
 
     private RegisteredSubjectProperty? FindSubjectProperty(RegisteredSubject registeredSubject, ReferenceDescription nodeRef)
