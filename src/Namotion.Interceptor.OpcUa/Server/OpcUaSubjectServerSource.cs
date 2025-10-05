@@ -77,6 +77,11 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         while (!stoppingToken.IsCancellationRequested)
         {
             var application = _configuration.CreateApplicationInstance();
+            if (_configuration.CleanCertificateStore)
+            {
+                CleanCertificateStore(application);
+                _logger.LogInformation("Cleaning up old certificates...");
+            }
             try
             {
                 _server = new OpcUaSubjectServer(_subject, this, _configuration);
@@ -100,6 +105,15 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
                     await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
                 }
             }
+        }
+    }
+    
+    private static void CleanCertificateStore(ApplicationInstance application)
+    {
+        var path = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.StorePath;
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, true);
         }
     }
 
