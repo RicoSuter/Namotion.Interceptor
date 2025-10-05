@@ -36,7 +36,13 @@ public class OpcUaServerConfiguration
     /// Handles type conversions such as decimal to double for OPC UA compatibility.
     /// </summary>
     public required OpcUaValueConverter ValueConverter { get; init; }
-    
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to clean up old certificates from the
+    /// application certificate store on connect. Defaults to true.
+    /// </summary>
+    public bool CleanCertificateStore { get; init; } = true;
+
     public virtual ApplicationInstance CreateApplicationInstance()
     {
         var application = new ApplicationInstance
