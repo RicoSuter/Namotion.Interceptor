@@ -2,7 +2,7 @@ using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Paths;
 
-namespace Namotion.Interceptor.OpcUa.Common;
+namespace Namotion.Interceptor.OpcUa;
 
 internal static class OpcUaPropertyExtensions
 {

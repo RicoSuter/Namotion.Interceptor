@@ -7,7 +7,6 @@ using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
 using System.Collections.Concurrent;
-using Namotion.Interceptor.OpcUa.Common;
 using Namotion.Interceptor.Sources.Paths.Attributes;
 
 namespace Namotion.Interceptor.OpcUa.Client;
@@ -77,7 +76,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 var cancellationTokenSource = new CancellationTokenSource();
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, cancellationTokenSource.Token);
                 
-                // Subscribe to disconnect events
                 _session.KeepAlive += (_, e) =>
                 {
                     if (!ServiceResult.IsGood(e.Status))
@@ -97,7 +95,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     cancellationTokenSource.Cancel();
                 };
 
-                // Clear client-handle map on (re)connect
                 _monitoredItems.Clear();
                 _activeSubscriptions.Clear();
 
@@ -118,7 +115,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     _logger.LogInformation("OPC UA client initialization complete. Monitoring {Count} items.", monitoredItems.Count);
                 }
 
-                // Keep the connection alive until cancelled
                 await Task.Delay(Timeout.Infinite, linked.Token);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

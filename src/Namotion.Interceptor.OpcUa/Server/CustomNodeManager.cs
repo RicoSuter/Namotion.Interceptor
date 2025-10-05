@@ -1,6 +1,5 @@
 ﻿using System.Reflection;
 using Namotion.Interceptor.OpcUa.Attributes;
-using Namotion.Interceptor.OpcUa.Common;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
