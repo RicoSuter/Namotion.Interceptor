@@ -90,12 +90,25 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 
                 // listen for changes by ignoring changes from the source and buffering them into a single update
                 await foreach (var changes in _context 
+
                     .GetPropertyChangedObservable()
-                    .Where(change => !change.IsChangingFromSource(_source) 
-                        && _source.IsPropertyIncluded(change.Property.GetRegisteredProperty()))
+                    .Where(change => {
+                        // TODO: Is this actually better?
+                        var rp = change.Property.GetRegisteredProperty();
+                        return rp.HasSetter
+                            && !change.IsChangingFromSource(_source)
+                            && _source.IsPropertyIncluded(rp);
+                    })
                     .BufferChanges(_bufferTime)
-                    .Where(changes => changes.Any())
                     .ToAsyncEnumerable()
+
+                    // .GetPropertyChangedObservable()
+                    // .Where(change => !change.IsChangingFromSource(_source) 
+                    //                  && _source.IsPropertyIncluded(change.Property.GetRegisteredProperty()))
+                    // .BufferChanges(_bufferTime)
+                    // .Where(changes => changes.Any())
+                    // .ToAsyncEnumerable()
+                    
                     .WithCancellation(stoppingToken))
                 {
                     try
