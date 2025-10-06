@@ -93,6 +93,7 @@ public static class SubjectMutationContext
     /// <returns>The result.</returns>
     public static bool IsChangingFromSource(this SubjectPropertyChange change, object source)
     {
+        // TODO(perf): Inline/remove this method for performance?
         return change.Source == source;
     }
 
