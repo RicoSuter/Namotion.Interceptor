@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
 using System.Collections.Concurrent;
-using Namotion.Interceptor.Sources.Paths.Attributes;
+using Namotion.Interceptor.OpcUa.Attributes;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
@@ -437,7 +437,14 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     inferredType,
                     _ => value,
                     (_, o) => value = o,
-                    new SourcePathAttribute("opc", nodeRef.BrowseName.Name));
+                    new OpcUaNodeAttribute(
+                        nodeRef.BrowseName.Name, 
+                        _session.NamespaceUris.GetString(nodeRef.BrowseName.NamespaceIndex),
+                        sourceName: null) // TODO: Allow custom source name (config, from source provider)?
+                    {
+                        NodeIdentifier = nodeRef.NodeId.Identifier.ToString(),
+                        NodeNamespaceUri = nodeRef.NodeId.NamespaceUri
+                    });
             }
 
             var propertyName = property.ResolvePropertyName(_configuration.SourcePathProvider);
@@ -473,13 +480,14 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         List<MonitoredItem> monitoredItems, 
         CancellationToken cancellationToken)
     {
-        var children = property.Children;
-        if (children.Count != 0)
+        var existingSubject = property.Children.SingleOrDefault();
+        if (existingSubject.Subject is not null)
         {
-            await LoadSubjectAsync(children.Single().Subject, node, monitoredItems, cancellationToken);
+            await LoadSubjectAsync(existingSubject.Subject, node, monitoredItems, cancellationToken);
         }
         else
         {
+            // Create new subject instance
             var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeRef, _session!, cancellationToken);
             newSubject.Context.AddFallbackContext(subject.Context);
             await LoadSubjectAsync(newSubject, nodeRef, monitoredItems, cancellationToken);
@@ -493,15 +501,16 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         List<MonitoredItem> monitoredItems,
         CancellationToken cancellationToken)
     {
-        // TODO: Reuse property.Children?
-        var childNodeProperties = await BrowseNodeAsync(childNodeId, cancellationToken);
-        var childNodes = childNodeProperties.ToList();
-        
+        var childNodes = await BrowseNodeAsync(childNodeId, cancellationToken);
+
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childNodes.Count);
         for (var i = 0; i < childNodes.Count; i++)
         {
             var childNode = childNodes[i];
-            var childSubject = DefaultSubjectFactory.Instance.CreateCollectionSubject(property, i);
+
+            var childSubject = property.Children.Count > i ? property.Children.ElementAt(i).Subject : null;
+            childSubject ??= DefaultSubjectFactory.Instance.CreateCollectionSubject(property, i);
+            
             children.Add((childNode, childSubject));
         }
 
@@ -514,24 +523,6 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         {
             await LoadSubjectAsync(child.Subject, child.Node, monitoredItems, cancellationToken);
         }
-    }
-
-    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
-        NodeId nodeId, 
-        CancellationToken cancellationToken)
-    {
-        var (_, _, nodeProperties, _) = await _session!.BrowseAsync(
-            null,
-            null,
-            [nodeId],
-            0u,
-            BrowseDirection.Forward,
-            ReferenceTypeIds.HierarchicalReferences,
-            true,
-            NodeClassMask,
-            cancellationToken);
-
-        return nodeProperties[0];
     }
 
     private RegisteredSubjectProperty? FindSubjectProperty(RegisteredSubject registeredSubject, ReferenceDescription nodeRef)
@@ -640,5 +631,23 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             //     Data = { ["BadVariableStatusCodeDictionary"] = badVariableStatusCodes }
             // };
         }
+    }
+
+    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
+        NodeId nodeId, 
+        CancellationToken cancellationToken)
+    {
+        var (_, _, nodeProperties, _) = await _session!.BrowseAsync(
+            null,
+            null,
+            [nodeId],
+            0u,
+            BrowseDirection.Forward,
+            ReferenceTypeIds.HierarchicalReferences,
+            true,
+            NodeClassMask,
+            cancellationToken);
+
+        return nodeProperties[0];
     }
 }
