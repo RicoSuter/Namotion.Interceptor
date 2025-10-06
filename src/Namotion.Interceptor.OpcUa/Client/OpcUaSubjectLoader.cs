@@ -33,7 +33,7 @@ internal class OpcUaSubjectLoader
     public async Task<IReadOnlyList<MonitoredItem>> LoadSubjectAsync(
         IInterceptorSubject subject,
         ReferenceDescription node,
-        Session session,
+        ISession session,
         CancellationToken cancellationToken)
     {
         var monitoredItems = new List<MonitoredItem>();
@@ -45,7 +45,7 @@ internal class OpcUaSubjectLoader
         IInterceptorSubject subject,
         ReferenceDescription node,
         List<MonitoredItem> monitoredItems,
-        Session session,
+        ISession session,
         CancellationToken cancellationToken)
     {
         var registeredSubject = subject.TryGetRegisteredSubject();
@@ -61,7 +61,6 @@ internal class OpcUaSubjectLoader
         {
             var nodeRef = nodeRefs[index];
             var property = FindSubjectProperty(registeredSubject, nodeRef, session);
-            
             if (property is null)
             {
                 var dynamicPropertyName = nodeRef.BrowseName.Name;
@@ -94,11 +93,11 @@ internal class OpcUaSubjectLoader
                     (_, o) => value = o,
                     new OpcUaNodeAttribute(
                         nodeRef.BrowseName.Name,
-                        session.NamespaceUris.GetString(nodeRef.BrowseName.NamespaceIndex),
+                        nodeRef.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex),
                         sourceName: null)
                     {
                         NodeIdentifier = nodeRef.NodeId.Identifier.ToString(),
-                        NodeNamespaceUri = nodeRef.NodeId.NamespaceUri
+                        NodeNamespaceUri = nodeRef.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex)
                     });
             }
 
@@ -133,7 +132,7 @@ internal class OpcUaSubjectLoader
         ReferenceDescription nodeRef,
         IInterceptorSubject subject,
         List<MonitoredItem> monitoredItems,
-        Session session,
+        ISession session,
         CancellationToken cancellationToken)
     {
         var existingSubject = property.Children.SingleOrDefault();
@@ -155,7 +154,7 @@ internal class OpcUaSubjectLoader
         RegisteredSubjectProperty property,
         NodeId childNodeId,
         List<MonitoredItem> monitoredItems,
-        Session session,
+        ISession session,
         CancellationToken cancellationToken)
     {
         var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken);
@@ -185,10 +184,10 @@ internal class OpcUaSubjectLoader
         }
     }
 
-    private RegisteredSubjectProperty? FindSubjectProperty(RegisteredSubject registeredSubject, ReferenceDescription nodeRef, Session session)
+    private RegisteredSubjectProperty? FindSubjectProperty(RegisteredSubject registeredSubject, ReferenceDescription nodeRef, ISession session)
     {
         var nodeIdString = nodeRef.NodeId.Identifier.ToString();
-        var nodeNamespaceUri = session.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex);
+        var nodeNamespaceUri = nodeRef.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex);
         
         var properties = registeredSubject.Properties;
         foreach (var property in properties)
@@ -233,20 +232,29 @@ internal class OpcUaSubjectLoader
 
     private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
         NodeId nodeId,
-        Session session,
+        ISession session,
         CancellationToken cancellationToken)
     {
-        var (_, _, nodeProperties, _) = await session.BrowseAsync(
+        var browseDescriptions = new BrowseDescriptionCollection
+        {
+            new BrowseDescription
+            {
+                NodeId = nodeId,
+                BrowseDirection = BrowseDirection.Forward,
+                ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                IncludeSubtypes = true,
+                NodeClassMask = NodeClassMask,
+                ResultMask = (uint)BrowseResultMask.All
+            }
+        };
+
+        var response = await session.BrowseAsync(
             null,
             null,
-            [nodeId],
             0u,
-            BrowseDirection.Forward,
-            ReferenceTypeIds.HierarchicalReferences,
-            true,
-            NodeClassMask,
+            browseDescriptions,
             cancellationToken);
 
-        return nodeProperties[0];
+        return response.Results.Count > 0 ? response.Results[0].References : new ReferenceDescriptionCollection();
     }
 }
