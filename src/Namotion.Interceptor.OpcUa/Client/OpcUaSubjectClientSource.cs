@@ -265,7 +265,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 var registeredProperty = change.Property.GetRegisteredProperty();
                 if (registeredProperty.HasSetter)
                 {
-                    var value = _configuration.ValueConverter.ConvertToNodeValue(change.NewValue, registeredProperty.Type);
+                    var value = _configuration.ValueConverter.ConvertToNodeValue(change.GetNewValue<object?>(), registeredProperty.Type);
                     writeValues.Add(new WriteValue
                     {
                         NodeId = nodeId,

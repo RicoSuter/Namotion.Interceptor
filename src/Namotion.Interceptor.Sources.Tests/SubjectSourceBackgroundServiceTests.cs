@@ -116,6 +116,6 @@ public class SubjectSourceBackgroundServiceTests
 
         // Assert
         Assert.NotNull(changes);
-        Assert.Equal("Bar", changes.First().NewValue);
+        Assert.Equal("Bar", changes.First().GetNewValue<string?>());
     }
 }

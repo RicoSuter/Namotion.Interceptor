@@ -16,7 +16,7 @@ namespace Namotion.Interceptor.SampleConsole
             context
                 .GetPropertyChangedObservable()
                 .Subscribe((change) => 
-                    Console.WriteLine($"Property {change.Property.Name} changed from {change.OldValue} to {change.NewValue}."));
+                    Console.WriteLine($"Property {change.Property.Name} changed from {change.GetOldValue<object?>()} to {change.GetNewValue<object?>()}."));
 
             var child1 = new Person { FirstName = "Child1" };
             var child2 = new Person { FirstName = "Child2" };

@@ -30,17 +30,17 @@ public class DerivedPropertyChangeHandlerTests
         // Assert
         Assert.Contains(changes, c =>
             c.Property.Name == nameof(Person.FullName) &&
-            c.OldValue?.ToString() == " " &&
-            c.NewValue?.ToString() == "Rico ");
+            c.GetOldValue<string?>() == " " &&
+            c.GetNewValue<string?>() == "Rico ");
 
         Assert.Contains(changes, c =>
             c.Property.Name == nameof(Person.FullName) &&
-            c.OldValue?.ToString() == "Rico " &&
-            c.NewValue?.ToString() == "Rico Suter");
+            c.GetOldValue<string?>() == "Rico " &&
+            c.GetNewValue<string?>() == "Rico Suter");
 
         Assert.Contains(changes, c =>
             c.Property.Name == nameof(Person.FullNameWithPrefix) &&
-            c.NewValue?.ToString() == "Mr. Rico Suter");
+            c.GetNewValue<string?>() == "Mr. Rico Suter");
     }
 
     [Fact]

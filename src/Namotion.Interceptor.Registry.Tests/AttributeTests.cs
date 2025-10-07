@@ -82,7 +82,7 @@ public class AttributeTests
         person.FirstName = "Rico";
 
         // Assert
-        Assert.Contains(changes, x => x.NewValue!.Equals("Mr. Rico"));
+        Assert.Contains(changes, x => x.GetNewValue<string>().Equals("Mr. Rico"));
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class AttributeTests
         person.FirstName = "Rico";
 
         // Assert
-        Assert.Contains(changes, x => x.NewValue!.Equals("Mr. Rico"));
+        Assert.Contains(changes, x => x.GetNewValue<string>().Equals("Mr. Rico"));
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public class AttributeTests
         dynamicProperty.SetValue("Abc");
 
         // Assert
-        Assert.Contains(changes, x => x.NewValue!.Equals("Abc"));
+        Assert.Contains(changes, x => x.GetNewValue<string>().Equals("Abc"));
     }
 
     [Fact]
@@ -186,6 +186,6 @@ public class AttributeTests
         dynamicAttribute.SetValue("Abc");
 
         // Assert
-        Assert.Contains(changes, x => x.NewValue!.Equals("Abc"));
+        Assert.Contains(changes, x => x.GetNewValue<string>().Equals("Abc"));
     }
 }
