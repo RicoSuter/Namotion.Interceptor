@@ -30,4 +30,19 @@ public class OpcUaNodeAttribute : SourcePathAttribute
     /// Gets the node namespace URI (uses default namespace from client configuration when null).
     /// </summary>
     public string? NodeNamespaceUri { get; set; }
+
+    /// <summary>
+    /// Gets or sets the sampling interval in milliseconds to be used in monitored item (default: null, use default).
+    /// </summary>
+    public int? SamplingInterval { get; set; }
+
+    /// <summary>
+    /// Gets or sets the queue size to be used in monitored item (default: null, use default).
+    /// </summary>
+    public uint? QueueSize { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the server should discard the oldest value in the queue when the queue is full (default: null, use default).
+    /// </summary>
+    public bool? DiscardOldest { get; set; }
 }
