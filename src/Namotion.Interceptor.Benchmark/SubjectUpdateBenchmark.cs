@@ -26,9 +26,9 @@ public class SubjectUpdateBenchmark
         _car = new Car(context);
         _changes =
         [
-            new SubjectPropertyChange(new PropertyReference(_car.Tires[2], "Pressure"), null, DateTimeOffset.Now, 10d, 42d),
-            new SubjectPropertyChange(new PropertyReference(_car, "Name"), null, DateTimeOffset.Now, "OldName", "NewName"),
-            new SubjectPropertyChange(new PropertyReference(_car.Tires[1], "Pressure"), null, DateTimeOffset.Now, 10d, 42d),
+            SubjectPropertyChange.Create(new PropertyReference(_car.Tires[2], "Pressure"), null, DateTimeOffset.Now, 10d, 42d),
+            SubjectPropertyChange.Create(new PropertyReference(_car, "Name"), null, DateTimeOffset.Now, "OldName", "NewName"),
+            SubjectPropertyChange.Create(new PropertyReference(_car.Tires[1], "Pressure"), null, DateTimeOffset.Now, 10d, 42d),
         ];
     }
 

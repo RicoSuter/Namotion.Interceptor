@@ -41,4 +41,6 @@ public interface ISubjectSource
     /// <param name="changes">The collection of subject property changes.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken);
+    
+    // TODO(perf): Use readonly span here for WriteToSourceAsync changes
 }

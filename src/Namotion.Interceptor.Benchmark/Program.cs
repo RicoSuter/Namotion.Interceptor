@@ -23,6 +23,7 @@ public static class Program
         // benchmark.Type = "interceptor";
         benchmark.Setup().GetAwaiter().GetResult();
         RunCode(benchmark);
+        benchmark.Cleanup().GetAwaiter().GetResult();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
