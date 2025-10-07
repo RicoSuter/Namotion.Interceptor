@@ -107,7 +107,7 @@ namespace Namotion.Interceptor.Mqtt
                 .Where(c => !c.Property.GetRegisteredProperty().HasChildSubjects)
                 .GetSourcePaths(_sourcePathProvider, _subject))
             {
-                await PublishPropertyValueAsync(path, change.NewValue, cancellationToken);
+                await PublishPropertyValueAsync(path, change.GetNewValue<object?>(), cancellationToken);
             }
         }
 

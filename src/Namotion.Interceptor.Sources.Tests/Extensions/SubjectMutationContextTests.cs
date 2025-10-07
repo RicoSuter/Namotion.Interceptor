@@ -38,8 +38,8 @@ public class SubjectMutationContextTests
         person.FirstName = "C";
 
         // Assert
-        Assert.False(changes.ElementAt(0).IsChangingFromSource(source));
-        Assert.True(changes.ElementAt(1).IsChangingFromSource(source));
-        Assert.False(changes.ElementAt(2).IsChangingFromSource(source));
+        Assert.False(changes.ElementAt(0).Source == source);
+        Assert.True(changes.ElementAt(1).Source == source);
+        Assert.False(changes.ElementAt(2).Source == source);
     }
 }

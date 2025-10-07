@@ -9,13 +9,17 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
 
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
+        var oldValue = context.CurrentValue;
+        
         next(ref context);
 
-        var changedContext = new SubjectPropertyChange(
+        var newValue = context.GetFinalValue();
+        var changedContext = SubjectPropertyChange.Create(
             context.Property, 
             SubjectMutationContext.GetCurrentSource(),
             SubjectMutationContext.GetCurrentTimestamp(),
-            context.CurrentValue, context.GetFinalValue());
+            oldValue, 
+            newValue);
         
         _subject.OnNext(changedContext);
     }

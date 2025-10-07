@@ -16,8 +16,8 @@ public static class ObservableExtensions
     {
         return observable
             .Buffer(bufferTime)
-            .Where(propertyChanges => propertyChanges.Any())
-            .Select(propertyChanges => propertyChanges
+            .Where(changes => changes.Count > 0)
+            .Select(changes => changes
                 .Reverse()
                 .DistinctBy(c => c.Property));
     }
