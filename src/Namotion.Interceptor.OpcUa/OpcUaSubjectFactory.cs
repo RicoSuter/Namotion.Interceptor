@@ -14,7 +14,7 @@ public class OpcUaSubjectFactory
         _subjectFactory = subjectFactory;
     }
 
-    public virtual Task<IInterceptorSubject> CreateSubjectAsync(RegisteredSubjectProperty property, ReferenceDescription node, Session session, CancellationToken cancellationToken)
+    public virtual Task<IInterceptorSubject> CreateSubjectAsync(RegisteredSubjectProperty property, ReferenceDescription node, ISession session, CancellationToken cancellationToken)
     {
         return Task.FromResult(_subjectFactory.CreateSubject(property));
     }

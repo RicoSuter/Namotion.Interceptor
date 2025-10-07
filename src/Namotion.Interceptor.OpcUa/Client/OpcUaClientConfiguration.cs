@@ -68,6 +68,21 @@ public class OpcUaClientConfiguration
     /// </summary>
     public required OpcUaSubjectFactory SubjectFactory { get; init; }
 
+    /// <summary>
+    /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute (default: 0).
+    /// </summary>
+    public int DefaultSamplingInterval { get; set; }
+
+    /// <summary>
+    /// Gets or sets the default queue size for monitored items when not specified on the [OpcUaNode] attribute (default: 10).
+    /// </summary>
+    public uint DefaultQueueSize { get; set; } = 10;
+
+    /// <summary>
+    /// Gets or sets whether the server should discard the oldest value in the queue when the queue is full for monitored items (default: true).
+    /// </summary>
+    public bool DefaultDiscardOldest { get; set; } = true;
+
     public virtual ApplicationInstance CreateApplicationInstance()
     {
         var application = new ApplicationInstance

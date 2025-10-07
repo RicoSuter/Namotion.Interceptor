@@ -14,24 +14,33 @@ public class OpcUaTypeResolver
         _logger = logger;
     }
     
-    public async Task<Type> GetTypeForNodeAsync(Session session, ReferenceDescription reference, CancellationToken cancellationToken)
+    public virtual async Task<Type> GetTypeForNodeAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
     {
         var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
 
         if (reference.NodeClass != NodeClass.Variable)
         {
-            var (_, _ , nodeProperties, _) = await session.BrowseAsync(
+            var browseDescriptions = new BrowseDescriptionCollection
+            {
+                new BrowseDescription
+                {
+                    NodeId = nodeId!,
+                    BrowseDirection = BrowseDirection.Forward,
+                    ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                    IncludeSubtypes = true,
+                    NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object,
+                    ResultMask = (uint)BrowseResultMask.All
+                }
+            };
+
+            var response = await session.BrowseAsync(
                 null,
                 null,
-                [nodeId],
                 0u,
-                BrowseDirection.Forward,
-                ReferenceTypeIds.HierarchicalReferences,
-                true,
-                (uint)NodeClass.Variable | (uint)NodeClass.Object,
+                browseDescriptions,
                 cancellationToken);
 
-            if (nodeProperties.SelectMany(p => p).Any(n => n.NodeClass == NodeClass.Variable))
+            if (response.Results.Count > 0 && response.Results[0].References.Any(n => n.NodeClass == NodeClass.Variable))
             {
                 return typeof(DynamicSubject);
             }

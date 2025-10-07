@@ -86,17 +86,6 @@ public static class SubjectMutationContext
     }
 
     /// <summary>
-    /// Checks if the property change is from the specified source.
-    /// </summary>
-    /// <param name="change">The property change.</param>
-    /// <param name="source">The source find.</param>
-    /// <returns>The result.</returns>
-    public static bool IsChangingFromSource(this SubjectPropertyChange change, object source)
-    {
-        return change.Source == source;
-    }
-
-    /// <summary>
     /// Sets the value of the property and marks the assignment as applied by the specified source.
     /// </summary>
     /// <param name="property">The property.</param>

@@ -120,7 +120,7 @@ public record SubjectUpdate
                 // handle property changes
                 var propertyName = property.Name;
                 var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates);
-                propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.GetNewValue<object?>(), propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
                 subjectUpdate.Properties[propertyName] = transformPropertyUpdate is not null ? transformPropertyUpdate(registeredProperty, propertyUpdate) : propertyUpdate;
             }
 
@@ -188,7 +188,7 @@ public record SubjectUpdate
             var attributeUpdate = OrCreateSubjectAttributeUpdate(parentAttributeUpdate, attributeName);
             if (changeProperty is not null && change.HasValue)
             {
-                attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.GetNewValue<object?>(), propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
                 attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(changeProperty, attributeUpdate) : attributeUpdate;
                 parentAttributeUpdate.Attributes![attributeName] = attributeUpdate;
             }
@@ -203,7 +203,7 @@ public record SubjectUpdate
             var attributeUpdate = OrCreateSubjectAttributeUpdate(propertyUpdate, attributeName);
             if (changeProperty is not null && change.HasValue)
             {
-                attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.NewValue, propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
+                attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.GetNewValue<object?>(), propertyFilter, transformPropertyUpdate, knownSubjectUpdates);
                 attributeUpdate = transformPropertyUpdate is not null ? transformPropertyUpdate(changeProperty, attributeUpdate) : attributeUpdate;
                 propertyUpdate.Attributes![attributeName] = attributeUpdate;
             }
