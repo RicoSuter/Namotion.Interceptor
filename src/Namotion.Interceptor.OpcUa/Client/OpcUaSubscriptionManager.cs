@@ -163,17 +163,16 @@ internal class OpcUaSubscriptionManager
             return;
         }
         
-        var changes = new List<SubjectPropertyChange>(monitoredItemsCount);
+        var changes = new List<OpcUaPropertyUpdate>(monitoredItemsCount);
         for (var i = 0; i < monitoredItemsCount; i++)
         {
             var item = notification.MonitoredItems[i];
             if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
             {
-                changes.Add(new SubjectPropertyChange
+                changes.Add(new OpcUaPropertyUpdate
                 {
                     Property = property,
-                    NewValue = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property.Type),
-                    OldValue = null,
+                    Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property.Type),
                     Timestamp = item.Value.SourceTimestamp
                 });
             }
@@ -191,7 +190,7 @@ internal class OpcUaSubscriptionManager
                 var change = changes[i];
                 try
                 {
-                    change.Property.SetValueFromSource(subscription, change.Timestamp, change.NewValue);
+                    change.Property.SetValueFromSource(subscription, change.Timestamp, change.Value);
                 }
                 catch (Exception e)
                 {
@@ -199,5 +198,14 @@ internal class OpcUaSubscriptionManager
                 }
             }
         });
+    }
+
+    private struct OpcUaPropertyUpdate
+    {
+        public PropertyReference Property { get; init; }
+        
+        public DateTimeOffset Timestamp { get; init; }
+        
+        public object? Value { get; init; }
     }
 }
