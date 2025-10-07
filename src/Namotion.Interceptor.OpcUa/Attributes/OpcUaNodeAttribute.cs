@@ -24,25 +24,25 @@ public class OpcUaNodeAttribute : SourcePathAttribute
     /// <summary>
     /// Gets the node identifier to enforce an exact, global Node ID match when connecting.
     /// </summary>
-    public string? NodeIdentifier { get; set; }
+    public string? NodeIdentifier { get; init; }
 
     /// <summary>
     /// Gets the node namespace URI (uses default namespace from client configuration when null).
     /// </summary>
-    public string? NodeNamespaceUri { get; set; }
+    public string? NodeNamespaceUri { get; init; }
 
     /// <summary>
     /// Gets or sets the sampling interval in milliseconds to be used in monitored item (default: null, use default).
     /// </summary>
-    public int? SamplingInterval { get; set; }
+    public int? SamplingInterval { get; init; }
 
     /// <summary>
     /// Gets or sets the queue size to be used in monitored item (default: null, use default).
     /// </summary>
-    public uint? QueueSize { get; set; }
+    public uint? QueueSize { get; init; }
 
     /// <summary>
     /// Gets or sets whether the server should discard the oldest value in the queue when the queue is full (default: null, use default).
     /// </summary>
-    public bool? DiscardOldest { get; set; }
+    public bool? DiscardOldest { get; init; }
 }
