@@ -33,11 +33,20 @@ public static class DerivedPropertyChangeHandlerExtensions
 
     internal static object? GetLastKnownValue(this PropertyReference property)
     {
-        return property.GetOrAddPropertyData(LastKnownValueKey, () => (object?)null);
+        return property.GetOrAddPropertyData(LastKnownValueKey, static () => new LastKnownValueWrapper()).Value;
     }
 
+    // TODO(perf): Use a struct-based/ref approach somehow to avoid allocations here in SetLastKnownValue
     internal static void SetLastKnownValue(this PropertyReference property, object? value)
     {
-        property.SetPropertyData(LastKnownValueKey, value);
+        property.AddOrUpdatePropertyData<LastKnownValueWrapper, object?>(
+            LastKnownValueKey, static (wrapper, val) => wrapper.Value = val, value);
+    }
+    
+    // Wrapper used to avoid boxing when the stored value happens to be a value type
+    // The wrapper itself is a reference type, so only one allocation per property is needed
+    private class LastKnownValueWrapper
+    {
+        public object? Value { get; set; }
     }
 }
