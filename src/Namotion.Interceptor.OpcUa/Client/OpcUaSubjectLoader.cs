@@ -211,12 +211,17 @@ internal class OpcUaSubjectLoader
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
     {
+        var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
         var monitoredItem = new MonitoredItem
         {
             StartNodeId = nodeId,
-            MonitoringMode = MonitoringMode.Reporting,
             AttributeId = Opc.Ua.Attributes.Value,
-            SamplingInterval = 0,
+
+            MonitoringMode = MonitoringMode.Reporting,
+           
+            SamplingInterval = opcUaNodeAttribute?.SamplingInterval ?? _configuration.DefaultSamplingInterval,
+            QueueSize = opcUaNodeAttribute?.QueueSize ?? _configuration.DefaultQueueSize,
+            DiscardOldest = opcUaNodeAttribute?.DiscardOldest ?? _configuration.DefaultDiscardOldest,
 
             // Delay ClientHandle mapping until after the item is added to a subscription.
             // Store the property on the item itself for later reference.
