@@ -13,44 +13,10 @@ public struct SubjectPropertyChange
     private byte _holderType; // 0 = none, 1 = inline (typed), 2 = boxed
 
     public PropertyReference Property { get; init; }
+    
     public object? Source { get; init; }
+    
     public DateTimeOffset Timestamp { get; init; }
-    
-    // TODO(perf): Search for usage of old value and new value (use typed method instead if possible)
-
-    // Lazy boxing: only box when accessed
-    public object? OldValue 
-    { 
-        get => _holderType switch
-        {
-            1 => _inlineStorage.GetOldValueBoxed(),
-            2 => _boxedHolder!.OldValue,
-            _ => null
-        };
-        init 
-        {
-            // When using object initializer, store boxed values
-            _boxedHolder = new BoxedValues { OldValue = value, NewValue = null };
-            _holderType = 2;
-        }
-    }
-    
-    public object? NewValue 
-    { 
-        get => _holderType switch
-        {
-            1 => _inlineStorage.GetNewValueBoxed(),
-            2 => _boxedHolder!.NewValue,
-            _ => null
-        };
-        init 
-        {
-            if (_holderType == 2 && _boxedHolder is not null)
-            {
-                _boxedHolder.NewValue = value;
-            }
-        }
-    }
 
     // Internal constructor used by Create<T> method for typed values
     private SubjectPropertyChange(PropertyReference property, object? source, DateTimeOffset timestamp, InlineValueStorage inlineStorage)
@@ -104,8 +70,8 @@ public struct SubjectPropertyChange
 
         return _holderType switch
         {
-            1 => ConvertOrThrow<TValue>(_inlineStorage.GetOldValueBoxed(), nameof(OldValue)),
-            2 => ConvertOrThrow<TValue>(_boxedHolder!.OldValue, nameof(OldValue)),
+            1 => ConvertOrThrow<TValue>(_inlineStorage.GetOldValueBoxed(), nameof(GetOldValue)),
+            2 => ConvertOrThrow<TValue>(_boxedHolder!.OldValue, nameof(GetOldValue)),
             _ => throw new InvalidOperationException("No value holder available.")
         };
     }
@@ -122,8 +88,8 @@ public struct SubjectPropertyChange
 
         return _holderType switch
         {
-            1 => ConvertOrThrow<TValue>(_inlineStorage.GetNewValueBoxed(), nameof(NewValue)),
-            2 => ConvertOrThrow<TValue>(_boxedHolder!.NewValue, nameof(NewValue)),
+            1 => ConvertOrThrow<TValue>(_inlineStorage.GetNewValueBoxed(), nameof(GetNewValue)),
+            2 => ConvertOrThrow<TValue>(_boxedHolder!.NewValue, nameof(GetNewValue)),
             _ => throw new InvalidOperationException("No value holder available.")
         };
     }
@@ -161,6 +127,11 @@ public struct SubjectPropertyChange
         if (value is TValue typedValue)
         {
             return typedValue;
+        }
+        
+        if (value == null && Equals(default(TValue), value))
+        {
+            return default!;
         }
 
         var actualType = value?.GetType()?.Name ?? "null";
