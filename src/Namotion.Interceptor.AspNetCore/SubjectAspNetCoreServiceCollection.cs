@@ -62,8 +62,7 @@ public static class SubjectAspNetCoreServiceCollection
                 {
                     var subject = subjectSelector(context.RequestServices);
                     return TypedResults.Ok(SubjectUpdate
-                        .CreateCompleteUpdate(subject)
-                        .ConvertToJsonCamelCasePath());
+                        .CreateCompleteUpdate(subject, JsonCamelCasePathProcessor.Instance));
                 })
             .Produces<SubjectUpdate>()
             .WithTags(typeof(TSubject).Name);

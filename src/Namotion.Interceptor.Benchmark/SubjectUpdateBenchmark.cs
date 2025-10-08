@@ -36,15 +36,13 @@ public class SubjectUpdateBenchmark
     public void CreateCompleteUpdate()
     {
         var subjectUpdate = SubjectUpdate
-            .CreateCompleteUpdate(_car)
-            .ConvertToJsonCamelCasePath();
+            .CreateCompleteUpdate(_car, JsonCamelCasePathProcessor.Instance);
     }
     
     [Benchmark]
     public void CreatePartialUpdate()
     {
         var partialSubjectUpdate = SubjectUpdate
-            .CreatePartialUpdateFromChanges(_car, _changes)
-            .ConvertToJsonCamelCasePath();    
+            .CreatePartialUpdateFromChanges(_car, _changes, JsonCamelCasePathProcessor.Instance);    
     }
 }

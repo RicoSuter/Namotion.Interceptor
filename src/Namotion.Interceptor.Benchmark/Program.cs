@@ -42,7 +42,7 @@ public static class Program
             {
                 // benchmark.ProcessSourceChanges();
                 //benchmark.ProcessLocalChanges();
-                benchmark.CreatePartialUpdate();
+                benchmark.CreateCompleteUpdate();
             }
             Console.WriteLine($"{i * inner}/{total} ({watch.ElapsedMilliseconds / (decimal)inner} ms)");
         }
