@@ -19,20 +19,20 @@ public static class Program
 
     private static void Run()
     {
-        var benchmark = new SubjectSourceBenchmark();
+        var benchmark = new SubjectUpdateBenchmark();
         // benchmark.Type = "interceptor";
-        benchmark.Setup().GetAwaiter().GetResult();
+        benchmark.Setup();//.GetAwaiter().GetResult();
         RunCode(benchmark);
-        benchmark.Cleanup().GetAwaiter().GetResult();
+        //benchmark.Cleanup().GetAwaiter().GetResult();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void RunCode(SubjectSourceBenchmark benchmark)
+    private static void RunCode(SubjectUpdateBenchmark benchmark)
     {
         var watch = Stopwatch.StartNew();
 
         const int outer = 100;
-        const int inner = 100;
+        const int inner = 100000;
         
         const int total = outer * inner;
         for (var i = 0; i < outer; ++i)
@@ -41,9 +41,10 @@ public static class Program
             for (var j = 0; j < inner; ++j)
             {
                 // benchmark.ProcessSourceChanges();
-                benchmark.ProcessLocalChanges();
+                //benchmark.ProcessLocalChanges();
+                benchmark.CreatePartialUpdate();
             }
-            Console.WriteLine($"{i * inner}/{total} ({watch.ElapsedMilliseconds / inner} ms)");
+            Console.WriteLine($"{i * inner}/{total} ({watch.ElapsedMilliseconds / (decimal)inner} ms)");
         }
     }
 }
