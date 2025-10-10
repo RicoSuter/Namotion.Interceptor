@@ -84,7 +84,7 @@ public record SubjectPropertyUpdate
     internal static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubjectProperty property, 
         ISubjectUpdateProcessor[] processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        List<(RegisteredSubjectProperty, SubjectPropertyUpdate, IDictionary<string, SubjectPropertyUpdate>)>? propertyUpdatesToTransform)
+        List<SubjectPropertyUpdateReference>? propertyUpdates)
     {
         var allAttributes = property.Attributes;
         
@@ -92,7 +92,7 @@ public record SubjectPropertyUpdate
             .Where(p => p.HasGetter)
             .ToDictionary(
                 p => p.AttributeMetadata.AttributeName,
-                p => CreateCompleteUpdate(p, processors, knownSubjectUpdates, propertyUpdatesToTransform)) : null;
+                p => CreateCompleteUpdate(p, processors, knownSubjectUpdates, propertyUpdates)) : null;
 
         var propertyUpdate = new SubjectPropertyUpdate
         {
@@ -100,20 +100,20 @@ public record SubjectPropertyUpdate
             Attributes = attributes?.Count != 0 ? attributes : null
         };
         
-        if (propertyUpdatesToTransform is not null && attributes?.Count > 0)
+        if (propertyUpdates is not null && attributes?.Count > 0)
         {
             foreach (var (attrName, attrUpdate) in attributes)
             {
                 var attrProperty = property.Attributes.FirstOrDefault(a => a.AttributeMetadata.AttributeName == attrName);
                 if (attrProperty is not null)
                 {
-                    propertyUpdatesToTransform.Add((attrProperty, attrUpdate, propertyUpdate.Attributes!));
+                    propertyUpdates.Add(new SubjectPropertyUpdateReference(attrProperty, attrUpdate, propertyUpdate.Attributes!));
                 }
             }
         }
         
         propertyUpdate.ApplyValue(property, property.Reference.TryGetWriteTimestamp(), property.GetValue(), 
-            processors, knownSubjectUpdates, propertyUpdatesToTransform);
+            processors, knownSubjectUpdates, propertyUpdates);
 
         return propertyUpdate;
     }
@@ -126,11 +126,11 @@ public record SubjectPropertyUpdate
     /// <param name="value">The value to apply.</param>
     /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
-    /// <param name="propertyUpdatesToTransform">Optional list to collect property updates for transformation.</param>
+    /// <param name="propertyUpdates">Optional list to collect property updates for transformation.</param>
     internal void ApplyValue(RegisteredSubjectProperty property, DateTimeOffset? timestamp, object? value, 
         ISubjectUpdateProcessor[] processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        List<(RegisteredSubjectProperty, SubjectPropertyUpdate, IDictionary<string, SubjectPropertyUpdate>)>? propertyUpdatesToTransform = null)
+        List<SubjectPropertyUpdateReference>? propertyUpdates = null)
     {
         Timestamp = timestamp;
 
@@ -144,7 +144,7 @@ public record SubjectPropertyUpdate
                     var item = dictionary[key];
                     return new SubjectPropertyCollectionUpdate
                     {
-                        Item = item is not null ? SubjectUpdate.CreateCompleteUpdate(item, processors, knownSubjectUpdates, propertyUpdatesToTransform) : null,
+                        Item = item is not null ? SubjectUpdate.CreateCompleteUpdate(item, processors, knownSubjectUpdates, propertyUpdates) : null,
                         Index = key
                     };
                 })
@@ -156,7 +156,7 @@ public record SubjectPropertyUpdate
             Collection = value is IEnumerable<IInterceptorSubject> collection ? collection
                 .Select((itemSubject, index) => new SubjectPropertyCollectionUpdate
                 {
-                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdatesToTransform),
+                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates),
                     Index = index
                 })
                 .ToList() : null;
@@ -164,7 +164,7 @@ public record SubjectPropertyUpdate
         else if (property.IsSubjectReference)
         {
             Kind = SubjectPropertyUpdateKind.Item;
-            Item = value is IInterceptorSubject itemSubject ? SubjectUpdate.CreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdatesToTransform) : null;
+            Item = value is IInterceptorSubject itemSubject ? SubjectUpdate.CreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates) : null;
         }
         else
         {
