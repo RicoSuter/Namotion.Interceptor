@@ -35,7 +35,7 @@ public class SubjectUpdateTests
 
         // Act
         var completeSubjectUpdate = SubjectUpdate
-            .CreateCompleteUpdate(person, JsonCamelCasePathProcessor.Instance);
+            .CreateCompleteUpdate(person, [JsonCamelCasePathProcessor.Instance]);
 
         // Assert
         await Verify(completeSubjectUpdate).DisableDateCounting();
@@ -73,7 +73,7 @@ public class SubjectUpdateTests
 
         // Act
         var partialSubjectUpdate = SubjectUpdate
-            .CreatePartialUpdateFromChanges(person, changes, JsonCamelCasePathProcessor.Instance);
+            .CreatePartialUpdateFromChanges(person, changes, [JsonCamelCasePathProcessor.Instance]);
 
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
@@ -112,8 +112,10 @@ public class SubjectUpdateTests
         // Act
         var partialSubjectUpdate = SubjectUpdate
             .CreatePartialUpdateFromChanges(person, changes, 
-                new MockProcessor(child1, child3), 
-                JsonCamelCasePathProcessor.Instance);
+                [
+                    new MockProcessor(child1, child3),
+                    JsonCamelCasePathProcessor.Instance
+                ]);
     
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
@@ -185,7 +187,7 @@ public class SubjectUpdateTests
         var partialSubjectUpdate = SubjectUpdate
             // TODO(perf): This method can probably made much faster in case of
             // non-root subjects (no need to create many objects)
-            .CreatePartialUpdateFromChanges(father, changes, JsonCamelCasePathProcessor.Instance);
+            .CreatePartialUpdateFromChanges(father, changes, [JsonCamelCasePathProcessor.Instance]);
 
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
@@ -224,7 +226,7 @@ public class SubjectUpdateTests
         person.Children[1].FirstName = "John";
 
         var partialSubjectUpdate = SubjectUpdate
-            .CreatePartialUpdateFromChanges(person, changes.ToArray().AsSpan(), JsonCamelCasePathProcessor.Instance);
+            .CreatePartialUpdateFromChanges(person, changes.ToArray().AsSpan(), [JsonCamelCasePathProcessor.Instance]);
 
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
@@ -266,7 +268,7 @@ public class SubjectUpdateTests
 
         // Act
         var partialSubjectUpdate = SubjectUpdate
-            .CreatePartialUpdateFromChanges(person, changes, JsonCamelCasePathProcessor.Instance);
+            .CreatePartialUpdateFromChanges(person, changes, [JsonCamelCasePathProcessor.Instance]);
 
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();

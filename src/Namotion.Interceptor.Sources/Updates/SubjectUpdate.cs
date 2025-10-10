@@ -31,7 +31,7 @@ public record SubjectUpdate
     /// <param name="subject">The root subject.</param>
     /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, params ReadOnlySpan<ISubjectUpdateProcessor> processors)
+    public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
         var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
         List<SubjectPropertyUpdateReference>? propertyUpdates = processors.Length > 0 ? new() : null;
@@ -101,7 +101,7 @@ public record SubjectUpdate
     public static SubjectUpdate CreatePartialUpdateFromChanges(
         IInterceptorSubject subject, 
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
-        params ReadOnlySpan<ISubjectUpdateProcessor> processors)
+        ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
         var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
         List<SubjectPropertyUpdateReference>? propertyUpdates = processors.Length > 0 ? new() : null;
