@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -29,18 +30,19 @@ public record SubjectUpdate
     /// Creates a complete update with all objects and properties for the given subject as root.
     /// </summary>
     /// <param name="subject">The root subject.</param>
-    /// <param name="processor">The update processor to filter and transform updates.</param>
+    /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, ISubjectUpdateProcessor? processor = null)
+    public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, params ISubjectUpdateProcessor[] processors)
     {
         var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
-        List<(RegisteredSubjectProperty, SubjectPropertyUpdate, IDictionary<string, SubjectPropertyUpdate>)>? propertyUpdatesToTransform = processor is not null ? new() : null;
+        List<(RegisteredSubjectProperty, SubjectPropertyUpdate, IDictionary<string, SubjectPropertyUpdate>)>? propertyUpdatesToTransform 
+            = processors.Length > 0 ? new() : null;
         
-        var update = CreateCompleteUpdateInternal(subject, processor, knownSubjectUpdates, propertyUpdatesToTransform);
+        var update = CreateCompleteUpdateInternal(subject, processors, knownSubjectUpdates, propertyUpdatesToTransform);
         
-        if (processor is not null && propertyUpdatesToTransform is not null)
+        if (processors?.Length > 0 && propertyUpdatesToTransform is not null)
         {
-            ApplyTransformations(knownSubjectUpdates, propertyUpdatesToTransform, processor);
+            ApplyTransformations(knownSubjectUpdates, propertyUpdatesToTransform, processors);
         }
         
         return update;
@@ -50,20 +52,20 @@ public record SubjectUpdate
     /// Creates a complete update with all objects and properties for the given subject as root.
     /// </summary>
     /// <param name="subject">The root subject.</param>
-    /// <param name="processor">The update processor to filter and transform updates.</param>
+    /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
     /// <param name="propertyUpdatesToTransform"></param>
     /// <returns>The update.</returns>
     internal static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject,
-        ISubjectUpdateProcessor? processor,
+        ISubjectUpdateProcessor[] processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates, List<(RegisteredSubjectProperty, SubjectPropertyUpdate, IDictionary<string, SubjectPropertyUpdate>)>? propertyUpdatesToTransform)
     {
         // This is called from ApplyValue for nested subjects - don't collect/apply transformations here
-        return CreateCompleteUpdateInternal(subject, processor, knownSubjectUpdates, propertyUpdatesToTransform);
+        return CreateCompleteUpdateInternal(subject, processors, knownSubjectUpdates, propertyUpdatesToTransform);
     }
 
     private static SubjectUpdate CreateCompleteUpdateInternal(IInterceptorSubject subject,
-        ISubjectUpdateProcessor? processor, 
+        ISubjectUpdateProcessor[] processors, 
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         List<(RegisteredSubjectProperty, SubjectPropertyUpdate, IDictionary<string, SubjectPropertyUpdate>)>? propertyUpdatesToTransform)
     {
@@ -72,18 +74,18 @@ public record SubjectUpdate
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is not null)
         {
-            foreach (var property in registeredSubject.Properties
-                .Where(p => p is { HasGetter: true, IsAttribute: false } && processor?.IsIncluded(p) != false))
+            var properties = registeredSubject.Properties;
+            for (var index = 0; index < properties.Length; index++)
             {
-                var propertyUpdate = SubjectPropertyUpdate.CreateCompleteUpdate(
-                    property, processor, knownSubjectUpdates, propertyUpdatesToTransform);
-
-                subjectUpdate.Properties[property.Name] = propertyUpdate;
-                
-                // Collect for transformation
-                if (propertyUpdatesToTransform is not null)
+                var property = registeredSubject.Properties[index];
+                if (property is { HasGetter: true, IsAttribute: false } && IsIncluded(processors, property))
                 {
-                    propertyUpdatesToTransform.Add((property, propertyUpdate, subjectUpdate.Properties));
+                    var propertyUpdate = SubjectPropertyUpdate.CreateCompleteUpdate(
+                        property, processors, knownSubjectUpdates, propertyUpdatesToTransform);
+
+                    subjectUpdate.Properties[property.Name] = propertyUpdate;
+
+                    propertyUpdatesToTransform?.Add((property, propertyUpdate, subjectUpdate.Properties));
                 }
             }
         }
@@ -97,29 +99,32 @@ public record SubjectUpdate
     /// </summary>
     /// <param name="subject">The root subject.</param>
     /// <param name="propertyChanges">The changes to look up within the object graph.</param>
-    /// <param name="processor">The update processor to filter and transform updates.</param>
+    /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <returns>The update.</returns>
     public static SubjectUpdate CreatePartialUpdateFromChanges(
         IInterceptorSubject subject, 
-        IEnumerable<SubjectPropertyChange> propertyChanges,
-        ISubjectUpdateProcessor? processor = null)
+        ReadOnlySpan<SubjectPropertyChange> propertyChanges,
+        params ISubjectUpdateProcessor[] processors)
     {
         var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
-        List<(RegisteredSubjectProperty, SubjectPropertyUpdate, IDictionary<string, SubjectPropertyUpdate>)>? propertyUpdatesToTransform = processor is not null ? new() : null;
+        List<(RegisteredSubjectProperty, SubjectPropertyUpdate, IDictionary<string, SubjectPropertyUpdate>)>? propertyUpdatesToTransform 
+            = processors.Length > 0 ? new() : null;
         
         var update = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
 
-        foreach (var change in propertyChanges)
+        for (var index = 0; index < propertyChanges.Length; index++)
         {
+            var change = propertyChanges[index];
+
             var property = change.Property;
             var registeredSubject = property.Subject.TryGetRegisteredSubject()
                 ?? throw new InvalidOperationException("Registered subject not found.");
 
             var propertySubject = property.Subject;
             var subjectUpdate = GetOrCreateSubjectUpdate(propertySubject, knownSubjectUpdates);
-            
+
             var registeredProperty = property.GetRegisteredProperty();
-            if (processor?.IsIncluded(registeredProperty) == false)
+            if (!IsIncluded(processors, registeredProperty))
             {
                 continue;
             }
@@ -128,11 +133,11 @@ public record SubjectUpdate
             {
                 // handle attribute changes
                 var (_, rootPropertyUpdate, rootPropertyName) = GetOrCreateSubjectAttributeUpdate(
-                    registeredProperty.GetAttributedProperty(), 
-                    registeredProperty.AttributeMetadata.AttributeName, 
-                    registeredProperty, change, processor,
+                    registeredProperty.GetAttributedProperty(),
+                    registeredProperty.AttributeMetadata.AttributeName,
+                    registeredProperty, change, processors,
                     knownSubjectUpdates, propertyUpdatesToTransform);
-                
+
                 subjectUpdate.Properties[rootPropertyName] = rootPropertyUpdate;
             }
             else
@@ -140,9 +145,9 @@ public record SubjectUpdate
                 // handle property changes
                 var propertyName = property.Name;
                 var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates);
-                propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.GetNewValue<object?>(), processor, knownSubjectUpdates, propertyUpdatesToTransform);
+                propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdatesToTransform);
                 subjectUpdate.Properties[propertyName] = propertyUpdate;
-                
+
                 // Collect for transformation
                 if (propertyUpdatesToTransform is not null)
                 {
@@ -153,38 +158,12 @@ public record SubjectUpdate
             CreateParentSubjectUpdatePath(registeredSubject, knownSubjectUpdates);
         }
 
-        if (processor is not null && propertyUpdatesToTransform is not null)
+        if (propertyUpdatesToTransform is not null)
         {
-            ApplyTransformations(knownSubjectUpdates, propertyUpdatesToTransform, processor);
+            ApplyTransformations(knownSubjectUpdates, propertyUpdatesToTransform, processors);
         }
 
         return update;
-    }
-
-    private static void ApplyTransformations(
-        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        List<(RegisteredSubjectProperty Property, SubjectPropertyUpdate Update, IDictionary<string, SubjectPropertyUpdate> ParentDict)> propertyUpdatesToTransform,
-        ISubjectUpdateProcessor processor)
-    {
-        // Transform all property updates from the cached list (no traversal needed)
-        foreach (var (property, propertyUpdate, parentDict) in propertyUpdatesToTransform)
-        {
-            var transformed = processor.TransformSubjectPropertyUpdate(property, propertyUpdate);
-            if (transformed != propertyUpdate)
-            {
-                parentDict[property.Name] = transformed;
-            }
-        }
-
-        // Transform all subject updates
-        foreach (var (subject, subjectUpdate) in knownSubjectUpdates)
-        {
-            var transformed = processor.TransformSubjectUpdate(subject, subjectUpdate);
-            if (transformed != subjectUpdate)
-            {
-                knownSubjectUpdates[subject] = transformed;
-            }
-        }
     }
 
     private static void CreateParentSubjectUpdatePath(
@@ -230,7 +209,7 @@ public record SubjectUpdate
             string attributeName,
             RegisteredSubjectProperty? changeProperty, 
             SubjectPropertyChange? change, 
-            ISubjectUpdateProcessor? processor,
+            ISubjectUpdateProcessor[] processors,
             Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
             List<(RegisteredSubjectProperty, SubjectPropertyUpdate, IDictionary<string, SubjectPropertyUpdate>)>? propertyUpdatesToTransform)
     {
@@ -239,13 +218,13 @@ public record SubjectUpdate
             var (parentAttributeUpdate, parentPropertyUpdate, parentPropertyName) = GetOrCreateSubjectAttributeUpdate(
                 property.GetAttributedProperty(), 
                 property.AttributeMetadata.AttributeName, 
-                null, null, processor, 
+                null, null, processors, 
                 knownSubjectUpdates, propertyUpdatesToTransform);
             
             var attributeUpdate = GetOrCreateSubjectAttributeUpdate(parentAttributeUpdate, attributeName);
             if (changeProperty is not null && change.HasValue)
             {
-                attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.GetNewValue<object?>(), processor, knownSubjectUpdates, propertyUpdatesToTransform);
+                attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdatesToTransform);
             }
             
             // Collect the parent attribute for transformation so its nested attributes get transformed
@@ -265,7 +244,7 @@ public record SubjectUpdate
             var attributeUpdate = GetOrCreateSubjectAttributeUpdate(propertyUpdate, attributeName);
             if (changeProperty is not null && change.HasValue)
             {
-                attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.GetNewValue<object?>(), processor, knownSubjectUpdates, propertyUpdatesToTransform);
+                attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdatesToTransform);
             }
             
             // Collect the main property (firstName) that contains the attributes dictionary
@@ -324,5 +303,53 @@ public record SubjectUpdate
         };
         knownSubjectUpdates[subject] = subjectUpdate;
         return subjectUpdate;
+    }
+
+    private static void ApplyTransformations(
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
+        List<(RegisteredSubjectProperty Property, SubjectPropertyUpdate Update, IDictionary<string, SubjectPropertyUpdate> ParentDict)> propertyUpdatesToTransform,
+        ISubjectUpdateProcessor[] processors)
+    {
+        for (var index = 0; index < propertyUpdatesToTransform.Count; index++)
+        {
+            var (property, propertyUpdate, parentDict) = propertyUpdatesToTransform[index];
+            for (var i = 0; i < processors.Length; i++)
+            {
+                var processor = processors[i];
+                var transformed = processor.TransformSubjectPropertyUpdate(property, propertyUpdate);
+                if (transformed != propertyUpdate)
+                {
+                    parentDict[property.Name] = transformed;
+                }
+            }
+        }
+
+        foreach (var (subject, subjectUpdate) in knownSubjectUpdates)
+        {
+            for (var index = 0; index < processors.Length; index++)
+            {
+                var processor = processors[index];
+                var transformed = processor.TransformSubjectUpdate(subject, subjectUpdate);
+                if (transformed != subjectUpdate)
+                {
+                    knownSubjectUpdates[subject] = transformed;
+                }
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsIncluded(ISubjectUpdateProcessor[] processors, RegisteredSubjectProperty property)
+    {
+        for (var index = 0; index < processors.Length; index++)
+        {
+            var processor = processors[index];
+            if (!processor.IsIncluded(property))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
