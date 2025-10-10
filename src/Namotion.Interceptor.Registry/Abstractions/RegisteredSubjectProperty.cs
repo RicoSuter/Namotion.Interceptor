@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 #pragma warning disable CS8618, CS9264
 
-public record RegisteredSubjectProperty
+public class RegisteredSubjectProperty
 {
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectReferenceCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
@@ -218,11 +218,13 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
-    public IEnumerable<RegisteredSubjectProperty> Attributes
+    public RegisteredSubjectProperty[] Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Parent.GetPropertyAttributes(Name);
+        get => AttributesCache = (AttributesCache ?? Parent.GetPropertyAttributes(Name).ToArray());
     }
+    
+    internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
     /// <summary>
     /// Gets a property attribute by name.

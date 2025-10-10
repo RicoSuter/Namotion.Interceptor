@@ -1,33 +1,41 @@
 ﻿using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Tracking.Change.Performance;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-public readonly record struct SubjectPropertyChange
+public readonly struct SubjectPropertyChange
 {
-    private readonly object? _oldValue;
-    private readonly object? _newValue;
-    
+    // Discriminated union: either inline storage OR boxed holder (per value)
+    private readonly InlineValueStorage _oldValueStorage;
+    private readonly InlineValueStorage _newValueStorage;
+    private readonly object? _oldBoxedHolder; // IBoxedValueHolder or null
+    private readonly object? _newBoxedHolder; // IBoxedValueHolder or null
+
     private SubjectPropertyChange(
         PropertyReference property,
         object? source,
         DateTimeOffset timestamp,
-        object? oldValue,
-        object? newValue)
+        InlineValueStorage oldValueStorage,
+        InlineValueStorage newValueStorage,
+        object? oldBoxedHolder,
+        object? newBoxedHolder)
     {
         Property = property;
         Source = source;
         Timestamp = timestamp;
-        
-        _oldValue = oldValue;
-        _newValue = newValue;
+        _oldValueStorage = oldValueStorage;
+        _newValueStorage = newValueStorage;
+        _oldBoxedHolder = oldBoxedHolder;
+        _newBoxedHolder = newBoxedHolder;
     }
 
-    public PropertyReference Property { get;  }
-    
-    public object? Source { get;  }
-    
-    public DateTimeOffset Timestamp { get;  }
-    
+    public PropertyReference Property { get; }
+
+    public object? Source { get; }
+
+    public DateTimeOffset Timestamp { get; }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static SubjectPropertyChange Create<TValue>(
         PropertyReference property,
         object? source,
@@ -35,40 +43,65 @@ public readonly record struct SubjectPropertyChange
         TValue oldValue,
         TValue newValue)
     {
-        return new SubjectPropertyChange(property, source, timestamp, oldValue, newValue);
-    }
-    
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TValue GetOldValue<TValue>()
-    {
-        if (TryGetOldValue<TValue>(out var value))
+        // Fast path: value types that fit inline (primitives, small structs) - ZERO allocations
+        if (typeof(TValue).IsValueType && Unsafe.SizeOf<TValue>() <= InlineValueStorage.MaxSize)
         {
-            return value;
+            return new SubjectPropertyChange(
+                property,
+                source,
+                timestamp,
+                InlineValueStorage.Create(oldValue),
+                InlineValueStorage.Create(newValue),
+                null,
+                null);
         }
 
-        throw new InvalidCastException($"Old value of property '{Property.Name}' is of type '{_oldValue?.GetType().FullName ?? "null"}' and cannot be cast to '{typeof(TValue).FullName}'.");
+        // Slow path: reference types or large value types - TWO allocations (one per value)
+        return new SubjectPropertyChange(
+            property,
+            source,
+            timestamp,
+            default,
+            default,
+            new BoxedValueHolder<TValue>(oldValue),
+            new BoxedValueHolder<TValue>(newValue));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TValue GetNewValue<TValue>()
-    {
-        if (TryGetNewValue<TValue>(out var value))
-        {
-            return value;
-        }
+    public TValue GetOldValue<TValue>() =>
+        TryGetValue(_oldValueStorage, _oldBoxedHolder, out TValue value)
+            ? value
+            : throw new InvalidCastException($"Old value of property '{Property.Name}' is of type '{_oldValueStorage.StoredType?.FullName ?? _oldBoxedHolder?.GetType().FullName ?? "null"}' and cannot be cast to '{typeof(TValue).FullName}'.");
 
-        throw new InvalidCastException($"New value of property '{Property.Name}' is of type '{_newValue?.GetType().FullName ?? "null"}' and cannot be cast to '{typeof(TValue).FullName}'.");
-    }
-    
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryGetOldValue<TValue>(out TValue value)
+    public TValue GetNewValue<TValue>() =>
+        TryGetValue(_newValueStorage, _newBoxedHolder, out TValue value)
+            ? value
+            : throw new InvalidCastException($"New value of property '{Property.Name}' is of type '{_newValueStorage.StoredType?.FullName ?? _newBoxedHolder?.GetType().FullName ?? "null"}' and cannot be cast to '{typeof(TValue).FullName}'.");
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetOldValue<TValue>(out TValue value) =>
+        TryGetValue(_oldValueStorage, _oldBoxedHolder, out value);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetNewValue<TValue>(out TValue value) =>
+        TryGetValue(_newValueStorage, _newBoxedHolder, out value);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryGetValue<TValue>(InlineValueStorage storage, object? boxedHolder, out TValue value)
     {
-        var v = _oldValue;
-        if (v is null)
+        // Fast path: inline storage (zero allocation retrieval)
+        if (boxedHolder == null)
         {
-            if (default(TValue) is null)
+            if (storage.TryGetValue(out value))
             {
-                value = default!;
+                return true;
+            }
+
+            // Support casting to object (will box the value)
+            if (typeof(TValue) == typeof(object))
+            {
+                value = (TValue)storage.GetValueBoxed()!;
                 return true;
             }
 
@@ -76,36 +109,21 @@ public readonly record struct SubjectPropertyChange
             return false;
         }
 
-        if (v is TValue t)
+        // Fast path: boxed holder with interface dispatch (no reflection)
+        if (boxedHolder is IBoxedValueHolder holder)
         {
-            value = t;
-            return true;
-        }
-
-        value = default!;
-        return false;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryGetNewValue<TValue>(out TValue value)
-    {
-        var v = _newValue;
-        if (v is null)
-        {
-            if (default(TValue) is null)
+            // Fast path: try direct type match first
+            if (holder.TryGetValue(out value))
             {
-                value = default!;
                 return true;
             }
 
-            value = default!;
-            return false;
-        }
-
-        if (v is TValue t)
-        {
-            value = t;
-            return true;
+            // Fallback: box for object cast (supports custom structs)
+            if (typeof(TValue) == typeof(object))
+            {
+                value = (TValue)holder.GetValueBoxed()!;
+                return true;
+            }
         }
 
         value = default!;

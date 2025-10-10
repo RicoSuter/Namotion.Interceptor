@@ -21,6 +21,8 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class SubjectAspNetCoreServiceCollection
 {
+    private static ISubjectUpdateProcessor[] DefaultProcessors { get; } = [JsonCamelCasePathProcessor.Instance];
+    
     public static IEndpointRouteBuilder MapSubjectWebApis<TSubject>(this IEndpointRouteBuilder builder, string path)
         where TSubject : class, IInterceptorSubject
     {
@@ -62,8 +64,7 @@ public static class SubjectAspNetCoreServiceCollection
                 {
                     var subject = subjectSelector(context.RequestServices);
                     return TypedResults.Ok(SubjectUpdate
-                        .CreateCompleteUpdate(subject)
-                        .ConvertToJsonCamelCasePath());
+                        .CreateCompleteUpdate(subject, DefaultProcessors));
                 })
             .Produces<SubjectUpdate>()
             .WithTags(typeof(TSubject).Name);
