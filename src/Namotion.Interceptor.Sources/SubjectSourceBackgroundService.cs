@@ -1,9 +1,7 @@
-﻿using System.Reactive.Linq;
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -87,25 +85,155 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                         EnqueueSubjectUpdate(action);
                     }
                 }
+
+                var subscription = _context.CreatePropertyChangedChannelSubscription();
                 
-                // listen for changes by ignoring changes from the source and buffering them into a single update
-                await foreach (var changes in _context 
-                    .GetPropertyChangedObservable()
-                    .Where(change => change.Source != _source 
-                        && _source.IsPropertyIncluded(change.Property.GetRegisteredProperty()))
-                    .BufferChanges(_bufferTime)
-                    .ToAsyncEnumerable()
-                    .WithCancellation(stoppingToken))
+                var buffer = new List<SubjectPropertyChange>();
+                var dedupSet = new HashSet<PropertyReference>();
+                var dedupedBuffer = new List<SubjectPropertyChange>();
+                var lockObj = new object();
+                DateTimeOffset lastFlushTime = DateTimeOffset.UtcNow;
+                var hasPendingWrite = false;
+                
+                using var periodicTimer = new PeriodicTimer(_bufferTime);
+                
+                // Start the periodic flush task
+                var flushTask = Task.Run(async () =>
                 {
                     try
                     {
-                        await _source.WriteToSourceAsync(changes, stoppingToken);
+                        while (await periodicTimer.WaitForNextTickAsync(stoppingToken))
+                        {
+                            bool shouldWrite = false;
+                            
+                            lock (lockObj)
+                            {
+                                if (buffer.Count > 0)
+                                {
+                                    var now = DateTimeOffset.UtcNow;
+                                    if (now - lastFlushTime >= _bufferTime)
+                                    {
+                                        // deduplicate - reuse dedupedBuffer, no allocations
+                                        dedupSet.Clear();
+                                        dedupedBuffer.Clear();
+                                        
+                                        for (var i = buffer.Count - 1; i >= 0; i--)
+                                        {
+                                            var change = buffer[i];
+                                            if (dedupSet.Add(change.Property))
+                                            {
+                                                dedupedBuffer.Add(change);
+                                            }
+                                        }
+                                        
+                                        buffer.Clear();
+                                        lastFlushTime = now;
+                                        
+                                        if (dedupedBuffer.Count > 0)
+                                        {
+                                            shouldWrite = true;
+                                            hasPendingWrite = true;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // write outside of lock - dedupedBuffer is not modified until next lock
+                            if (shouldWrite)
+                            {
+                                try
+                                {
+                                    await _source.WriteToSourceAsync(dedupedBuffer, stoppingToken);
+                                }
+                                catch (Exception e)
+                                {
+                                    _logger.LogError(e, "Failed to write changes to source (timer flush).");
+                                }
+                                finally
+                                {
+                                    lock (lockObj)
+                                    {
+                                        hasPendingWrite = false;
+                                    }
+                                }
+                            }
+                        }
                     }
-                    catch (Exception e)
+                    catch (OperationCanceledException)
                     {
-                        // TODO: What do to here?
-                        _logger.LogError(e, "Failed to write changes to source.");
+                        // Expected when stopping
                     }
+                }, stoppingToken);
+                
+                try
+                {
+                    await foreach (var item in subscription.ReadAllAsync(stoppingToken))
+                    {
+                        // filter: ignore changes from the source itself and only include properties that are part of the source
+                        if (item.Source == _source || !_source.IsPropertyIncluded(item.Property.GetRegisteredProperty()))
+                        {
+                            continue;
+                        }
+
+                        bool shouldWrite = false;
+                        
+                        lock (lockObj)
+                        {
+                            buffer.Add(item);
+
+                            // check if buffer time has elapsed based on item timestamp and no pending write
+                            if (!hasPendingWrite && item.Timestamp - lastFlushTime >= _bufferTime)
+                            {
+                                // deduplicate: keep only the latest change per property (reverse order, then distinct)
+                                // iterate backwards through buffer and only add the first occurrence of each property
+                                dedupSet.Clear();
+                                dedupedBuffer.Clear();
+
+                                for (var i = buffer.Count - 1; i >= 0; i--)
+                                {
+                                    var change = buffer[i];
+                                    if (dedupSet.Add(change.Property))
+                                    {
+                                        dedupedBuffer.Add(change);
+                                    }
+                                }
+
+                                buffer.Clear();
+                                lastFlushTime = item.Timestamp;
+                                
+                                if (dedupedBuffer.Count > 0)
+                                {
+                                    shouldWrite = true;
+                                    hasPendingWrite = true;
+                                }
+                            }
+                        }
+                        
+                        // write outside of lock - dedupedBuffer is not modified until next lock
+                        if (shouldWrite)
+                        {
+                            try
+                            {
+                                await _source.WriteToSourceAsync(dedupedBuffer, stoppingToken);
+                            }
+                            catch (Exception e)
+                            {
+                                _logger.LogError(e, "Failed to write changes to source.");
+                            }
+                            finally
+                            {
+                                lock (lockObj)
+                                {
+                                    hasPendingWrite = false;
+                                }
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    // Wait for flush task to complete
+                    await flushTask;
                 }
             }
             catch (Exception ex)
