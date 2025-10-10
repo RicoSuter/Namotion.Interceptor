@@ -15,7 +15,6 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
 
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        // Fast-path: if nobody observes property changes, skip all tracking overhead
         if (!_subject.HasObservers)
         {
             next(ref context);
