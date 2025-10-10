@@ -15,7 +15,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     {
         get
         {
-            lock (_knownSubjects)
+            lock (_lock)
                 return _knownSubjects.ToImmutableDictionary();
         }
     }
@@ -24,7 +24,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
     {
-        lock (_knownSubjects)
+        lock (_lock)
         {
             return _knownSubjects.GetValueOrDefault(subject);
         }
@@ -43,7 +43,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     /// <inheritdoc />
     void ILifecycleHandler.AttachSubject(SubjectLifecycleChange change)
     {
-        lock (_knownSubjects)
+        lock (_lock)
         {
             if (!_knownSubjects.TryGetValue(change.Subject, out var subject))
             {
@@ -101,29 +101,31 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
 
     void ILifecycleHandler.DetachSubject(SubjectLifecycleChange change)
     {
-        lock (_knownSubjects)
+        lock (_lock)
         {
             if (change.ReferenceCount == 0)
             {
-                var registeredSubject = TryGetRegisteredSubject(change.Subject);
-                if (registeredSubject is null)
+                if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
                 {
                     return;
                 }
 
                 if (change.Property is not null)
                 {
-                    var property = TryGetRegisteredProperty(change.Property.Value);
-                    property?
-                        .Parent
-                        .RemoveParent(property, change.Index);
-                    
-                    property?
-                        .RemoveChild(new SubjectPropertyChild
-                        {
-                            Subject = change.Subject,
-                            Index = change.Index
-                        });
+                    if (_knownSubjects.TryGetValue(change.Property.Value.Subject, out var propertySubject))
+                    {
+                        var property = propertySubject.TryGetProperty(change.Property.Value.Name);
+                        property?
+                            .Parent
+                            .RemoveParent(property, change.Index);
+                        
+                        property?
+                            .RemoveChild(new SubjectPropertyChild
+                            {
+                                Subject = change.Subject,
+                                Index = change.Index
+                            });
+                    }
                 }
 
                 _knownSubjects.Remove(change.Subject);
