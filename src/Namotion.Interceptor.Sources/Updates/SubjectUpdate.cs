@@ -17,8 +17,7 @@ public record SubjectUpdate
     /// Gets a dictionary of property updates.
     /// The dictionary is mutable so that additional updates can be attached.
     /// </summary>
-    public IDictionary<string, SubjectPropertyUpdate> Properties { get; init; }
-        = new Dictionary<string, SubjectPropertyUpdate>();
+    public Dictionary<string, SubjectPropertyUpdate> Properties { get; init; } = new();
 
     /// <summary>
     /// Gets or sets custom extension data added by the transformPropertyUpdate function.

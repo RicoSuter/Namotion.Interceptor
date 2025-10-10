@@ -16,7 +16,7 @@ public record SubjectPropertyUpdate
     /// Gets the updated attributes.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public IDictionary<string, SubjectPropertyUpdate>? Attributes { get; internal set; }
+    public Dictionary<string, SubjectPropertyUpdate>? Attributes { get; internal set; }
 
     /// <summary>
     /// Gets the type of the property value.

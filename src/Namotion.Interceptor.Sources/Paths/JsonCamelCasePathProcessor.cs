@@ -14,18 +14,9 @@ public class JsonCamelCasePathProcessor : ISubjectUpdateProcessor
 
     public SubjectUpdate TransformSubjectUpdate(IInterceptorSubject subject, SubjectUpdate update)
     {
-        // TODO(perf): Avoid memory allocations in TransformSubjectUpdate
         if (update.Properties.Count > 0)
         {
-            var updatedProperties = update
-                .Properties
-                .ToDictionary(p => JsonCamelCaseSourcePathProvider.ConvertToSourcePath(p.Key) ?? p.Key, p => p.Value);
-      
-            update.Properties.Clear();
-            foreach (var y in updatedProperties)
-            {
-                update.Properties[y.Key] = y.Value;
-            }
+            TransformDictionaryKeys(update.Properties);
         }
 
         return update;
@@ -33,21 +24,56 @@ public class JsonCamelCasePathProcessor : ISubjectUpdateProcessor
 
     public SubjectPropertyUpdate TransformSubjectPropertyUpdate(RegisteredSubjectProperty property, SubjectPropertyUpdate update)
     {
-        // TODO(perf): Avoid memory allocations in TransformSubjectUpdate
         if (update.Attributes is not null && update.Attributes.Count > 0)
         {
-            var transformedAttributes = update.Attributes
-                .ToDictionary(
-                    a => JsonCamelCaseSourcePathProvider.ConvertToSourcePath(a.Key) ?? a.Key, 
-                    a => a.Value);
-            
-            update.Attributes.Clear();
-            foreach (var attr in transformedAttributes)
-            {
-                update.Attributes[attr.Key] = attr.Value;
-            }
+            TransformDictionaryKeys(update.Attributes);
         }
         
         return update;
+    }
+
+    private static void TransformDictionaryKeys(Dictionary<string, SubjectPropertyUpdate> dictionary)
+    {
+        var count = dictionary.Count;
+        if (count == 0)
+        {
+            return;
+        }
+
+        var keyPairs = System.Buffers.ArrayPool<string>.Shared.Rent(count * 2);
+        try
+        {
+            // Single pass: collect keys that need transformation
+            var index = 0;
+            foreach (var key in dictionary.Keys)
+            {
+                var transformedKey = JsonCamelCaseSourcePathProvider.ConvertToSourcePath(key);
+                if (transformedKey != key)
+                {
+                    keyPairs[index++] = key;
+                    keyPairs[index++] = transformedKey;
+                }
+            }
+
+            // Early exit if no transformations needed
+            if (index == 0)
+            {
+                return;
+            }
+
+            // Apply transformations
+            for (int i = 0; i < index; i += 2)
+            {
+                var oldKey = keyPairs[i];
+                var newKey = keyPairs[i + 1];
+                var value = dictionary[oldKey];
+                dictionary.Remove(oldKey);
+                dictionary[newKey] = value;
+            }
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<string>.Shared.Return(keyPairs);
+        }
     }
 }
