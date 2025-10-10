@@ -4,11 +4,14 @@ using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-public sealed class PropertyChangedChannel : IWriteInterceptor, IDisposable
+public sealed class PropertyChangedChannel : IWriteInterceptor
 {
     private readonly Channel<SubjectPropertyChange> _source;
     private ImmutableArray<Channel<SubjectPropertyChange>> _subscribers = ImmutableArray<Channel<SubjectPropertyChange>>.Empty;
-    private readonly CancellationTokenSource _cts = new();
+    
+    private Task? _broadcastTask;
+    private CancellationTokenSource? _broadcastCts;
+    private readonly Lock _broadcastLock = new();
 
     public PropertyChangedChannel(bool singleProducer = true)
     {
@@ -17,8 +20,6 @@ public sealed class PropertyChangedChannel : IWriteInterceptor, IDisposable
             SingleWriter = singleProducer,
             AllowSynchronousContinuations = false
         });
-
-        _ = RunAsync(_cts.Token);
     }
 
     public PropertyChangedChannelSubscription Subscribe()
@@ -27,29 +28,40 @@ public sealed class PropertyChangedChannel : IWriteInterceptor, IDisposable
             SingleReader = true, SingleWriter = true,
             AllowSynchronousContinuations = false
         });
-        ImmutableInterlocked.Update(ref _subscribers, a => a.Add(ch));
+        
+        lock (_broadcastLock)
+        {
+            var wasEmpty = _subscribers.Length == 0;
+            ImmutableInterlocked.Update(ref _subscribers, a => a.Add(ch));
+            
+            if (wasEmpty && _broadcastTask == null)
+            {
+                _broadcastCts = new CancellationTokenSource();
+                _broadcastTask = RunAsync(_broadcastCts.Token);
+            }
+        }
+        
         return new PropertyChangedChannelSubscription(ch.Reader, () => Unsubscribe(ch));
     }
 
     private void Unsubscribe(Channel<SubjectPropertyChange> channel)
     {
-        ImmutableInterlocked.Update(ref _subscribers, a => a.Remove(channel));
-        channel.Writer.TryComplete();
+        lock (_broadcastLock)
+        {
+            ImmutableInterlocked.Update(ref _subscribers, a => a.Remove(channel));
+            channel.Writer.TryComplete();
+            
+            if (_subscribers.Length == 0 && _broadcastCts != null)
+            {
+                _broadcastCts.Cancel();
+                _broadcastCts.Dispose();
+                _broadcastCts = null;
+                _broadcastTask = null;
+            }
+        }
     }
 
     public bool TryPublish(SubjectPropertyChange item) => _source.Writer.TryWrite(item);
-
-    public ValueTask PublishAsync(SubjectPropertyChange item, CancellationToken ct = default)
-        => _source.Writer.WriteAsync(item, ct);
-
-    public void Complete() => _source.Writer.TryComplete();
-
-    public void Dispose()
-    {
-        _cts.Cancel();
-        _cts.Dispose();
-        _source.Writer.TryComplete();
-    }
 
     private async Task RunAsync(CancellationToken ct)
     {
@@ -57,7 +69,6 @@ public sealed class PropertyChangedChannel : IWriteInterceptor, IDisposable
         {
             await foreach (var item in _source.Reader.ReadAllAsync(ct))
             {
-                // Snapshot is a struct; enumerating it is allocation-free.
                 var targets = _subscribers;
                 foreach (var sub in targets)
                 {
@@ -73,12 +84,10 @@ public sealed class PropertyChangedChannel : IWriteInterceptor, IDisposable
                 sub.Writer.TryComplete();
             }
         }
-        catch (OperationCanceledException oce)
+        catch (OperationCanceledException)
         {
-            foreach (var sub in _subscribers)
-            {
-                sub.Writer.TryComplete(oce);
-            }
+            // Expected when no more subscribers - don't complete subscriber channels
+            // They were already completed in Unsubscribe
         }
         catch (Exception ex)
         {
@@ -110,10 +119,7 @@ public sealed class PropertyChangedChannel : IWriteInterceptor, IDisposable
             SubjectMutationContext.GetCurrentTimestamp(),
             oldValue, 
             newValue);
-        
-        // TryPublish uses TryWrite which only fails if the channel is completed.
-        // Since this runs synchronously in the property setter, we can't use WriteAsync.
-        // If the channel is being disposed, it's acceptable to drop this change.
+
         TryPublish(changedContext);
     }
 }
