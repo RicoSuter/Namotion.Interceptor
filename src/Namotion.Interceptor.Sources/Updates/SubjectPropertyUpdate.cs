@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
@@ -82,42 +83,22 @@ public record SubjectPropertyUpdate
     }
     
     internal static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubjectProperty property, 
-        ISubjectUpdateProcessor[] processors,
+        ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         List<SubjectPropertyUpdateReference>? propertyUpdates)
     {
-        var allAttributes = property.Attributes;
-        
-        var attributes = allAttributes.Length > 0 ? allAttributes
-            .Where(p => p.HasGetter)
-            .ToDictionary(
-                p => p.AttributeMetadata.AttributeName,
-                p => CreateCompleteUpdate(p, processors, knownSubjectUpdates, propertyUpdates)) : null;
-
         var propertyUpdate = new SubjectPropertyUpdate
         {
             Type = property.Type.Name,
-            Attributes = attributes?.Count != 0 ? attributes : null
+            Attributes = CreateAttributeUpdates(property, processors, knownSubjectUpdates, propertyUpdates)
         };
-        
-        if (propertyUpdates is not null && attributes?.Count > 0)
-        {
-            foreach (var (attrName, attrUpdate) in attributes)
-            {
-                var attrProperty = property.Attributes.FirstOrDefault(a => a.AttributeMetadata.AttributeName == attrName);
-                if (attrProperty is not null)
-                {
-                    propertyUpdates.Add(new SubjectPropertyUpdateReference(attrProperty, attrUpdate, propertyUpdate.Attributes!));
-                }
-            }
-        }
         
         propertyUpdate.ApplyValue(property, property.Reference.TryGetWriteTimestamp(), property.GetValue(), 
             processors, knownSubjectUpdates, propertyUpdates);
 
         return propertyUpdate;
     }
-    
+
     /// <summary>
     /// Adds a complete update of the given value to the property update.
     /// </summary>
@@ -128,7 +109,7 @@ public record SubjectPropertyUpdate
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
     /// <param name="propertyUpdates">Optional list to collect property updates for transformation.</param>
     internal void ApplyValue(RegisteredSubjectProperty property, DateTimeOffset? timestamp, object? value, 
-        ISubjectUpdateProcessor[] processors,
+        ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         List<SubjectPropertyUpdateReference>? propertyUpdates = null)
     {
@@ -137,29 +118,16 @@ public record SubjectPropertyUpdate
         if (property.IsSubjectDictionary)
         {
             Kind = SubjectPropertyUpdateKind.Collection;
-            Collection = value is IReadOnlyDictionary<string, IInterceptorSubject?> dictionary ? dictionary
-                .Keys
-                .Select(key =>
-                {
-                    var item = dictionary[key];
-                    return new SubjectPropertyCollectionUpdate
-                    {
-                        Item = item is not null ? SubjectUpdate.CreateCompleteUpdate(item, processors, knownSubjectUpdates, propertyUpdates) : null,
-                        Index = key
-                    };
-                })
-                .ToList() : null;
+            Collection = value is IReadOnlyDictionary<string, IInterceptorSubject?> dictionary 
+                ? CreateDictionaryCollectionUpdates(dictionary, processors, knownSubjectUpdates, propertyUpdates)
+                : null;
         }
         else if (property.IsSubjectCollection)
         {
             Kind = SubjectPropertyUpdateKind.Collection;
-            Collection = value is IEnumerable<IInterceptorSubject> collection ? collection
-                .Select((itemSubject, index) => new SubjectPropertyCollectionUpdate
-                {
-                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates),
-                    Index = index
-                })
-                .ToList() : null;
+            Collection = value is IEnumerable<IInterceptorSubject> collection 
+                ? CreateEnumerableCollectionUpdates(collection, processors, knownSubjectUpdates, propertyUpdates)
+                : null;
         }
         else if (property.IsSubjectReference)
         {
@@ -171,5 +139,91 @@ public record SubjectPropertyUpdate
             Kind = SubjectPropertyUpdateKind.Value;
             Value = value;
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static List<SubjectPropertyCollectionUpdate> CreateDictionaryCollectionUpdates(
+        IReadOnlyDictionary<string, IInterceptorSubject?> dictionary,
+        ReadOnlySpan<ISubjectUpdateProcessor> processors,
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
+        List<SubjectPropertyUpdateReference>? propertyUpdates)
+    {
+        var collectionUpdates = new List<SubjectPropertyCollectionUpdate>(dictionary.Count);
+        foreach (var key in dictionary.Keys)
+        {
+            var item = dictionary[key];
+            collectionUpdates.Add(new SubjectPropertyCollectionUpdate
+            {
+                Item = item is not null ? SubjectUpdate.CreateCompleteUpdate(item, processors, knownSubjectUpdates, propertyUpdates) : null,
+                Index = key
+            });
+        }
+        return collectionUpdates;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static List<SubjectPropertyCollectionUpdate> CreateEnumerableCollectionUpdates(
+        IEnumerable<IInterceptorSubject> enumerable,
+        ReadOnlySpan<ISubjectUpdateProcessor> processors,
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
+        List<SubjectPropertyUpdateReference>? propertyUpdates)
+    {
+        if (enumerable is ICollection<IInterceptorSubject> collection)
+        {
+            var index = 0;
+            var collectionUpdates = new List<SubjectPropertyCollectionUpdate>(collection.Count);
+            foreach (var itemSubject in collection)
+            {
+                collectionUpdates.Add(new SubjectPropertyCollectionUpdate
+                {
+                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates),
+                    Index = index++
+                });
+            }
+            return collectionUpdates;
+        }
+        else
+        {
+            var index = 0;
+            var collectionUpdates = new List<SubjectPropertyCollectionUpdate>();
+            foreach (var itemSubject in enumerable)
+            {
+                collectionUpdates.Add(new SubjectPropertyCollectionUpdate
+                {
+                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates),
+                    Index = index++
+                });
+            }
+            return collectionUpdates;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Dictionary<string, SubjectPropertyUpdate>? CreateAttributeUpdates(RegisteredSubjectProperty property,
+        ReadOnlySpan<ISubjectUpdateProcessor> processors,
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
+        List<SubjectPropertyUpdateReference>? propertyUpdates)
+    {
+        var allAttributes = property.Attributes;
+       
+        Dictionary<string, SubjectPropertyUpdate>? attributes = null;
+        if (allAttributes.Length > 0)
+        {
+            for (int i = 0; i < allAttributes.Length; i++)
+            {
+                var attribute = allAttributes[i];
+                if (attribute.HasGetter)
+                {
+                    attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
+
+                    var attributeUpdate = CreateCompleteUpdate(attribute, processors, knownSubjectUpdates, propertyUpdates);
+                    attributes[attribute.AttributeMetadata.AttributeName] = attributeUpdate;
+
+                    propertyUpdates?.Add(new SubjectPropertyUpdateReference(attribute, attributeUpdate, attributes));
+                }
+            }
+        }
+
+        return attributes?.Count > 0 ? attributes : null;
     }
 }

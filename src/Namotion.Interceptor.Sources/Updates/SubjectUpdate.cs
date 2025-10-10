@@ -31,13 +31,13 @@ public record SubjectUpdate
     /// <param name="subject">The root subject.</param>
     /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, params ISubjectUpdateProcessor[] processors)
+    public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, params ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
         var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
         List<SubjectPropertyUpdateReference>? propertyUpdates = processors.Length > 0 ? new() : null;
         
         var update = CreateCompleteUpdateInternal(subject, processors, knownSubjectUpdates, propertyUpdates);
-        if (processors?.Length > 0 && propertyUpdates is not null)
+        if (processors.Length > 0 && propertyUpdates is not null)
         {
             ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
         }
@@ -54,7 +54,7 @@ public record SubjectUpdate
     /// <param name="propertyUpdates">The list to collect property updates for transformation.</param>
     /// <returns>The update.</returns>
     internal static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject,
-        ISubjectUpdateProcessor[] processors,
+        ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates, 
         List<SubjectPropertyUpdateReference>? propertyUpdates)
     {
@@ -63,7 +63,7 @@ public record SubjectUpdate
     }
 
     private static SubjectUpdate CreateCompleteUpdateInternal(IInterceptorSubject subject,
-        ISubjectUpdateProcessor[] processors, 
+        ReadOnlySpan<ISubjectUpdateProcessor> processors, 
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         List<SubjectPropertyUpdateReference>? propertyUpdates)
     {
@@ -102,7 +102,7 @@ public record SubjectUpdate
     public static SubjectUpdate CreatePartialUpdateFromChanges(
         IInterceptorSubject subject, 
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
-        params ISubjectUpdateProcessor[] processors)
+        params ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
         var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
         List<SubjectPropertyUpdateReference>? propertyUpdates = processors.Length > 0 ? new() : null;
@@ -205,7 +205,7 @@ public record SubjectUpdate
             string attributeName,
             RegisteredSubjectProperty? changeProperty, 
             SubjectPropertyChange? change, 
-            ISubjectUpdateProcessor[] processors,
+            ReadOnlySpan<ISubjectUpdateProcessor> processors,
             Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
             List<SubjectPropertyUpdateReference>? propertyUpdates)
     {
@@ -301,7 +301,7 @@ public record SubjectUpdate
     private static void ApplyTransformations(
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         List<SubjectPropertyUpdateReference> propertyUpdates,
-        ISubjectUpdateProcessor[] processors)
+        ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
         for (var index = 0; index < propertyUpdates.Count; index++)
         {
@@ -332,7 +332,7 @@ public record SubjectUpdate
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsIncluded(ISubjectUpdateProcessor[] processors, RegisteredSubjectProperty property)
+    private static bool IsIncluded(ReadOnlySpan<ISubjectUpdateProcessor> processors, RegisteredSubjectProperty property)
     {
         for (var index = 0; index < processors.Length; index++)
         {
