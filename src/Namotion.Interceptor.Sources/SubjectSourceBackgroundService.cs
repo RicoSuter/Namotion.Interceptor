@@ -37,7 +37,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         _source = source;
         _context = context;
         _logger = logger;
-        _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
+        _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(1);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
     }
 
@@ -119,10 +119,10 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     {
         ResetState();
 
-        using var periodicTimer = new PeriodicTimer(_bufferTime);
+        using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
         using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
-        var flushTask = RunPeriodicFlushAsync(periodicTimer, linkedTokenSource.Token);
+        var flushTask = periodicTimer is not null ? RunPeriodicFlushAsync(periodicTimer, linkedTokenSource.Token) : Task.CompletedTask;
         try
         {
             await foreach (var item in reader.ReadAllAsync(linkedTokenSource.Token))
@@ -133,10 +133,18 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 }
 
                 _changes.Add(item);
-               
-                if (item.Timestamp - _flushLastTime >= _bufferTime)
+
+                if (periodicTimer is null)
                 {
-                    await TryFlushBufferAsync(item.Timestamp, linkedTokenSource.Token);
+                    await WriteToSourceAsync(_changes, linkedTokenSource.Token);
+                    _changes.Clear();
+                }
+                else
+                {
+                    if (item.Timestamp - _flushLastTime >= _bufferTime)
+                    {
+                        await TryFlushBufferAsync(item.Timestamp, linkedTokenSource.Token);
+                    }
                 }
             }
         }
@@ -207,7 +215,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
-    private async Task WriteToSourceAsync(List<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    private async ValueTask WriteToSourceAsync(List<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         try
         {
