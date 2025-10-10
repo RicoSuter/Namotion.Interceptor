@@ -246,9 +246,7 @@ public record SubjectUpdate
             {
                 attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdatesToTransform);
             }
-            
-            // Collect the main property (firstName) that contains the attributes dictionary
-            // This allows the Transform method to transform all attribute keys in the Attributes dict
+
             if (propertyUpdatesToTransform is not null)
             {
                 var subjectUpdate = GetOrCreateSubjectUpdate(property.Parent.Subject, knownSubjectUpdates);
@@ -292,7 +290,6 @@ public record SubjectUpdate
         IInterceptorSubject subject,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
-        // Avoid double lookup and unnecessary dictionary churn
         if (knownSubjectUpdates.TryGetValue(subject, out var subjectUpdate))
         {
             return subjectUpdate;
