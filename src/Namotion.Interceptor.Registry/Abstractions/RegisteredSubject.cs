@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.Collections.Frozen;
+﻿using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
@@ -15,9 +14,7 @@ public class RegisteredSubject
 
     private FrozenDictionary<string, RegisteredSubjectProperty> _properties;
     private readonly HashSet<SubjectPropertyParent> _parents = []; // TODO(perf): Use a FrozenSet?
-
-    private readonly ConcurrentDictionary<string, RegisteredSubjectProperty[]> _attributesCache = new();
-
+    
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
     public ICollection<SubjectPropertyParent> Parents
@@ -34,17 +31,14 @@ public class RegisteredSubject
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
-    public RegisteredSubjectProperty[] GetPropertyAttributes(string propertyName)
+    public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
     {
-        return _attributesCache.GetOrAdd(propertyName, _ =>
+        lock (_lock)
         {
-            return _properties.Values.Length > 0
-                ? _properties.Values
-                    .Where(p => p.IsAttribute &&
-                                p.AttributeMetadata.PropertyName == propertyName)
-                    .ToArray()
-                : [];
-        });
+            return _properties.Values
+                .Where(p => p.IsAttribute &&
+                            p.AttributeMetadata.PropertyName == propertyName);
+        }
     }
 
     /// <summary>
@@ -162,8 +156,6 @@ public class RegisteredSubject
             {
                 property.AttributesCache = null;
             }
-
-            _attributesCache.Clear();
         }
 
         Subject.AttachSubjectProperty(subjectProperty.Reference);
