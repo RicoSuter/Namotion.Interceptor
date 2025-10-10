@@ -58,7 +58,6 @@ public record SubjectUpdate
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates, 
         List<SubjectPropertyUpdateReference>? propertyUpdates)
     {
-        // This is called from ApplyValue for nested subjects - don't collect/apply transformations here
         return CreateCompleteUpdateInternal(subject, processors, knownSubjectUpdates, propertyUpdates);
     }
 
