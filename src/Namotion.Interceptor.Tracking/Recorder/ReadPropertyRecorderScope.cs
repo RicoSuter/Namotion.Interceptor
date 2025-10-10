@@ -15,7 +15,7 @@ public class ReadPropertyRecorderScope : IDisposable
     {
         get
         {
-            lock (typeof(ReadPropertyRecorder))
+            lock (ReadPropertyRecorder.ScopesLock)
             {
                 return _properties.ToArray();
             }
@@ -24,7 +24,7 @@ public class ReadPropertyRecorderScope : IDisposable
 
     public PropertyReference[] GetPropertiesAndReset()
     {
-        lock (typeof(ReadPropertyRecorder))
+        lock (ReadPropertyRecorder.ScopesLock)
         {
             var properties = _properties.ToArray();
             _properties.Clear();
@@ -34,7 +34,7 @@ public class ReadPropertyRecorderScope : IDisposable
 
     public PropertyReference[] GetPropertiesAndDispose()
     {
-        lock (typeof(ReadPropertyRecorder))
+        lock (ReadPropertyRecorder.ScopesLock)
         {
             var properties = _properties.ToArray();
             Dispose();
@@ -44,7 +44,7 @@ public class ReadPropertyRecorderScope : IDisposable
 
     public void Dispose()
     {
-        lock (typeof(ReadPropertyRecorder))
+        lock (ReadPropertyRecorder.ScopesLock)
         {
             ReadPropertyRecorder.Scopes.Value?[_recorder]?.Remove(_properties);
         }

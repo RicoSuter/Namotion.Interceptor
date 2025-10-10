@@ -5,12 +5,13 @@ namespace Namotion.Interceptor.Tracking.Recorder;
 public class ReadPropertyRecorder : IReadInterceptor
 {
     internal static AsyncLocal<IDictionary<ReadPropertyRecorder, List<HashSet<PropertyReference>>>> Scopes { get; } = new();
+    internal static readonly object ScopesLock = new();
     
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
         if (Scopes.Value is not null)
         {
-            lock (typeof(ReadPropertyRecorder))
+            lock (ScopesLock)
             {
                 if (Scopes.Value is not null &&
                     Scopes.Value.TryGetValue(this, out var scopes))
