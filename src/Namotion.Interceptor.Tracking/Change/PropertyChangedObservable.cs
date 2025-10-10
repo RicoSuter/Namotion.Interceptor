@@ -5,9 +5,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWriteInterceptor
 {
-    // Core subject to check HasObservers without wrapper overhead
     private readonly Subject<SubjectPropertyChange> _subject = new();
-    // Synchronized wrapper to keep thread-safety guarantees for subscribers
     private readonly ISubject<SubjectPropertyChange> _syncSubject;
 
     public PropertyChangedObservable()
