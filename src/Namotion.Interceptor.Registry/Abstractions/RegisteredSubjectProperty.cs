@@ -221,7 +221,7 @@ public class RegisteredSubjectProperty
     public RegisteredSubjectProperty[] Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => AttributesCache = (AttributesCache ?? Parent.GetPropertyAttributes(Name));
+        get => AttributesCache = (AttributesCache ?? Parent.GetPropertyAttributes(Name).ToArray());
     }
     
     internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review

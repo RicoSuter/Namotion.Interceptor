@@ -204,26 +204,19 @@ public record SubjectPropertyUpdate
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         List<SubjectPropertyUpdateReference>? propertyUpdates)
     {
-        var allAttributes = property.Attributes;
-       
         Dictionary<string, SubjectPropertyUpdate>? attributes = null;
-        if (allAttributes.Length > 0)
+        foreach (var attribute in property.Attributes)
         {
-            for (int i = 0; i < allAttributes.Length; i++)
+            if (attribute.HasGetter)
             {
-                var attribute = allAttributes[i];
-                if (attribute.HasGetter)
-                {
-                    attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
+                attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
 
-                    var attributeUpdate = CreateCompleteUpdate(attribute, processors, knownSubjectUpdates, propertyUpdates);
-                    attributes[attribute.AttributeMetadata.AttributeName] = attributeUpdate;
+                var attributeUpdate = CreateCompleteUpdate(attribute, processors, knownSubjectUpdates, propertyUpdates);
+                attributes[attribute.AttributeMetadata.AttributeName] = attributeUpdate;
 
-                    propertyUpdates?.Add(new SubjectPropertyUpdateReference(attribute, attributeUpdate, attributes));
-                }
+                propertyUpdates?.Add(new SubjectPropertyUpdateReference(attribute, attributeUpdate, attributes));
             }
         }
-
         return attributes?.Count > 0 ? attributes : null;
     }
 }
