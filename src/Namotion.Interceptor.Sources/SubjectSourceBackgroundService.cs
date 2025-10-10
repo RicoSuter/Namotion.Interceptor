@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Hosting;
+﻿using System.Threading.Channels;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -67,182 +68,219 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                     _beforeInitializationUpdates = [];
                 }
 
-                // start listening for changes
+                // Start listening for changes from the source
                 using var disposable = await _source.StartListeningAsync(this, stoppingToken);
-                
-                // read complete data set from source
                 var applyAction = await _source.LoadCompleteSourceStateAsync(stoppingToken);
                 lock (this)
                 {
                     applyAction?.Invoke();
 
-                    // replaying previously buffered updates
+                    // Replay previously buffered updates
                     var beforeInitializationUpdates = _beforeInitializationUpdates;
                     _beforeInitializationUpdates = null;
-                    
+            
                     foreach (var action in beforeInitializationUpdates!)
                     {
                         EnqueueSubjectUpdate(action);
                     }
                 }
 
-                var subscription = _context.CreatePropertyChangedChannelSubscription();
-                
-                var buffer = new List<SubjectPropertyChange>();
-                var dedupSet = new HashSet<PropertyReference>();
-                var dedupedBuffer = new List<SubjectPropertyChange>();
-                var lockObj = new object();
-                DateTimeOffset lastFlushTime = DateTimeOffset.UtcNow;
-                var hasPendingWrite = false;
-                
-                using var periodicTimer = new PeriodicTimer(_bufferTime);
-                
-                // Start the periodic flush task
-                var flushTask = Task.Run(async () =>
-                {
-                    try
-                    {
-                        while (await periodicTimer.WaitForNextTickAsync(stoppingToken))
-                        {
-                            bool shouldWrite = false;
-                            
-                            lock (lockObj)
-                            {
-                                if (buffer.Count > 0)
-                                {
-                                    var now = DateTimeOffset.UtcNow;
-                                    if (now - lastFlushTime >= _bufferTime)
-                                    {
-                                        // deduplicate - reuse dedupedBuffer, no allocations
-                                        dedupSet.Clear();
-                                        dedupedBuffer.Clear();
-                                        
-                                        for (var i = buffer.Count - 1; i >= 0; i--)
-                                        {
-                                            var change = buffer[i];
-                                            if (dedupSet.Add(change.Property))
-                                            {
-                                                dedupedBuffer.Add(change);
-                                            }
-                                        }
-                                        
-                                        buffer.Clear();
-                                        lastFlushTime = now;
-                                        
-                                        if (dedupedBuffer.Count > 0)
-                                        {
-                                            shouldWrite = true;
-                                            hasPendingWrite = true;
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // write outside of lock - dedupedBuffer is not modified until next lock
-                            if (shouldWrite)
-                            {
-                                try
-                                {
-                                    await _source.WriteToSourceAsync(dedupedBuffer, stoppingToken);
-                                }
-                                catch (Exception e)
-                                {
-                                    _logger.LogError(e, "Failed to write changes to source (timer flush).");
-                                }
-                                finally
-                                {
-                                    lock (lockObj)
-                                    {
-                                        hasPendingWrite = false;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // Expected when stopping
-                    }
-                }, stoppingToken);
-                
-                try
-                {
-                    await foreach (var item in subscription.ReadAllAsync(stoppingToken))
-                    {
-                        // filter: ignore changes from the source itself and only include properties that are part of the source
-                        if (item.Source == _source || !_source.IsPropertyIncluded(item.Property.GetRegisteredProperty()))
-                        {
-                            continue;
-                        }
+                // Subscribe to property changes and sync them to the source
+                using var subscription = _context.CreatePropertyChangedChannelSubscription();
+                await ProcessPropertyChangesAsync(subscription.Reader, stoppingToken);
 
-                        bool shouldWrite = false;
-                        
-                        lock (lockObj)
-                        {
-                            buffer.Add(item);
-
-                            // check if buffer time has elapsed based on item timestamp and no pending write
-                            if (!hasPendingWrite && item.Timestamp - lastFlushTime >= _bufferTime)
-                            {
-                                // deduplicate: keep only the latest change per property (reverse order, then distinct)
-                                // iterate backwards through buffer and only add the first occurrence of each property
-                                dedupSet.Clear();
-                                dedupedBuffer.Clear();
-
-                                for (var i = buffer.Count - 1; i >= 0; i--)
-                                {
-                                    var change = buffer[i];
-                                    if (dedupSet.Add(change.Property))
-                                    {
-                                        dedupedBuffer.Add(change);
-                                    }
-                                }
-
-                                buffer.Clear();
-                                lastFlushTime = item.Timestamp;
-                                
-                                if (dedupedBuffer.Count > 0)
-                                {
-                                    shouldWrite = true;
-                                    hasPendingWrite = true;
-                                }
-                            }
-                        }
-                        
-                        // write outside of lock - dedupedBuffer is not modified until next lock
-                        if (shouldWrite)
-                        {
-                            try
-                            {
-                                await _source.WriteToSourceAsync(dedupedBuffer, stoppingToken);
-                            }
-                            catch (Exception e)
-                            {
-                                _logger.LogError(e, "Failed to write changes to source.");
-                            }
-                            finally
-                            {
-                                lock (lockObj)
-                                {
-                                    hasPendingWrite = false;
-                                }
-                            }
-                        }
-                    }
-                }
-                finally
-                {
-                    // Wait for flush task to complete
-                    await flushTask;
-                }
+                // Read complete data set from source
             }
             catch (Exception ex)
             {
-                if (ex is TaskCanceledException) return;
+                if (ex is TaskCanceledException or OperationCanceledException) 
+                    return;
                 
                 _logger.LogError(ex, "Failed to listen for changes in source.");
                 await Task.Delay(_retryTime, stoppingToken);
             }
         }
+    }
+
+    private async Task ProcessPropertyChangesAsync(
+        ChannelReader<SubjectPropertyChange> reader,
+        CancellationToken stoppingToken)
+    {
+        var state = new ProcessingState
+        {
+            Buffer = new List<SubjectPropertyChange>(),
+            DedupSet = new HashSet<PropertyReference>(),
+            DedupedBuffer = new List<SubjectPropertyChange>(),
+            WriteSemaphore = new SemaphoreSlim(1, 1),
+            LastFlushTime = DateTimeOffset.UtcNow
+        };
+        
+        using var periodicTimer = new PeriodicTimer(_bufferTime);
+        using var flushCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        
+        // Start the periodic flush task - pass all state explicitly
+        var flushTask = RunPeriodicFlushAsync(periodicTimer, state, flushCts.Token);
+        
+        try
+        {
+            await foreach (var item in reader.ReadAllAsync(stoppingToken))
+            {
+                // Filter: ignore changes from the source itself and only include properties that are part of the source
+                if (item.Source == _source || !_source.IsPropertyIncluded(item.Property.GetRegisteredProperty()))
+                {
+                    continue;
+                }
+
+                state.Buffer.Add(item);
+
+                // Check if buffer time has elapsed based on item timestamp
+                if (item.Timestamp - state.LastFlushTime >= _bufferTime)
+                {
+                    await TryFlushBufferAsync(state, item.Timestamp, flushCts.Token);
+                }
+            }
+        }
+        finally
+        {
+            // Stop the flush task and wait for it to complete
+            await flushCts.CancelAsync();
+            try
+            {
+                await flushTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected
+            }
+            
+            // Final flush of any remaining buffered items
+            await state.WriteSemaphore.WaitAsync(CancellationToken.None);
+            try
+            {
+                if (state.Buffer.Count > 0)
+                {
+                    DeduplicateBuffer(state.Buffer, state.DedupSet, state.DedupedBuffer);
+                    
+                    if (state.DedupedBuffer.Count > 0)
+                    {
+                        await WriteToSourceAsync(state.DedupedBuffer, "final flush", CancellationToken.None);
+                    }
+                }
+            }
+            finally
+            {
+                state.WriteSemaphore.Release();
+                state.WriteSemaphore.Dispose();
+            }
+        }
+    }
+
+    private async Task RunPeriodicFlushAsync(
+        PeriodicTimer timer,
+        ProcessingState state,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                var now = DateTimeOffset.UtcNow;
+                
+                // Only flush if we have data and enough time has elapsed
+                if (state.Buffer.Count > 0 && now - state.LastFlushTime >= _bufferTime)
+                {
+                    await TryFlushBufferAsync(state, now, cancellationToken);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when stopping
+        }
+    }
+
+    private ValueTask TryFlushBufferAsync(
+        ProcessingState state,
+        DateTimeOffset newFlushTime,
+        CancellationToken cancellationToken)
+    {
+        // Try to acquire the write lock without blocking
+        if (!state.WriteSemaphore.Wait(0))
+        {
+            return ValueTask.CompletedTask; // Another write is in progress, skip this flush
+        }
+
+        return FlushBufferCoreAsync(state, newFlushTime, cancellationToken);
+    }
+
+    private async ValueTask FlushBufferCoreAsync(
+        ProcessingState state,
+        DateTimeOffset newFlushTime,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (state.Buffer.Count == 0)
+            {
+                return;
+            }
+
+            DeduplicateBuffer(state.Buffer, state.DedupSet, state.DedupedBuffer);
+            state.LastFlushTime = newFlushTime;
+
+            if (state.DedupedBuffer.Count > 0)
+            {
+                await WriteToSourceAsync(state.DedupedBuffer, "flush", cancellationToken);
+            }
+        }
+        finally
+        {
+            state.WriteSemaphore.Release();
+        }
+    }
+
+    private static void DeduplicateBuffer(
+        List<SubjectPropertyChange> buffer,
+        HashSet<PropertyReference> dedupSet,
+        List<SubjectPropertyChange> dedupedBuffer)
+    {
+        dedupSet.Clear();
+        dedupedBuffer.Clear();
+
+        // Iterate backwards to keep only the latest change per property
+        for (var i = buffer.Count - 1; i >= 0; i--)
+        {
+            var change = buffer[i];
+            if (dedupSet.Add(change.Property))
+            {
+                dedupedBuffer.Add(change);
+            }
+        }
+
+        buffer.Clear();
+    }
+
+    private async Task WriteToSourceAsync(
+        List<SubjectPropertyChange> changes,
+        string context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _source.WriteToSourceAsync(changes, cancellationToken);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to write changes to source ({Context}).", context);
+        }
+    }
+
+    private sealed class ProcessingState
+    {
+        public required List<SubjectPropertyChange> Buffer { get; init; }
+        public required HashSet<PropertyReference> DedupSet { get; init; }
+        public required List<SubjectPropertyChange> DedupedBuffer { get; init; }
+        public required SemaphoreSlim WriteSemaphore { get; init; }
+        public DateTimeOffset LastFlushTime { get; set; }
     }
 }

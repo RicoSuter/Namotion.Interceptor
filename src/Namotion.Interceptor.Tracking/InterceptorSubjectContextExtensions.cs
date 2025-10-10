@@ -106,7 +106,7 @@ public static class InterceptorSubjectContextExtensions
     /// <param name="context">The context.</param>
     /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).</param>
     /// <returns>The observable.</returns>
-    public static ChannelReader<SubjectPropertyChange> CreatePropertyChangedChannelSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
+    public static PropertyChangedChannelSubscription CreatePropertyChangedChannelSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
     {
         return context
             .GetService<PropertyChangedChannel>()
