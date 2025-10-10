@@ -10,6 +10,7 @@ namespace Namotion.Interceptor.Sources;
 
 public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutationDispatcher
 {
+    private readonly Lock _lock = new();
     private readonly ISubjectSource _source;
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
@@ -17,6 +18,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     private readonly TimeSpan _retryTime;
 
     private List<Action>? _beforeInitializationUpdates = [];
+    private ISubjectRegistry? _subjectRegistry;
 
     public SubjectSourceBackgroundService(
         ISubjectSource source,
@@ -31,28 +33,30 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
     }
-    
+
     /// <inheritdoc />
     public void EnqueueSubjectUpdate(Action update)
     {
-        lock (this)
+        if (_beforeInitializationUpdates is not null)
         {
-            if (_beforeInitializationUpdates is not null)
+            lock (_lock)
             {
-                _beforeInitializationUpdates.Add(update);
-            }
-            else
-            {
-                try
+                if (_beforeInitializationUpdates is not null)
                 {
-                    var registry = _context.GetService<ISubjectRegistry>();
-                    registry.ExecuteSubjectUpdate(update);
-                }
-                catch (Exception e)
-                {
-                    _logger.LogError(e, "Failed to execute subject update.");
+                    _beforeInitializationUpdates.Add(update);
+                    return;
                 }
             }
+        }
+
+        try
+        {
+            _subjectRegistry ??= _context.GetService<ISubjectRegistry>();
+            _subjectRegistry.ExecuteSubjectUpdate(update);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to execute subject update.");
         }
     }
 
@@ -63,7 +67,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         {
             try
             {
-                lock (this)
+                lock (_lock)
                 {
                     _beforeInitializationUpdates = [];
                 }
@@ -71,14 +75,14 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 // Start listening for changes from the source
                 using var disposable = await _source.StartListeningAsync(this, stoppingToken);
                 var applyAction = await _source.LoadCompleteSourceStateAsync(stoppingToken);
-                lock (this)
+                lock (_lock)
                 {
                     applyAction?.Invoke();
 
                     // Replay previously buffered updates
                     var beforeInitializationUpdates = _beforeInitializationUpdates;
                     _beforeInitializationUpdates = null;
-            
+
                     foreach (var action in beforeInitializationUpdates!)
                     {
                         EnqueueSubjectUpdate(action);
@@ -88,14 +92,14 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 // Subscribe to property changes and sync them to the source
                 using var subscription = _context.CreatePropertyChangedChannelSubscription();
                 await ProcessPropertyChangesAsync(subscription.Reader, stoppingToken);
-
-                // Read complete data set from source
             }
             catch (Exception ex)
             {
-                if (ex is TaskCanceledException or OperationCanceledException) 
+                if (ex is TaskCanceledException or OperationCanceledException)
+                {
                     return;
-                
+                }
+
                 _logger.LogError(ex, "Failed to listen for changes in source.");
                 await Task.Delay(_retryTime, stoppingToken);
             }
@@ -108,24 +112,21 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     {
         var state = new ProcessingState
         {
-            Buffer = new List<SubjectPropertyChange>(),
-            DedupSet = new HashSet<PropertyReference>(),
-            DedupedBuffer = new List<SubjectPropertyChange>(),
+            Buffer = [],
+            DedupSet = [],
+            DedupedBuffer = [],
             WriteSemaphore = new SemaphoreSlim(1, 1),
             LastFlushTime = DateTimeOffset.UtcNow
         };
-        
+
         using var periodicTimer = new PeriodicTimer(_bufferTime);
-        using var flushCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        
-        // Start the periodic flush task - pass all state explicitly
-        var flushTask = RunPeriodicFlushAsync(periodicTimer, state, flushCts.Token);
-        
+        using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+
+        var flushTask = RunPeriodicFlushAsync(periodicTimer, state, linkedTokenSource.Token);
         try
         {
-            await foreach (var item in reader.ReadAllAsync(stoppingToken))
+            await foreach (var item in reader.ReadAllAsync(linkedTokenSource.Token))
             {
-                // Filter: ignore changes from the source itself and only include properties that are part of the source
                 if (item.Source == _source || !_source.IsPropertyIncluded(item.Property.GetRegisteredProperty()))
                 {
                     continue;
@@ -133,17 +134,15 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
                 state.Buffer.Add(item);
 
-                // Check if buffer time has elapsed based on item timestamp
                 if (item.Timestamp - state.LastFlushTime >= _bufferTime)
                 {
-                    await TryFlushBufferAsync(state, item.Timestamp, flushCts.Token);
+                    await TryFlushBufferAsync(state, item.Timestamp, linkedTokenSource.Token);
                 }
             }
         }
         finally
         {
-            // Stop the flush task and wait for it to complete
-            await flushCts.CancelAsync();
+            await linkedTokenSource.CancelAsync();
             try
             {
                 await flushTask;
@@ -152,18 +151,17 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
             {
                 // Expected
             }
-            
-            // Final flush of any remaining buffered items
+
             await state.WriteSemaphore.WaitAsync(CancellationToken.None);
             try
             {
                 if (state.Buffer.Count > 0)
                 {
                     DeduplicateBuffer(state.Buffer, state.DedupSet, state.DedupedBuffer);
-                    
+
                     if (state.DedupedBuffer.Count > 0)
                     {
-                        await WriteToSourceAsync(state.DedupedBuffer, "final flush", CancellationToken.None);
+                        await WriteToSourceAsync(state.DedupedBuffer, CancellationToken.None);
                     }
                 }
             }
@@ -175,10 +173,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
-    private async Task RunPeriodicFlushAsync(
-        PeriodicTimer timer,
-        ProcessingState state,
-        CancellationToken cancellationToken)
+    private async Task RunPeriodicFlushAsync(PeriodicTimer timer, ProcessingState state, CancellationToken cancellationToken)
     {
         try
         {
@@ -186,7 +181,6 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
             {
                 var now = DateTimeOffset.UtcNow;
                 
-                // Only flush if we have data and enough time has elapsed
                 if (state.Buffer.Count > 0 && now - state.LastFlushTime >= _bufferTime)
                 {
                     await TryFlushBufferAsync(state, now, cancellationToken);
@@ -199,24 +193,17 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
-    private ValueTask TryFlushBufferAsync(
-        ProcessingState state,
-        DateTimeOffset newFlushTime,
-        CancellationToken cancellationToken)
+    private ValueTask TryFlushBufferAsync(ProcessingState state, DateTimeOffset newFlushTime, CancellationToken cancellationToken)
     {
-        // Try to acquire the write lock without blocking
-        if (!state.WriteSemaphore.Wait(0))
+        if (!state.WriteSemaphore.Wait(0, cancellationToken))
         {
-            return ValueTask.CompletedTask; // Another write is in progress, skip this flush
+            return ValueTask.CompletedTask;
         }
 
         return FlushBufferCoreAsync(state, newFlushTime, cancellationToken);
     }
 
-    private async ValueTask FlushBufferCoreAsync(
-        ProcessingState state,
-        DateTimeOffset newFlushTime,
-        CancellationToken cancellationToken)
+    private async ValueTask FlushBufferCoreAsync(ProcessingState state, DateTimeOffset newFlushTime, CancellationToken cancellationToken)
     {
         try
         {
@@ -230,7 +217,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
             if (state.DedupedBuffer.Count > 0)
             {
-                await WriteToSourceAsync(state.DedupedBuffer, "flush", cancellationToken);
+                await WriteToSourceAsync(state.DedupedBuffer, cancellationToken);
             }
         }
         finally
@@ -239,15 +226,11 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
-    private static void DeduplicateBuffer(
-        List<SubjectPropertyChange> buffer,
-        HashSet<PropertyReference> dedupSet,
-        List<SubjectPropertyChange> dedupedBuffer)
+    private static void DeduplicateBuffer(List<SubjectPropertyChange> buffer, HashSet<PropertyReference> dedupSet, List<SubjectPropertyChange> dedupedBuffer)
     {
         dedupSet.Clear();
         dedupedBuffer.Clear();
 
-        // Iterate backwards to keep only the latest change per property
         for (var i = buffer.Count - 1; i >= 0; i--)
         {
             var change = buffer[i];
@@ -260,10 +243,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         buffer.Clear();
     }
 
-    private async Task WriteToSourceAsync(
-        List<SubjectPropertyChange> changes,
-        string context,
-        CancellationToken cancellationToken)
+    private async Task WriteToSourceAsync(List<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         try
         {
@@ -271,16 +251,20 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Failed to write changes to source ({Context}).", context);
+            _logger.LogError(e, "Failed to write changes to source.");
         }
     }
 
     private sealed class ProcessingState
     {
         public required List<SubjectPropertyChange> Buffer { get; init; }
+
         public required HashSet<PropertyReference> DedupSet { get; init; }
+
         public required List<SubjectPropertyChange> DedupedBuffer { get; init; }
+
         public required SemaphoreSlim WriteSemaphore { get; init; }
+
         public DateTimeOffset LastFlushTime { get; set; }
     }
 }
