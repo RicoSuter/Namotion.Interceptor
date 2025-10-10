@@ -42,8 +42,8 @@ public class SubjectSourceBackgroundServiceTests
             .ReturnsAsync(() => { updates.Add("Complete"); });
 
         subjectSourceMock
-            .Setup(s => s.WriteToSourceAsync(It.IsAny<IEnumerable<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .Setup(s => s.WriteToSourceAsync(It.IsAny<IReadOnlyCollection<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.CompletedTask);
 
         var cancellationTokenSource = new CancellationTokenSource();
 
@@ -94,9 +94,9 @@ public class SubjectSourceBackgroundServiceTests
         IEnumerable<SubjectPropertyChange>? changes = null;
 
         subjectSourceMock
-            .Setup(s => s.WriteToSourceAsync(It.IsAny<IEnumerable<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.WriteToSourceAsync(It.IsAny<IReadOnlyCollection<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback((IEnumerable<SubjectPropertyChange> c, CancellationToken _) => changes = c)
-            .Returns(Task.CompletedTask);
+            .Returns(ValueTask.CompletedTask);
 
         var cancellationTokenSource = new CancellationTokenSource();
 
