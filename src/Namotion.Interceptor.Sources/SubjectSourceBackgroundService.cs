@@ -19,6 +19,12 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
     private List<Action>? _beforeInitializationUpdates = [];
     private ISubjectRegistry? _subjectRegistry;
+    
+    private readonly List<SubjectPropertyChange> _buffer = [];
+    private readonly HashSet<PropertyReference> _dedupSet = [];
+    private readonly List<SubjectPropertyChange> _dedupedBuffer = [];
+    private readonly SemaphoreSlim _writeSemaphore = new(1, 1);
+    private DateTimeOffset _lastFlushTime = DateTimeOffset.MinValue;
 
     public SubjectSourceBackgroundService(
         ISubjectSource source,
@@ -101,28 +107,21 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 }
 
                 _logger.LogError(ex, "Failed to listen for changes in source.");
+                ResetState();
+
                 await Task.Delay(_retryTime, stoppingToken);
             }
         }
     }
 
-    private async Task ProcessPropertyChangesAsync(
-        ChannelReader<SubjectPropertyChange> reader,
-        CancellationToken stoppingToken)
+    private async Task ProcessPropertyChangesAsync(ChannelReader<SubjectPropertyChange> reader, CancellationToken stoppingToken)
     {
-        var state = new ProcessingState
-        {
-            Buffer = [],
-            DedupSet = [],
-            DedupedBuffer = [],
-            WriteSemaphore = new SemaphoreSlim(1, 1),
-            LastFlushTime = DateTimeOffset.UtcNow
-        };
+        ResetState();
 
         using var periodicTimer = new PeriodicTimer(_bufferTime);
         using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
-        var flushTask = RunPeriodicFlushAsync(periodicTimer, state, linkedTokenSource.Token);
+        var flushTask = RunPeriodicFlushAsync(periodicTimer, linkedTokenSource.Token);
         try
         {
             await foreach (var item in reader.ReadAllAsync(linkedTokenSource.Token))
@@ -132,11 +131,10 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                     continue;
                 }
 
-                state.Buffer.Add(item);
-
-                if (item.Timestamp - state.LastFlushTime >= _bufferTime)
+                _buffer.Add(item);
+                if (item.Timestamp - _lastFlushTime >= _bufferTime)
                 {
-                    await TryFlushBufferAsync(state, item.Timestamp, linkedTokenSource.Token);
+                    await TryFlushBufferAsync(item.Timestamp, linkedTokenSource.Token);
                 }
             }
         }
@@ -152,38 +150,27 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 // Expected
             }
 
-            await state.WriteSemaphore.WaitAsync(CancellationToken.None);
-            try
+            if (_buffer.Count > 0)
             {
-                if (state.Buffer.Count > 0)
+                DeduplicateBuffer();
+                if (_dedupedBuffer.Count > 0)
                 {
-                    DeduplicateBuffer(state.Buffer, state.DedupSet, state.DedupedBuffer);
-
-                    if (state.DedupedBuffer.Count > 0)
-                    {
-                        await WriteToSourceAsync(state.DedupedBuffer, CancellationToken.None);
-                    }
+                    await WriteToSourceAsync(_dedupedBuffer, CancellationToken.None);
                 }
-            }
-            finally
-            {
-                state.WriteSemaphore.Release();
-                state.WriteSemaphore.Dispose();
             }
         }
     }
 
-    private async Task RunPeriodicFlushAsync(PeriodicTimer timer, ProcessingState state, CancellationToken cancellationToken)
+    private async Task RunPeriodicFlushAsync(PeriodicTimer timer, CancellationToken cancellationToken)
     {
         try
         {
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
                 var now = DateTimeOffset.UtcNow;
-                
-                if (state.Buffer.Count > 0 && now - state.LastFlushTime >= _bufferTime)
+                if (_buffer.Count > 0 && now - _lastFlushTime >= _bufferTime)
                 {
-                    await TryFlushBufferAsync(state, now, cancellationToken);
+                    await TryFlushBufferAsync(now, cancellationToken);
                 }
             }
         }
@@ -193,54 +180,54 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
-    private ValueTask TryFlushBufferAsync(ProcessingState state, DateTimeOffset newFlushTime, CancellationToken cancellationToken)
+    private ValueTask TryFlushBufferAsync(DateTimeOffset newFlushTime, CancellationToken cancellationToken)
     {
-        if (!state.WriteSemaphore.Wait(0, cancellationToken))
+        if (!_writeSemaphore.Wait(0, cancellationToken))
         {
             return ValueTask.CompletedTask;
         }
 
-        return FlushBufferCoreAsync(state, newFlushTime, cancellationToken);
+        return FlushBufferCoreAsync(newFlushTime, cancellationToken);
     }
 
-    private async ValueTask FlushBufferCoreAsync(ProcessingState state, DateTimeOffset newFlushTime, CancellationToken cancellationToken)
+    private async ValueTask FlushBufferCoreAsync(DateTimeOffset newFlushTime, CancellationToken cancellationToken)
     {
         try
         {
-            if (state.Buffer.Count == 0)
+            if (_buffer.Count == 0)
             {
                 return;
             }
 
-            DeduplicateBuffer(state.Buffer, state.DedupSet, state.DedupedBuffer);
-            state.LastFlushTime = newFlushTime;
+            DeduplicateBuffer();
+            _lastFlushTime = newFlushTime;
 
-            if (state.DedupedBuffer.Count > 0)
+            if (_dedupedBuffer.Count > 0)
             {
-                await WriteToSourceAsync(state.DedupedBuffer, cancellationToken);
+                await WriteToSourceAsync(_dedupedBuffer, cancellationToken);
             }
         }
         finally
         {
-            state.WriteSemaphore.Release();
+            _writeSemaphore.Release();
         }
     }
 
-    private static void DeduplicateBuffer(List<SubjectPropertyChange> buffer, HashSet<PropertyReference> dedupSet, List<SubjectPropertyChange> dedupedBuffer)
+    private void DeduplicateBuffer()
     {
-        dedupSet.Clear();
-        dedupedBuffer.Clear();
+        _dedupSet.Clear();
+        _dedupedBuffer.Clear();
 
-        for (var i = buffer.Count - 1; i >= 0; i--)
+        for (var i = _buffer.Count - 1; i >= 0; i--)
         {
-            var change = buffer[i];
-            if (dedupSet.Add(change.Property))
+            var change = _buffer[i];
+            if (_dedupSet.Add(change.Property))
             {
-                dedupedBuffer.Add(change);
+                _dedupedBuffer.Add(change);
             }
         }
 
-        buffer.Clear();
+        _buffer.Clear();
     }
 
     private async Task WriteToSourceAsync(List<SubjectPropertyChange> changes, CancellationToken cancellationToken)
@@ -255,16 +242,17 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
-    private sealed class ProcessingState
+    public override void Dispose()
     {
-        public required List<SubjectPropertyChange> Buffer { get; init; }
+        _writeSemaphore.Dispose();
+        base.Dispose();
+    }
 
-        public required HashSet<PropertyReference> DedupSet { get; init; }
-
-        public required List<SubjectPropertyChange> DedupedBuffer { get; init; }
-
-        public required SemaphoreSlim WriteSemaphore { get; init; }
-
-        public DateTimeOffset LastFlushTime { get; set; }
+    private void ResetState()
+    {
+        _buffer.Clear();
+        _dedupSet.Clear();
+        _dedupedBuffer.Clear();
+        _lastFlushTime = DateTimeOffset.MinValue;
     }
 }
