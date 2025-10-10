@@ -90,7 +90,7 @@ public class PathExtensionsTests
             "Father.FirstName", timestamp, "NewFather", sourcePathProvider, null);
         
         var completeUpdate = SubjectUpdate
-            .CreateCompleteUpdate(person, JsonCamelCasePathProcessor.Instance);
+            .CreateCompleteUpdate(person, [JsonCamelCasePathProcessor.Instance]);
 
         // Assert
         Assert.Equal(timestamp, person
