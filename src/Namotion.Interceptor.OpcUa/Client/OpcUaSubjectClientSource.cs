@@ -257,7 +257,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             return;
         }
 
-        var writeValues = new WriteValueCollection();
+        var writeValues = new WriteValueCollection(changes.Count);
         foreach (var change in changes)
         {
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)

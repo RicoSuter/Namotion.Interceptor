@@ -81,16 +81,16 @@ internal class OpcUaSubscriptionManager
             }
             catch (ServiceResultException sre)
             {
-                _logger.LogWarning(sre, "ApplyChanges failed for a batch; attempting to keep valid monitored items by removing failed ones.");
+                _logger.LogWarning(sre, "ApplyChanges failed for a batch; attempting to keep valid OPC UA monitored items by removing failed ones.");
             }
 
             var removed = await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken);
             if (removed > 0)
             {
-                _logger.LogWarning("Removed {Removed} monitored items that failed to create in subscription {Id}.", removed, subscription.Id);
+                _logger.LogWarning("Removed {Removed} monitored items that failed to create in OPC UA subscription {Id}.", removed, subscription.Id);
             }
             
-            _logger.LogInformation("Created subscription {SubscriptionId} with {Count} monitored items.", subscription.Id, subscription.MonitoredItems.Count());
+            _logger.LogInformation("Created OPC UA subscription {SubscriptionId} with {Count} monitored items.", subscription.Id, subscription.MonitoredItems.Count());
         }
     }
 
@@ -123,7 +123,7 @@ internal class OpcUaSubscriptionManager
 
                 _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
 
-                _logger.LogError("Monitored item creation failed for {DisplayName} (Handle={Handle}): {Status}", 
+                _logger.LogError("OPC UA monitored item creation failed for {DisplayName} (Handle={Handle}): {Status}", 
                     monitoredItem.DisplayName, monitoredItem.ClientHandle, statusCode);
             }
         }
@@ -141,7 +141,7 @@ internal class OpcUaSubscriptionManager
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "ApplyChanges after removing failed items still failed. Continuing with remaining items.");
+                _logger.LogWarning(ex, "ApplyChanges after removing failed items still failed. Continuing with remaining OPC UA monitored items.");
             }
 
             return itemsToRemove.Count;
@@ -194,7 +194,7 @@ internal class OpcUaSubscriptionManager
                 }
                 catch (Exception e)
                 {
-                    _logger.LogError(e, "Failed to apply change for {Path}.", change.Property.Name);
+                    _logger.LogError(e, "Failed to apply change for OPC UA {Path}.", change.Property.Name);
                 }
             }
         });
