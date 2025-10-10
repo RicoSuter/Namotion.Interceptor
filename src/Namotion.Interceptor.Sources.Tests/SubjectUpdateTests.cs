@@ -1,5 +1,6 @@
 ﻿using System.Reactive.Concurrency;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Sources.Updates;
@@ -34,8 +35,7 @@ public class SubjectUpdateTests
 
         // Act
         var completeSubjectUpdate = SubjectUpdate
-            .CreateCompleteUpdate(person)
-            .ConvertToJsonCamelCasePath();
+            .CreateCompleteUpdate(person, [JsonCamelCasePathProcessor.Instance]);
 
         // Assert
         await Verify(completeSubjectUpdate).DisableDateCounting();
@@ -73,8 +73,7 @@ public class SubjectUpdateTests
 
         // Act
         var partialSubjectUpdate = SubjectUpdate
-            .CreatePartialUpdateFromChanges(person, changes)
-            .ConvertToJsonCamelCasePath();
+            .CreatePartialUpdateFromChanges(person, changes, [JsonCamelCasePathProcessor.Instance]);
 
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
@@ -87,13 +86,13 @@ public class SubjectUpdateTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry();
-
+    
         var father = new Person { FirstName = "Father" };
         var mother = new Person { FirstName = "Mother" };
         var child1 = new Person { FirstName = "Child1" };
         var child2 = new Person { FirstName = "Child2" };
         var child3 = new Person { FirstName = "Child3" };
-
+    
         var person = new Person(context)
         {
             FirstName = "Child",
@@ -101,7 +100,7 @@ public class SubjectUpdateTests
             Father = father,
             Children = [child1, child2, child3]
         };
-
+    
         var changes = new[]
         {
             SubjectPropertyChange.Create(new PropertyReference(person, "FirstName"), null, DateTimeOffset.Now, "Old", "NewPerson"),
@@ -109,26 +108,51 @@ public class SubjectUpdateTests
             SubjectPropertyChange.Create(new PropertyReference(child1, "FirstName"), null, DateTimeOffset.Now, "Old", "NewChild1"),
             SubjectPropertyChange.Create(new PropertyReference(child3, "FirstName"), null, DateTimeOffset.Now, "Old", "NewChild3"),
         };
-
+    
         // Act
         var partialSubjectUpdate = SubjectUpdate
-            .CreatePartialUpdateFromChanges(person, changes, property =>
-            {
-                return property.Parent.Subject != child1; // exclude child1.FirstName
-            }, (property, update) =>
-            {
-                if (property.Parent.Subject == child3)
-                {
-                    update.Value = "TransformedValue"; // transform child3.FirstName
-                }
-
-                return update;
-            })
-            .ConvertToJsonCamelCasePath();
-
+            .CreatePartialUpdateFromChanges(person, changes, 
+                [
+                    new MockProcessor(child1, child3),
+                    JsonCamelCasePathProcessor.Instance
+                ]);
+    
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
     }
+    
+    public class MockProcessor : ISubjectUpdateProcessor
+    {
+        private readonly IInterceptorSubject _excluded;
+        private readonly IInterceptorSubject _transform;
+
+        public MockProcessor(IInterceptorSubject excluded, IInterceptorSubject transform)
+        {
+            _excluded = excluded;
+            _transform = transform;
+        }
+        
+        public bool IsIncluded(RegisteredSubjectProperty property)
+        {
+            return property.Parent.Subject != _excluded;
+        }
+
+        public SubjectUpdate TransformSubjectUpdate(IInterceptorSubject subject, SubjectUpdate update)
+        {
+            return update;
+        }
+
+        public SubjectPropertyUpdate TransformSubjectPropertyUpdate(RegisteredSubjectProperty property, SubjectPropertyUpdate update)
+        {
+            if (property.Parent.Subject == _transform)
+            {
+                update.Value = "TransformedValue";
+            }
+    
+            return update;
+        }
+    }
+
     [Fact]
     public async Task WhenGeneratingPartialSubjectDescriptionForNonRoot_ThenResultIsCorrect()
     {
@@ -163,8 +187,7 @@ public class SubjectUpdateTests
         var partialSubjectUpdate = SubjectUpdate
             // TODO(perf): This method can probably made much faster in case of
             // non-root subjects (no need to create many objects)
-            .CreatePartialUpdateFromChanges(father, changes) 
-            .ConvertToJsonCamelCasePath();
+            .CreatePartialUpdateFromChanges(father, changes, [JsonCamelCasePathProcessor.Instance]);
 
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
@@ -203,8 +226,7 @@ public class SubjectUpdateTests
         person.Children[1].FirstName = "John";
 
         var partialSubjectUpdate = SubjectUpdate
-            .CreatePartialUpdateFromChanges(person, changes)
-            .ConvertToJsonCamelCasePath();
+            .CreatePartialUpdateFromChanges(person, changes.ToArray().AsSpan(), [JsonCamelCasePathProcessor.Instance]);
 
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
@@ -246,8 +268,7 @@ public class SubjectUpdateTests
 
         // Act
         var partialSubjectUpdate = SubjectUpdate
-            .CreatePartialUpdateFromChanges(person, changes)
-            .ConvertToJsonCamelCasePath();
+            .CreatePartialUpdateFromChanges(person, changes, [JsonCamelCasePathProcessor.Instance]);
 
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
