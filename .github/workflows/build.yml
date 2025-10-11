@@ -62,6 +62,30 @@ jobs:
           name: html-coverage-report
           path: coverage-report
 
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Run benchmarks
+        run: |
+          dotnet run --project src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj `
+            --configuration Release `
+            --filter '*' `
+            --exporters json html
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: BenchmarkDotNet.Artifacts/results/
+          if-no-files-found: error
+
   pack:
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
