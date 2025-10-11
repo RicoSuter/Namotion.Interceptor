@@ -40,8 +40,8 @@ jobs:
 
       - name: Save current branch results
         run: |
+          New-Item -ItemType Directory -Force -Path benchmark-results-current
           if (Test-Path BenchmarkDotNet.Artifacts/results) {
-            New-Item -ItemType Directory -Force -Path benchmark-results-current
             Copy-Item -Path BenchmarkDotNet.Artifacts/results/* -Destination benchmark-results-current/ -Recurse
           }
 
@@ -65,8 +65,8 @@ jobs:
             --join
           
           # Save base branch results
+          New-Item -ItemType Directory -Force -Path benchmark-results-base
           if (Test-Path BenchmarkDotNet.Artifacts/results) {
-            New-Item -ItemType Directory -Force -Path benchmark-results-base
             Copy-Item -Path BenchmarkDotNet.Artifacts/results/* -Destination benchmark-results-base/ -Recurse
           }
           
@@ -126,7 +126,7 @@ jobs:
         with:
           name: benchmark-results-current
           path: benchmark-results-current/
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Upload base branch benchmark results
         if: github.event_name == 'pull_request'
@@ -135,3 +135,4 @@ jobs:
           name: benchmark-results-base
           path: benchmark-results-base/
           if-no-files-found: ignore
+
