@@ -35,8 +35,7 @@ jobs:
           dotnet run --project src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj `
             --configuration Release `
             --filter '*' `
-            --exporters json html `
-            --join
+            --exporters json html
 
       - name: Save current branch results
         run: |
@@ -61,8 +60,7 @@ jobs:
           dotnet run --project src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj `
             --configuration Release `
             --filter '*' `
-            --exporters json html `
-            --join
+            --exporters json html
           
           # Save base branch results
           New-Item -ItemType Directory -Force -Path benchmark-results-base
