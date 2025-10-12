@@ -20,6 +20,9 @@ defaults:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v3
         with:
@@ -101,6 +104,9 @@ jobs:
               # Save comparison to file
               $comparison | Out-File -FilePath comparison.md -Encoding utf8
               
+              # Also write to workflow summary (always available)
+              $comparison >> $env:GITHUB_STEP_SUMMARY
+              
               # Set output for comment
               "has_comparison=true" >> $env:GITHUB_OUTPUT
             }
@@ -108,18 +114,25 @@ jobs:
 
       - name: Comment PR with comparison
         if: github.event_name == 'pull_request' && steps.compare.outputs.has_comparison == 'true'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const comparison = fs.readFileSync('comparison.md', 'utf8');
             
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comparison
-            });
+            try {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comparison
+              });
+              console.log('Successfully posted comment to PR');
+            } catch (error) {
+              console.log('Unable to post comment to PR. Check the workflow summary for benchmark comparison results.');
+              console.log('Error:', error.message);
+            }
 
       - name: Upload current branch benchmark results
         uses: actions/upload-artifact@v4
