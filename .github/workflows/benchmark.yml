@@ -38,7 +38,8 @@ jobs:
           dotnet run --project src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj `
             --configuration Release `
             --filter '*' `
-            --exporters json html
+            --exporters json html `
+            --join '*'
 
       - name: Save current branch results
         run: |
@@ -63,7 +64,8 @@ jobs:
           dotnet run --project src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj `
             --configuration Release `
             --filter '*' `
-            --exporters json html
+            --exporters json html `
+            --join '*'
           
           # Save base branch results
           New-Item -ItemType Directory -Force -Path benchmark-results-base
@@ -129,36 +131,25 @@ jobs:
                 }
                 
                 if ($tableRows.Count -gt 0) {
-                  $comparison = @"
-          ## 📊 Benchmark Comparison Results
-          
-          Benchmarks comparison between **base** (${{ github.base_ref }}) and **current** branch.
-          
-          | Benchmark | Base Mean | Current Mean | Diff (%) | Base Memory | Current Memory | Diff (%) |
-          |-----------|-----------|--------------|----------|-------------|----------------|----------|
-          $($tableRows -join "`n")
-          
-          **Legend:**
-          - 🟢 Green: Improvement (faster/less memory)
-          - 🔴 Red: Regression (slower/more memory)  
-          - ⚪ White: No change
-          
-          📁 **Download artifacts for detailed analysis:**
-          - Current branch: \`benchmark-results-current\`
-          - Base branch: \`benchmark-results-base\`
-          "@
+                  $comparison = "## 📊 Benchmark Comparison Results`n`n"
+                  $comparison += "Benchmarks comparison between **base** (${{ github.base_ref }}) and **current** branch.`n`n"
+                  $comparison += "| Benchmark | Base Mean | Current Mean | Diff (%) | Base Memory | Current Memory | Diff (%) |`n"
+                  $comparison += "|-----------|-----------|--------------|----------|-------------|----------------|----------|`n"
+                  $comparison += ($tableRows -join "`n") + "`n`n"
+                  $comparison += "**Legend:**`n"
+                  $comparison += "- 🟢 Green: Improvement (faster/less memory)`n"
+                  $comparison += "- 🔴 Red: Regression (slower/more memory)`n"
+                  $comparison += "- ⚪ White: No change`n`n"
+                  $comparison += "📁 **Download artifacts for detailed analysis:**`n"
+                  $comparison += "- Current branch: \`benchmark-results-current\``n"
+                  $comparison += "- Base branch: \`benchmark-results-base\``n"
                 } else {
-                  $comparison = @"
-          ## 📊 Benchmark Comparison Results
-          
-          Benchmarks have been run on both the PR branch and the base branch (${{ github.base_ref }}).
-          
-          ⚠️ No matching benchmarks found for comparison.
-          
-          📁 **Download artifacts for detailed analysis:**
-          - Current branch: \`benchmark-results-current\`
-          - Base branch: \`benchmark-results-base\`
-          "@
+                  $comparison = "## 📊 Benchmark Comparison Results`n`n"
+                  $comparison += "Benchmarks have been run on both the PR branch and the base branch (${{ github.base_ref }}).`n`n"
+                  $comparison += "⚠️ No matching benchmarks found for comparison.`n`n"
+                  $comparison += "📁 **Download artifacts for detailed analysis:**`n"
+                  $comparison += "- Current branch: \`benchmark-results-current\``n"
+                  $comparison += "- Base branch: \`benchmark-results-base\``n"
                 }
                 
                 # Save comparison to file
@@ -171,17 +162,12 @@ jobs:
                 "has_comparison=true" >> $env:GITHUB_OUTPUT
               } catch {
                 Write-Host "Error parsing benchmark results: $_"
-                $comparison = @"
-          ## 📊 Benchmark Comparison Results
-          
-          Benchmarks have been run on both the PR branch and the base branch (${{ github.base_ref }}).
-          
-          ⚠️ **Note:** Could not parse benchmark results for automatic comparison.
-          
-          📁 **Download artifacts for manual analysis:**
-          - Current branch: \`benchmark-results-current\`
-          - Base branch: \`benchmark-results-base\`
-          "@
+                $comparison = "## 📊 Benchmark Comparison Results`n`n"
+                $comparison += "Benchmarks have been run on both the PR branch and the base branch (${{ github.base_ref }}).`n`n"
+                $comparison += "⚠️ **Note:** Could not parse benchmark results for automatic comparison.`n`n"
+                $comparison += "📁 **Download artifacts for manual analysis:**`n"
+                $comparison += "- Current branch: \`benchmark-results-current\``n"
+                $comparison += "- Base branch: \`benchmark-results-base\``n"
                 $comparison | Out-File -FilePath comparison.md -Encoding utf8
                 $comparison >> $env:GITHUB_STEP_SUMMARY
                 "has_comparison=true" >> $env:GITHUB_OUTPUT
