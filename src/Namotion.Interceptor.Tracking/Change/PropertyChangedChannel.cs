@@ -81,6 +81,7 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
 
     private async Task RunAsync(CancellationToken cancellationToken)
     {
+        // TODO: Do we need a retry here to avoid stopping the broadcast
         try
         {
             await foreach (var item in _source.Reader.ReadAllAsync(cancellationToken))
