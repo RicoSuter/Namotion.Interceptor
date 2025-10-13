@@ -135,21 +135,11 @@ jobs:
                   $comparison += "Benchmarks comparison between **base** (${{ github.base_ref }}) and **current** branch.`n`n"
                   $comparison += "| Benchmark | Base Mean | Current Mean | Diff (%) | Base Memory | Current Memory | Diff (%) |`n"
                   $comparison += "|-----------|-----------|--------------|----------|-------------|----------------|----------|`n"
-                  $comparison += ($tableRows -join "`n") + "`n`n"
-                  $comparison += "**Legend:**`n"
-                  $comparison += "- 🟢 Green: Improvement (faster/less memory)`n"
-                  $comparison += "- 🔴 Red: Regression (slower/more memory)`n"
-                  $comparison += "- ⚪ White: No change`n`n"
-                  $comparison += "📁 **Download artifacts for detailed analysis:**`n"
-                  $comparison += "- Current branch: \`benchmark-results-current\``n"
-                  $comparison += "- Base branch: \`benchmark-results-base\``n"
+                  $comparison += ($tableRows -join "`n") + "`n"
                 } else {
                   $comparison = "## 📊 Benchmark Comparison Results`n`n"
                   $comparison += "Benchmarks have been run on both the PR branch and the base branch (${{ github.base_ref }}).`n`n"
-                  $comparison += "⚠️ No matching benchmarks found for comparison.`n`n"
-                  $comparison += "📁 **Download artifacts for detailed analysis:**`n"
-                  $comparison += "- Current branch: \`benchmark-results-current\``n"
-                  $comparison += "- Base branch: \`benchmark-results-base\``n"
+                  $comparison += "⚠️ No matching benchmarks found for comparison.`n"
                 }
                 
                 # Save comparison to file
@@ -164,10 +154,7 @@ jobs:
                 Write-Host "Error parsing benchmark results: $_"
                 $comparison = "## 📊 Benchmark Comparison Results`n`n"
                 $comparison += "Benchmarks have been run on both the PR branch and the base branch (${{ github.base_ref }}).`n`n"
-                $comparison += "⚠️ **Note:** Could not parse benchmark results for automatic comparison.`n`n"
-                $comparison += "📁 **Download artifacts for manual analysis:**`n"
-                $comparison += "- Current branch: \`benchmark-results-current\``n"
-                $comparison += "- Base branch: \`benchmark-results-base\``n"
+                $comparison += "⚠️ **Note:** Could not parse benchmark results for automatic comparison.`n"
                 $comparison | Out-File -FilePath comparison.md -Encoding utf8
                 $comparison >> $env:GITHUB_STEP_SUMMARY
                 "has_comparison=true" >> $env:GITHUB_OUTPUT
