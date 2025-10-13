@@ -86,48 +86,52 @@ jobs:
             $baseFiles = Get-ChildItem -Path benchmark-results-base -Filter "*-report-full-compressed.json"
             
             if ($currentFiles -and $baseFiles) {
-              # Parse JSON files
-              $currentJson = Get-Content $currentFiles[0].FullName | ConvertFrom-Json
-              $baseJson = Get-Content $baseFiles[0].FullName | ConvertFrom-Json
-              
-              # Build comparison table
-              $tableRows = @()
-              
-              foreach ($currentBench in $currentJson.Benchmarks) {
-                $benchmarkName = $currentBench.FullName
-                $baseBench = $baseJson.Benchmarks | Where-Object { $_.FullName -eq $benchmarkName } | Select-Object -First 1
+              try {
+                # Parse JSON files
+                $currentJson = Get-Content $currentFiles[0].FullName -Raw | ConvertFrom-Json
+                $baseJson = Get-Content $baseFiles[0].FullName -Raw | ConvertFrom-Json
                 
-                if ($baseBench) {
-                  # Extract metrics
-                  $currentMean = [double]$currentBench.Statistics.Mean
-                  $baseMean = [double]$baseBench.Statistics.Mean
-                  $meanDiff = if ($baseMean -ne 0) { (($currentMean - $baseMean) / $baseMean) * 100 } else { 0 }
-                  
-                  # Memory metrics
-                  $currentMem = if ($currentBench.Memory.BytesAllocatedPerOperation) { [double]$currentBench.Memory.BytesAllocatedPerOperation } else { 0 }
-                  $baseMem = if ($baseBench.Memory.BytesAllocatedPerOperation) { [double]$baseBench.Memory.BytesAllocatedPerOperation } else { 0 }
-                  $memDiff = if ($baseMem -ne 0) { (($currentMem - $baseMem) / $baseMem) * 100 } else { 0 }
-                  
-                  # Format values
-                  $meanDiffStr = if ($meanDiff -gt 0) { "🔴 +$($meanDiff.ToString('F2'))%" } elseif ($meanDiff -lt 0) { "🟢 $($meanDiff.ToString('F2'))%" } else { "⚪ 0.00%" }
-                  $memDiffStr = if ($memDiff -gt 0) { "🔴 +$($memDiff.ToString('F2'))%" } elseif ($memDiff -lt 0) { "🟢 $($memDiff.ToString('F2'))%" } else { "⚪ 0.00%" }
-                  
-                  # Format mean time
-                  $currentMeanStr = if ($currentMean -lt 1000) { "$($currentMean.ToString('F2')) ns" } elseif ($currentMean -lt 1000000) { "$(($currentMean/1000).ToString('F2')) μs" } else { "$(($currentMean/1000000).ToString('F2')) ms" }
-                  $baseMeanStr = if ($baseMean -lt 1000) { "$($baseMean.ToString('F2')) ns" } elseif ($baseMean -lt 1000000) { "$(($baseMean/1000).ToString('F2')) μs" } else { "$(($baseMean/1000000).ToString('F2')) ms" }
-                  
-                  # Format memory
-                  $currentMemStr = if ($currentMem -eq 0) { "N/A" } elseif ($currentMem -lt 1024) { "$($currentMem.ToString('F0')) B" } elseif ($currentMem -lt 1048576) { "$(($currentMem/1024).ToString('F2')) KB" } else { "$(($currentMem/1048576).ToString('F2')) MB" }
-                  $baseMemStr = if ($baseMem -eq 0) { "N/A" } elseif ($baseMem -lt 1024) { "$($baseMem.ToString('F0')) B" } elseif ($baseMem -lt 1048576) { "$(($baseMem/1024).ToString('F2')) KB" } else { "$(($baseMem/1048576).ToString('F2')) MB" }
-                  
-                  # Shorten benchmark name
-                  $shortName = $benchmarkName -replace 'Namotion\.Interceptor\.Benchmark\.', ''
-                  
-                  $tableRows += "| $shortName | $baseMeanStr | $currentMeanStr | $meanDiffStr | $baseMemStr | $currentMemStr | $memDiffStr |"
+                # Build comparison table
+                $tableRows = @()
+                
+                if ($currentJson.Benchmarks -and $baseJson.Benchmarks) {
+                  foreach ($currentBench in $currentJson.Benchmarks) {
+                    $benchmarkName = $currentBench.FullName
+                    $baseBench = $baseJson.Benchmarks | Where-Object { $_.FullName -eq $benchmarkName } | Select-Object -First 1
+                    
+                    if ($baseBench) {
+                      # Extract metrics safely
+                      $currentMean = if ($currentBench.Statistics.Mean) { [double]$currentBench.Statistics.Mean } else { 0 }
+                      $baseMean = if ($baseBench.Statistics.Mean) { [double]$baseBench.Statistics.Mean } else { 0 }
+                      $meanDiff = if ($baseMean -ne 0) { (($currentMean - $baseMean) / $baseMean) * 100 } else { 0 }
+                      
+                      # Memory metrics
+                      $currentMem = if ($currentBench.Memory -and $currentBench.Memory.BytesAllocatedPerOperation) { [double]$currentBench.Memory.BytesAllocatedPerOperation } else { 0 }
+                      $baseMem = if ($baseBench.Memory -and $baseBench.Memory.BytesAllocatedPerOperation) { [double]$baseBench.Memory.BytesAllocatedPerOperation } else { 0 }
+                      $memDiff = if ($baseMem -ne 0) { (($currentMem - $baseMem) / $baseMem) * 100 } else { 0 }
+                      
+                      # Format values
+                      $meanDiffStr = if ($meanDiff -gt 0) { "🔴 +$($meanDiff.ToString('F2'))%" } elseif ($meanDiff -lt 0) { "🟢 $($meanDiff.ToString('F2'))%" } else { "⚪ 0.00%" }
+                      $memDiffStr = if ($memDiff -gt 0) { "🔴 +$($memDiff.ToString('F2'))%" } elseif ($memDiff -lt 0) { "🟢 $($memDiff.ToString('F2'))%" } else { "⚪ 0.00%" }
+                      
+                      # Format mean time
+                      $currentMeanStr = if ($currentMean -lt 1000) { "$($currentMean.ToString('F2')) ns" } elseif ($currentMean -lt 1000000) { "$(($currentMean/1000).ToString('F2')) μs" } else { "$(($currentMean/1000000).ToString('F2')) ms" }
+                      $baseMeanStr = if ($baseMean -lt 1000) { "$($baseMean.ToString('F2')) ns" } elseif ($baseMean -lt 1000000) { "$(($baseMean/1000).ToString('F2')) μs" } else { "$(($baseMean/1000000).ToString('F2')) ms" }
+                      
+                      # Format memory
+                      $currentMemStr = if ($currentMem -eq 0) { "N/A" } elseif ($currentMem -lt 1024) { "$($currentMem.ToString('F0')) B" } elseif ($currentMem -lt 1048576) { "$(($currentMem/1024).ToString('F2')) KB" } else { "$(($currentMem/1048576).ToString('F2')) MB" }
+                      $baseMemStr = if ($baseMem -eq 0) { "N/A" } elseif ($baseMem -lt 1024) { "$($baseMem.ToString('F0')) B" } elseif ($baseMem -lt 1048576) { "$(($baseMem/1024).ToString('F2')) KB" } else { "$(($baseMem/1048576).ToString('F2')) MB" }
+                      
+                      # Shorten benchmark name
+                      $shortName = $benchmarkName -replace 'Namotion\.Interceptor\.Benchmark\.', ''
+                      
+                      $tableRows += "| $shortName | $baseMeanStr | $currentMeanStr | $meanDiffStr | $baseMemStr | $currentMemStr | $memDiffStr |"
+                    }
+                  }
                 }
-              }
-              
-              $comparison = @"
+                
+                if ($tableRows.Count -gt 0) {
+                  $comparison = @"
           ## 📊 Benchmark Comparison Results
           
           Benchmarks comparison between **base** (${{ github.base_ref }}) and **current** branch.
@@ -145,15 +149,45 @@ jobs:
           - Current branch: \`benchmark-results-current\`
           - Base branch: \`benchmark-results-base\`
           "@
-              
-              # Save comparison to file
-              $comparison | Out-File -FilePath comparison.md -Encoding utf8
-              
-              # Also write to workflow summary (always available)
-              $comparison >> $env:GITHUB_STEP_SUMMARY
-              
-              # Set output for comment
-              "has_comparison=true" >> $env:GITHUB_OUTPUT
+                } else {
+                  $comparison = @"
+          ## 📊 Benchmark Comparison Results
+          
+          Benchmarks have been run on both the PR branch and the base branch (${{ github.base_ref }}).
+          
+          ⚠️ No matching benchmarks found for comparison.
+          
+          📁 **Download artifacts for detailed analysis:**
+          - Current branch: \`benchmark-results-current\`
+          - Base branch: \`benchmark-results-base\`
+          "@
+                }
+                
+                # Save comparison to file
+                $comparison | Out-File -FilePath comparison.md -Encoding utf8
+                
+                # Also write to workflow summary (always available)
+                $comparison >> $env:GITHUB_STEP_SUMMARY
+                
+                # Set output for comment
+                "has_comparison=true" >> $env:GITHUB_OUTPUT
+              } catch {
+                Write-Host "Error parsing benchmark results: $_"
+                $comparison = @"
+          ## 📊 Benchmark Comparison Results
+          
+          Benchmarks have been run on both the PR branch and the base branch (${{ github.base_ref }}).
+          
+          ⚠️ **Note:** Could not parse benchmark results for automatic comparison.
+          
+          📁 **Download artifacts for manual analysis:**
+          - Current branch: \`benchmark-results-current\`
+          - Base branch: \`benchmark-results-base\`
+          "@
+                $comparison | Out-File -FilePath comparison.md -Encoding utf8
+                $comparison >> $env:GITHUB_STEP_SUMMARY
+                "has_comparison=true" >> $env:GITHUB_OUTPUT
+              }
             }
           }
 
