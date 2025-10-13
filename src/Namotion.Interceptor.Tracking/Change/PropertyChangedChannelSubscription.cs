@@ -4,22 +4,23 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 public sealed class PropertyChangedChannelSubscription : IDisposable
 {
-    private readonly Action _unsubscribe;
+    private readonly PropertyChangedChannel _channel;
+    private readonly Channel<SubjectPropertyChange> _readerChannel;
     private int _disposed;
 
-    public PropertyChangedChannelSubscription(ChannelReader<SubjectPropertyChange> reader, Action unsubscribe)
+    public PropertyChangedChannelSubscription(PropertyChangedChannel channel, Channel<SubjectPropertyChange> readerChannel)
     {
-        Reader = reader;
-        _unsubscribe = unsubscribe;
+        _channel = channel;
+        _readerChannel = readerChannel;
     }
 
-    public ChannelReader<SubjectPropertyChange> Reader { get; }
+    public ChannelReader<SubjectPropertyChange> Reader => _readerChannel.Reader;
 
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            _unsubscribe();
+            _channel.Unsubscribe(_readerChannel);
         }
     }
 }
