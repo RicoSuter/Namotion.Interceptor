@@ -58,7 +58,7 @@ public class SubjectSourceBenchmark
     [Benchmark]
     public void ProcessLocalChanges()
     {
-        var observable = _context.GetService<PropertyChangedObservable>();
+        var observable = _context.GetService<PropertyChangedChannel>();
         for (var i = 0; i < 100000; i++)
         {
             var context = new PropertyWriteContext<int>(
@@ -81,6 +81,8 @@ public class SubjectSourceBenchmark
 
     private class TestSubjectSource : ISubjectSource
     {
+        public TaskCompletionSource WriteCompletionTask { get; set; } = new();
+        
         public bool IsPropertyIncluded(RegisteredSubjectProperty property) => false;
 
         public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
@@ -95,6 +97,7 @@ public class SubjectSourceBenchmark
 
         public ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
+            WriteCompletionTask.SetResult();
             return ValueTask.CompletedTask;
         }
     }
