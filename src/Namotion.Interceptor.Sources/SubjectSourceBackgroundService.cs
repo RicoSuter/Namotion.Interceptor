@@ -21,12 +21,13 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     private ISubjectRegistry? _subjectRegistry;
     
     private List<SubjectPropertyChange> _changes = [];
+    private readonly SemaphoreSlim _writeSemaphore = new(1, 1);
+
     private List<SubjectPropertyChange> _flushChanges = [];
     private readonly HashSet<PropertyReference> _flushTouchedChanges = [];
     private readonly List<SubjectPropertyChange> _flushDedupedChanges = [];
-    private readonly SemaphoreSlim _writeSemaphore = new(1, 1);
     private DateTimeOffset _flushLastTime = DateTimeOffset.MinValue;
-
+    
     public SubjectSourceBackgroundService(
         ISubjectSource source,
         IInterceptorSubjectContext context,
@@ -133,7 +134,6 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 }
 
                 _changes.Add(item);
-
                 if (periodicTimer is null)
                 {
                     await WriteToSourceAsync(_changes, linkedTokenSource.Token);
