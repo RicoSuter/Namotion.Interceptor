@@ -1,0 +1,201 @@
+name: benchmark
+on:
+  workflow_dispatch: # Allow running the workflow manually from the GitHub UI
+  push:
+    branches:
+      - 'master'
+  pull_request:
+    branches:
+      - '*'
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_NOLOGO: true
+  DOTNET_VERSION: 9.0.x
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Run benchmarks on current branch
+        run: |
+          dotnet run --project src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj `
+            --configuration Release `
+            --filter '*' `
+            --exporters json html `
+            --join '*'
+
+      - name: Save current branch results
+        run: |
+          New-Item -ItemType Directory -Force -Path benchmark-results-current
+          if (Test-Path BenchmarkDotNet.Artifacts/results) {
+            Copy-Item -Path BenchmarkDotNet.Artifacts/results/* -Destination benchmark-results-current/ -Recurse
+          }
+
+      - name: Run benchmarks on base branch (if PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          # Clean previous artifacts
+          if (Test-Path BenchmarkDotNet.Artifacts) {
+            Remove-Item -Path BenchmarkDotNet.Artifacts -Recurse -Force
+          }
+          
+          # Checkout base branch
+          git fetch origin ${{ github.base_ref }}
+          git checkout origin/${{ github.base_ref }}
+          
+          # Run benchmarks on base branch
+          dotnet run --project src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj `
+            --configuration Release `
+            --filter '*' `
+            --exporters json html `
+            --join '*'
+          
+          # Save base branch results
+          New-Item -ItemType Directory -Force -Path benchmark-results-base
+          if (Test-Path BenchmarkDotNet.Artifacts/results) {
+            Copy-Item -Path BenchmarkDotNet.Artifacts/results/* -Destination benchmark-results-base/ -Recurse
+          }
+          
+          # Return to PR branch
+          git checkout -
+
+      - name: Compare benchmark results
+        if: github.event_name == 'pull_request'
+        id: compare
+        run: |
+          # Compare JSON results if both exist
+          if ((Test-Path benchmark-results-current) -and (Test-Path benchmark-results-base)) {
+            $currentFiles = Get-ChildItem -Path benchmark-results-current -Filter "*-report-full-compressed.json"
+            $baseFiles = Get-ChildItem -Path benchmark-results-base -Filter "*-report-full-compressed.json"
+            
+            if ($currentFiles -and $baseFiles) {
+              try {
+                # Parse JSON files
+                $currentJson = Get-Content $currentFiles[0].FullName -Raw | ConvertFrom-Json
+                $baseJson = Get-Content $baseFiles[0].FullName -Raw | ConvertFrom-Json
+                
+                # Build comparison table
+                $tableRows = @()
+                
+                if ($currentJson.Benchmarks -and $baseJson.Benchmarks) {
+                  foreach ($currentBench in $currentJson.Benchmarks) {
+                    $benchmarkName = $currentBench.FullName
+                    $baseBench = $baseJson.Benchmarks | Where-Object { $_.FullName -eq $benchmarkName } | Select-Object -First 1
+                    
+                    if ($baseBench) {
+                      # Extract metrics safely
+                      $currentMean = if ($currentBench.Statistics.Mean) { [double]$currentBench.Statistics.Mean } else { 0 }
+                      $baseMean = if ($baseBench.Statistics.Mean) { [double]$baseBench.Statistics.Mean } else { 0 }
+                      $meanDiff = if ($baseMean -ne 0) { (($currentMean - $baseMean) / $baseMean) * 100 } else { 0 }
+                      
+                      # Memory metrics
+                      $currentMem = if ($currentBench.Memory -and $currentBench.Memory.BytesAllocatedPerOperation) { [double]$currentBench.Memory.BytesAllocatedPerOperation } else { 0 }
+                      $baseMem = if ($baseBench.Memory -and $baseBench.Memory.BytesAllocatedPerOperation) { [double]$baseBench.Memory.BytesAllocatedPerOperation } else { 0 }
+                      $memDiff = if ($baseMem -ne 0) { (($currentMem - $baseMem) / $baseMem) * 100 } else { 0 }
+                      
+                      # Format values
+                      $meanDiffStr = if ($meanDiff -gt 0) { "🔴 +$($meanDiff.ToString('F2'))%" } elseif ($meanDiff -lt 0) { "🟢 $($meanDiff.ToString('F2'))%" } else { "⚪ 0.00%" }
+                      $memDiffStr = if ($memDiff -gt 0) { "🔴 +$($memDiff.ToString('F2'))%" } elseif ($memDiff -lt 0) { "🟢 $($memDiff.ToString('F2'))%" } else { "⚪ 0.00%" }
+                      
+                      # Format mean time
+                      $currentMeanStr = if ($currentMean -lt 1000) { "$($currentMean.ToString('F2')) ns" } elseif ($currentMean -lt 1000000) { "$(($currentMean/1000).ToString('F2')) μs" } else { "$(($currentMean/1000000).ToString('F2')) ms" }
+                      $baseMeanStr = if ($baseMean -lt 1000) { "$($baseMean.ToString('F2')) ns" } elseif ($baseMean -lt 1000000) { "$(($baseMean/1000).ToString('F2')) μs" } else { "$(($baseMean/1000000).ToString('F2')) ms" }
+                      
+                      # Format memory
+                      $currentMemStr = if ($currentMem -eq 0) { "N/A" } elseif ($currentMem -lt 1024) { "$($currentMem.ToString('F0')) B" } elseif ($currentMem -lt 1048576) { "$(($currentMem/1024).ToString('F2')) KB" } else { "$(($currentMem/1048576).ToString('F2')) MB" }
+                      $baseMemStr = if ($baseMem -eq 0) { "N/A" } elseif ($baseMem -lt 1024) { "$($baseMem.ToString('F0')) B" } elseif ($baseMem -lt 1048576) { "$(($baseMem/1024).ToString('F2')) KB" } else { "$(($baseMem/1048576).ToString('F2')) MB" }
+                      
+                      # Shorten benchmark name
+                      $shortName = $benchmarkName -replace 'Namotion\.Interceptor\.Benchmark\.', ''
+                      
+                      $tableRows += "| $shortName | $baseMeanStr | $currentMeanStr | $meanDiffStr | $baseMemStr | $currentMemStr | $memDiffStr |"
+                    }
+                  }
+                }
+                
+                if ($tableRows.Count -gt 0) {
+                  $comparison = "## 📊 Benchmark Comparison Results`n`n"
+                  $comparison += "Benchmarks comparison between **base** (${{ github.base_ref }}) and **current** branch.`n`n"
+                  $comparison += "| Benchmark | Base Mean | Current Mean | Diff (%) | Base Memory | Current Memory | Diff (%) |`n"
+                  $comparison += "|-----------|-----------|--------------|----------|-------------|----------------|----------|`n"
+                  $comparison += ($tableRows -join "`n") + "`n"
+                } else {
+                  $comparison = "## 📊 Benchmark Comparison Results`n`n"
+                  $comparison += "Benchmarks have been run on both the PR branch and the base branch (${{ github.base_ref }}).`n`n"
+                  $comparison += "⚠️ No matching benchmarks found for comparison.`n"
+                }
+                
+                # Save comparison to file
+                $comparison | Out-File -FilePath comparison.md -Encoding utf8
+                
+                # Also write to workflow summary (always available)
+                $comparison >> $env:GITHUB_STEP_SUMMARY
+                
+                # Set output for comment
+                "has_comparison=true" >> $env:GITHUB_OUTPUT
+              } catch {
+                Write-Host "Error parsing benchmark results: $_"
+                $comparison = "## 📊 Benchmark Comparison Results`n`n"
+                $comparison += "Benchmarks have been run on both the PR branch and the base branch (${{ github.base_ref }}).`n`n"
+                $comparison += "⚠️ **Note:** Could not parse benchmark results for automatic comparison.`n"
+                $comparison | Out-File -FilePath comparison.md -Encoding utf8
+                $comparison >> $env:GITHUB_STEP_SUMMARY
+                "has_comparison=true" >> $env:GITHUB_OUTPUT
+              }
+            }
+          }
+
+      - name: Comment PR with comparison
+        if: github.event_name == 'pull_request' && steps.compare.outputs.has_comparison == 'true'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const comparison = fs.readFileSync('comparison.md', 'utf8');
+            
+            try {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comparison
+              });
+              console.log('Successfully posted comment to PR');
+            } catch (error) {
+              console.log('Unable to post comment to PR. Check the workflow summary for benchmark comparison results.');
+              console.log('Error:', error.message);
+            }
+
+      - name: Upload current branch benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-current
+          path: benchmark-results-current/
+          if-no-files-found: warn
+
+      - name: Upload base branch benchmark results
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-base
+          path: benchmark-results-base/
+          if-no-files-found: ignore
+
