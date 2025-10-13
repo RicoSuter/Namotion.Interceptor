@@ -16,7 +16,7 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
     private ImmutableArray<Channel<SubjectPropertyChange>> _subscribers = ImmutableArray<Channel<SubjectPropertyChange>>.Empty;
 
     private CancellationTokenSource? _broadcastCts;
-    private readonly Lock _broadcastLock = new();
+    private readonly Lock _subscriptionLock = new();
 
     public PropertyChangedChannelSubscription Subscribe()
     {
@@ -27,7 +27,7 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
             AllowSynchronousContinuations = false
         });
 
-        lock (_broadcastLock)
+        lock (_subscriptionLock)
         {
             var wasEmpty = _subscribers.Length == 0;
             ImmutableInterlocked.Update(ref _subscribers, a => a.Add(channel));
@@ -44,16 +44,14 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
 
     internal void Unsubscribe(Channel<SubjectPropertyChange> channel)
     {
-        lock (_broadcastLock)
+        lock (_subscriptionLock)
         {
             ImmutableInterlocked.Update(ref _subscribers, a => a.Remove(channel));
             channel.Writer.TryComplete();
 
-            if (_subscribers.Length == 0 && _broadcastCts != null)
+            if (_subscribers.Length == 0)
             {
-                _broadcastCts.Cancel();
-                _broadcastCts.Dispose();
-                _broadcastCts = null;
+                CleanUpBroadcast();
             }
         }
     }
@@ -81,11 +79,11 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
         _source.Writer.TryWrite(changedContext);
     }
 
-    private async Task RunAsync(CancellationToken ct)
+    private async Task RunAsync(CancellationToken cancellationToken)
     {
         try
         {
-            await foreach (var item in _source.Reader.ReadAllAsync(ct))
+            await foreach (var item in _source.Reader.ReadAllAsync(cancellationToken))
             {
                 var targets = _subscribers;
                 foreach (var sub in targets)
@@ -111,7 +109,22 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
                 sub.Writer.TryComplete(ex);
             }
 
+            lock (_subscriptionLock)
+            {
+                CleanUpBroadcast();
+            }
+
             throw;
+        }
+    }
+
+    private void CleanUpBroadcast()
+    {
+        if (_broadcastCts != null)
+        {
+            _broadcastCts.Cancel();
+            _broadcastCts.Dispose();
+            _broadcastCts = null;
         }
     }
 }
