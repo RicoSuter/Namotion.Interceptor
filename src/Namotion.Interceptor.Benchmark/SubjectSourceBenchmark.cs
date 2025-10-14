@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
@@ -23,6 +24,7 @@ public class SubjectSourceBenchmark
     private IInterceptorSubjectContext _context;
     private CancellationTokenSource _cts;
     private Car _car;
+    private string[] _propertyNames;
 
     [GlobalSetup]
     public async Task Setup()
@@ -41,32 +43,52 @@ public class SubjectSourceBenchmark
             retryTime: TimeSpan.FromSeconds(1));
 
         _car = new Car(_context);
+        _propertyNames = Enumerable
+            .Range(1, 5000)
+            .Select(i => $"Name{i}")
+            .ToArray();
+        
+        foreach (var name in _propertyNames)
+        {
+            _car.TryGetRegisteredSubject()!
+                .AddProperty(name, typeof(string), static _ => "foo", static (_, _) => { });
+        }
         
         _cts = new CancellationTokenSource();
         await _service.StartAsync(_cts.Token);
     }
 
     [Benchmark]
-    public void ProcessSourceChanges()
+    public void WriteToRegistrySubjects()
     {
-        for (int i = 0; i < 100000; i++)
+        var c = 0;
+        for (var i = 0; i < 1000000; i++)
         {
-            _service.EnqueueSubjectUpdate(() => { });
+            _service.EnqueueSubjectUpdate(() => { c++;});
+        }
+        while (c < 1000000)
+        {
+            Thread.Sleep(1);
         }
     }
 
     [Benchmark]
-    public void ProcessLocalChanges()
+    public void WriteToSource()
     {
         var observable = _context.GetService<PropertyChangedChannel>();
-        for (var i = 0; i < 100000; i++)
+        for (var i = 0; i < _propertyNames.Length; i++)
         {
             var context = new PropertyWriteContext<int>(
-                new PropertyReference(_car, "Name"), 
+                new PropertyReference(_car, _propertyNames[i]), 
                 0, 
                 i);
 
             observable.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});
+        }
+        
+        while (_source.Count < _propertyNames.Length)
+        {
+            Thread.Sleep(1);
         }
     }
 
@@ -81,9 +103,9 @@ public class SubjectSourceBenchmark
 
     private class TestSubjectSource : ISubjectSource
     {
-        public TaskCompletionSource WriteCompletionTask { get; set; } = new();
+        public int Count { get; set; }
         
-        public bool IsPropertyIncluded(RegisteredSubjectProperty property) => false;
+        public bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
 
         public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
         {
@@ -97,7 +119,7 @@ public class SubjectSourceBenchmark
 
         public ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
-            WriteCompletionTask.SetResult();
+            Count += changes.Count;
             return ValueTask.CompletedTask;
         }
     }
