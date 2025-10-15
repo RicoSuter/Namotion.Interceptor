@@ -11,19 +11,19 @@ namespace Namotion.Interceptor.SampleBlazor
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            var context = InterceptorSubjectContext
-                .Create()
-                .WithFullPropertyTracking()
-                .WithReadPropertyRecorder();
-
             // Add services to the container.
             builder.Services
                 .AddRazorComponents()
                 .AddInteractiveServerComponents();
 
-            // Add Namotion.Interceptor.Blazor services
+            // Add trackable game
+            var context = InterceptorSubjectContext
+                .Create()
+                .WithFullPropertyTracking()
+                .WithReadPropertyRecorder();
+
             builder.Services
-                .AddInterceptorSubjectRoot<Game>()
+                .AddSingleton<Game>(_ => new Game(context))
                 .AddScoped<Player>();
 
             var app = builder.Build();
