@@ -3,12 +3,11 @@
 public class ReadPropertyRecorderScope : IDisposable
 {
     private readonly ReadPropertyRecorder _recorder;
-    private readonly HashSet<PropertyReference> _properties;
+    private readonly HashSet<PropertyReference> _properties = [];
 
-    public ReadPropertyRecorderScope(ReadPropertyRecorder recorder, HashSet<PropertyReference> properties)
+    public ReadPropertyRecorderScope(ReadPropertyRecorder recorder)
     {
         _recorder = recorder;
-        _properties = properties;
     }
 
     public PropertyReference[] Properties
@@ -44,9 +43,15 @@ public class ReadPropertyRecorderScope : IDisposable
 
     public void Dispose()
     {
+        _properties.Clear();
         lock (typeof(ReadPropertyRecorder))
         {
-            ReadPropertyRecorder.Scopes.Value?[_recorder]?.Remove(_properties);
+            ReadPropertyRecorder.Scopes.Value?[_recorder]?.Remove(this);
         }
+    }
+
+    internal void AddProperty(PropertyReference property)
+    {
+        _properties.Add(property);
     }
 }

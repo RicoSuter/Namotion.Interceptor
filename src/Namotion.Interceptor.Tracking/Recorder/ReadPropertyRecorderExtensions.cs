@@ -9,13 +9,13 @@ public static class ReadPropertyRecorderExtensions
     /// <returns>The recording scope.</returns>
     public static ReadPropertyRecorderScope StartPropertyAccessRecording(this ReadPropertyRecorder recorder)
     {
-        ReadPropertyRecorder.Scopes.Value ??= new Dictionary<ReadPropertyRecorder, List<HashSet<PropertyReference>>>();
+        ReadPropertyRecorder.Scopes.Value ??= new Dictionary<ReadPropertyRecorder, List<ReadPropertyRecorderScope>>();
 
-        var scope = new HashSet<PropertyReference>();
+        var scope = new ReadPropertyRecorderScope(recorder); // TODO(perf): Use pooled collection
 
         ReadPropertyRecorder.Scopes.Value.TryAdd(recorder, []);
         ReadPropertyRecorder.Scopes.Value[recorder].Add(scope);
 
-        return new ReadPropertyRecorderScope(recorder, scope);
+        return scope;
     }
 }
