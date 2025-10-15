@@ -11,10 +11,10 @@ namespace Namotion.Interceptor.SampleBlazor.Models
 
         public Player(Game game)
         {
+            Name = Guid.NewGuid().ToString();
+
             _game = game;
             _game.AddPlayer(this);
-
-            Name = Guid.NewGuid().ToString();
         }
 
         public void Dispose()

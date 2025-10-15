@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.Components;
+﻿using System.Reflection;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Rendering;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Recorder;
 
@@ -9,8 +11,8 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
 {
     private IDisposable? _subscription;
     private ReadPropertyRecorderScope? _recorderScope;
-        
-    private PropertyReference[]? _properties;
+
+    private HashSet<PropertyReference>? _properties;
     private ReadPropertyRecorder? _recorder;
 
     [Inject]
@@ -32,22 +34,20 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
         _recorder = Subject?
             .Context
             .GetService<ReadPropertyRecorder>();
-    }
 
-    protected override bool ShouldRender()
-    {
-        var result = base.ShouldRender();
-        if (result)
+        var field = typeof(ComponentBase).GetField("_renderFragment", BindingFlags.NonPublic | BindingFlags.Instance);
+        if (field?.GetValue(this) is RenderFragment renderFragment)
         {
-            _recorderScope = _recorder?.StartPropertyAccessRecording();
+            void WrappedRenderFragment(RenderTreeBuilder builder)
+            {
+                _recorderScope?.Dispose();
+                _recorderScope = _recorder?.StartPropertyAccessRecording();
+                renderFragment(builder);
+                _properties = (_recorderScope?.GetPropertiesAndDispose() ?? []).ToHashSet();
+            }
+
+            field.SetValue(this, (RenderFragment)WrappedRenderFragment);
         }
-
-        return result;
-    }
-
-    protected override void OnAfterRender(bool firstRender)
-    {
-        _properties = _recorderScope?.GetPropertiesAndDispose();
     }
 
     public virtual void Dispose()

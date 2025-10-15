@@ -21,10 +21,10 @@ namespace Namotion.Interceptor.SampleBlazor
                 .AddRazorComponents()
                 .AddInteractiveServerComponents();
 
-            builder.Services.AddSingleton(context.GetPropertyChangedObservable());          
-            builder.Services.AddSingleton(context.GetService<ReadPropertyRecorder>());          
-            builder.Services.AddSingleton(new Game(context));
-            builder.Services.AddScoped<Player>();
+            // Add Namotion.Interceptor.Blazor services
+            builder.Services
+                .AddInterceptorSubjectRoot<Game>()
+                .AddScoped<Player>();
 
             var app = builder.Build();
 
