@@ -17,10 +17,7 @@ public class ReadPropertyRecorderTests
         // Act
         var person = new Person(context);
 
-        var recorder = context
-            .GetService<ReadPropertyRecorder>()
-            .StartPropertyAccessRecording();
-        
+        var recorder = ReadPropertyRecorder.Start();
         using (recorder)
         {
              var firstName = person.FirstName;
