@@ -35,10 +35,10 @@ public class AttributeTests
         var registeredProperty = person.TryGetRegisteredProperty(p => p!.FirstName)!;
 
         var attributePropertyName = registeredProperty.AddAttribute("MyAttribute",
-            typeof(int), _ => attributeValue, (_, v) => attributeValue = (int)v!);
+            _ => attributeValue, (_, v) => attributeValue = v!);
 
         attributePropertyName.AddAttribute("MyAttribute2",
-            typeof(int), _ => attributeValue, (_, v) => attributeValue = (int)v!);
+            _ => attributeValue, (_, v) => attributeValue = v!);
 
         var attribute = registeredProperty.TryGetAttribute("MyAttribute");
         var attribute2 = attribute?.TryGetAttribute("MyAttribute2");
@@ -72,7 +72,7 @@ public class AttributeTests
         // Act
         var dynamicDerivedProperty = person
             .TryGetRegisteredSubject()!
-            .AddDerivedProperty("DynamicDerivedProperty", typeof(string), _ => "Mr. " + person.FirstName, null);
+            .AddDerivedProperty<string>("DynamicDerivedProperty", _ => "Mr. " + person.FirstName);
 
         context
             .GetPropertyChangedObservable(ImmediateScheduler.Instance)
