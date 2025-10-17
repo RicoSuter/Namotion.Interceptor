@@ -5,19 +5,19 @@ namespace Namotion.Interceptor.Tracking.Recorder;
 
 public class ReadPropertyRecorder : IReadInterceptor
 {
-    internal static AsyncLocal<ConcurrentBag<ReadPropertyRecorderScope>?> Scopes { get; } = new();
+    internal static AsyncLocal<ConcurrentDictionary<ReadPropertyRecorderScope, bool>?> Scopes { get; } = new();
     
     /// <summary>
     /// Starts the recording of property read accesses.
     /// </summary>
     /// <param name="properties">The preallocated properties bag.</param>
     /// <returns>The recording scope.</returns>
-    public static ReadPropertyRecorderScope Start(HashSet<PropertyReference>? properties = null)
+    public static ReadPropertyRecorderScope Start(ConcurrentDictionary<PropertyReference, bool>? properties = null)
     {
         Scopes.Value ??= [];
 
         var scope = new ReadPropertyRecorderScope(properties);
-        Scopes.Value.Add(scope);
+        Scopes.Value.TryAdd(scope, false);
         return scope;
     }
     
@@ -28,10 +28,7 @@ public class ReadPropertyRecorder : IReadInterceptor
         {
             foreach (var scope in scopes)
             {
-                if (!scope.IsDisposed)
-                {
-                    scope.AddProperty(context.Property);
-                }
+                scope.Key.AddProperty(context.Property);
             }
         }
 
