@@ -1,6 +1,9 @@
 ﻿@page "/counter"
+@rendermode InteractiveServer
+
 @using HomeBlaze.Client.State
-@using Namotion.Interceptor
+
+@inject Host Host
 
 @inherits Namotion.Interceptor.Blazor.TrackingComponentBase<HomeBlaze.Client.State.Host>
 
@@ -36,18 +39,18 @@
 @code {
     private void Callback()
     {
-        Subject?.AddThing();
+        Host.AddThing();
     }
     private void Clear()
     {
-        Subject?.Clear();
+        Host.Clear();
     }
 
     private IEnumerable<Thing> GetThings()
     {
-        return Subject?.Things ?? Enumerable.Empty<Thing>();
+        return Host.Things;
     }
-
+    
     private Color GetTemperatureColor(int temperatureC)
     {
         if (temperatureC < 0)

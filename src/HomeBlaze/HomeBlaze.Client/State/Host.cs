@@ -8,7 +8,12 @@ namespace HomeBlaze.Client.State;
 [InterceptorSubject]
 public partial class Host : BackgroundService
 {
-    public ImmutableArray<Thing> Things { get; set; } = ImmutableArray<Thing>.Empty;
+    private Host()
+    {
+        Things = ImmutableArray<Thing>.Empty;
+    }
+    
+    public partial ImmutableArray<Thing> Things { get; set; }
     
     public void AddThing()
     {
@@ -38,8 +43,15 @@ public partial class Host : BackgroundService
             {
                 Console.WriteLine(e);
             }
-            
-            await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                foreach (var thing in Things)
+                {
+                    thing.TemperatureC = Random.Shared.Next(-20, 55);
+                }
+            }
         }
         catch (TaskCanceledException)
         {
