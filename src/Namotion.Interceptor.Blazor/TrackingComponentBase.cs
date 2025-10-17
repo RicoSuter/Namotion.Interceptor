@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.Reflection;
+﻿using System.Reflection;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
 using Namotion.Interceptor.Tracking;
@@ -16,7 +15,6 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
 
     private HashSet<PropertyReference> _scopeProperties = [];
     private HashSet<PropertyReference> _properties = [];
-    private ReadPropertyRecorder? _recorder;
 
     [Inject]
     public TSubject? Subject { get; set; }
@@ -34,10 +32,6 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
                 }
             });
         
-        _recorder = Subject?
-            .Context
-            .GetService<ReadPropertyRecorder>() ?? throw new InvalidOperationException("The ReadPropertyRecorder service not found.");
-
         var field = typeof(ComponentBase).GetField("_renderFragment", BindingFlags.NonPublic | BindingFlags.Instance);
         if (field?.GetValue(this) is RenderFragment renderFragment)
         {
@@ -45,10 +39,9 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
             {
                 lock (_lock)
                 {
-                    var recorderScope = _recorder.StartPropertyAccessRecording(_scopeProperties);
-            
+                    using var recorderScope = ReadPropertyRecorder.Start(_scopeProperties);
                     renderFragment(builder);
-
+                    
                     var previousProperties = _properties;
                     _properties = recorderScope.GetPropertiesAndDispose();
                     _scopeProperties = previousProperties;

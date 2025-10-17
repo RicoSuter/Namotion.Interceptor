@@ -2,10 +2,11 @@
 
 public class ReadPropertyRecorderScope : IDisposable
 {
+    private readonly Lock _lock = new();
     private readonly HashSet<PropertyReference> _properties;
     private volatile int _disposed;
-
-    public ReadPropertyRecorderScope(HashSet<PropertyReference>? properties)
+    
+    internal ReadPropertyRecorderScope(HashSet<PropertyReference>? properties)
     {
         _properties = properties ?? [];
         _properties.Clear();
@@ -22,7 +23,7 @@ public class ReadPropertyRecorderScope : IDisposable
     public HashSet<PropertyReference> GetPropertiesAndDispose()
     {
         Dispose();
-        lock (this)
+        lock (_lock)
         {
             return _properties;
         }
@@ -37,7 +38,8 @@ public class ReadPropertyRecorderScope : IDisposable
     {
         if (_disposed == 0)
         {
-            lock (this)
+            // TODO(perf): Avoid locking here by using a concurrent collection
+            lock (_lock)
             {
                 _properties.Add(property);
             }
