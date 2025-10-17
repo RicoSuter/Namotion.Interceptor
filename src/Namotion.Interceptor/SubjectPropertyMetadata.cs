@@ -10,6 +10,8 @@ public readonly record struct SubjectPropertyMetadata
     
     public IReadOnlyCollection<Attribute> Attributes { get; }
     
+    // TODO(perf): Use generic instead of object? here?
+    
     public Func<IInterceptorSubject, object?>? GetValue { get; }
     
     public Action<IInterceptorSubject, object?>? SetValue { get; }
