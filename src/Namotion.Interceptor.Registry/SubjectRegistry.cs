@@ -101,9 +101,9 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
 
     void ILifecycleHandler.DetachSubject(SubjectLifecycleChange change)
     {
-        lock (_lock)
+        if (change.ReferenceCount == 0)
         {
-            if (change.ReferenceCount == 0)
+            lock (_lock)
             {
                 if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
                 {
