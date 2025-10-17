@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
@@ -159,6 +158,43 @@ public class RegisteredSubjectProperty
                 return _children.ToArray();
             }
         }
+    }
+    
+    /// <summary>
+    /// Adds an attribute to the property.
+    /// </summary>
+    /// <param name="name">The name of the attribute.</param>
+    /// <param name="getValue">The value getter function.</param>
+    /// <param name="setValue">The value setter action.</param>
+    /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
+    /// <returns>The created attribute property.</returns>
+    public RegisteredSubjectProperty AddAttribute<TProperty>(
+        string name,
+        Func<IInterceptorSubject, TProperty?>? getValue,
+        Action<IInterceptorSubject, TProperty?>? setValue = null,
+        params Attribute[] attributes)
+    {
+        return AddAttribute(name, typeof(TProperty), 
+            getValue is not null ? x => (TProperty)getValue(x)! : null, 
+            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null, 
+            attributes);
+    }
+
+    /// <summary>
+    /// Adds an attribute to the property.
+    /// </summary>
+    /// <param name="name">The name of the attribute.</param>
+    /// <param name="getValue">The value getter function.</param>
+    /// <param name="setValue">The value setter action.</param>
+    /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
+    /// <returns>The created attribute property.</returns>
+    public RegisteredSubjectProperty AddAttribute<TProperty>(
+        string name,
+        Func<IInterceptorSubject, object?>? getValue,
+        Action<IInterceptorSubject, object?>? setValue = null,
+        params Attribute[] attributes)
+    {
+        return AddAttribute(name, typeof(TProperty), getValue, setValue, attributes);
     }
 
     /// <summary>
