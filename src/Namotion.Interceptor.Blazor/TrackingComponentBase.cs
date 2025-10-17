@@ -26,7 +26,9 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
             .GetPropertyChangedObservable()
             .Subscribe(change =>
             {
-                if (_properties?.Contains(change.Property) == true)
+                bool contains;
+                lock (_lock) contains = _properties.Contains(change.Property);
+                if (contains)
                 {
                     InvokeAsync(StateHasChanged);
                 }
@@ -37,7 +39,7 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
         {
             void WrappedRenderFragment(RenderTreeBuilder builder)
             {
-                // TODO(perf): Is this lock needed?
+                // TODO(perf): Replace with lock-free implementation here and in subscribe
                 lock (_lock)
                 {
                     using var recorderScope = ReadPropertyRecorder.Start(_scopeProperties);
