@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Collections.Concurrent;
+using System.Reflection;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
 using Namotion.Interceptor.Tracking;
@@ -9,12 +10,10 @@ namespace Namotion.Interceptor.Blazor;
 public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
     where TSubject : IInterceptorSubject
 {
-    private readonly Lock _lock = new();
-
     private IDisposable? _subscription;
 
-    private HashSet<PropertyReference> _scopeProperties = [];
-    private HashSet<PropertyReference> _properties = [];
+    private ConcurrentDictionary<PropertyReference, bool> _scopeProperties = [];
+    private ConcurrentDictionary<PropertyReference, bool> _properties = [];
 
     [Inject]
     public TSubject? Subject { get; set; }
@@ -26,9 +25,7 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
             .GetPropertyChangedObservable()
             .Subscribe(change =>
             {
-                bool contains;
-                lock (_lock) contains = _properties.Contains(change.Property);
-                if (contains)
+                if (_properties.TryGetValue(change.Property, out _))
                 {
                     InvokeAsync(StateHasChanged);
                 }
@@ -39,16 +36,9 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
         {
             void WrappedRenderFragment(RenderTreeBuilder builder)
             {
-                // TODO(perf): Replace with lock-free implementation here and in subscribe
-                lock (_lock)
-                {
-                    using var recorderScope = ReadPropertyRecorder.Start(_scopeProperties);
-                    renderFragment(builder);
-                    
-                    var previousProperties = _properties;
-                    _properties = recorderScope.GetPropertiesAndDispose();
-                    _scopeProperties = previousProperties;
-                }
+                using var recorderScope = ReadPropertyRecorder.Start(_scopeProperties);
+                renderFragment(builder);
+                (_properties, _scopeProperties) = (_scopeProperties, _properties);
             }
 
             field.SetValue(this, (RenderFragment)WrappedRenderFragment);
