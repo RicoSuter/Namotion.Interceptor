@@ -37,6 +37,7 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
         {
             void WrappedRenderFragment(RenderTreeBuilder builder)
             {
+                // TODO(perf): Is this lock needed?
                 lock (_lock)
                 {
                     using var recorderScope = ReadPropertyRecorder.Start(_scopeProperties);
