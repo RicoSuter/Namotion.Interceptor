@@ -94,6 +94,63 @@ public class RegisteredSubject
     }
 
     /// <summary>
+    /// Adds a dynamic derived property to the subject with tracking of dependencies.
+    /// </summary>
+    /// <param name="name">The name of the property.</param>
+    /// <param name="getValue">The get method.</param>
+    /// <param name="setValue">The set method.</param>
+    /// <param name="attributes">The custom attributes.</param>
+    /// <returns>The property.</returns>
+    public RegisteredSubjectProperty AddDerivedProperty<TProperty>(string name, 
+        Func<IInterceptorSubject, TProperty?>? getValue,
+        Action<IInterceptorSubject, TProperty?>? setValue = null,
+        params Attribute[] attributes)
+    {
+        return AddProperty(name, typeof(TProperty), 
+            getValue is not null ? x => (TProperty)getValue(x)! : null, 
+            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null, 
+            attributes.Concat([new DerivedAttribute()]).ToArray());
+    }
+
+    /// <summary>
+    /// Adds a dynamic derived property to the subject with tracking of dependencies.
+    /// </summary>
+    /// <param name="name">The name of the property.</param>
+    /// <param name="getValue">The get method.</param>
+    /// <param name="setValue">The set method.</param>
+    /// <param name="attributes">The custom attributes.</param>
+    /// <returns>The property.</returns>
+    public RegisteredSubjectProperty AddProperty<TProperty>(string name, 
+        Func<IInterceptorSubject, TProperty?>? getValue,
+        Action<IInterceptorSubject, TProperty?>? setValue = null,
+        params Attribute[] attributes)
+    {
+        return AddProperty(name, typeof(TProperty), 
+            getValue is not null ? x => (TProperty)getValue(x)! : null, 
+            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null, 
+            attributes);
+    }
+
+    /// <summary>
+    /// Adds a dynamic derived property to the subject with tracking of dependencies.
+    /// </summary>
+    /// <param name="name">The name of the property.</param>
+    /// <param name="type">The property type.</param>
+    /// <param name="getValue">The get method.</param>
+    /// <param name="setValue">The set method.</param>
+    /// <param name="attributes">The custom attributes.</param>
+    /// <returns>The property.</returns>
+    public RegisteredSubjectProperty AddDerivedProperty(string name, 
+        Type type,
+        Func<IInterceptorSubject, object?>? getValue,
+        Action<IInterceptorSubject, object?>? setValue = null,
+        params Attribute[] attributes)
+    {
+        return AddProperty(name, type, getValue, setValue, attributes
+            .Concat([new DerivedAttribute()]).ToArray());
+    }
+
+    /// <summary>
     /// Adds a dynamic property with backing data to the subject.
     /// </summary>
     /// <param name="name">The name of the property.</param>
@@ -102,7 +159,9 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddProperty(string name, Type type,
+    public RegisteredSubjectProperty AddProperty(
+        string name, 
+        Type type,
         Func<IInterceptorSubject, object?>? getValue,
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
@@ -116,7 +175,7 @@ public class RegisteredSubject
             isIntercepted: true,
             isDynamic: true));
 
-        var property = AddProperty(name, type, attributes);
+        var property = AddPropertyInternal(name, type, attributes);
 
         // trigger change event
         property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
@@ -125,24 +184,7 @@ public class RegisteredSubject
         return property;
     }
 
-    /// <summary>
-    /// Adds a dynamic derived property to the subject with tracking of dependencies.
-    /// </summary>
-    /// <param name="name">The name of the property.</param>
-    /// <param name="type">The property type.</param>
-    /// <param name="getValue">The get method.</param>
-    /// <param name="setValue">The set method.</param>
-    /// <param name="attributes">The custom attributes.</param>
-    /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddDerivedProperty(string name, Type type,
-        Func<IInterceptorSubject, object?>? getValue,
-        Action<IInterceptorSubject, object?>? setValue,
-        params Attribute[] attributes)
-    {
-        return AddProperty(name, type, getValue, setValue, attributes.Concat([new DerivedAttribute()]).ToArray());
-    }
-
-    private RegisteredSubjectProperty AddProperty(string name, Type type, Attribute[] attributes)
+    private RegisteredSubjectProperty AddPropertyInternal(string name, Type type, Attribute[] attributes)
     {
         var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
 

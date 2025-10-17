@@ -11,11 +11,15 @@ public interface ILifecycleHandler
     /// Called when a subject is attached to the subject tree.
     /// </summary>
     /// <param name="change">The lifecycle change information.</param>
-    public void AttachSubject(SubjectLifecycleChange change);
+    public void AttachSubject(SubjectLifecycleChange change)
+    {
+    }
 
     /// <summary>
     /// Called when a subject is detached from the subject tree.
     /// </summary>
     /// <param name="change">The lifecycle change information.</param>
-    public void DetachSubject(SubjectLifecycleChange change);
+    public void DetachSubject(SubjectLifecycleChange change)
+    {
+    }
 }
