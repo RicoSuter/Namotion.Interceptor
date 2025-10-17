@@ -6,16 +6,14 @@ public static class ReadPropertyRecorderExtensions
     /// Starts the recording of property read accesses.
     /// </summary>
     /// <param name="recorder">The recorder.</param>
+    /// <param name="properties">The preallocated properties bag.</param>
     /// <returns>The recording scope.</returns>
-    public static ReadPropertyRecorderScope StartPropertyAccessRecording(this ReadPropertyRecorder recorder)
+    public static ReadPropertyRecorderScope StartPropertyAccessRecording(this ReadPropertyRecorder recorder, HashSet<PropertyReference>? properties = null)
     {
-        ReadPropertyRecorder.Scopes.Value ??= new Dictionary<ReadPropertyRecorder, List<ReadPropertyRecorderScope>>();
+        ReadPropertyRecorder.Scopes.Value ??= [];
 
-        var scope = new ReadPropertyRecorderScope(recorder); // TODO(perf): Use pooled collection
-
-        ReadPropertyRecorder.Scopes.Value.TryAdd(recorder, []);
-        ReadPropertyRecorder.Scopes.Value[recorder].Add(scope);
-
+        var scope = new ReadPropertyRecorderScope(properties);
+        ReadPropertyRecorder.Scopes.Value.Add(scope);
         return scope;
     }
 }

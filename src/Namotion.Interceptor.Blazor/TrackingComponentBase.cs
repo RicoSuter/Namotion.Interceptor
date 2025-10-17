@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Collections.Concurrent;
+using System.Reflection;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
 using Namotion.Interceptor.Tracking;
@@ -9,10 +10,12 @@ namespace Namotion.Interceptor.Blazor;
 public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
     where TSubject : IInterceptorSubject
 {
-    private IDisposable? _subscription;
-    private ReadPropertyRecorderScope? _recorderScope;
+    private readonly Lock _lock = new();
 
-    private HashSet<PropertyReference>? _properties;
+    private IDisposable? _subscription;
+
+    private HashSet<PropertyReference> _scopeProperties = [];
+    private HashSet<PropertyReference> _properties = [];
     private ReadPropertyRecorder? _recorder;
 
     [Inject]
@@ -33,17 +36,23 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
         
         _recorder = Subject?
             .Context
-            .GetService<ReadPropertyRecorder>();
+            .GetService<ReadPropertyRecorder>() ?? throw new InvalidOperationException("The ReadPropertyRecorder service not found.");
 
         var field = typeof(ComponentBase).GetField("_renderFragment", BindingFlags.NonPublic | BindingFlags.Instance);
         if (field?.GetValue(this) is RenderFragment renderFragment)
         {
             void WrappedRenderFragment(RenderTreeBuilder builder)
             {
-                _recorderScope?.Dispose();
-                _recorderScope = _recorder?.StartPropertyAccessRecording();
-                renderFragment(builder);
-                _properties = (_recorderScope?.GetPropertiesAndDispose() ?? []).ToHashSet();
+                lock (_lock)
+                {
+                    var recorderScope = _recorder.StartPropertyAccessRecording(_scopeProperties);
+            
+                    renderFragment(builder);
+
+                    var previousProperties = _properties;
+                    _properties = recorderScope.GetPropertiesAndDispose();
+                    _scopeProperties = previousProperties;
+                }
             }
 
             field.SetValue(this, (RenderFragment)WrappedRenderFragment);
@@ -53,6 +62,5 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
     public virtual void Dispose()
     {
         _subscription?.Dispose();
-        _recorderScope?.Dispose();
     }
 }

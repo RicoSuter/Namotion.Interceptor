@@ -30,14 +30,10 @@ public class ReadPropertyRecorderTests
         
         // TODO: Check whether recording also works with additional registered properties or attributes (registry)
 
-        var allProperties = recorder.Properties;
-        var properties = recorder.GetPropertiesAndReset();
-        var propertiesAgain = recorder.GetPropertiesAndDispose();
+        var properties = recorder.GetPropertiesAndDispose();
         
         // Assert
         Assert.Single(properties);
-        Assert.Single(allProperties);
-        Assert.Empty(propertiesAgain);
-        Assert.Contains(allProperties, p => p.Name == "FirstName");
+        Assert.Contains(properties, p => p.Name == "FirstName");
     }
 }

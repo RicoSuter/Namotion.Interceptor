@@ -2,56 +2,45 @@
 
 public class ReadPropertyRecorderScope : IDisposable
 {
-    private readonly ReadPropertyRecorder _recorder;
-    private readonly HashSet<PropertyReference> _properties = [];
+    private readonly HashSet<PropertyReference> _properties;
+    private volatile int _disposed;
 
-    public ReadPropertyRecorderScope(ReadPropertyRecorder recorder)
+    public ReadPropertyRecorderScope(HashSet<PropertyReference>? properties)
     {
-        _recorder = recorder;
+        _properties = properties ?? [];
+        _properties.Clear();
     }
 
-    public PropertyReference[] Properties
-    {
-        get
-        {
-            lock (typeof(ReadPropertyRecorder))
-            {
-                return _properties.ToArray();
-            }
-        }
-    }
+    /// <summary>
+    /// Gets whether this scope has been disposed.
+    /// </summary>
+    internal bool IsDisposed => _disposed != 0;
 
-    public PropertyReference[] GetPropertiesAndReset()
+    /// <summary>
+    /// Gets the recorded properties and disposes the scope.
+    /// </summary>
+    public HashSet<PropertyReference> GetPropertiesAndDispose()
     {
-        lock (typeof(ReadPropertyRecorder))
+        Dispose();
+        lock (this)
         {
-            var properties = _properties.ToArray();
-            _properties.Clear();
-            return properties;
-        }
-    }
-
-    public PropertyReference[] GetPropertiesAndDispose()
-    {
-        lock (typeof(ReadPropertyRecorder))
-        {
-            var properties = _properties.ToArray();
-            Dispose();
-            return properties;
+            return _properties;
         }
     }
 
     public void Dispose()
     {
-        _properties.Clear();
-        lock (typeof(ReadPropertyRecorder))
-        {
-            ReadPropertyRecorder.Scopes.Value?[_recorder]?.Remove(this);
-        }
+        Interlocked.Exchange(ref _disposed, 1);
     }
 
     internal void AddProperty(PropertyReference property)
     {
-        _properties.Add(property);
+        if (_disposed == 0)
+        {
+            lock (this)
+            {
+                _properties.Add(property);
+            }
+        }
     }
 }

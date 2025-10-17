@@ -1,20 +1,23 @@
-﻿using Namotion.Interceptor.Interceptors;
+﻿using System.Collections.Concurrent;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Recorder;
 
 public class ReadPropertyRecorder : IReadInterceptor
 {
-    internal static AsyncLocal<IDictionary<ReadPropertyRecorder, List<ReadPropertyRecorderScope>>> Scopes { get; } = new();
+    internal static AsyncLocal<ConcurrentBag<ReadPropertyRecorderScope>?> Scopes { get; } = new();
     
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
-        if (Scopes.Value is not null &&
-            Scopes.Value.TryGetValue(this, out var scopes))
+        var scopes = Scopes.Value;
+        if (scopes is not null && !scopes.IsEmpty)
         {
-            for (var index = 0; index < scopes.Count; index++)
+            foreach (var scope in scopes)
             {
-                var scope = scopes[index];
-                scope.AddProperty(context.Property);
+                if (!scope.IsDisposed)
+                {
+                    scope.AddProperty(context.Property);
+                }
             }
         }
 
