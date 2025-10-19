@@ -46,9 +46,7 @@ namespace YourDefaultNamespace
                 {
                     "FirstName",       
                     new SubjectPropertyMetadata(
-                        nameof(FirstName), 
-                        typeof(Person).GetProperty(nameof(FirstName)).PropertyType!, 
-                        typeof(Person).GetProperty(nameof(FirstName)).GetCustomAttributes().ToArray()!, 
+                        typeof(Person).GetProperty(nameof(FirstName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
                         (o) => ((Person)o).FirstName, 
                         (o, v) => ((Person)o).FirstName = (string)v, 
                         isIntercepted: true,
@@ -57,9 +55,7 @@ namespace YourDefaultNamespace
                 {
                     "LastName",       
                     new SubjectPropertyMetadata(
-                        nameof(LastName), 
-                        typeof(Person).GetProperty(nameof(LastName)).PropertyType!, 
-                        typeof(Person).GetProperty(nameof(LastName)).GetCustomAttributes().ToArray()!, 
+                        typeof(Person).GetProperty(nameof(LastName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
                         (o) => ((Person)o).LastName, 
                         (o, v) => ((Person)o).LastName = (string)v, 
                         isIntercepted: true,
@@ -170,9 +166,7 @@ namespace YourDefaultNamespace
                 {
                     "MainCourse",       
                     new SubjectPropertyMetadata(
-                        nameof(MainCourse), 
-                        typeof(Teacher).GetProperty(nameof(MainCourse)).PropertyType!, 
-                        typeof(Teacher).GetProperty(nameof(MainCourse)).GetCustomAttributes().ToArray()!, 
+                        typeof(Teacher).GetProperty(nameof(MainCourse), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
                         (o) => ((Teacher)o).MainCourse, 
                         (o, v) => ((Teacher)o).MainCourse = (string)v, 
                         isIntercepted: true,
