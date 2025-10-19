@@ -142,7 +142,7 @@ public class OpcUaSubjectLoaderTests
         var registeredSubject = subject.TryGetRegisteredSubject()!;
             
         // Add existing property
-        registeredSubject.AddProperty("Temperature", typeof(double), _ => 0.0, (_, _) => { });
+        registeredSubject.AddProperty("Temperature", _ => 0.0, (_, _) => { });
 
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
         var mockSession = CreateMockSessionWithChildren(
