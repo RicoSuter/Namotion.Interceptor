@@ -50,11 +50,11 @@ public readonly record struct SubjectPropertyMetadata
     /// <summary>
     /// Gets a value indicating whether the getter or setter of the property is public (true for dynamic properties).
     /// </summary>
-    public bool IsPublic => 
-        PropertyInfo is null ||
-        PropertyInfo.GetMethod?.IsPublic == true || 
-        PropertyInfo.SetMethod?.IsPublic == true;
+    public bool IsPublic { get; }
 
+    /// <summary>
+    /// Gets the PropertyInfo for the property, if available.
+    /// </summary>
     public PropertyInfo? PropertyInfo { get; }
     
     public SubjectPropertyMetadata(
@@ -113,5 +113,9 @@ public readonly record struct SubjectPropertyMetadata
         IsDynamic = isDynamic;
         IsDerived = attributes.Any(a => a is DerivedAttribute);
         PropertyInfo = propertyInfo;
+        IsPublic =
+            PropertyInfo is null ||
+            PropertyInfo.GetMethod?.IsPublic == true ||
+            PropertyInfo.SetMethod?.IsPublic == true;
     }
 }
