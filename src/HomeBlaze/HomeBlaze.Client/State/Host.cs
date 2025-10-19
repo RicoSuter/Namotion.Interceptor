@@ -1,6 +1,6 @@
-using System.Collections.Immutable;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Client.State;
@@ -10,23 +10,26 @@ public partial class Host : BackgroundService
 {
     private Host()
     {
-        Things = ImmutableArray<Thing>.Empty;
+        Things = [];
     }
     
-    public partial ImmutableArray<Thing> Things { get; set; }
+    // TODO: Should support ImmutableArray<T>
+    public partial Thing[] Things { get; set; }
     
     public void AddThing()
     {
-        Things = Things.Add(new Thing
-        {
-            Date = DateOnly.FromDateTime(DateTime.Now),
-            TemperatureC = Random.Shared.Next(-20, 55)
-        });
+        Things = Things
+            .Concat([new Thing(((IInterceptorSubject)this).Context)
+            {
+                Date = DateOnly.FromDateTime(DateTime.Now),
+                TemperatureC = Random.Shared.Next(-20, 55)
+            }])
+            .ToArray();
     }
     
     public void Clear()
     {
-        Things = Things.Clear();
+        Things = [];
     }
     
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
