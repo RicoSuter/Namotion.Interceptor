@@ -109,7 +109,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
             }
 
-            var count = subject.Data .AddOrUpdate((null, ReferenceCountKey), 0, 
+            var count = subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, 
                 (_, count) => (int)count! - 1) as int?;
             
             var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);

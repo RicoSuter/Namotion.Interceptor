@@ -23,7 +23,7 @@ namespace Namotion.Interceptor.Registry.Tests.Models
 
         [Derived]
         public string FullNameWithPrefix => $"Mr. {FullName}";
-
+        
         public partial Person? Father { get; set; }
 
         public partial Person? Mother { get; set; }
@@ -31,5 +31,7 @@ namespace Namotion.Interceptor.Registry.Tests.Models
         public partial Person[] Children { get; set; }
 
         public override string ToString() => FullName;
+
+        protected string ProtectedProperty => "Hidden";
     }
 }
