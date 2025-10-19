@@ -61,6 +61,15 @@ namespace YourDefaultNamespace
                         isIntercepted: true,
                         isDynamic: false)
                 },
+                {
+                    "Hidden",       
+                    new SubjectPropertyMetadata(
+                        typeof(SampleSubject).GetProperty(nameof(Hidden), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
+                        (o) => ((SampleSubject)o).Hidden, 
+                        (o, v) => ((SampleSubject)o).Hidden = (string)v, 
+                        isIntercepted: false,
+                        isDynamic: false)
+                },
             }
             
             .ToFrozenDictionary();
