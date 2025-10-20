@@ -33,10 +33,11 @@ public record SubjectUpdate
     /// <returns>The update.</returns>
     public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates = processors.Length > 0 ? [] : null;
+
         var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
-        List<SubjectPropertyUpdateReference>? propertyUpdates = processors.Length > 0 ? new() : null;
-        
         var update = CreateCompleteUpdateInternal(subject, processors, knownSubjectUpdates, propertyUpdates);
+      
         if (processors.Length > 0 && propertyUpdates is not null)
         {
             ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
@@ -56,7 +57,7 @@ public record SubjectUpdate
     internal static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates, 
-        List<SubjectPropertyUpdateReference>? propertyUpdates)
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
         return CreateCompleteUpdateInternal(subject, processors, knownSubjectUpdates, propertyUpdates);
     }
@@ -64,7 +65,7 @@ public record SubjectUpdate
     private static SubjectUpdate CreateCompleteUpdateInternal(IInterceptorSubject subject,
         ReadOnlySpan<ISubjectUpdateProcessor> processors, 
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        List<SubjectPropertyUpdateReference>? propertyUpdates)
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
         if (knownSubjectUpdates.ContainsKey(subject))
         {
@@ -88,7 +89,7 @@ public record SubjectUpdate
 
                     subjectUpdate.Properties[property.Name] = propertyUpdate;
 
-                    propertyUpdates?.Add(new SubjectPropertyUpdateReference(property, propertyUpdate, subjectUpdate.Properties));
+                    propertyUpdates?.TryAdd(propertyUpdate, new SubjectPropertyUpdateReference(property.Reference, subjectUpdate.Properties));
                 }
             }
         }
@@ -109,10 +110,11 @@ public record SubjectUpdate
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
         ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
-        var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
-        List<SubjectPropertyUpdateReference>? propertyUpdates = processors.Length > 0 ? new() : null;
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates = processors.Length > 0 ? [] : null;
         
+        var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
         var update = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
+
         for (var index = 0; index < propertyChanges.Length; index++)
         {
             var change = propertyChanges[index];
@@ -145,18 +147,12 @@ public record SubjectUpdate
             {
                 // handle property changes
                 var propertyName = property.Name;
-                var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates);
+                var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates, propertyUpdates);
                 propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
                 subjectUpdate.Properties[propertyName] = propertyUpdate;
-
-                // Collect for transformation
-                if (propertyUpdates is not null)
-                {
-                    propertyUpdates.Add(new SubjectPropertyUpdateReference(registeredProperty, propertyUpdate, subjectUpdate.Properties));
-                }
             }
 
-            CreateParentSubjectUpdatePath(registeredSubject, subject, knownSubjectUpdates);
+            CreateParentSubjectUpdatePath(registeredSubject, subject, knownSubjectUpdates, propertyUpdates);
         }
 
         if (propertyUpdates is not null)
@@ -170,7 +166,8 @@ public record SubjectUpdate
     private static void CreateParentSubjectUpdatePath(
         RegisteredSubject registeredSubject,
         IInterceptorSubject rootSubject,
-        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
         if (registeredSubject.Subject == rootSubject)
         {
@@ -181,7 +178,7 @@ public record SubjectUpdate
         var parentProperty = registeredSubject.Parents.FirstOrDefault().Property ?? null;
         if (parentProperty?.Subject is { } parentPropertySubject)
         {
-            var parentSubjectPropertyUpdate = GetOrCreateSubjectPropertyUpdate(parentPropertySubject, parentProperty.Name, knownSubjectUpdates);
+            var parentSubjectPropertyUpdate = GetOrCreateSubjectPropertyUpdate(parentPropertySubject, parentProperty.Name, knownSubjectUpdates, propertyUpdates);
 
             var parentRegisteredSubject = parentPropertySubject.TryGetRegisteredSubject()
                 ?? throw new InvalidOperationException("Registered subject not found.");
@@ -206,7 +203,7 @@ public record SubjectUpdate
 
             if (parentPropertySubject.TryGetRegisteredSubject() is { } parentPropertyRegisteredSubject)
             {
-                CreateParentSubjectUpdatePath(parentPropertyRegisteredSubject, rootSubject, knownSubjectUpdates);
+                CreateParentSubjectUpdatePath(parentPropertyRegisteredSubject, rootSubject, knownSubjectUpdates, propertyUpdates);
             }
         }
     }
@@ -219,7 +216,7 @@ public record SubjectUpdate
             SubjectPropertyChange? change, 
             ReadOnlySpan<ISubjectUpdateProcessor> processors,
             Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-            List<SubjectPropertyUpdateReference>? propertyUpdates)
+            Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
         if (property.IsAttribute)
         {
@@ -229,17 +226,16 @@ public record SubjectUpdate
                 null, null, processors, 
                 knownSubjectUpdates, propertyUpdates);
             
-            var attributeUpdate = GetOrCreateSubjectAttributeUpdate(parentAttributeUpdate, attributeName);
+            var attributeUpdate = GetOrCreateSubjectAttributeUpdate(parentAttributeUpdate, attributeName, propertyUpdates);
             if (changeProperty is not null && change.HasValue)
             {
                 attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
             }
             
-            // Collect the parent attribute for transformation so its nested attributes get transformed
             if (propertyUpdates is not null && parentAttributeUpdate.Attributes is not null)
             {
                 var parentAttrProperty = property.GetAttributedProperty();
-                propertyUpdates.Add(new SubjectPropertyUpdateReference(parentAttrProperty, parentAttributeUpdate, parentPropertyUpdate.Attributes ?? new Dictionary<string, SubjectPropertyUpdate>()));
+                propertyUpdates[parentAttributeUpdate] = new SubjectPropertyUpdateReference(parentAttrProperty, parentAttributeUpdate.Attributes);
             }
 
             return (attributeUpdate, parentPropertyUpdate, parentPropertyName);
@@ -247,9 +243,10 @@ public record SubjectUpdate
         else
         {
             var propertyUpdate = GetOrCreateSubjectPropertyUpdate(
-                property.Parent.Subject, property.Name, knownSubjectUpdates);
+                property.Parent.Subject, property.Name, knownSubjectUpdates, propertyUpdates);
 
-            var attributeUpdate = GetOrCreateSubjectAttributeUpdate(propertyUpdate, attributeName);
+            var attributeUpdate = GetOrCreateSubjectAttributeUpdate(propertyUpdate, attributeName, propertyUpdates);
+           
             if (changeProperty is not null && change.HasValue)
             {
                 attributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
@@ -258,7 +255,7 @@ public record SubjectUpdate
             if (propertyUpdates is not null)
             {
                 var subjectUpdate = GetOrCreateSubjectUpdate(property.Parent.Subject, knownSubjectUpdates);
-                propertyUpdates.Add(new SubjectPropertyUpdateReference(property, propertyUpdate, subjectUpdate.Properties));
+                propertyUpdates[propertyUpdate] = new SubjectPropertyUpdateReference(property, subjectUpdate.Properties);
             }
 
             return (attributeUpdate, propertyUpdate, property.Name);
@@ -266,7 +263,8 @@ public record SubjectUpdate
     }
 
     private static SubjectPropertyUpdate GetOrCreateSubjectAttributeUpdate(
-        SubjectPropertyUpdate propertyUpdate, string attributeName)
+        SubjectPropertyUpdate propertyUpdate, string attributeName,
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
         propertyUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
         if (propertyUpdate.Attributes.TryGetValue(attributeName, out var existingSubjectUpdate))
@@ -281,7 +279,8 @@ public record SubjectUpdate
 
     private static SubjectPropertyUpdate GetOrCreateSubjectPropertyUpdate(
         IInterceptorSubject subject, string propertyName,
-        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
         var subjectUpdate = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
         if (subjectUpdate.Properties.TryGetValue(propertyName, out var existingSubjectUpdate))
@@ -291,6 +290,7 @@ public record SubjectUpdate
 
         var propertyUpdate = new SubjectPropertyUpdate();
         subjectUpdate.Properties[propertyName] = propertyUpdate;
+        propertyUpdates?.TryAdd(propertyUpdate, new SubjectPropertyUpdateReference(new PropertyReference(subject, propertyName), subjectUpdate.Properties));
         return propertyUpdate;
     }
 
@@ -312,19 +312,18 @@ public record SubjectUpdate
 
     private static void ApplyTransformations(
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        List<SubjectPropertyUpdateReference> propertyUpdates,
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference> propertyUpdates,
         ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
-        for (var index = 0; index < propertyUpdates.Count; index++)
+        foreach (var update in propertyUpdates)
         {
-            var transformation = propertyUpdates[index];
             for (var i = 0; i < processors.Length; i++)
             {
                 var processor = processors[i];
-                var transformed = processor.TransformSubjectPropertyUpdate(transformation.Property, transformation.Update);
-                if (transformed != transformation.Update)
+                var transformed = processor.TransformSubjectPropertyUpdate(update.Value.Property.GetRegisteredProperty(), update.Key);
+                if (transformed != update.Key)
                 {
-                    transformation.ParentCollection[transformation.Property.Name] = transformed;
+                    update.Value.ParentCollection[update.Value.Property.Name] = transformed;
                 }
             }
         }
