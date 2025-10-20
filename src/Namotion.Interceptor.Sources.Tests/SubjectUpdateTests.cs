@@ -33,11 +33,16 @@ public class SubjectUpdateTests
             Children = [child1, child2, child3]
         };
 
+        var counter = new TransformCounter();
+
         // Act
         var completeSubjectUpdate = SubjectUpdate
-            .CreateCompleteUpdate(person, [JsonCamelCasePathProcessor.Instance]);
+            .CreateCompleteUpdate(person, [counter, JsonCamelCasePathProcessor.Instance]);
 
         // Assert
+        Assert.Equal(6, counter.TransformSubjectCount);
+        Assert.Equal(30, counter.TransformPropertyCount);
+        
         await Verify(completeSubjectUpdate).DisableDateCounting();
     }
 
@@ -71,11 +76,16 @@ public class SubjectUpdateTests
             SubjectPropertyChange.Create(new PropertyReference(child3, "FirstName"), null, DateTimeOffset.Now, "Old", "NewChild3"),
         };
 
+        var counter = new TransformCounter();
+
         // Act
         var partialSubjectUpdate = SubjectUpdate
-            .CreatePartialUpdateFromChanges(person, changes, [JsonCamelCasePathProcessor.Instance]);
+            .CreatePartialUpdateFromChanges(person, changes, [counter, JsonCamelCasePathProcessor.Instance]);
 
         // Assert
+        Assert.Equal(5, counter.TransformSubjectCount);
+        Assert.Equal(6, counter.TransformPropertyCount);
+
         await Verify(partialSubjectUpdate).DisableDateCounting();
     }
 
@@ -272,5 +282,33 @@ public class SubjectUpdateTests
 
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
+    }
+
+    public class TransformCounter : ISubjectUpdateProcessor
+    {
+        private readonly HashSet<SubjectUpdate> _transformedSubjects = [];
+        private readonly HashSet<SubjectPropertyUpdate> _transformedProperties = [];
+
+        public int TransformSubjectCount { get; private set; } = 0;
+
+        public int TransformPropertyCount { get; private set; } = 0;
+
+        public SubjectUpdate TransformSubjectUpdate(IInterceptorSubject subject, SubjectUpdate update)
+        {
+            if (!_transformedSubjects.Add(update))
+                throw new InvalidOperationException("Already added.");
+            
+            TransformSubjectCount++;
+            return update;
+        }
+
+        public SubjectPropertyUpdate TransformSubjectPropertyUpdate(RegisteredSubjectProperty property, SubjectPropertyUpdate update)
+        {
+            if (!_transformedProperties.Add(update))
+                throw new InvalidOperationException("Already added.");
+            
+            TransformPropertyCount++;
+            return update;
+        }
     }
 }
