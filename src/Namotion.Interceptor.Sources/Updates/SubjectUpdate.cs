@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Sources.Updates.Performance;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Updates;
@@ -33,17 +34,28 @@ public class SubjectUpdate
     /// <returns>The update.</returns>
     public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
-        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates = processors.Length > 0 ? [] : null;
-
-        var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
-        var update = CreateCompleteUpdateInternal(subject, processors, knownSubjectUpdates, propertyUpdates);
-      
-        if (processors.Length > 0 && propertyUpdates is not null)
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates = null;
+        var knownSubjectUpdates = SubjectUpdatePools.RentKnownSubjectUpdates();
+        try
         {
-            ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
+            if (processors.Length > 0)
+            {
+                propertyUpdates = SubjectUpdatePools.RentPropertyUpdates();
+            }
+
+            var update = CreateCompleteUpdateInternal(subject, processors, knownSubjectUpdates, propertyUpdates);
+            if (processors.Length > 0 && propertyUpdates is not null && propertyUpdates.Count > 0)
+            {
+                ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
+            }
+
+            return update;
         }
-        
-        return update;
+        finally
+        {
+            SubjectUpdatePools.ReturnPropertyUpdates(propertyUpdates);
+            SubjectUpdatePools.ReturnKnownSubjectUpdates(knownSubjectUpdates);
+        }
     }
 
     /// <summary>
@@ -72,7 +84,7 @@ public class SubjectUpdate
             // Avoid cycles: If subject already has an update then we have a cycle and break it here
             return new SubjectUpdate();
         }
-        
+
         var subjectUpdate = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
 
         var registeredSubject = subject.TryGetRegisteredSubject();
@@ -110,62 +122,77 @@ public class SubjectUpdate
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
         ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
-        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates = processors.Length > 0 ? [] : null;
-        
-        var knownSubjectUpdates = new Dictionary<IInterceptorSubject, SubjectUpdate>();
-        var update = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
-
-        for (var index = 0; index < propertyChanges.Length; index++)
+        var propertyUpdates = processors.Length > 0 ? SubjectUpdatePools.RentPropertyUpdates() : null;
+        var knownSubjectUpdates = SubjectUpdatePools.RentKnownSubjectUpdates();
+        var processedParentPaths = SubjectUpdatePools.RentProcessedParentPaths();
+        try
         {
-            var change = propertyChanges[index];
-            
-            var subjectUpdate = GetOrCreateSubjectUpdate(change.Property.Subject, knownSubjectUpdates);
-            var registeredProperty = change.Property.GetRegisteredProperty();
+            var update = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
 
-            if (!IsIncluded(processors, registeredProperty))
+            for (var index = 0; index < propertyChanges.Length; index++)
             {
-                continue;
+                var change = propertyChanges[index];
+                
+                var subjectUpdate = GetOrCreateSubjectUpdate(change.Property.Subject, knownSubjectUpdates);
+                var registeredProperty = change.Property.GetRegisteredProperty();
+
+                if (!IsIncluded(processors, registeredProperty))
+                {
+                    continue;
+                }
+
+                if (registeredProperty.IsAttribute)
+                {
+                    // handle attribute changes
+                    var (_, rootPropertyUpdate, rootPropertyName) = GetOrCreateSubjectAttributeUpdate(
+                        registeredProperty.GetAttributedProperty(),
+                        registeredProperty.AttributeMetadata.AttributeName,
+                        registeredProperty, change, processors,
+                        knownSubjectUpdates, propertyUpdates);
+
+                    subjectUpdate.Properties[rootPropertyName] = rootPropertyUpdate;
+                }
+                else
+                {
+                    // handle property changes
+                    var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredProperty, knownSubjectUpdates, propertyUpdates);
+                    propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
+                    subjectUpdate.Properties[registeredProperty.Name] = propertyUpdate;
+                }
+
+                CreateParentSubjectUpdatePath(registeredProperty.Parent, subject, knownSubjectUpdates, propertyUpdates, processedParentPaths);
             }
 
-            if (registeredProperty.IsAttribute)
+            if (propertyUpdates is not null)
             {
-                // handle attribute changes
-                var (_, rootPropertyUpdate, rootPropertyName) = GetOrCreateSubjectAttributeUpdate(
-                    registeredProperty.GetAttributedProperty(),
-                    registeredProperty.AttributeMetadata.AttributeName,
-                    registeredProperty, change, processors,
-                    knownSubjectUpdates, propertyUpdates);
-
-                subjectUpdate.Properties[rootPropertyName] = rootPropertyUpdate;
-            }
-            else
-            {
-                // handle property changes
-                var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredProperty, knownSubjectUpdates, propertyUpdates);
-                propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
-                subjectUpdate.Properties[registeredProperty.Name] = propertyUpdate;
+                ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
             }
 
-            CreateParentSubjectUpdatePath(registeredProperty.Parent, subject, knownSubjectUpdates, propertyUpdates);
+            return update;
         }
-
-        if (propertyUpdates is not null)
+        finally
         {
-            ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
+            SubjectUpdatePools.ReturnPropertyUpdates(propertyUpdates);
+            SubjectUpdatePools.ReturnProcessedParentPaths(processedParentPaths);
+            SubjectUpdatePools.ReturnKnownSubjectUpdates(knownSubjectUpdates);
         }
-
-        return update;
     }
 
-    private static void CreateParentSubjectUpdatePath(
-        RegisteredSubject registeredSubject,
+    private static void CreateParentSubjectUpdatePath(RegisteredSubject registeredSubject,
         IInterceptorSubject rootSubject,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates, 
+        HashSet<IInterceptorSubject> processedParentPaths)
     {
         if (registeredSubject.Subject == rootSubject)
         {
             // Avoid cycles: If we are already in root, then we do not need to traverse further
+            return;
+        }
+
+        if (!processedParentPaths.Add(registeredSubject.Subject))
+        {
+            // Already processed
             return;
         }
 
@@ -192,7 +219,7 @@ public class SubjectUpdate
                 parentSubjectPropertyUpdate.Item = GetOrCreateSubjectUpdate(registeredSubject.Subject, knownSubjectUpdates);
             }
 
-            CreateParentSubjectUpdatePath(parentRegisteredSubject, rootSubject, knownSubjectUpdates, propertyUpdates);
+            CreateParentSubjectUpdatePath(parentRegisteredSubject, rootSubject, knownSubjectUpdates, propertyUpdates, processedParentPaths);
         }
     }
 
@@ -263,6 +290,7 @@ public class SubjectUpdate
 
         var attributeUpdate = new SubjectPropertyUpdate();
         propertyUpdate.Attributes[attributeName] = attributeUpdate;
+        // TODO: Add update to propertyUpdates? Needs many more tests
         return attributeUpdate;
     }
 
@@ -299,6 +327,21 @@ public class SubjectUpdate
         return subjectUpdate;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsIncluded(ReadOnlySpan<ISubjectUpdateProcessor> processors, RegisteredSubjectProperty property)
+    {
+        for (var index = 0; index < processors.Length; index++)
+        {
+            var processor = processors[index];
+            if (!processor.IsIncluded(property))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static void ApplyTransformations(
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference> propertyUpdates,
@@ -329,20 +372,5 @@ public class SubjectUpdate
                 }
             }
         }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsIncluded(ReadOnlySpan<ISubjectUpdateProcessor> processors, RegisteredSubjectProperty property)
-    {
-        for (var index = 0; index < processors.Length; index++)
-        {
-            var processor = processors[index];
-            if (!processor.IsIncluded(property))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 }
