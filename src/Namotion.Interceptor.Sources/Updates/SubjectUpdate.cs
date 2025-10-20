@@ -66,6 +66,12 @@ public record SubjectUpdate
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         List<SubjectPropertyUpdateReference>? propertyUpdates)
     {
+        if (knownSubjectUpdates.ContainsKey(subject))
+        {
+            // Avoid cycles: If subject already has an update then we have a cycle and break it here
+            return new SubjectUpdate();
+        }
+        
         var subjectUpdate = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
 
         var registeredSubject = subject.TryGetRegisteredSubject();
@@ -150,7 +156,7 @@ public record SubjectUpdate
                 }
             }
 
-            CreateParentSubjectUpdatePath(registeredSubject, knownSubjectUpdates);
+            CreateParentSubjectUpdatePath(registeredSubject, subject, knownSubjectUpdates);
         }
 
         if (propertyUpdates is not null)
@@ -163,8 +169,15 @@ public record SubjectUpdate
 
     private static void CreateParentSubjectUpdatePath(
         RegisteredSubject registeredSubject,
+        IInterceptorSubject rootSubject,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
+        if (registeredSubject.Subject == rootSubject)
+        {
+            // Avoid cycles: If we are already in root, then we do not need to traverse further
+            return;
+        }
+
         var parentProperty = registeredSubject.Parents.FirstOrDefault().Property ?? null;
         if (parentProperty?.Subject is { } parentPropertySubject)
         {
@@ -193,7 +206,7 @@ public record SubjectUpdate
 
             if (parentPropertySubject.TryGetRegisteredSubject() is { } parentPropertyRegisteredSubject)
             {
-                CreateParentSubjectUpdatePath(parentPropertyRegisteredSubject, knownSubjectUpdates);
+                CreateParentSubjectUpdatePath(parentPropertyRegisteredSubject, rootSubject, knownSubjectUpdates);
             }
         }
     }

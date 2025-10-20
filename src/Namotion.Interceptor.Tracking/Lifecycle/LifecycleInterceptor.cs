@@ -190,14 +190,16 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         foreach (var property in subject.Properties)
         {
-            if (property.Value.IsDerived || 
-                property.Value.Type.IsValueType || 
-                property.Value.Type == typeof(string))
+            var metadata = property.Value;
+            if (metadata.IsDerived || 
+                metadata.IsIntercepted == false ||
+                metadata.Type.IsValueType || 
+                metadata.Type == typeof(string))
             {
                 continue;
             }
 
-            var propertyValue = property.Value.GetValue?.Invoke(subject);
+            var propertyValue = metadata.GetValue?.Invoke(subject);
             if (propertyValue is not null)
             {
                 FindSubjectsInProperty(new PropertyReference(subject, property.Key), propertyValue, null, collectedSubjects, touchedSubjects);
