@@ -192,6 +192,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             if (property.Value.IsDerived || 
                 property.Value.Type.IsValueType || 
+                !property.Value.IsIntercepted ||
                 property.Value.Type == typeof(string))
             {
                 continue;
