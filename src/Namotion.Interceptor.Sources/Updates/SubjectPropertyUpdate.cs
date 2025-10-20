@@ -214,7 +214,7 @@ public class SubjectPropertyUpdate
                 var attributeUpdate = CreateCompleteUpdate(attribute, processors, knownSubjectUpdates, propertyUpdates);
                 attributes[attribute.AttributeMetadata.AttributeName] = attributeUpdate;
 
-                propertyUpdates?.TryAdd(attributeUpdate, new SubjectPropertyUpdateReference(attribute.Reference, attributes));
+                propertyUpdates?.TryAdd(attributeUpdate, new SubjectPropertyUpdateReference(attribute, attributes));
             }
         }
         return attributes?.Count > 0 ? attributes : null;
