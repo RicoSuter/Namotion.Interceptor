@@ -89,7 +89,7 @@ public class SubjectUpdate
 
                     subjectUpdate.Properties[property.Name] = propertyUpdate;
 
-                    propertyUpdates?.TryAdd(propertyUpdate, new SubjectPropertyUpdateReference(property.Reference, subjectUpdate.Properties));
+                    propertyUpdates?.TryAdd(propertyUpdate, new SubjectPropertyUpdateReference(property, subjectUpdate.Properties));
                 }
             }
         }
@@ -118,15 +118,10 @@ public class SubjectUpdate
         for (var index = 0; index < propertyChanges.Length; index++)
         {
             var change = propertyChanges[index];
+            
+            var subjectUpdate = GetOrCreateSubjectUpdate(change.Property.Subject, knownSubjectUpdates);
+            var registeredProperty = change.Property.GetRegisteredProperty();
 
-            var property = change.Property;
-            var registeredSubject = property.Subject.TryGetRegisteredSubject()
-                ?? throw new InvalidOperationException("Registered subject not found.");
-
-            var propertySubject = property.Subject;
-            var subjectUpdate = GetOrCreateSubjectUpdate(propertySubject, knownSubjectUpdates);
-
-            var registeredProperty = property.GetRegisteredProperty();
             if (!IsIncluded(processors, registeredProperty))
             {
                 continue;
@@ -146,13 +141,12 @@ public class SubjectUpdate
             else
             {
                 // handle property changes
-                var propertyName = property.Name;
-                var propertyUpdate = GetOrCreateSubjectPropertyUpdate(propertySubject, propertyName, knownSubjectUpdates, propertyUpdates);
+                var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredProperty, knownSubjectUpdates, propertyUpdates);
                 propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
-                subjectUpdate.Properties[propertyName] = propertyUpdate;
+                subjectUpdate.Properties[registeredProperty.Name] = propertyUpdate;
             }
 
-            CreateParentSubjectUpdatePath(registeredSubject, subject, knownSubjectUpdates, propertyUpdates);
+            CreateParentSubjectUpdatePath(registeredProperty.Parent, subject, knownSubjectUpdates, propertyUpdates);
         }
 
         if (propertyUpdates is not null)
@@ -176,13 +170,10 @@ public class SubjectUpdate
         }
 
         var parentProperty = registeredSubject.Parents.FirstOrDefault().Property ?? null;
-        if (parentProperty?.Subject is { } parentPropertySubject)
+        if (parentProperty?.Parent is { } parentRegisteredSubject)
         {
-            var parentSubjectPropertyUpdate = GetOrCreateSubjectPropertyUpdate(parentPropertySubject, parentProperty.Name, knownSubjectUpdates, propertyUpdates);
-
-            var parentRegisteredSubject = parentPropertySubject.TryGetRegisteredSubject()
-                ?? throw new InvalidOperationException("Registered subject not found.");
-
+            var parentSubjectPropertyUpdate = GetOrCreateSubjectPropertyUpdate(parentProperty, knownSubjectUpdates, propertyUpdates);
+            
             var children = parentRegisteredSubject.TryGetProperty(parentProperty.Name)?.Children;
             if (children?.Any(c => c.Index is not null) == true)
             {
@@ -201,10 +192,7 @@ public class SubjectUpdate
                 parentSubjectPropertyUpdate.Item = GetOrCreateSubjectUpdate(registeredSubject.Subject, knownSubjectUpdates);
             }
 
-            if (parentPropertySubject.TryGetRegisteredSubject() is { } parentPropertyRegisteredSubject)
-            {
-                CreateParentSubjectUpdatePath(parentPropertyRegisteredSubject, rootSubject, knownSubjectUpdates, propertyUpdates);
-            }
+            CreateParentSubjectUpdatePath(parentRegisteredSubject, rootSubject, knownSubjectUpdates, propertyUpdates);
         }
     }
 
@@ -243,7 +231,8 @@ public class SubjectUpdate
         else
         {
             var propertyUpdate = GetOrCreateSubjectPropertyUpdate(
-                property.Parent.Subject, property.Name, knownSubjectUpdates, propertyUpdates);
+                property.Parent.Subject.TryGetRegisteredProperty(property.Name)!, 
+                knownSubjectUpdates, propertyUpdates);
 
             var attributeUpdate = GetOrCreateSubjectAttributeUpdate(propertyUpdate, attributeName, propertyUpdates);
            
@@ -278,19 +267,19 @@ public class SubjectUpdate
     }
 
     private static SubjectPropertyUpdate GetOrCreateSubjectPropertyUpdate(
-        IInterceptorSubject subject, string propertyName,
+        RegisteredSubjectProperty property,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
-        var subjectUpdate = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
-        if (subjectUpdate.Properties.TryGetValue(propertyName, out var existingSubjectUpdate))
+        var subjectUpdate = GetOrCreateSubjectUpdate(property.Subject, knownSubjectUpdates);
+        if (subjectUpdate.Properties.TryGetValue(property.Name, out var existingSubjectUpdate))
         {
             return existingSubjectUpdate;
         }
 
         var propertyUpdate = new SubjectPropertyUpdate();
-        subjectUpdate.Properties[propertyName] = propertyUpdate;
-        propertyUpdates?.TryAdd(propertyUpdate, new SubjectPropertyUpdateReference(new PropertyReference(subject, propertyName), subjectUpdate.Properties));
+        subjectUpdate.Properties[property.Name] = propertyUpdate;
+        propertyUpdates?.TryAdd(propertyUpdate, new SubjectPropertyUpdateReference(property, subjectUpdate.Properties));
         return propertyUpdate;
     }
 
@@ -320,7 +309,7 @@ public class SubjectUpdate
             for (var i = 0; i < processors.Length; i++)
             {
                 var processor = processors[i];
-                var transformed = processor.TransformSubjectPropertyUpdate(update.Value.Property.GetRegisteredProperty(), update.Key);
+                var transformed = processor.TransformSubjectPropertyUpdate(update.Value.Property, update.Key);
                 if (transformed != update.Key)
                 {
                     update.Value.ParentCollection[update.Value.Property.Name] = transformed;
