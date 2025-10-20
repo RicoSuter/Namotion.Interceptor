@@ -8,16 +8,14 @@ namespace Namotion.Interceptor.Sources.Updates;
 internal struct SubjectPropertyUpdateReference
 {
     public RegisteredSubjectProperty Property { get; }
-    public SubjectPropertyUpdate Update { get; }
+
     public IDictionary<string, SubjectPropertyUpdate> ParentCollection { get; }
 
     public SubjectPropertyUpdateReference(
         RegisteredSubjectProperty property,
-        SubjectPropertyUpdate update,
         IDictionary<string, SubjectPropertyUpdate> parentCollection)
     {
         Property = property;
-        Update = update;
         ParentCollection = parentCollection;
     }
 }
