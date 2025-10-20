@@ -6,7 +6,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Updates;
 
-public record SubjectUpdate
+public class SubjectUpdate
 {
     /// <summary>
     /// Gets the type of the subject.

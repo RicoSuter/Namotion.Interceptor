@@ -5,7 +5,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Sources.Updates;
 
-public record SubjectPropertyUpdate
+public class SubjectPropertyUpdate
 {
     /// <summary>
     /// Gets the kind of entity which is updated.
@@ -214,7 +214,7 @@ public record SubjectPropertyUpdate
                 var attributeUpdate = CreateCompleteUpdate(attribute, processors, knownSubjectUpdates, propertyUpdates);
                 attributes[attribute.AttributeMetadata.AttributeName] = attributeUpdate;
 
-                propertyUpdates?.TryAdd(attributeUpdate, new SubjectPropertyUpdateReference(attribute, attributes));
+                propertyUpdates?.TryAdd(attributeUpdate, new SubjectPropertyUpdateReference(attribute.Reference, attributes));
             }
         }
         return attributes?.Count > 0 ? attributes : null;
