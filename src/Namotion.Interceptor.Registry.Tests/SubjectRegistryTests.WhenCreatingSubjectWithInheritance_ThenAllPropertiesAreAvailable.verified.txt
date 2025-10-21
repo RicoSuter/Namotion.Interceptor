@@ -2,6 +2,8 @@
   MainCourse,
   Id,
   FirstName,
+  FirstName_MaxLength,
+  FirstName_MaxLength_Unit,
   LastName,
   FullName,
   FullNameWithPrefix,

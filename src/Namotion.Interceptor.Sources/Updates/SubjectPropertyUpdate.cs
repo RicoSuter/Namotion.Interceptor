@@ -12,12 +12,6 @@ public class SubjectPropertyUpdate
     /// </summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public SubjectPropertyUpdateKind Kind { get; internal set; }
-    
-    /// <summary>
-    /// Gets the updated attributes.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public Dictionary<string, SubjectPropertyUpdate>? Attributes { get; internal set; }
 
     /// <summary>
     /// Gets the type of the property value.
@@ -45,6 +39,12 @@ public class SubjectPropertyUpdate
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public IReadOnlyCollection<SubjectPropertyCollectionUpdate>? Collection { get; internal set; }
+    
+    /// <summary>
+    /// Gets the updated attributes.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Dictionary<string, SubjectPropertyUpdate>? Attributes { get; internal set; }
     
     /// <summary>
     /// Gets or sets custom extension data added by the transformPropertyUpdate function.
