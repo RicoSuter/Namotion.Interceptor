@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Namotion.Interceptor.Tracking.Change;
 
 public static class SubjectMutationContext
@@ -53,6 +55,7 @@ public static class SubjectMutationContext
     /// </summary>
     /// <param name="source">The source.</param>
     /// <param name="action">The action</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ApplyChangesWithSource(object? source, Action action)
     {
         var previousSource = _currentSource;
