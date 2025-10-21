@@ -10,15 +10,15 @@
             Attributes: {
               test1: {
                 Kind: Value,
+                Value: 12,
+                Timestamp: {Scrubbed},
                 Attributes: {
                   test2: {
                     Kind: Value,
                     Value: 22,
                     Timestamp: {Scrubbed}
                   }
-                },
-                Value: 12,
-                Timestamp: {Scrubbed}
+                }
               }
             }
           }

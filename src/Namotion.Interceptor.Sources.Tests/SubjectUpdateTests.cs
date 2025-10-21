@@ -41,7 +41,7 @@ public class SubjectUpdateTests
 
         // Assert
         Assert.Equal(6, counter.TransformSubjectCount);
-        Assert.Equal(30, counter.TransformPropertyCount);
+        Assert.Equal(30 /* 6x5 properties */ + 12 /* 6x2 attributes */, counter.TransformPropertyCount);
         
         await Verify(completeSubjectUpdate).DisableDateCounting();
     }
