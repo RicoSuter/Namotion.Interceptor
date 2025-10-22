@@ -46,6 +46,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
+        var timestamp = SubjectMutationContext.GetCurrentTimestamp();
         lock (usedByProperties)
         {
             foreach (var usedByProperty in usedByProperties)
@@ -65,13 +66,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 TouchProperty(usedByProperty);
 
                 usedByProperty.SetLastKnownValue(newValue);
-                usedByProperty.SetWriteTimestamp(
-                    context.Property.TryGetWriteTimestamp() 
-                    ?? SubjectMutationContext.GetCurrentTimestamp());
+                usedByProperty.SetWriteTimestamp(timestamp);
 
-                // trigger change event (derived change has local process as source (null))
+                // Trigger change event (derived change has local process as source (null))
                 SubjectMutationContext.ApplyChangesWithSource(null, () =>
-                    usedByProperty.SetPropertyValueWithInterception(newValue, _ => oldValue, delegate {})
+                    usedByProperty.SetPropertyValueWithInterception(newValue, _ => oldValue, delegate { })
                 );
             }
         }
