@@ -5,6 +5,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
 /// Handles derived properties and triggers change events and recalculations when dependent properties are changed.
+/// Requires LifecycleInterceptor to be added after this interceptor.
 /// </summary>
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
@@ -41,12 +42,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         next(ref context);
 
         var usedByProperties = context.Property.GetUsedByProperties();
-        if (usedByProperties.Count == 0)
+        if (usedByProperties.Count == 0) // TODO(ts): Here we have a potential race condition with not locking usedByProperties (find lock free solution)
         {
             return;
         }
+        
+        // Read timestamp from property which has been set by lifecycle interceptor before
+        var timestamp = context.Property.TryGetWriteTimestamp() 
+            ?? SubjectMutationContext.GetCurrentTimestamp();
 
-        var timestamp = SubjectMutationContext.GetCurrentTimestamp();
         lock (usedByProperties)
         {
             foreach (var usedByProperty in usedByProperties)

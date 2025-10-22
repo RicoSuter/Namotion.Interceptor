@@ -1,4 +1,5 @@
 ﻿using System.Reactive.Concurrency;
+using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -65,5 +66,41 @@ public class DerivedPropertyChangeHandlerTests
         
         // Assert
         Assert.Contains(changes, c => c.Property.Name == "AveragePressure");
+    }
+
+    [Fact]
+    public void WhenDerivedPropertyChanges_ThenTimestampIsConsistentWithMutationContext()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection()
+            .WithPropertyChangedObservable();
+
+        var dateTime = DateTimeOffset.UtcNow.AddHours(-1);
+        var person = new Person(context);
+        context
+            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .Where(c => c.Property.Name == nameof(Person.FullName))
+            .Subscribe(changes.Add);
+
+        // Act
+        for (var i = 0; i < 10000; i++)
+        {
+            var dt = dateTime.AddSeconds(i);
+            SubjectMutationContext.ApplyChangesWithTimestamp(dt, () =>
+            {
+                person.FirstName = dt.ToString();
+            });
+        }
+
+        // Assert
+        Assert.Equal(10000, changes.Count);
+        foreach (var c in changes)
+        {
+            // the fullname should contain the timestamp as firstname
+            Assert.Equal(c.GetNewValue<string>(), $"{c.Timestamp} "); 
+        }
     }
 }

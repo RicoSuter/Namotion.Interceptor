@@ -36,6 +36,7 @@ public static class SubjectMutationContext
     /// </summary>
     /// <param name="timestamp">The timestamp to set in the context.</param>
     /// <param name="action">The action.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ApplyChangesWithTimestamp(DateTimeOffset? timestamp, Action action)
     {
         var previousTimestamp = _currentTimestamp;
