@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using System.Reactive.Concurrency;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
@@ -53,7 +53,8 @@ void PrintStats(string title, List<double> latencyData, List<double> throughputD
     Console.WriteLine($"Latency:     Avg: {avgLatency,8:F2} | P99.9: {p999Latency,8:F2} | Max: {maxLatency,8:F2} ms");
 }
 
-context.GetPropertyChangedObservable().Subscribe(change =>
+// Subscribe inline to minimize scheduling jitter (reduces p99.9 tail)
+context.GetPropertyChangedObservable(ImmediateScheduler.Instance).Subscribe(change =>
 {
     var now = DateTimeOffset.UtcNow;
     var changeTimestamp = change.Timestamp;
@@ -70,17 +71,25 @@ context.GetPropertyChangedObservable().Subscribe(change =>
         lastAllThroughputTime = now;
     }
 
+    var reset = false;
+
     var timeSinceStart = (now - windowStartTime).TotalSeconds;
     if (timeSinceStart >= 10.0 && !hasShownIntermediateStats && allLatencies.Count > 0)
     {
-        PrintStats("All Changes - Intermediate (10 seconds)", allLatencies.ToList(), allThroughputSamples.ToList());
+        PrintStats("All Changes - Intermediate (10 seconds)", allLatencies, allThroughputSamples);
         hasShownIntermediateStats = true;
+        reset = true;
     }
 
     if (timeSinceStart >= 60.0 && allLatencies.Count > 0)
     {
         Console.WriteLine($"\n[{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss.fff}]");
         PrintStats("All Changes - 1 minute", allLatencies, allThroughputSamples);
+        reset = true;
+    }
+
+    if (reset) 
+    {
         allLatencies.Clear();
         allThroughputSamples.Clear();
         allUpdatesSinceLastSample = 0;
