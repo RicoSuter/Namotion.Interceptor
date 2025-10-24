@@ -98,14 +98,14 @@ context.GetPropertyChangedObservable().Subscribe(change =>
     var timeSinceStart = (now - windowStartTime).TotalSeconds;
     if (timeSinceStart >= 10.0 && !hasShownIntermediateStats && allLatencies.Count > 0)
     {
-        PrintStats("Updates benchmark - Intermediate (10 seconds)", allLatencies, allLatencies2, allThroughputSamples.ToList());
+        PrintStats("Benchmark - Intermediate (10 seconds)", allLatencies, allLatencies2, allThroughputSamples.ToList());
         hasShownIntermediateStats = true;
     }
 
     if (timeSinceStart >= 60.0 && allLatencies.Count > 0)
     {
         Console.WriteLine($"\n[{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss.fff}]");
-        PrintStats("Updates benchmark - 1 minute", allLatencies, allLatencies2, allThroughputSamples);
+        PrintStats("Benchmark - 1 minute", allLatencies, allLatencies2, allThroughputSamples);
         allLatencies.Clear();
         allLatencies2.Clear();
         allThroughputSamples.Clear();
