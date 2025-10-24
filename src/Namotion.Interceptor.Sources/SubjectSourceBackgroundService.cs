@@ -29,7 +29,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         _source = source;
         _context = context;
         _logger = logger;
-        _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
+        _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(1);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
     }
     
@@ -46,6 +46,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
             {
                 try
                 {
+                    // TODO(perf): Resolve registry once?
                     var registry = _context.GetService<ISubjectRegistry>();
                     registry.ExecuteSubjectUpdate(update);
                 }

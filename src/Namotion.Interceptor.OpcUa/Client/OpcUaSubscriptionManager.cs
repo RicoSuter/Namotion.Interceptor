@@ -162,7 +162,9 @@ internal class OpcUaSubscriptionManager
         {
             return;
         }
-        
+
+        var receivedTimestamp = DateTimeOffset.Now;
+
         var changes = new List<OpcUaPropertyUpdate>(monitoredItemsCount);
         for (var i = 0; i < monitoredItemsCount; i++)
         {
@@ -190,7 +192,7 @@ internal class OpcUaSubscriptionManager
                 var change = changes[i];
                 try
                 {
-                    change.Property.SetValueFromSource(subscription, change.Timestamp, change.Value);
+                    change.Property.SetValueFromSource(subscription, change.Timestamp, receivedTimestamp, change.Value);
                 }
                 catch (Exception e)
                 {

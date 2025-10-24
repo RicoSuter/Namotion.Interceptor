@@ -5,7 +5,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 public static class SubjectMutationContext
 {
     [ThreadStatic] private static object? _currentSource;
-    [ThreadStatic] private static DateTimeOffset? _currentTimestamp;
+    [ThreadStatic] private static DateTimeOffset? _currentChangeTimestamp;
+    [ThreadStatic] private static DateTimeOffset? _currentReceivedTimestamp;
     
     /// <summary>
     /// Gets or sets a function which retrieves the current timestamp (default is <see cref="DateTimeOffset.Now"/>).
@@ -17,37 +18,37 @@ public static class SubjectMutationContext
     /// </summary>
     /// <param name="timestamp">The timestamp to set in the context.</param>
     /// <param name="action">The action.</param>
-    public static T ApplyChangesWithTimestamp<T>(DateTimeOffset? timestamp, Func<T> action)
+    public static T ApplyChangesWithChangedTimestamp<T>(DateTimeOffset? timestamp, Func<T> action)
     {
-        var previousTimestamp = _currentTimestamp;
-        _currentTimestamp = timestamp;
+        var previousTimestamp = _currentChangeTimestamp;
+        _currentChangeTimestamp = timestamp;
         try
         {
             return action();
         }
         finally
         {
-            _currentTimestamp = previousTimestamp;
+            _currentChangeTimestamp = previousTimestamp;
         }
     }
     
     /// <summary>
-    /// Changes the current timestamp in the async local context until the scope is disposed.
+    /// Changes the current changed timestamp in the async local context until the scope is disposed.
     /// </summary>
     /// <param name="timestamp">The timestamp to set in the context.</param>
     /// <param name="action">The action.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void ApplyChangesWithTimestamp(DateTimeOffset? timestamp, Action action)
+    public static void ApplyChangesWithChangedTimestamp(DateTimeOffset? timestamp, Action action)
     {
-        var previousTimestamp = _currentTimestamp;
-        _currentTimestamp = timestamp;
+        var previousTimestamp = _currentChangeTimestamp;
+        _currentChangeTimestamp = timestamp;
         try
         {
             action();
         }
         finally
         {
-            _currentTimestamp = previousTimestamp;
+            _currentChangeTimestamp = previousTimestamp;
         }
     }
 
@@ -72,12 +73,21 @@ public static class SubjectMutationContext
     }
 
     /// <summary>
-    /// Gets the current timestamp from the async local context or fallback to calling <see cref="GetTimestampFunction"/>.
+    /// Gets the changed timestamp from the async local context or fallback to calling <see cref="GetTimestampFunction"/>.
     /// </summary>
     /// <returns>The current timestamp.</returns>
-    public static DateTimeOffset GetCurrentTimestamp()
+    public static DateTimeOffset GetChangedTimestamp()
     {
-        return _currentTimestamp ?? GetTimestampFunction();
+        return _currentChangeTimestamp ?? GetTimestampFunction();
+    }
+
+    /// <summary>
+    /// Gets the received timestamp from the async local context or null when unknown (usually when not set from source).
+    /// </summary>
+    /// <returns>The current timestamp.</returns>
+    public static DateTimeOffset? TryGetReceivedTimestamp()
+    {
+        return _currentReceivedTimestamp;
     }
 
     /// <summary>
@@ -94,13 +104,16 @@ public static class SubjectMutationContext
     /// </summary>
     /// <param name="property">The property.</param>
     /// <param name="source">The source.</param>
-    /// <param name="timestamp">The timestamp to set in the context.</param>
+    /// <param name="changedTimestamp">The changed timestamp to set in the context.</param>
+    /// <param name="receivedTimestamp">The received timestamp to set in the context.</param>
     /// <param name="valueFromSource">The value</param>
-    public static void SetValueFromSource(this PropertyReference property, object source, DateTimeOffset? timestamp, object? valueFromSource)
+    public static void SetValueFromSource(this PropertyReference property, object source, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp, object? valueFromSource)
     {        
-        var previousTimestamp = _currentTimestamp;
+        var previousChangedTimestamp = _currentChangeTimestamp;
+        var previousReceivedTimestamp = _currentChangeTimestamp;
         var previousSource = _currentSource;
-        _currentTimestamp = timestamp;
+        _currentChangeTimestamp = changedTimestamp;
+        _currentReceivedTimestamp = receivedTimestamp;
         _currentSource = source;
         try
         {
@@ -108,7 +121,8 @@ public static class SubjectMutationContext
         }
         finally
         {
-            _currentTimestamp = previousTimestamp;
+            _currentChangeTimestamp = previousChangedTimestamp;
+            _currentReceivedTimestamp = previousReceivedTimestamp;
             _currentSource = previousSource;
         }
     }
