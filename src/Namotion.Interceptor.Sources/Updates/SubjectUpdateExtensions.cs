@@ -101,7 +101,7 @@ public static class SubjectUpdateExtensions
         switch (propertyUpdate.Kind)
         {
             case SubjectPropertyUpdateKind.Value:
-                SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () =>
+                SubjectMutationContext.ApplyChangesWithChangedTimestamp(propertyUpdate.Timestamp, () =>
                     applyValuePropertyUpdate.Invoke(registeredProperty, propertyUpdate));
                 break;
 
@@ -124,7 +124,7 @@ public static class SubjectUpdateExtensions
                             var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
                             item.ApplySubjectPropertyUpdate(propertyUpdate.Item, applyValuePropertyUpdate, subjectFactory, parentRegistry);
 
-                            SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () =>
+                            SubjectMutationContext.ApplyChangesWithChangedTimestamp(propertyUpdate.Timestamp, () =>
                                 registeredProperty.SetValue(item));
                         }
                     }
@@ -132,7 +132,7 @@ public static class SubjectUpdateExtensions
                 else
                 {
                     // set item to null
-                    SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () =>
+                    SubjectMutationContext.ApplyChangesWithChangedTimestamp(propertyUpdate.Timestamp, () =>
                         registeredProperty.SetValue(null));
                 }
                 break;
@@ -210,7 +210,7 @@ public static class SubjectUpdateExtensions
                             }) ?? [];
 
                         var collection = subjectFactory.CreateSubjectCollection(registeredProperty.Type, items);
-                        SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () => registeredProperty.SetValue(collection));
+                        SubjectMutationContext.ApplyChangesWithChangedTimestamp(propertyUpdate.Timestamp, () => registeredProperty.SetValue(collection));
                     }
                 }
                 else
