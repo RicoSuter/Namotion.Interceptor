@@ -89,10 +89,10 @@ public class DerivedPropertyChangeHandlerTests
         for (var i = 0; i < 10000; i++)
         {
             var dt = dateTime.AddSeconds(i);
-            SubjectMutationContext.ApplyChangesWithChangedTimestamp(dt, () =>
+            using (SubjectChangeContext.WithChangedTimestamp(dt))
             {
                 person.FirstName = dt.ToString();
-            });
+            }
         }
 
         // Assert

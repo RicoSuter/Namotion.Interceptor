@@ -79,8 +79,10 @@ public static class PathExtensions
         IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Action<RegisteredSubjectProperty, string, object?> visitProperty,
         ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
-        return SubjectMutationContext.ApplyChangesWithChangedTimestamp(timestamp,
-            () => VisitPropertiesFromSourcePaths(subject, sourcePaths, visitProperty, sourcePathProvider, subjectFactory));
+        using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+        {
+            return VisitPropertiesFromSourcePaths(subject, sourcePaths, visitProperty, sourcePathProvider, subjectFactory);
+        }
     }
 
     private static void SetPropertyValue(RegisteredSubjectProperty property, DateTimeOffset timestamp, object? value, ISubjectSource? source)
