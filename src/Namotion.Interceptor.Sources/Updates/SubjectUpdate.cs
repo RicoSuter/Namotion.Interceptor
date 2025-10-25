@@ -146,7 +146,7 @@ public class SubjectUpdate
                 {
                     // handle property changes
                     var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredProperty, knownSubjectUpdates, propertyUpdates);
-                    propertyUpdate.ApplyValue(registeredProperty, change.Timestamp, change.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
+                    propertyUpdate.ApplyValue(registeredProperty, change.ChangedTimestamp, change.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
                     subjectUpdate.Properties[registeredProperty.Name] = propertyUpdate;
                 }
                 else
@@ -265,7 +265,7 @@ public class SubjectUpdate
         // Apply value if needed
         if (changeProperty is not null && change.HasValue)
         {
-            finalAttributeUpdate.ApplyValue(changeProperty, change.Value.Timestamp, change.Value.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
+            finalAttributeUpdate.ApplyValue(changeProperty, change.Value.ChangedTimestamp, change.Value.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
         }
 
         return (rootPropertyUpdate, rootProperty.Name);

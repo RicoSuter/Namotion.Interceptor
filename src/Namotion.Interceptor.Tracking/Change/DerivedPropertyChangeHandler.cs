@@ -49,7 +49,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         
         // Read timestamp from property which has been set by lifecycle interceptor before
         var timestamp = context.Property.TryGetWriteTimestamp() 
-            ?? SubjectMutationContext.GetCurrentTimestamp();
+            ?? SubjectChangeContext.Current.ChangedTimestamp;
 
         lock (usedByProperties)
         {
@@ -73,9 +73,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 usedByProperty.SetWriteTimestamp(timestamp);
 
                 // Trigger change event (derived change has local process as source (null))
-                SubjectMutationContext.ApplyChangesWithSource(null, () =>
-                    usedByProperty.SetPropertyValueWithInterception(newValue, _ => oldValue, delegate { })
-                );
+                using (SubjectChangeContext.WithSource(null))
+                {
+                    usedByProperty.SetPropertyValueWithInterception(newValue, _ => oldValue, delegate { });
+                }
             }
         }
     }
