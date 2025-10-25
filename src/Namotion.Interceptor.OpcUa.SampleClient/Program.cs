@@ -1,3 +1,4 @@
+using System.Reactive.Concurrency;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
@@ -65,26 +66,26 @@ var hasShownIntermediateStats = false;
 var windowStartTime = DateTimeOffset.UtcNow;
 var lastAllThroughputTime = DateTimeOffset.UtcNow;
 
-var allLatencies = new List<double>();
-var allLatencies2 = new List<double?>();
+var allChangedLatencies = new List<double>();
+var allReceivedLatencies = new List<double?>();
 var allThroughputSamples = new List<double>();
 
-context.GetPropertyChangedObservable().Subscribe(change =>
+context.GetPropertyChangedObservable(ImmediateScheduler.Instance).Subscribe(change =>
 {
     var now = DateTimeOffset.UtcNow;
     allUpdatesSinceLastSample++;
 
     // change timestamp
-    var changeTimestamp = change.ChangedTimestamp;
-    var changeLatencyMs = (now - changeTimestamp).TotalMilliseconds;
+    var changedTimestamp = change.ChangedTimestamp;
+    var changedLatencyMs = (now - changedTimestamp).TotalMilliseconds;
     
-    allLatencies.Add(changeLatencyMs);
+    allChangedLatencies.Add(changedLatencyMs);
 
     // change timestamp
-    var changeTimestamp2 = change.ReceivedTimestamp;
-    var changeLatencyMs2 = (now - changeTimestamp2)?.TotalMilliseconds;
+    var receivedTimestamp = change.ReceivedTimestamp;
+    var receivedLatencyMs = (now - receivedTimestamp)?.TotalMilliseconds;
 
-    allLatencies2.Add(changeLatencyMs2);
+    allReceivedLatencies.Add(receivedLatencyMs);
 
     var timeSinceLastAllSample = (now - lastAllThroughputTime).TotalSeconds;
     if (timeSinceLastAllSample >= 1.0)
@@ -95,21 +96,32 @@ context.GetPropertyChangedObservable().Subscribe(change =>
         lastAllThroughputTime = now;
     }
 
+    var reset = false;
+
     var timeSinceStart = (now - windowStartTime).TotalSeconds;
-    if (timeSinceStart >= 10.0 && !hasShownIntermediateStats && allLatencies.Count > 0)
+    if (timeSinceStart >= 10.0 && !hasShownIntermediateStats && allChangedLatencies.Count > 0)
     {
-        PrintStats("Benchmark - Intermediate (10 seconds)", allLatencies, allLatencies2, allThroughputSamples.ToList());
+        PrintStats("Benchmark - Intermediate (10 seconds)", allChangedLatencies, allReceivedLatencies, allThroughputSamples.ToList());
         hasShownIntermediateStats = true;
+        reset = true;
     }
 
-    if (timeSinceStart >= 60.0 && allLatencies.Count > 0)
+    if (timeSinceStart >= 60.0 && allChangedLatencies.Count > 0)
     {
         Console.WriteLine($"\n[{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss.fff}]");
-        PrintStats("Benchmark - 1 minute", allLatencies, allLatencies2, allThroughputSamples);
-        allLatencies.Clear();
-        allLatencies2.Clear();
+        PrintStats("Benchmark - 1 minute", allChangedLatencies, allReceivedLatencies, allThroughputSamples);
+        reset = true;
+    }
+
+    if (reset) 
+    {
+        now = DateTimeOffset.UtcNow;
+
+        allChangedLatencies.Clear();
+        allReceivedLatencies.Clear();
         allThroughputSamples.Clear();
         allUpdatesSinceLastSample = 0;
+        
         windowStartTime = now;
         lastAllThroughputTime = now;
     }
