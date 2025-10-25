@@ -4,9 +4,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 public static class SubjectMutationContext
 {
-    [ThreadStatic] private static object? _currentSource;
-    [ThreadStatic] private static DateTimeOffset? _currentChangedTimestamp;
-    [ThreadStatic] private static DateTimeOffset? _currentReceivedTimestamp;
+    [ThreadStatic] private static (DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp, object? source) _currentContext;
     
     /// <summary>
     /// Gets or sets a function which retrieves the current timestamp (default is <see cref="DateTimeOffset.Now"/>).
@@ -21,15 +19,15 @@ public static class SubjectMutationContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static T ApplyChangesWithChangedTimestamp<T>(DateTimeOffset? timestamp, Func<T> action)
     {
-        var previousTimestamp = _currentChangedTimestamp;
-        _currentChangedTimestamp = timestamp;
+        var previousTimestamp = _currentContext.changedTimestamp;
+        _currentContext.changedTimestamp = timestamp;
         try
         {
             return action();
         }
         finally
         {
-            _currentChangedTimestamp = previousTimestamp;
+            _currentContext.changedTimestamp = previousTimestamp;
         }
     }
     
@@ -41,15 +39,15 @@ public static class SubjectMutationContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ApplyChangesWithChangedTimestamp(DateTimeOffset? timestamp, Action action)
     {
-        var previousTimestamp = _currentChangedTimestamp;
-        _currentChangedTimestamp = timestamp;
+        var previousTimestamp = _currentContext.changedTimestamp;
+        _currentContext.changedTimestamp = timestamp;
         try
         {
             action();
         }
         finally
         {
-            _currentChangedTimestamp = previousTimestamp;
+            _currentContext.changedTimestamp = previousTimestamp;
         }
     }
 
@@ -61,15 +59,15 @@ public static class SubjectMutationContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ApplyChangesWithSource(object? source, Action action)
     {
-        var previousSource = _currentSource;
-        _currentSource = source;
+        var previousSource = _currentContext.source;
+        _currentContext.source = source;
         try
         {
             action();
         }
         finally
         {
-            _currentSource = previousSource;
+            _currentContext.source = previousSource;
         }
     }
 
@@ -79,7 +77,7 @@ public static class SubjectMutationContext
     /// <returns>The current timestamp.</returns>
     public static DateTimeOffset GetChangedTimestamp()
     {
-        return _currentChangedTimestamp ?? GetTimestampFunction();
+        return _currentContext.changedTimestamp ?? GetTimestampFunction();
     }
 
     /// <summary>
@@ -88,7 +86,7 @@ public static class SubjectMutationContext
     /// <returns>The current timestamp.</returns>
     public static DateTimeOffset? TryGetReceivedTimestamp()
     {
-        return _currentReceivedTimestamp;
+        return _currentContext.receivedTimestamp;
     }
 
     /// <summary>
@@ -97,7 +95,7 @@ public static class SubjectMutationContext
     /// <returns>The source or null (unknown).</returns>
     internal static object? GetCurrentSource()
     {
-        return _currentSource;
+        return _currentContext.source;
     }
 
     /// <summary>
@@ -110,21 +108,15 @@ public static class SubjectMutationContext
     /// <param name="valueFromSource">The value</param>
     public static void SetValueFromSource(this PropertyReference property, object source, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp, object? valueFromSource)
     {        
-        var previousChangedTimestamp = _currentChangedTimestamp;
-        var previousReceivedTimestamp = _currentChangedTimestamp;
-        var previousSource = _currentSource;
-        _currentChangedTimestamp = changedTimestamp;
-        _currentReceivedTimestamp = receivedTimestamp;
-        _currentSource = source;
+        var previousContext = _currentContext;
+        _currentContext = (changedTimestamp, receivedTimestamp, source);
         try
         {
             property.Metadata.SetValue?.Invoke(property.Subject, valueFromSource);
         }
         finally
         {
-            _currentChangedTimestamp = previousChangedTimestamp;
-            _currentReceivedTimestamp = previousReceivedTimestamp;
-            _currentSource = previousSource;
+            _currentContext = previousContext;
         }
     }
 }
