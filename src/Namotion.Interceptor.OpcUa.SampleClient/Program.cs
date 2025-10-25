@@ -109,17 +109,19 @@ context.GetPropertyChangedObservable(ImmediateScheduler.Instance).Subscribe(chan
     if (timeSinceStart >= 60.0 && allChangedLatencies.Count > 0)
     {
         Console.WriteLine($"\n[{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss.fff}]");
-        PrintStats("All Changes - 1 minute", allChangedLatencies, allReceivedLatencies, allThroughputSamples);
+        PrintStats("Benchmark - 1 minute", allChangedLatencies, allReceivedLatencies, allThroughputSamples);
         reset = true;
     }
 
     if (reset) 
     {
-        PrintStats("Benchmark - 1 minute", allChangedLatencies, allReceivedLatencies, allThroughputSamples);
+        now = DateTimeOffset.UtcNow;
+
         allChangedLatencies.Clear();
         allReceivedLatencies.Clear();
         allThroughputSamples.Clear();
         allUpdatesSinceLastSample = 0;
+        
         windowStartTime = now;
         lastAllThroughputTime = now;
     }
