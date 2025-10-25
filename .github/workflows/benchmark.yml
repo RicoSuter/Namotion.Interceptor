@@ -17,8 +17,6 @@ defaults:
 jobs:
   benchmark:
     runs-on: self-hosted
-    # Only run when manually triggered via workflow_dispatch
-    if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
       pull-requests: write
@@ -48,7 +46,7 @@ jobs:
           }
 
       - name: Run benchmarks on base branch (if PR)
-        if: github.event.pull_request || github.head_ref
+        if: github.event_name == 'pull_request'
         run: |
           # Clean previous artifacts
           if (Test-Path BenchmarkDotNet.Artifacts) {
@@ -76,7 +74,7 @@ jobs:
           git checkout -
 
       - name: Compare benchmark results
-        if: github.event.pull_request || github.head_ref
+        if: github.event_name == 'pull_request'
         id: compare
         run: |
           # Compare JSON results if both exist
@@ -165,7 +163,7 @@ jobs:
           }
 
       - name: Comment PR with comparison
-        if: (github.event.pull_request || github.head_ref) && steps.compare.outputs.has_comparison == 'true'
+        if: github.event_name == 'pull_request' && steps.compare.outputs.has_comparison == 'true'
         continue-on-error: true
         uses: actions/github-script@v7
         with:
@@ -174,35 +172,13 @@ jobs:
             const comparison = fs.readFileSync('comparison.md', 'utf8');
             
             try {
-              // Get PR number from event or find it from the current branch
-              let prNumber = context.issue.number;
-              
-              if (!prNumber || prNumber === 0) {
-                // Find PR for current branch
-                const branch = context.ref.replace('refs/heads/', '');
-                const { data: pulls } = await github.rest.pulls.list({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  state: 'open',
-                  head: `${context.repo.owner}:${branch}`
-                });
-                
-                if (pulls.length > 0) {
-                  prNumber = pulls[0].number;
-                } else {
-                  console.log('No open PR found for this branch.');
-                  console.log('Benchmark comparison results are available in the workflow summary.');
-                  return;
-                }
-              }
-              
               await github.rest.issues.createComment({
-                issue_number: prNumber,
+                issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 body: comparison
               });
-              console.log(`Successfully posted comment to PR #${prNumber}`);
+              console.log('Successfully posted comment to PR');
             } catch (error) {
               console.log('Unable to post comment to PR. Check the workflow summary for benchmark comparison results.');
               console.log('Error:', error.message);
@@ -216,10 +192,9 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload base branch benchmark results
-        if: github.event.pull_request || github.head_ref
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results-base
           path: benchmark-results-base/
           if-no-files-found: ignore
-

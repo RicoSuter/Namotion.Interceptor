@@ -46,6 +46,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
             {
                 try
                 {
+                    // TODO(perf): Resolve registry once?
                     var registry = _context.GetService<ISubjectRegistry>();
                     registry.ExecuteSubjectUpdate(update);
                 }
