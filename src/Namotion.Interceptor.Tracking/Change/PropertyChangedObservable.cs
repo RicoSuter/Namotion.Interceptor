@@ -29,9 +29,9 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
         var newValue = context.GetFinalValue();
         var changedContext = SubjectPropertyChange.Create(
             context.Property, 
-            SubjectMutationContext.GetCurrentSource(),
-            SubjectMutationContext.GetChangedTimestamp(),
-            SubjectMutationContext.TryGetReceivedTimestamp(),
+            SubjectChangeContext.GetCurrentSource(),
+            SubjectChangeContext.GetChangedTimestamp(),
+            SubjectChangeContext.TryGetReceivedTimestamp(),
             oldValue, 
             newValue);
         

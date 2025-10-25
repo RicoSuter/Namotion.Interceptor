@@ -29,12 +29,12 @@ public class TimestampTests
         var timestamp = DateTimeOffset.Now.AddDays(-200);
 
         // Act
-        SubjectMutationContext.ApplyChangesWithChangedTimestamp(timestamp, () =>
+        using (SubjectChangeContext.WithChangedTimestamp(timestamp))
         {
             mother.FirstName = "Mother";
-        });
+        }
 
-        var currentTimestamp = SubjectMutationContext.GetChangedTimestamp();
+        var currentTimestamp = SubjectChangeContext.GetChangedTimestamp();
         
         // Assert
         Assert.Equal(3, changes.Count); // backed, derived, derived

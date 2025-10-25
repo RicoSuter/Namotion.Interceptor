@@ -131,7 +131,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         next(ref context);
         var newValue = context.GetFinalValue();
 
-        context.Property.SetWriteTimestamp(SubjectMutationContext.GetChangedTimestamp());
+        context.Property.SetWriteTimestamp(SubjectChangeContext.GetChangedTimestamp());
 
         if (typeof(TProperty).IsValueType || typeof(TProperty) == typeof(string))
         {
