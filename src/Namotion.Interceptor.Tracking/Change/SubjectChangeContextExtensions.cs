@@ -15,7 +15,7 @@ public static class SubjectChangeContextExtensions
         object source, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp, 
         object? valueFromSource)
     {
-        using (SubjectChangeContext.Apply(source, changedTimestamp, receivedTimestamp))
+        using (SubjectChangeContext.WithState(source, changedTimestamp, receivedTimestamp))
         {
             property.Metadata.SetValue?.Invoke(property.Subject, valueFromSource);
         }

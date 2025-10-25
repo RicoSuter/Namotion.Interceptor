@@ -65,7 +65,7 @@ public readonly struct SubjectChangeContext
 
     /// <summary>Enters a scope that sets source, changed and received timestamps.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static SubjectChangeContextScope Apply(object? source, DateTimeOffset? changed, DateTimeOffset? received)
+    public static SubjectChangeContextScope WithState(object? source, DateTimeOffset? changed, DateTimeOffset? received)
     {
         var previousState = _current;
         _current = new SubjectChangeContext(changed, received, source);
