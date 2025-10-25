@@ -51,7 +51,6 @@ public static class OpcUaSubjectServerExtensions
         {
             ServerUrl = serverUrl,
             RootName = rootName,
-            MaximumItemsPerSubscription = 5000,
             SourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
             TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
             ValueConverter = new OpcUaValueConverter(),
