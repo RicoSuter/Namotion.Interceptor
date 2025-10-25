@@ -15,7 +15,7 @@ public class Worker : BackgroundService
     
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // expected updates/second = number of persons * 2 / delay
+        // Expected updates/second = number of persons * 2 / delay
         
         var delay = TimeSpan.FromSeconds(1);
         var lastChange = DateTimeOffset.Now;
@@ -30,11 +30,14 @@ public class Worker : BackgroundService
                 for (var index = 0; index < _root.Persons.Length; index++)
                 {
                     var person = _root.Persons[index];
-                    // this triggers 2 changes
+                    
+                    // Triggers 2 changes: FirstName and FullName
                     person.FirstName = Stopwatch.GetTimestamp().ToString();
 
                     if (index % mod == 0) // distribute updates over approx. 0.5s
+                    {
                         await Task.Delay(10, stoppingToken);
+                    }
                 }
             }
 
