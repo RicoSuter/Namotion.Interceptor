@@ -1,12 +1,9 @@
 name: benchmark
 on:
   workflow_dispatch: # Allow running the workflow manually from the GitHub UI
-#  push:
-#    branches:
-#      - 'master'
-#  pull_request:
-#    branches:
-#      - '*'
+  pull_request:
+    branches:
+      - '*'
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
@@ -20,6 +17,8 @@ defaults:
 jobs:
   benchmark:
     runs-on: self-hosted
+    # Only run when manually triggered via workflow_dispatch
+    if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
       pull-requests: write
