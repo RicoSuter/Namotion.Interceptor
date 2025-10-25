@@ -44,7 +44,7 @@ public static class InterceptorSubjectContextExtensions
     /// <returns>The context.</returns>
     public static IInterceptorSubjectContext WithDerivedPropertyChangeDetection(this IInterceptorSubjectContext context)
     {
-        context
+        context // must be before lifecycle!
             .WithService(() => new DerivedPropertyChangeHandler());
 
         return context

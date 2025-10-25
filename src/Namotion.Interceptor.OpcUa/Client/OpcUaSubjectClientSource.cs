@@ -275,7 +275,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                             Value = value,
                             StatusCode = StatusCodes.Good,
                             //ServerTimestamp = DateTime.UtcNow,
-                            SourceTimestamp = change.Timestamp.UtcDateTime
+                            SourceTimestamp = change.ChangedTimestamp.UtcDateTime
                         }
                     });
                 }

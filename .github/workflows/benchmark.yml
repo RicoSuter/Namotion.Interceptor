@@ -1,9 +1,6 @@
 name: benchmark
 on:
   workflow_dispatch: # Allow running the workflow manually from the GitHub UI
-  push:
-    branches:
-      - 'master'
   pull_request:
     branches:
       - '*'
@@ -19,7 +16,7 @@ defaults:
 
 jobs:
   benchmark:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       pull-requests: write
@@ -110,9 +107,12 @@ jobs:
                       $baseMem = if ($baseBench.Memory -and $baseBench.Memory.BytesAllocatedPerOperation) { [double]$baseBench.Memory.BytesAllocatedPerOperation } else { 0 }
                       $memDiff = if ($baseMem -ne 0) { (($currentMem - $baseMem) / $baseMem) * 100 } else { 0 }
                       
-                      # Format values
-                      $meanDiffStr = if ($meanDiff -gt 0) { "🔴 +$($meanDiff.ToString('F2'))%" } elseif ($meanDiff -lt 0) { "🟢 $($meanDiff.ToString('F2'))%" } else { "⚪ 0.00%" }
-                      $memDiffStr = if ($memDiff -gt 0) { "🔴 +$($memDiff.ToString('F2'))%" } elseif ($memDiff -lt 0) { "🟢 $($memDiff.ToString('F2'))%" } else { "⚪ 0.00%" }
+                      # Define threshold for showing color indicators
+                      $threshold = 3
+                      
+                      # Format values (show color only when absolute diff > threshold)
+                      $meanDiffStr = if ($meanDiff -gt $threshold) { "🔴 +$($meanDiff.ToString('F2'))%" } elseif ($meanDiff -lt -$threshold) { "🟢 $($meanDiff.ToString('F2'))%" } elseif ($meanDiff -ge 0) { "+$($meanDiff.ToString('F2'))%" } else { "$($meanDiff.ToString('F2'))%" }
+                      $memDiffStr = if ($memDiff -gt $threshold) { "🔴 +$($memDiff.ToString('F2'))%" } elseif ($memDiff -lt -$threshold) { "🟢 $($memDiff.ToString('F2'))%" } elseif ($memDiff -ge 0) { "+$($memDiff.ToString('F2'))%" } else { "$($memDiff.ToString('F2'))%" }
                       
                       # Format mean time
                       $currentMeanStr = if ($currentMean -lt 1000) { "$($currentMean.ToString('F2')) ns" } elseif ($currentMean -lt 1000000) { "$(($currentMean/1000).ToString('F2')) μs" } else { "$(($currentMean/1000000).ToString('F2')) ms" }
@@ -198,4 +198,3 @@ jobs:
           name: benchmark-results-base
           path: benchmark-results-base/
           if-no-files-found: ignore
-

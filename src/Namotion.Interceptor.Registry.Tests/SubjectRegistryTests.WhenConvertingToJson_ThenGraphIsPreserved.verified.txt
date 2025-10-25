@@ -1,6 +1,8 @@
 ﻿{
   "id": null,
   "firstName": "Child",
+  "firstName@MaxLength": 123,
+  "firstName@MaxLength@Unit": "Count",
   "lastName": null,
   "fullName": "Child ",
   "fullNameWithPrefix": "Mr. Child ",
@@ -8,6 +10,8 @@
   "mother": {
     "id": null,
     "firstName": "Mother",
+    "firstName@MaxLength": 123,
+    "firstName@MaxLength@Unit": "Count",
     "lastName": null,
     "fullName": "Mother ",
     "fullNameWithPrefix": "Mr. Mother ",
@@ -15,6 +19,8 @@
     "mother": {
       "id": null,
       "firstName": "Grandmother",
+      "firstName@MaxLength": 123,
+      "firstName@MaxLength@Unit": "Count",
       "lastName": null,
       "fullName": "Grandmother ",
       "fullNameWithPrefix": "Mr. Grandmother ",

@@ -5,19 +5,13 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Sources.Updates;
 
-public record SubjectPropertyUpdate
+public class SubjectPropertyUpdate
 {
     /// <summary>
     /// Gets the kind of entity which is updated.
     /// </summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public SubjectPropertyUpdateKind Kind { get; internal set; }
-    
-    /// <summary>
-    /// Gets the updated attributes.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public Dictionary<string, SubjectPropertyUpdate>? Attributes { get; internal set; }
 
     /// <summary>
     /// Gets the type of the property value.
@@ -45,6 +39,12 @@ public record SubjectPropertyUpdate
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public IReadOnlyCollection<SubjectPropertyCollectionUpdate>? Collection { get; internal set; }
+    
+    /// <summary>
+    /// Gets the updated attributes.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Dictionary<string, SubjectPropertyUpdate>? Attributes { get; internal set; }
     
     /// <summary>
     /// Gets or sets custom extension data added by the transformPropertyUpdate function.
@@ -85,7 +85,7 @@ public record SubjectPropertyUpdate
     internal static SubjectPropertyUpdate CreateCompleteUpdate(RegisteredSubjectProperty property, 
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        List<SubjectPropertyUpdateReference>? propertyUpdates)
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
         var propertyUpdate = new SubjectPropertyUpdate
         {
@@ -111,7 +111,7 @@ public record SubjectPropertyUpdate
     internal void ApplyValue(RegisteredSubjectProperty property, DateTimeOffset? timestamp, object? value, 
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        List<SubjectPropertyUpdateReference>? propertyUpdates = null)
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates = null)
     {
         Timestamp = timestamp;
 
@@ -146,7 +146,7 @@ public record SubjectPropertyUpdate
         IReadOnlyDictionary<string, IInterceptorSubject?> dictionary,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        List<SubjectPropertyUpdateReference>? propertyUpdates)
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
         var collectionUpdates = new List<SubjectPropertyCollectionUpdate>(dictionary.Count);
         foreach (var key in dictionary.Keys)
@@ -166,7 +166,7 @@ public record SubjectPropertyUpdate
         IEnumerable<IInterceptorSubject> enumerable,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        List<SubjectPropertyUpdateReference>? propertyUpdates)
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
         if (enumerable is ICollection<IInterceptorSubject> collection)
         {
@@ -202,7 +202,7 @@ public record SubjectPropertyUpdate
     private static Dictionary<string, SubjectPropertyUpdate>? CreateAttributeUpdates(RegisteredSubjectProperty property,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        List<SubjectPropertyUpdateReference>? propertyUpdates)
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
         Dictionary<string, SubjectPropertyUpdate>? attributes = null;
         foreach (var attribute in property.Attributes)
@@ -214,7 +214,7 @@ public record SubjectPropertyUpdate
                 var attributeUpdate = CreateCompleteUpdate(attribute, processors, knownSubjectUpdates, propertyUpdates);
                 attributes[attribute.AttributeMetadata.AttributeName] = attributeUpdate;
 
-                propertyUpdates?.Add(new SubjectPropertyUpdateReference(attribute, attributeUpdate, attributes));
+                propertyUpdates?.TryAdd(attributeUpdate, new SubjectPropertyUpdateReference(attribute, attributes));
             }
         }
         return attributes?.Count > 0 ? attributes : null;

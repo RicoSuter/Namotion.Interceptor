@@ -131,7 +131,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         next(ref context);
         var newValue = context.GetFinalValue();
 
-        context.Property.SetWriteTimestamp(SubjectMutationContext.GetCurrentTimestamp());
+        context.Property.SetWriteTimestamp(SubjectChangeContext.Current.ChangedTimestamp);
 
         if (typeof(TProperty).IsValueType || typeof(TProperty) == typeof(string))
         {
@@ -231,6 +231,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
                 break;
 
+            // TODO: Support more enumerations with high performance here (immutable arrays, lists, ...)
+            // case string collection: break;
+            // case IEnumerable collection:
+
             case ICollection collection:
                 var i = 0;
                 foreach (var item in collection)
@@ -246,6 +250,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
+    #region  Performance
+    
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static List<(IInterceptorSubject subject, PropertyReference property, object? index)> GetList()
     {
@@ -273,4 +279,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         hashSet.Clear();
         _hashSetPool!.Push(hashSet);
     }
+
+    #endregion
 }
