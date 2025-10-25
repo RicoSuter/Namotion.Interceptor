@@ -62,7 +62,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
                 }
 
                 node.Value = actualValue;
-                node.Timestamp = change.Timestamp.UtcDateTime;
+                node.Timestamp = change.ChangedTimestamp.UtcDateTime;
                 node.ClearChangeMasks(_server?.CurrentInstance.DefaultSystemContext, false);
             }
         }
@@ -117,14 +117,16 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         }
     }
 
-    internal void UpdateProperty(PropertyReference property, DateTimeOffset timestamp, object? value)
+    internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
     {
+        var receivedTimestamp = DateTimeOffset.Now;
+
         var targetType = property.GetRegisteredProperty().Type;
         var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, targetType);
         
         _dispatcher?.EnqueueSubjectUpdate(() =>
         {
-            property.SetValueFromSource(this, timestamp, convertedValue);
+            property.SetValueFromSource(this, changedTimestamp, receivedTimestamp, convertedValue);
         });
     }
 }

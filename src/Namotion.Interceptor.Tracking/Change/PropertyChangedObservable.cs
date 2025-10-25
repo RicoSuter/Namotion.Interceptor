@@ -26,14 +26,17 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
         next(ref context);
 
         var newValue = context.GetFinalValue();
-        var changedContext = SubjectPropertyChange.Create(
+
+        var changeContext = SubjectChangeContext.Current;
+        var propertyChange = SubjectPropertyChange.Create(
             context.Property, 
-            SubjectMutationContext.GetCurrentSource(),
-            SubjectMutationContext.GetCurrentTimestamp(),
+            changeContext.Source,
+            changeContext.ChangedTimestamp,
+            changeContext.ReceivedTimestamp,
             oldValue, 
             newValue);
         
-        _syncSubject.OnNext(changedContext);
+        _syncSubject.OnNext(propertyChange);
     }
 
     public IDisposable Subscribe(IObserver<SubjectPropertyChange> observer)

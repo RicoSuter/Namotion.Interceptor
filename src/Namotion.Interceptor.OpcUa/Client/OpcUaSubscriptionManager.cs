@@ -32,6 +32,7 @@ internal class OpcUaSubscriptionManager
 
     public void Clear()
     {
+        _changesBuffer.Clear();
         _monitoredItems.Clear();
         _activeSubscriptions.Clear();
     }
@@ -150,8 +151,14 @@ internal class OpcUaSubscriptionManager
         return 0;
     }
 
-    private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringtable)
+    private readonly ConcurrentDictionary<Subscription, List<OpcUaPropertyUpdate>> _changesBuffer = new();
+    
+    private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
+        // This callback is called in sequence/order per subscription
+        // with EnqueueSubjectUpdate we ensure that changes are applied in order
+        // over multiple subscriptions as well.
+        
         if (_dispatcher is null)
         {
             return;
@@ -162,8 +169,11 @@ internal class OpcUaSubscriptionManager
         {
             return;
         }
+
+        var receivedTimestamp = DateTimeOffset.Now;
         
-        var changes = new List<OpcUaPropertyUpdate>(monitoredItemsCount);
+        var changes = _changesBuffer.GetOrAdd(subscription, _ => []);
+        changes.Clear();
         for (var i = 0; i < monitoredItemsCount; i++)
         {
             var item = notification.MonitoredItems[i];
@@ -190,7 +200,7 @@ internal class OpcUaSubscriptionManager
                 var change = changes[i];
                 try
                 {
-                    change.Property.SetValueFromSource(subscription, change.Timestamp, change.Value);
+                    change.Property.SetValueFromSource(subscription, change.Timestamp, receivedTimestamp, change.Value);
                 }
                 catch (Exception e)
                 {
