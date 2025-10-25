@@ -89,10 +89,10 @@ public class DerivedPropertyChangeHandlerTests
         for (var i = 0; i < 10000; i++)
         {
             var dt = dateTime.AddSeconds(i);
-            SubjectMutationContext.ApplyChangesWithTimestamp(dt, () =>
+            using (SubjectChangeContext.WithChangedTimestamp(dt))
             {
                 person.FirstName = dt.ToString();
-            });
+            }
         }
 
         // Assert
@@ -100,7 +100,7 @@ public class DerivedPropertyChangeHandlerTests
         foreach (var c in changes)
         {
             // the fullname should contain the timestamp as firstname
-            Assert.Equal(c.GetNewValue<string>(), $"{c.Timestamp} "); 
+            Assert.Equal(c.GetNewValue<string>(), $"{c.ChangedTimestamp} "); 
         }
     }
 }
