@@ -27,11 +27,12 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
         next(ref context);
 
         var newValue = context.GetFinalValue();
+        var changeState = SubjectChangeContext.Current;
         var changedContext = SubjectPropertyChange.Create(
             context.Property, 
-            SubjectChangeContext.GetCurrentSource(),
-            SubjectChangeContext.GetChangedTimestamp(),
-            SubjectChangeContext.TryGetReceivedTimestamp(),
+            changeState.Source,
+            changeState.ChangedTimestamp,
+            changeState.ReceivedTimestamp,
             oldValue, 
             newValue);
         

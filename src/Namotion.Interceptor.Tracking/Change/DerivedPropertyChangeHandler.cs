@@ -49,7 +49,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         
         // Read timestamp from property which has been set by lifecycle interceptor before
         var timestamp = context.Property.TryGetWriteTimestamp() 
-            ?? SubjectChangeContext.GetChangedTimestamp();
+            ?? SubjectChangeContext.Current.ChangedTimestamp;
 
         lock (usedByProperties)
         {

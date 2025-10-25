@@ -34,7 +34,7 @@ public class TimestampTests
             mother.FirstName = "Mother";
         }
 
-        var currentTimestamp = SubjectChangeContext.GetChangedTimestamp();
+        var currentTimestamp = SubjectChangeContext.Current.ChangedTimestamp;
         
         // Assert
         Assert.Equal(3, changes.Count); // backed, derived, derived

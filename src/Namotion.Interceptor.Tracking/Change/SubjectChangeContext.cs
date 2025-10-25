@@ -1,26 +1,28 @@
-using System;
-using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-public static class SubjectChangeContext
+public readonly struct SubjectChangeContext
 {
-    [ThreadStatic] private static State _state;
+    [ThreadStatic]
+    private static SubjectChangeContext _current;
+    
+    private readonly DateTimeOffset? _changedTimestamp;
+    public readonly DateTimeOffset? ReceivedTimestamp;
+    public readonly object? Source;
 
-    internal struct State
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private SubjectChangeContext(DateTimeOffset? changed, DateTimeOffset? received, object? source)
     {
-        public readonly DateTimeOffset? ChangedTimestamp;
-        public readonly DateTimeOffset? ReceivedTimestamp;
-        public readonly object? Source;
+        _changedTimestamp = changed;
+        ReceivedTimestamp = received;
+        Source = source;
+    }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public State(DateTimeOffset? changed, DateTimeOffset? received, object? source)
-        {
-            ChangedTimestamp = changed;
-            ReceivedTimestamp = received;
-            Source = source;
-        }
+    /// <summary>Gets the changed timestamp from the thread-local context or falls back to <see cref="SubjectChangeContext.GetTimestampFunction"/>.</summary>
+    public DateTimeOffset ChangedTimestamp
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] get => _changedTimestamp ?? GetTimestampFunction();
     }
     
     /// <summary>
@@ -28,84 +30,56 @@ public static class SubjectChangeContext
     /// </summary>
     public static Func<DateTimeOffset> GetTimestampFunction { get; set; } = () => DateTimeOffset.Now;
 
-    /// <summary>Gets the changed timestamp from the thread-local context or falls back to <see cref="GetTimestampFunction"/>.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static DateTimeOffset GetChangedTimestamp() => _state.ChangedTimestamp ?? GetTimestampFunction();
+    /// <summary>Gets the current change context.</summary>
+    public static SubjectChangeContext Current
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] get => _current;
+    }
 
-    /// <summary>Gets the received timestamp from the thread-local context, or null when unknown.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static DateTimeOffset? TryGetReceivedTimestamp() => _state.ReceivedTimestamp;
-
-    /// <summary>Gets the current source which is doing the mutation.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static object? GetCurrentSource() => _state.Source;
-    
     /// <summary>Enters a scope that sets only the changed timestamp.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Scope WithChangedTimestamp(DateTimeOffset? changed)
+    public static SubjectChangeContextScope WithChangedTimestamp(DateTimeOffset? changed)
     {
-        var previousState = _state;
-        _state = new State(changed, previousState.ReceivedTimestamp, previousState.Source);
-        return new Scope(previousState);
+        var previousState = _current;
+        _current = new SubjectChangeContext(changed, previousState.ReceivedTimestamp, previousState.Source);
+        return new SubjectChangeContextScope(previousState);
     }
 
     /// <summary>Enters a scope that sets only the received timestamp.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Scope WithReceivedTimestamp(DateTimeOffset? received)
+    public static SubjectChangeContextScope WithReceivedTimestamp(DateTimeOffset? received)
     {
-        var previousState = _state;
-        _state = new State(previousState.ChangedTimestamp, received, previousState.Source);
-        return new Scope(previousState);
+        var previousState = _current;
+        _current = new SubjectChangeContext(previousState._changedTimestamp, received, previousState.Source);
+        return new SubjectChangeContextScope(previousState);
     }
 
     /// <summary>Enters a scope that sets only the mutation source.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Scope WithSource(object? source)
+    public static SubjectChangeContextScope WithSource(object? source)
     {
-        var previousState = _state;
-        _state = new State(previousState.ChangedTimestamp, previousState.ReceivedTimestamp, source);
-        return new Scope(previousState);
+        var previousState = _current;
+        _current = new SubjectChangeContext(previousState._changedTimestamp, previousState.ReceivedTimestamp, source);
+        return new SubjectChangeContextScope(previousState);
     }
 
     /// <summary>Enters a scope that sets source, changed and received timestamps.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Scope With(object? source, DateTimeOffset? changed, DateTimeOffset? received)
+    public static SubjectChangeContextScope Apply(object? source, DateTimeOffset? changed, DateTimeOffset? received)
     {
-        var previousState = _state;
-        _state = new State(changed, received, source);
-        return new Scope(previousState);
+        var previousState = _current;
+        _current = new SubjectChangeContext(changed, received, source);
+        return new SubjectChangeContextScope(previousState);
     }
 
-    /// <summary>
-    /// Sets the value of the property from the given source, changed and received timestamp.
-    /// </summary>
-    /// <param name="property">The property to mutate.</param>
-    /// <param name="source">The source.</param>
-    /// <param name="changedTimestamp">The changed timestamp.</param>
-    /// <param name="receivedTimestamp">The received timestamp.</param>
-    /// <param name="valueFromSource">The value.</param>
-    public static void SetValueFromSource(
-        this PropertyReference property, 
-        object source, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp, 
-        object? valueFromSource)
+    public readonly ref struct SubjectChangeContextScope
     {
-        using (With(source, changedTimestamp, receivedTimestamp))
-        {
-            property.Metadata.SetValue?.Invoke(property.Subject, valueFromSource);
-        }
-    }
-
-    public readonly ref struct Scope
-    {
-        private readonly State _previousState;
+        private readonly SubjectChangeContext _previousState;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal Scope(State previousState)
-        {
-            _previousState = previousState;
-        }
+        internal SubjectChangeContextScope(SubjectChangeContext previousState) => _previousState = previousState;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Dispose() => _state = _previousState;
+        public void Dispose() => _current = _previousState;
     }
 }
