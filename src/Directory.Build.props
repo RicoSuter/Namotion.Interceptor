@@ -14,6 +14,6 @@
     <PackageTags>Interceptor</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     
-    <Version>0.0.39</Version>
+    <Version>0.1.0</Version>
   </PropertyGroup>
 </Project>
