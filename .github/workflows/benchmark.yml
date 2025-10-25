@@ -110,9 +110,9 @@ jobs:
                       $baseMem = if ($baseBench.Memory -and $baseBench.Memory.BytesAllocatedPerOperation) { [double]$baseBench.Memory.BytesAllocatedPerOperation } else { 0 }
                       $memDiff = if ($baseMem -ne 0) { (($currentMem - $baseMem) / $baseMem) * 100 } else { 0 }
                       
-                      # Format values
-                      $meanDiffStr = if ($meanDiff -gt 0) { "🔴 +$($meanDiff.ToString('F2'))%" } elseif ($meanDiff -lt 0) { "🟢 $($meanDiff.ToString('F2'))%" } else { "⚪ 0.00%" }
-                      $memDiffStr = if ($memDiff -gt 0) { "🔴 +$($memDiff.ToString('F2'))%" } elseif ($memDiff -lt 0) { "🟢 $($memDiff.ToString('F2'))%" } else { "⚪ 0.00%" }
+                      # Format values (show color only when diff > 3%)
+                      $meanDiffStr = if ($meanDiff -gt 3) { "🔴 +$($meanDiff.ToString('F2'))%" } elseif ($meanDiff -lt -3) { "🟢 $($meanDiff.ToString('F2'))%" } else { "$($meanDiff.ToString('F2'))%" }
+                      $memDiffStr = if ($memDiff -gt 3) { "🔴 +$($memDiff.ToString('F2'))%" } elseif ($memDiff -lt -3) { "🟢 $($memDiff.ToString('F2'))%" } else { "$($memDiff.ToString('F2'))%" }
                       
                       # Format mean time
                       $currentMeanStr = if ($currentMean -lt 1000) { "$($currentMean.ToString('F2')) ns" } elseif ($currentMean -lt 1000000) { "$(($currentMean/1000).ToString('F2')) μs" } else { "$(($currentMean/1000000).ToString('F2')) ms" }
