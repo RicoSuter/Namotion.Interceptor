@@ -1,4 +1,6 @@
-﻿namespace Namotion.Interceptor.Tracking.Change;
+﻿using System.Runtime.CompilerServices;
+
+namespace Namotion.Interceptor.Tracking.Change;
 
 public static class SubjectChangeContextExtensions
 {
@@ -10,6 +12,7 @@ public static class SubjectChangeContextExtensions
     /// <param name="changedTimestamp">The changed timestamp.</param>
     /// <param name="receivedTimestamp">The received timestamp.</param>
     /// <param name="valueFromSource">The value.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void SetValueFromSource(
         this PropertyReference property, 
         object source, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp, 
