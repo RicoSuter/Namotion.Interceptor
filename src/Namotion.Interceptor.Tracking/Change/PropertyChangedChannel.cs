@@ -65,18 +65,19 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
         }
 
         var oldValue = context.CurrentValue;
-
         next(ref context);
-
         var newValue = context.GetFinalValue();
-        var changedContext = SubjectPropertyChange.Create(
+
+        var changeContext = SubjectChangeContext.Current;
+        var propertyChange = SubjectPropertyChange.Create(
             context.Property,
-            SubjectMutationContext.GetCurrentSource(),
-            SubjectMutationContext.GetCurrentTimestamp(),
+            changeContext.Source,
+            changeContext.ChangedTimestamp,
+            changeContext.ReceivedTimestamp,
             oldValue,
             newValue);
 
-        _source.Writer.TryWrite(changedContext);
+        _source.Writer.TryWrite(propertyChange);
     }
 
     private async Task RunAsync(CancellationToken cancellationToken)
