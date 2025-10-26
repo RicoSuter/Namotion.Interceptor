@@ -88,7 +88,8 @@ internal class OpcUaSubscriptionManager
             var removed = await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken);
             if (removed > 0)
             {
-                _logger.LogWarning("Removed {Removed} monitored items that failed to create in OPC UA subscription {Id}.", removed, subscription.Id);
+                // TODO: Switch to polling when monitoring failed
+                _logger.LogWarning("Removed {Removed} monitored items that failed to create in OPC UA subscription {SubscriptionId}.", removed, subscription.Id);
             }
             
             _logger.LogInformation("Created OPC UA subscription {SubscriptionId} with {Count} monitored items.", subscription.Id, subscription.MonitoredItems.Count());
