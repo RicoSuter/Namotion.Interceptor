@@ -9,13 +9,14 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
     private readonly Channel<SubjectPropertyChange> _source = Channel.CreateUnbounded<SubjectPropertyChange>(new UnboundedChannelOptions
     {
         SingleReader = true,
-        SingleWriter = true,
+        SingleWriter = false, // Multiple threads can write property changes
         AllowSynchronousContinuations = false
     });
 
     private ImmutableArray<Channel<SubjectPropertyChange>> _subscribers = ImmutableArray<Channel<SubjectPropertyChange>>.Empty;
 
     private CancellationTokenSource? _broadcastCts;
+    private volatile Task? _broadcastTask;
     private readonly Lock _subscriptionLock = new();
 
     public PropertyChangedChannelSubscription Subscribe()
@@ -32,10 +33,12 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
             var wasEmpty = _subscribers.Length == 0;
             ImmutableInterlocked.Update(ref _subscribers, a => a.Add(channel));
 
-            if (wasEmpty && _broadcastCts == null)
+            // Start broadcast task if this is the first subscriber and no task is running
+            if (wasEmpty && (_broadcastTask == null || _broadcastTask.IsCompleted))
             {
+                _broadcastCts?.Dispose(); // Clean up any previous CTS
                 _broadcastCts = new CancellationTokenSource();
-                _ = RunAsync(_broadcastCts.Token);
+                _broadcastTask = Task.Run(() => RunAsync(_broadcastCts.Token));
             }
         }
 
@@ -58,14 +61,16 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
 
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
+        var oldValue = context.CurrentValue;
+        next(ref context);
+
+        // Check if there are any subscribers after the property write
+        // This ensures we don't miss events if a subscription happens during the write
         if (_subscribers.Length == 0)
         {
-            next(ref context);
             return;
         }
 
-        var oldValue = context.CurrentValue;
-        next(ref context);
         var newValue = context.GetFinalValue();
 
         var changeContext = SubjectChangeContext.Current;
@@ -82,7 +87,6 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
 
     private async Task RunAsync(CancellationToken cancellationToken)
     {
-        // TODO: Do we need a retry here to avoid stopping the broadcast
         try
         {
             await foreach (var item in _source.Reader.ReadAllAsync(cancellationToken))
@@ -95,38 +99,54 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
                 }
             }
 
-            foreach (var sub in _subscribers)
+            // Normal completion - complete all subscriber channels
+            var subscribers = _subscribers;
+            foreach (var sub in subscribers)
             {
                 sub.Writer.TryComplete();
             }
         }
         catch (OperationCanceledException)
         {
-            // Don't complete subscriber channels because they were already completed in Unsubscribe
+            // Expected during shutdown - subscriber channels are completed in Unsubscribe
         }
         catch (Exception ex)
         {
-            foreach (var sub in _subscribers)
+            // Unexpected exception - complete all channels with error and clean up
+            var subscribers = _subscribers;
+            foreach (var sub in subscribers)
             {
                 sub.Writer.TryComplete(ex);
             }
 
             lock (_subscriptionLock)
             {
+                // Clear subscribers to prevent memory leak
+                _subscribers = ImmutableArray<Channel<SubjectPropertyChange>>.Empty;
                 CleanUpBroadcast();
             }
 
-            throw;
+            // Log but don't rethrow - this is a fire-and-forget task
+            // In production, consider logging via ILogger if available
         }
     }
 
     private void CleanUpBroadcast()
     {
-        if (_broadcastCts != null)
+        // Capture and null out the CTS under lock to prevent use-after-dispose
+        var cts = _broadcastCts;
+        _broadcastCts = null;
+        
+        if (cts != null)
         {
-            _broadcastCts.Cancel();
-            _broadcastCts.Dispose();
-            _broadcastCts = null;
+            try
+            {
+                cts.Cancel();
+            }
+            finally
+            {
+                cts.Dispose();
+            }
         }
     }
 }
