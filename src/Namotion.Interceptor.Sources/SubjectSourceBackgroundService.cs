@@ -20,6 +20,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     private List<Action>? _beforeInitializationUpdates = [];
     private ISubjectRegistry? _subjectRegistry;
 
+    private readonly Lock _changesLock = new();
     private List<SubjectPropertyChange> _changes = [];
     private readonly SemaphoreSlim _writeSemaphore = new(1, 1);
 
@@ -45,10 +46,13 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     /// <inheritdoc />
     public void EnqueueSubjectUpdate(Action update)
     {
-        if (_beforeInitializationUpdates is not null)
+        // Fast path check without lock
+        var beforeInit = _beforeInitializationUpdates;
+        if (beforeInit is not null)
         {
             lock (_lock)
             {
+                // Re-check under lock to ensure thread safety
                 if (_beforeInitializationUpdates is not null)
                 {
                     _beforeInitializationUpdates.Add(update);
@@ -140,15 +144,27 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                         continue;
                     }
 
-                    _changes.Add(item);
-
                     if (periodicTimer is null)
                     {
+                        // Immediate mode - no buffering
+                        lock (_changesLock)
+                        {
+                            _changes.Add(item);
+                        }
                         await WriteToSourceAsync(_changes, linkedTokenSource.Token).ConfigureAwait(false);
-                        _changes.Clear();
+                        lock (_changesLock)
+                        {
+                            _changes.Clear();
+                        }
                     }
                     else
                     {
+                        // Buffered mode
+                        lock (_changesLock)
+                        {
+                            _changes.Add(item);
+                        }
+
                         if (item.ChangedTimestamp - _flushLastTime >= _bufferTime)
                         {
                             await TryFlushBufferAsync(item.ChangedTimestamp, linkedTokenSource.Token).ConfigureAwait(false);
@@ -171,7 +187,13 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
                 var now = DateTimeOffset.UtcNow;
-                if (_changes.Count > 0 && now - _flushLastTime >= _bufferTime)
+                int changesCount;
+                lock (_changesLock)
+                {
+                    changesCount = _changes.Count;
+                }
+
+                if (changesCount > 0 && now - _flushLastTime >= _bufferTime)
                 {
                     await TryFlushBufferAsync(now, cancellationToken).ConfigureAwait(false);
                 }
@@ -194,17 +216,24 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
         try
         {
-            if (_changes.Count == 0)
+            // Swap the changes list under lock
+            lock (_changesLock)
             {
-                return;
-            }
+                if (_changes.Count == 0)
+                {
+                    return;
+                }
 
-            _flushChanges = Interlocked.Exchange(ref _changes, _flushChanges);
-            _flushLastTime = newFlushTime;
+                var temp = _flushChanges;
+                _flushChanges = _changes;
+                _changes = temp;
+                _flushLastTime = newFlushTime;
+            }
 
             _flushTouchedChanges.Clear();
             _flushDedupedChanges.Clear();
 
+            // Deduplicate - take the most recent change for each property
             for (var i = _flushChanges.Count - 1; i >= 0; i--)
             {
                 var change = _flushChanges[i];
