@@ -19,7 +19,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
     private List<Action>? _beforeInitializationUpdates = [];
     private ISubjectRegistry? _subjectRegistry;
-    
+
     private List<SubjectPropertyChange> _changes = [];
     private readonly SemaphoreSlim _writeSemaphore = new(1, 1);
 
@@ -27,7 +27,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     private readonly HashSet<PropertyReference> _flushTouchedChanges = [];
     private readonly List<SubjectPropertyChange> _flushDedupedChanges = [];
     private DateTimeOffset _flushLastTime = DateTimeOffset.MinValue;
-    
+
     public SubjectSourceBackgroundService(
         ISubjectSource source,
         IInterceptorSubjectContext context,
@@ -81,8 +81,9 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 }
 
                 // Start listening for changes from the source
-                using var disposable = await _source.StartListeningAsync(this, stoppingToken);
-                var applyAction = await _source.LoadCompleteSourceStateAsync(stoppingToken);
+                using var disposable = await _source.StartListeningAsync(this, stoppingToken).ConfigureAwait(false);
+                var applyAction = await _source.LoadCompleteSourceStateAsync(stoppingToken).ConfigureAwait(false);
+
                 lock (_lock)
                 {
                     applyAction?.Invoke();
@@ -99,7 +100,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
                 // Subscribe to property changes and sync them to the source
                 using var subscription = _context.CreatePropertyChangedChannelSubscription();
-                await ProcessPropertyChangesAsync(subscription.Reader, stoppingToken);
+                await ProcessPropertyChangesAsync(subscription.Reader, stoppingToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -123,35 +124,43 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
         using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
-        var flushTask = periodicTimer is not null ? RunPeriodicFlushAsync(periodicTimer, linkedTokenSource.Token) : Task.CompletedTask;
+        var flushTask = periodicTimer is not null
+            ? RunPeriodicFlushAsync(periodicTimer!, linkedTokenSource.Token)
+            : Task.CompletedTask;
+
         try
         {
-            await foreach (var item in reader.ReadAllAsync(linkedTokenSource.Token))
+            // Wait + drain loop (avoids async-iterator allocations from ReadAllAsync)
+            while (await reader.WaitToReadAsync(linkedTokenSource.Token).ConfigureAwait(false))
             {
-                if (item.Source == _source || !_source.IsPropertyIncluded(item.Property.GetRegisteredProperty()))
+                while (reader.TryRead(out var item))
                 {
-                    continue;
-                }
-
-                _changes.Add(item);
-                if (periodicTimer is null)
-                {
-                    await WriteToSourceAsync(_changes, linkedTokenSource.Token);
-                    _changes.Clear();
-                }
-                else
-                {
-                    if (item.ChangedTimestamp - _flushLastTime >= _bufferTime)
+                    if (item.Source == _source || !_source.IsPropertyIncluded(item.Property.GetRegisteredProperty()))
                     {
-                        await TryFlushBufferAsync(item.ChangedTimestamp, linkedTokenSource.Token);
+                        continue;
+                    }
+
+                    _changes.Add(item);
+
+                    if (periodicTimer is null)
+                    {
+                        await WriteToSourceAsync(_changes, linkedTokenSource.Token).ConfigureAwait(false);
+                        _changes.Clear();
+                    }
+                    else
+                    {
+                        if (item.ChangedTimestamp - _flushLastTime >= _bufferTime)
+                        {
+                            await TryFlushBufferAsync(item.ChangedTimestamp, linkedTokenSource.Token).ConfigureAwait(false);
+                        }
                     }
                 }
             }
         }
         finally
         {
-            await linkedTokenSource.CancelAsync();
-            await flushTask;
+            try { await linkedTokenSource.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
+            await flushTask.ConfigureAwait(false);
         }
     }
 
@@ -159,12 +168,12 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     {
         try
         {
-            while (await timer.WaitForNextTickAsync(cancellationToken))
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
                 var now = DateTimeOffset.UtcNow;
                 if (_changes.Count > 0 && now - _flushLastTime >= _bufferTime)
                 {
-                    await TryFlushBufferAsync(now, cancellationToken);
+                    await TryFlushBufferAsync(now, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -176,7 +185,9 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
     private async ValueTask TryFlushBufferAsync(DateTimeOffset newFlushTime, CancellationToken cancellationToken)
     {
-        if (!await _writeSemaphore.WaitAsync(0, cancellationToken))
+        // Use synchronous try-enter to avoid Task allocation from WaitAsync
+        // ReSharper disable once MethodHasAsyncOverload
+        if (!_writeSemaphore.Wait(0, cancellationToken))
         {
             return;
         }
@@ -193,6 +204,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
             _flushTouchedChanges.Clear();
             _flushDedupedChanges.Clear();
+
             for (var i = _flushChanges.Count - 1; i >= 0; i--)
             {
                 var change = _flushChanges[i];
@@ -206,7 +218,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
             if (_flushDedupedChanges.Count > 0)
             {
-                await WriteToSourceAsync(_flushDedupedChanges, cancellationToken);
+                await WriteToSourceAsync(_flushDedupedChanges, cancellationToken).ConfigureAwait(false);
             }
         }
         finally
