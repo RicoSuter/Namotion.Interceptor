@@ -26,6 +26,8 @@ public class SubjectSourceBenchmark
     private Car _car;
     private string[] _propertyNames;
 
+    private readonly AutoResetEvent _signal = new(false);
+
     [GlobalSetup]
     public async Task Setup()
     {
@@ -34,7 +36,12 @@ public class SubjectSourceBenchmark
             .WithFullPropertyTracking()
             .WithRegistry();
 
-        _source = new TestSubjectSource();
+        _propertyNames = Enumerable
+            .Range(1, 5000)
+            .Select(i => $"Name{i}")
+            .ToArray();
+
+        _source = new TestSubjectSource(_propertyNames.Length);
         _service = new SubjectSourceBackgroundService(
             _source,
             _context,
@@ -43,10 +50,6 @@ public class SubjectSourceBenchmark
             retryTime: TimeSpan.FromSeconds(1));
 
         _car = new Car(_context);
-        _propertyNames = Enumerable
-            .Range(1, 5000)
-            .Select(i => $"Name{i}")
-            .ToArray();
         
         foreach (var name in _propertyNames)
         {
@@ -64,17 +67,24 @@ public class SubjectSourceBenchmark
         var c = 0;
         for (var i = 0; i < 1000000; i++)
         {
-            _service.EnqueueSubjectUpdate(() => { c++;});
+            _service.EnqueueSubjectUpdate(() =>
+            {
+                c++;
+                if (c == 1000000)
+                {
+                    _signal.Set();
+                }
+            });
         }
-        while (c < 1000000)
-        {
-            Thread.Sleep(1);
-        }
+
+        _signal.WaitOne();
     }
 
     [Benchmark]
     public void WriteToSource()
     {
+        _source.Reset();
+
         var observable = _context.GetService<PropertyChangedChannel>();
         for (var i = 0; i < _propertyNames.Length; i++)
         {
@@ -86,10 +96,7 @@ public class SubjectSourceBenchmark
             observable.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});
         }
         
-        while (_source.Count < _propertyNames.Length)
-        {
-            Thread.Sleep(1);
-        }
+        _source.Wait();
     }
 
     [GlobalCleanup]
@@ -103,7 +110,24 @@ public class SubjectSourceBenchmark
 
     private class TestSubjectSource : ISubjectSource
     {
-        public int Count { get; set; }
+        private int _count;
+        private readonly int _targetCount;
+        private readonly AutoResetEvent _signal = new(false);
+
+        public TestSubjectSource(int targetCount)
+        {
+            _targetCount = targetCount;
+        }
+
+        public void Reset()
+        {
+            _count = 0;
+        }
+        
+        public void Wait()
+        {
+            _signal.WaitOne();
+        }
         
         public bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
 
@@ -119,7 +143,13 @@ public class SubjectSourceBenchmark
 
         public ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
-            Count += changes.Count;
+            _count += changes.Count;
+
+            if (_count >= _targetCount)
+            {
+                _signal.Set();
+            }
+
             return ValueTask.CompletedTask;
         }
     }
