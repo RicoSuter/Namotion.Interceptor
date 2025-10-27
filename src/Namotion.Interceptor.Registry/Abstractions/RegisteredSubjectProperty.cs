@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Registry.Performance;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
@@ -9,22 +10,39 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubjectProperty
 {
+    private static readonly ObjectPool<RegisteredSubjectProperty> Pool = new(
+        static () => new RegisteredSubjectProperty());
+
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectReferenceCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
     private readonly List<SubjectPropertyChild> _children = [];
-    private readonly PropertyAttributeAttribute? _attributeMetadata;
+    private PropertyAttributeAttribute? _attributeMetadata;
 
-    public RegisteredSubjectProperty(RegisteredSubject parent, string name, 
-        Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
+    private RegisteredSubjectProperty()
     {
-        Parent = parent;
-        Type = type;
-        ReflectionAttributes = reflectionAttributes;
-        Reference = new PropertyReference(parent.Subject, name);
+    }
 
-        _attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
+    public static RegisteredSubjectProperty Create(RegisteredSubject parent, string name, Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
+    {
+        var property = Pool.Rent();
+        property.Parent = parent;
+        property.Type = type;
+        property.ReflectionAttributes = reflectionAttributes;
+        property.Reference = new PropertyReference(parent.Subject, name);
+
+        property._attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
+        return property;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void Return()
+    {
+        lock (_children)
+            _children.Clear();
+
+        Pool.Return(this);
     }
 
     /// <summary>
@@ -40,22 +58,22 @@ public class RegisteredSubjectProperty
     /// <summary>
     /// Gets the parent subject which contains the property.
     /// </summary>
-    public RegisteredSubject Parent { get; }
+    public RegisteredSubject Parent { get; private set; }
     
     /// <summary>
     /// Gets the property reference.
     /// </summary>
-    public PropertyReference Reference { get; }
+    public PropertyReference Reference { get; private set; }
     
     /// <summary>
     /// Gets the type of the property.
     /// </summary>
-    public Type Type { get; }
+    public Type Type { get; private set; }
 
     /// <summary>
     /// Gets a list of all .NET reflection attributes.
     /// </summary>
-    public IReadOnlyCollection<Attribute> ReflectionAttributes { get; }
+    public IReadOnlyCollection<Attribute> ReflectionAttributes { get; private set; }
     
     /// <summary>
     /// Gets the browse name of the property (either the property or attribute name).
