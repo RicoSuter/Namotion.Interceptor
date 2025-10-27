@@ -27,6 +27,7 @@ public class SubjectSourceBenchmark
     private string[] _propertyNames;
 
     private readonly AutoResetEvent _signal = new(false);
+    private Action[] _updates;
 
     [GlobalSetup]
     public async Task Setup()
@@ -50,31 +51,34 @@ public class SubjectSourceBenchmark
             retryTime: TimeSpan.FromSeconds(1));
 
         _car = new Car(_context);
-        
+
         foreach (var name in _propertyNames)
         {
             _car.TryGetRegisteredSubject()!
                 .AddProperty(name, typeof(string), static _ => "foo", static (_, _) => { });
         }
-        
+
         _cts = new CancellationTokenSource();
         await _service.StartAsync(_cts.Token);
+
+        _updates = Enumerable
+            .Range(1, 1000000)
+            .Select(c => c < 1000000
+                ? new Action(() => { c++; })
+                : () =>
+                {
+                    c++;
+                    _signal.Set();
+                })
+            .ToArray();
     }
 
     [Benchmark]
     public void WriteToRegistrySubjects()
     {
-        var c = 0;
-        for (var i = 0; i < 1000000; i++)
+        for (var i = 0; i < _updates.Length; i++)
         {
-            _service.EnqueueSubjectUpdate(() =>
-            {
-                c++;
-                if (c == 1000000)
-                {
-                    _signal.Set();
-                }
-            });
+            _service.EnqueueSubjectUpdate(_updates[i]);
         }
 
         _signal.WaitOne();
