@@ -94,7 +94,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
 
     private RegisteredSubject RegisterSubject(IInterceptorSubject subject)
     {
-        var registeredSubject = new RegisteredSubject(subject);
+        var registeredSubject = RegisteredSubject.Create(subject);
         _knownSubjects[subject] = registeredSubject;
         return registeredSubject;
     }
@@ -127,6 +127,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                 }
 
                 _knownSubjects.Remove(change.Subject);
+                registeredSubject.Return();
             }
         }
     }

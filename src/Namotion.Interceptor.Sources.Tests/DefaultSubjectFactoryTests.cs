@@ -39,8 +39,8 @@ public class DefaultSubjectFactoryTests
         context.AddService(serviceCollection.BuildServiceProvider());
 
         var person = new Person(context);
-        var property = new RegisteredSubjectProperty(
-            new RegisteredSubject(person),
+        var property = RegisteredSubjectProperty.Create(
+            RegisteredSubject.Create(person),
             nameof(Person.Mother),
             typeof(MyClass),
             []);
@@ -61,8 +61,8 @@ public class DefaultSubjectFactoryTests
         var context = new InterceptorSubjectContext();
 
         var person = new Person(context);
-        var property = new RegisteredSubjectProperty(
-            new RegisteredSubject(person),
+        var property = RegisteredSubjectProperty.Create(
+            RegisteredSubject.Create(person),
             nameof(Person.Mother),
             typeof(IList<MyClass>),
             []);
