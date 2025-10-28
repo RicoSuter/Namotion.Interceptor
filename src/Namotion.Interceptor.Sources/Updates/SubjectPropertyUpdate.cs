@@ -132,7 +132,9 @@ public class SubjectPropertyUpdate
         else if (property.IsSubjectReference)
         {
             Kind = SubjectPropertyUpdateKind.Item;
-            Item = value is IInterceptorSubject itemSubject ? SubjectUpdate.CreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates) : null;
+            Item = value is IInterceptorSubject itemSubject ? 
+                SubjectUpdate.CreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates) : 
+                null;
         }
         else
         {

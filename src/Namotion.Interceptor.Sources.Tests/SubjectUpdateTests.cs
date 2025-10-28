@@ -41,8 +41,8 @@ public class SubjectUpdateTests
 
         // Assert
         Assert.Equal(6, counter.TransformSubjectCount);
-        Assert.Equal(30 /* 6x5 properties */ + 12 /* 6x2 attributes */, counter.TransformPropertyCount);
-        
+        Assert.Equal(36 /* 6x6 properties */ + 12 /* 6x2 attributes */, counter.TransformPropertyCount);
+
         await Verify(completeSubjectUpdate).DisableDateCounting();
     }
 
@@ -96,13 +96,13 @@ public class SubjectUpdateTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry();
-    
+
         var father = new Person { FirstName = "Father" };
         var mother = new Person { FirstName = "Mother" };
         var child1 = new Person { FirstName = "Child1" };
         var child2 = new Person { FirstName = "Child2" };
         var child3 = new Person { FirstName = "Child3" };
-    
+
         var person = new Person(context)
         {
             FirstName = "Child",
@@ -110,7 +110,7 @@ public class SubjectUpdateTests
             Father = father,
             Children = [child1, child2, child3]
         };
-    
+
         var changes = new[]
         {
             SubjectPropertyChange.Create(new PropertyReference(person, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewPerson"),
@@ -118,19 +118,19 @@ public class SubjectUpdateTests
             SubjectPropertyChange.Create(new PropertyReference(child1, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewChild1"),
             SubjectPropertyChange.Create(new PropertyReference(child3, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewChild3"),
         };
-    
+
         // Act
         var partialSubjectUpdate = SubjectUpdate
-            .CreatePartialUpdateFromChanges(person, changes, 
-                [
-                    new MockProcessor(child1, child3),
-                    JsonCamelCasePathProcessor.Instance
-                ]);
-    
+            .CreatePartialUpdateFromChanges(person, changes,
+            [
+                new MockProcessor(child1, child3),
+                JsonCamelCasePathProcessor.Instance
+            ]);
+
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
     }
-    
+
     public class MockProcessor : ISubjectUpdateProcessor
     {
         private readonly IInterceptorSubject _excluded;
@@ -141,7 +141,7 @@ public class SubjectUpdateTests
             _excluded = excluded;
             _transform = transform;
         }
-        
+
         public bool IsIncluded(RegisteredSubjectProperty property)
         {
             return property.Parent.Subject != _excluded;
@@ -158,7 +158,7 @@ public class SubjectUpdateTests
             {
                 update.Value = "TransformedValue";
             }
-    
+
             return update;
         }
     }
@@ -252,7 +252,7 @@ public class SubjectUpdateTests
 
         var father = new Person { FirstName = "Father" };
         var mother = new Person { FirstName = "Mother" };
-        
+
         var person = new Person(context)
         {
             FirstName = "Child",
@@ -260,7 +260,7 @@ public class SubjectUpdateTests
             Father = father,
             Children = []
         };
-        
+
         var attribute1 = mother.TryGetRegisteredSubject()!
             .TryGetProperty("FirstName")!
             .AddAttribute("Test1", typeof(int), _ => 42, null);
@@ -284,31 +284,95 @@ public class SubjectUpdateTests
         await Verify(partialSubjectUpdate).DisableDateCounting();
     }
 
-    public class TransformCounter : ISubjectUpdateProcessor
+    [Fact]
+    public async Task WhenUpdateContainsIncrementalChanges_ThenAllOfThemAreApplied()
     {
-        private readonly HashSet<SubjectUpdate> _transformedSubjects = [];
-        private readonly HashSet<SubjectPropertyUpdate> _transformedProperties = [];
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
 
-        public int TransformSubjectCount { get; private set; } = 0;
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
 
-        public int TransformPropertyCount { get; private set; } = 0;
-
-        public SubjectUpdate TransformSubjectUpdate(IInterceptorSubject subject, SubjectUpdate update)
+        var person = new Person(context)
         {
-            if (!_transformedSubjects.Add(update))
-                throw new InvalidOperationException("Already added.");
-            
-            TransformSubjectCount++;
-            return update;
+            FirstName = "Parent",
+            Children = [child1, child2]
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        using var _ = context
+            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c));
+
+        // Act
+        var date = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        using (SubjectChangeContext.WithChangedTimestamp(date))
+        {
+            // Modify Child2 properties
+            child2.FirstName = "Child2.0";
+
+            // Remove Child1 and move Child2 to first position, previous changes should be kept
+            person.Children = person.Children.Where(c => c.FirstName != "Child1").ToList();
         }
 
-        public SubjectPropertyUpdate TransformSubjectPropertyUpdate(RegisteredSubjectProperty property, SubjectPropertyUpdate update)
+        var partialSubjectUpdate1 = SubjectUpdate
+            .CreatePartialUpdateFromChanges(person, changes.ToArray(), [JsonCamelCasePathProcessor.Instance]);
+
+        changes.Clear();
+        using (SubjectChangeContext.WithChangedTimestamp(date.AddSeconds(1)))
         {
-            if (!_transformedProperties.Add(update))
-                throw new InvalidOperationException("Already added.");
-            
-            TransformPropertyCount++;
-            return update;
+            child2.FirstName = "Child2.1";
         }
+
+        var partialSubjectUpdate2 = SubjectUpdate
+            .CreatePartialUpdateFromChanges(person, changes.ToArray(), [JsonCamelCasePathProcessor.Instance]);
+
+        changes.Clear();
+        using (SubjectChangeContext.WithChangedTimestamp(date.AddSeconds(2)))
+        {
+            person.FirstName = "ParentNext";
+        }
+
+        var partialSubjectUpdate3 = SubjectUpdate
+            .CreatePartialUpdateFromChanges(person, changes.ToArray(), [JsonCamelCasePathProcessor.Instance]);
+
+        // Assert
+        await Verify(new
+        {
+            Update1 = partialSubjectUpdate1,
+            Update2 = partialSubjectUpdate2,
+            Update3 = partialSubjectUpdate3
+        });
+    }
+}
+
+public class TransformCounter : ISubjectUpdateProcessor
+{
+    private readonly HashSet<SubjectUpdate> _transformedSubjects = [];
+    private readonly HashSet<SubjectPropertyUpdate> _transformedProperties = [];
+
+    public int TransformSubjectCount { get; private set; } = 0;
+
+    public int TransformPropertyCount { get; private set; } = 0;
+
+    public SubjectUpdate TransformSubjectUpdate(IInterceptorSubject subject, SubjectUpdate update)
+    {
+        if (!_transformedSubjects.Add(update))
+            throw new InvalidOperationException("Already added.");
+
+        TransformSubjectCount++;
+        return update;
+    }
+
+    public SubjectPropertyUpdate TransformSubjectPropertyUpdate(RegisteredSubjectProperty property, SubjectPropertyUpdate update)
+    {
+        if (!_transformedProperties.Add(update))
+            throw new InvalidOperationException("Already added.");
+
+        TransformPropertyCount++;
+        return update;
     }
 }
