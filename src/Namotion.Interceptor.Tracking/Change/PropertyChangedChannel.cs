@@ -1,64 +1,45 @@
-using System.Collections.Immutable;
-using System.Threading.Channels;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-public sealed class PropertyChangedChannel : IWriteInterceptor
+public sealed class PropertyChangedChannel : IWriteInterceptor, IDisposable
 {
-    private readonly Channel<SubjectPropertyChange> _source = Channel.CreateUnbounded<SubjectPropertyChange>(new UnboundedChannelOptions
-    {
-        SingleReader = true,
-        SingleWriter = true,
-        AllowSynchronousContinuations = false
-    });
-
-    private ImmutableArray<Channel<SubjectPropertyChange>> _subscribers = ImmutableArray<Channel<SubjectPropertyChange>>.Empty;
-
-    private CancellationTokenSource? _broadcastCts;
-    private readonly Lock _subscriptionLock = new();
+    private volatile PropertyChangedChannelSubscription[] _subscriptions = [];
+    private readonly Lock _gate = new();
 
     public PropertyChangedChannelSubscription Subscribe()
     {
-        var channel = Channel.CreateUnbounded<SubjectPropertyChange>(new UnboundedChannelOptions
+        var subscription = new PropertyChangedChannelSubscription(this);
+        lock (_gate)
         {
-            SingleReader = true,
-            SingleWriter = true,
-            AllowSynchronousContinuations = false
-        });
-
-        lock (_subscriptionLock)
-        {
-            var wasEmpty = _subscribers.Length == 0;
-            ImmutableInterlocked.Update(ref _subscribers, a => a.Add(channel));
-
-            if (wasEmpty && _broadcastCts == null)
-            {
-                _broadcastCts = new CancellationTokenSource();
-                _ = RunAsync(_broadcastCts.Token);
-            }
+            var newArray = new PropertyChangedChannelSubscription[_subscriptions.Length + 1];
+            Array.Copy(_subscriptions, newArray, _subscriptions.Length);
+            newArray[_subscriptions.Length] = subscription;
+            _subscriptions = newArray;
         }
-
-        return new PropertyChangedChannelSubscription(this, channel);
+        return subscription;
     }
 
-    internal void Unsubscribe(Channel<SubjectPropertyChange> channel)
+    public void Unsubscribe(PropertyChangedChannelSubscription subscription)
     {
-        lock (_subscriptionLock)
+        lock (_gate)
         {
-            ImmutableInterlocked.Update(ref _subscribers, a => a.Remove(channel));
-            channel.Writer.TryComplete();
-
-            if (_subscribers.Length == 0)
+            var index = Array.IndexOf(_subscriptions, subscription);
+            if (index >= 0)
             {
-                CleanUpBroadcast();
+                var newArray = new PropertyChangedChannelSubscription[_subscriptions.Length - 1];
+                Array.Copy(_subscriptions, 0, newArray, 0, index);
+                Array.Copy(_subscriptions, index + 1, newArray, index, _subscriptions.Length - index - 1);
+                _subscriptions = newArray;
             }
         }
     }
 
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        if (_subscribers.Length == 0)
+        var subscriptions = _subscriptions; // volatile read
+        if (subscriptions.Length == 0)
         {
             next(ref context);
             return;
@@ -77,56 +58,25 @@ public sealed class PropertyChangedChannel : IWriteInterceptor
             oldValue,
             newValue);
 
-        _source.Writer.TryWrite(propertyChange);
+        Enqueue(propertyChange);
     }
 
-    private async Task RunAsync(CancellationToken cancellationToken)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void Enqueue(SubjectPropertyChange change)
     {
-        // TODO: Do we need a retry here to avoid stopping the broadcast
-        try
+        var subscriptions = _subscriptions; // volatile read
+        for (int i = 0; i < subscriptions.Length; i++)
         {
-            await foreach (var item in _source.Reader.ReadAllAsync(cancellationToken))
-            {
-                var targets = _subscribers;
-                foreach (var sub in targets)
-                {
-                    // TryWrite is non-blocking and only fails if the channel is completed or disposed.
-                    sub.Writer.TryWrite(item);
-                }
-            }
-
-            foreach (var sub in _subscribers)
-            {
-                sub.Writer.TryComplete();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Don't complete subscriber channels because they were already completed in Unsubscribe
-        }
-        catch (Exception ex)
-        {
-            foreach (var sub in _subscribers)
-            {
-                sub.Writer.TryComplete(ex);
-            }
-
-            lock (_subscriptionLock)
-            {
-                CleanUpBroadcast();
-            }
-
-            throw;
+            subscriptions[i].Enqueue(change); // never blocks
         }
     }
 
-    private void CleanUpBroadcast()
+    public void Dispose()
     {
-        if (_broadcastCts != null)
+        var subscriptions = _subscriptions; // volatile read
+        for (int i = 0; i < subscriptions.Length; i++)
         {
-            _broadcastCts.Cancel();
-            _broadcastCts.Dispose();
-            _broadcastCts = null;
+            subscriptions[i].Dispose();
         }
     }
 }

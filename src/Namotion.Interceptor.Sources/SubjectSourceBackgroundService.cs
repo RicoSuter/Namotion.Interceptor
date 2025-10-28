@@ -1,5 +1,4 @@
-﻿using System.Threading.Channels;
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -97,10 +96,10 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                         EnqueueSubjectUpdate(action);
                     }
                 }
-
+                
                 // Subscribe to property changes and sync them to the source
                 using var subscription = _context.CreatePropertyChangedChannelSubscription();
-                await ProcessPropertyChangesAsync(subscription.Reader, stoppingToken).ConfigureAwait(false);
+                await ProcessPropertyChangesAsync(subscription, stoppingToken);
             }
             catch (Exception ex)
             {
@@ -117,7 +116,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
-    private async Task ProcessPropertyChangesAsync(ChannelReader<SubjectPropertyChange> reader, CancellationToken stoppingToken)
+    private async Task ProcessPropertyChangesAsync(PropertyChangedChannelSubscription subscription, CancellationToken stoppingToken)
     {
         ResetState();
 
@@ -125,34 +124,34 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
         var flushTask = periodicTimer is not null
-            ? RunPeriodicFlushAsync(periodicTimer!, linkedTokenSource.Token)
+            ? RunPeriodicFlushAsync(periodicTimer, linkedTokenSource.Token)
             : Task.CompletedTask;
 
         try
         {
+            // Ensure we don't block the startup process
+            await Task.Yield(); 
+
             // Wait + drain loop (avoids async-iterator allocations from ReadAllAsync)
-            while (await reader.WaitToReadAsync(linkedTokenSource.Token).ConfigureAwait(false))
+            while (subscription.TryDequeue(out var item, linkedTokenSource.Token))
             {
-                while (reader.TryRead(out var item))
+                if (item.Source == _source || !_source.IsPropertyIncluded(item.Property.GetRegisteredProperty()))
                 {
-                    if (item.Source == _source || !_source.IsPropertyIncluded(item.Property.GetRegisteredProperty()))
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    _changes.Add(item);
+                _changes.Add(item);
 
-                    if (periodicTimer is null)
+                if (periodicTimer is null)
+                {
+                    await WriteToSourceAsync(_changes, linkedTokenSource.Token).ConfigureAwait(false);
+                    _changes.Clear();
+                }
+                else
+                {
+                    if (item.ChangedTimestamp - _flushLastTime >= _bufferTime)
                     {
-                        await WriteToSourceAsync(_changes, linkedTokenSource.Token).ConfigureAwait(false);
-                        _changes.Clear();
-                    }
-                    else
-                    {
-                        if (item.ChangedTimestamp - _flushLastTime >= _bufferTime)
-                        {
-                            await TryFlushBufferAsync(item.ChangedTimestamp, linkedTokenSource.Token).ConfigureAwait(false);
-                        }
+                        await TryFlushBufferAsync(item.ChangedTimestamp, linkedTokenSource.Token).ConfigureAwait(false);
                     }
                 }
             }
@@ -171,7 +170,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
                 var now = DateTimeOffset.UtcNow;
-                if (_changes.Count > 0 && now - _flushLastTime >= _bufferTime)
+                var changes = Volatile.Read(ref _changes);
+                if (changes.Count > 0 && now - _flushLastTime >= _bufferTime)
                 {
                     await TryFlushBufferAsync(now, cancellationToken).ConfigureAwait(false);
                 }
