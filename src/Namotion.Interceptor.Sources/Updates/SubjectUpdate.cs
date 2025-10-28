@@ -79,12 +79,10 @@ public class SubjectUpdate
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
-        if (knownSubjectUpdates.ContainsKey(subject))
+        if (knownSubjectUpdates.TryGetValue(subject, out var update))
         {
-            // Avoid cycles: If subject already has an update then we have a cycle and break it here
-            
-            // TODO(cycle): Add reference to another update?
-            return new SubjectUpdate();
+            // stop here when already generated in previous step
+            return update;
         }
 
         var subjectUpdate = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
