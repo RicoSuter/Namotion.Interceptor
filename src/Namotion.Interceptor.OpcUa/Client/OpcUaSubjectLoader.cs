@@ -231,8 +231,6 @@ internal class OpcUaSubjectLoader
         property.Reference.SetPropertyData(OpcVariableKey, nodeId);
         _propertiesWithOpcData.Add(property.Reference);
         monitoredItems.Add(monitoredItem);
-
-        _logger.LogInformation("Prepared monitoring for '{Path}'", nodeId);
     }
 
     private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(

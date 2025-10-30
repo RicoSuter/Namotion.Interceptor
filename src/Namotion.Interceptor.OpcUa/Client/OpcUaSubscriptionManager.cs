@@ -95,14 +95,14 @@ internal class OpcUaSubscriptionManager
         }
     }
 
-    public void Cleanup()
+    public async Task CleanupAsync(CancellationToken cancellationToken)
     {
         foreach (var subscription in _activeSubscriptions)
         {
             try
             {
                 subscription.FastDataChangeCallback -= OnFastDataChange;
-                subscription.Delete(true);
+                await subscription.DeleteAsync(true, cancellationToken);
             }
             catch { /* ignore cleanup exceptions */ }
         }

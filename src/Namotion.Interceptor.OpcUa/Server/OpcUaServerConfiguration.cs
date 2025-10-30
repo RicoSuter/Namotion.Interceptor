@@ -43,7 +43,7 @@ public class OpcUaServerConfiguration
     /// </summary>
     public bool CleanCertificateStore { get; init; } = true;
 
-    public virtual ApplicationInstance CreateApplicationInstance()
+    public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync(CancellationToken cancellationToken)
     {
         var application = new ApplicationInstance
         {
@@ -162,7 +162,7 @@ public class OpcUaServerConfiguration
         };
 
         // Register the certificate validator with the configuration.
-        config.CertificateValidator.Update(config);
+        await config.CertificateValidator.UpdateAsync(config.SecurityConfiguration);
 
         application.ApplicationConfiguration = config;
         return application;
