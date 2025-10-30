@@ -1,10 +1,8 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Configuration;
@@ -50,7 +48,9 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     public Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        foreach (var change in changes)
+        var systemContext = _server?.CurrentInstance.DefaultSystemContext;
+
+        Parallel.ForEach(changes, change =>
         {
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) && 
                 data is BaseDataVariableState node)
@@ -61,11 +61,14 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
                     actualValue = Convert.ToDouble(actualValue);
                 }
 
-                node.Value = actualValue;
-                node.Timestamp = change.ChangedTimestamp.UtcDateTime;
-                node.ClearChangeMasks(_server?.CurrentInstance.DefaultSystemContext, false);
+                lock (node)
+                {
+                    node.Value = actualValue;
+                    node.Timestamp = change.ChangedTimestamp.UtcDateTime;
+                    node.ClearChangeMasks(systemContext, false);
+                }
             }
-        }
+        });
 
         return Task.CompletedTask;
     }
