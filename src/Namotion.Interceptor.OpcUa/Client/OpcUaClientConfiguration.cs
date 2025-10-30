@@ -143,7 +143,7 @@ public class OpcUaClientConfiguration
             CertificateValidator = new CertificateValidator()
         };
 
-        await config.CertificateValidator.UpdateAsync(config.SecurityConfiguration);
+        await config.CertificateValidator.UpdateAsync(config);
 
         application.ApplicationConfiguration = config;
         return application;

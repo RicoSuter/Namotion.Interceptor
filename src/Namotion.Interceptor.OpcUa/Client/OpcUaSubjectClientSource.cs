@@ -55,7 +55,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}...", _configuration.ServerUrl);
                 
                 var application = await _configuration.CreateApplicationInstanceAsync(stoppingToken);
-                await application.CheckApplicationInstanceCertificatesAsync(false, 0, stoppingToken);
+                await application.CheckApplicationInstanceCertificatesAsync(false, null, stoppingToken);
 
                 var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
                 var endpointDescription = await CoreClientUtils.SelectEndpointAsync(application.ApplicationConfiguration, _configuration.ServerUrl, false, stoppingToken);

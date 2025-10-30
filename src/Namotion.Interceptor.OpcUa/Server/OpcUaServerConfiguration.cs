@@ -162,7 +162,7 @@ public class OpcUaServerConfiguration
         };
 
         // Register the certificate validator with the configuration.
-        await config.CertificateValidator.UpdateAsync(config.SecurityConfiguration);
+        await config.CertificateValidator.UpdateAsync(config);
 
         application.ApplicationConfiguration = config;
         return application;
