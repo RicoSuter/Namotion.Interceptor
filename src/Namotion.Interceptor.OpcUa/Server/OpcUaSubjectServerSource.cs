@@ -1,10 +1,8 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Configuration;
@@ -76,7 +74,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var application = _configuration.CreateApplicationInstance();
+            var application = await _configuration.CreateApplicationInstanceAsync(stoppingToken);
             if (_configuration.CleanCertificateStore)
             {
                 CleanCertificateStore(application);
@@ -86,8 +84,8 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             {
                 _server = new OpcUaSubjectServer(_subject, this, _configuration);
 
-                await application.CheckApplicationInstanceCertificates(true);
-                await application.Start(_server);
+                await application.CheckApplicationInstanceCertificatesAsync(true, 0, stoppingToken);
+                await application.StartAsync(_server);
 
                 await Task.Delay(-1, stoppingToken);
             }

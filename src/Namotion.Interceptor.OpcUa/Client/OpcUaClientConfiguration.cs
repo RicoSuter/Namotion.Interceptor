@@ -83,7 +83,7 @@ public class OpcUaClientConfiguration
     /// </summary>
     public bool DefaultDiscardOldest { get; set; } = true;
 
-    public virtual ApplicationInstance CreateApplicationInstance()
+    public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync(CancellationToken cancellationToken)
     {
         var application = new ApplicationInstance
         {
@@ -143,7 +143,7 @@ public class OpcUaClientConfiguration
             CertificateValidator = new CertificateValidator()
         };
 
-        config.CertificateValidator.Update(config);
+        await config.CertificateValidator.UpdateAsync(config.SecurityConfiguration);
 
         application.ApplicationConfiguration = config;
         return application;
