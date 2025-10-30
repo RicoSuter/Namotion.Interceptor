@@ -84,7 +84,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             {
                 _server = new OpcUaSubjectServer(_subject, this, _configuration);
 
-                await application.CheckApplicationInstanceCertificatesAsync(true, 0, stoppingToken);
+                await application.CheckApplicationInstanceCertificatesAsync(true, null, stoppingToken);
                 await application.StartAsync(_server);
 
                 await Task.Delay(-1, stoppingToken);
