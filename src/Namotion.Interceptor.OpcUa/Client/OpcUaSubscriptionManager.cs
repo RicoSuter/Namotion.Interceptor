@@ -174,6 +174,7 @@ internal class OpcUaSubscriptionManager
         
         var changes = _changesBuffer.GetOrAdd(subscription, _ => []);
         changes.Clear();
+
         for (var i = 0; i < monitoredItemsCount; i++)
         {
             var item = notification.MonitoredItems[i];
@@ -195,18 +196,20 @@ internal class OpcUaSubscriptionManager
         
         _dispatcher?.EnqueueSubjectUpdate(() =>
         {
-            for (var i = 0; i < changes.Count; i++)
+            Parallel.ForEach(changes, change =>
             {
-                var change = changes[i];
                 try
                 {
-                    change.Property.SetValueFromSource(subscription, change.Timestamp, receivedTimestamp, change.Value);
+                    lock (change.Property.Subject)
+                    {
+                        change.Property.SetValueFromSource(subscription, change.Timestamp, receivedTimestamp, change.Value);
+                    }
                 }
                 catch (Exception e)
                 {
                     _logger.LogError(e, "Failed to apply change for {Path}.", change.Property.Name);
                 }
-            }
+            });
         });
     }
 

@@ -258,7 +258,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         }
 
         var writeValues = new WriteValueCollection();
-        foreach (var change in changes)
+        Parallel.ForEach(changes, change =>
         {
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)
             {
@@ -266,7 +266,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 if (registeredProperty.HasSetter)
                 {
                     var value = _configuration.ValueConverter.ConvertToNodeValue(change.GetNewValue<object?>(), registeredProperty.Type);
-                    writeValues.Add(new WriteValue
+                    var writeValue = new WriteValue
                     {
                         NodeId = nodeId,
                         AttributeId = Opc.Ua.Attributes.Value,
@@ -277,10 +277,15 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                             //ServerTimestamp = DateTime.UtcNow,
                             SourceTimestamp = change.ChangedTimestamp.UtcDateTime
                         }
-                    });
+                    };
+
+                    lock (writeValues)
+                    {
+                        writeValues.Add(writeValue);
+                    }
                 }
             }
-        }
+        });
         
         if (writeValues.Count == 0)
         {
