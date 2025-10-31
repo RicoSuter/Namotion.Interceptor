@@ -15,10 +15,10 @@ public class DerivedPropertyChangeHandlerTests
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangedObservable();
+            .WithPropertyChangeObservable();
 
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(changes.Add);
 
         // Act
@@ -52,14 +52,14 @@ public class DerivedPropertyChangeHandlerTests
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
             .WithContextInheritance();
         
         // Act
         var car = new Car(context);
         
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(changes.Add);
         
         car.Tires[0].Pressure = 2.0m;       
@@ -76,12 +76,12 @@ public class DerivedPropertyChangeHandlerTests
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangedObservable();
+            .WithPropertyChangeObservable();
 
         var dateTime = DateTimeOffset.UtcNow.AddHours(-1);
         var person = new Person(context);
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property.Name == nameof(Person.FullName))
             .Subscribe(changes.Add);
 

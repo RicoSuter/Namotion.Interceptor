@@ -48,7 +48,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         return Task.FromResult<Action?>(null);
     }
 
-    public Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         foreach (var change in changes)
         {
@@ -67,7 +67,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             }
         }
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

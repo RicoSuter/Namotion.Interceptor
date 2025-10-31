@@ -83,6 +83,16 @@ public class OpcUaClientConfiguration
     /// </summary>
     public bool DefaultDiscardOldest { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets the time window to buffer incoming changes (default: 8ms).
+    /// </summary>
+    public TimeSpan? BufferTime { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the retry time (default: 10s).
+    /// </summary>
+    public TimeSpan? RetryTime { get; set; }
+
     public virtual ApplicationInstance CreateApplicationInstance()
     {
         var application = new ApplicationInstance

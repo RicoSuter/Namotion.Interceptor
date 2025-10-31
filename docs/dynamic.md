@@ -1,6 +1,6 @@
 # Dynamic
 
-The Dynamic package enables creating interceptor subjects from interfaces at runtime without requiring compile-time code generation. This is particularly useful for scenarios where you need to create trackable objects from external interfaces, plugin architectures, or when working with dynamically loaded assemblies.
+The `Namotion.Interceptor.Dynamic` package enables creating interceptor subjects from interfaces at runtime without requiring compile-time code generation. This is particularly useful for scenarios where you need to create trackable objects from external interfaces, plugin architectures, or when working with dynamically loaded assemblies.
 
 Unlike the main interceptor approach that uses source generation with `[InterceptorSubject]` classes, the Namotion.Interceptor.Dynamic package uses Castle DynamicProxy to create runtime implementations of interfaces that fully participate in the interceptor ecosystem.
 
