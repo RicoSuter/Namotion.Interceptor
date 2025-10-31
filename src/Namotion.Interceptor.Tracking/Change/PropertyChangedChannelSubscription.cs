@@ -7,8 +7,7 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
 {
     private readonly PropertyChangedChannel _channel;
     private readonly ConcurrentQueue<SubjectPropertyChange> _queue = new();
-    private readonly SemaphoreSlim _semaphore = new(0, 1); // Binary semaphore (max count = 1)
-    private volatile int _hasItems; // 0 = no items, 1 = has items
+    private readonly ManualResetEventSlim _signal = new(false); // non-counting signal
     private volatile bool _completed;
 
     public PropertyChangedChannelSubscription(PropertyChangedChannel channel)
@@ -25,55 +24,59 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
         }
 
         _queue.Enqueue(item);
-        
-        // Use binary signaling: only signal if transitioning from 0 to 1
-        // This prevents semaphore overflow with large queues
-        if (Interlocked.CompareExchange(ref _hasItems, 1, 0) == 0)
-        {
-            _semaphore.Release();
-        }
+        _signal.Set(); // wake consumer (idempotent if already set)
     }
 
     public bool TryDequeue(out SubjectPropertyChange item, CancellationToken ct = default)
     {
         while (true)
         {
-            // Try to dequeue first in case items are already available
+            // Fast path: dequeue if available
             if (_queue.TryDequeue(out item))
             {
                 return true;
             }
 
-            // Check completion after failed dequeue
             if (_completed)
             {
                 item = default!;
                 return false;
             }
 
-            // Mark as no items before waiting
-            // This must be done BEFORE checking the queue again
-            Interlocked.Exchange(ref _hasItems, 0);
-            
-            // Double-check queue after marking as no items
-            // This prevents race where item is enqueued after our first TryDequeue
+            // Short spin to handle bursts without kernel waits
+            var spinner = new SpinWait();
+            while (!spinner.NextSpinWillYield)
+            {
+                spinner.SpinOnce();
+                if (_queue.TryDequeue(out item))
+                {
+                    return true;
+                }
+                if (_completed)
+                {
+                    item = default!;
+                    return false;
+                }
+            }
+
+            // Reset the signal and re-check via TryDequeue to avoid lost wake-ups
+            _signal.Reset();
             if (_queue.TryDequeue(out item))
             {
                 return true;
             }
 
-            // Queue is empty, wait for signal
+            // Still empty after reset: wait for a producer to Set()
             try
             {
-                _semaphore.Wait(ct);
+                _signal.Wait(ct);
             }
             catch (OperationCanceledException)
             {
                 item = default!;
                 return false;
             }
-            
-            // After being signaled, loop back to try dequeuing again
+            // loop and try dequeuing again
         }
     }
 
@@ -85,22 +88,11 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
         }
 
         _completed = true;
-        
-        // Signal to wake up any waiting TryDequeue calls
-        // Use CompareExchange to avoid semaphore overflow
-        if (Interlocked.CompareExchange(ref _hasItems, 1, 0) == 0)
-        {
-            try
-            {
-                _semaphore.Release();
-            }
-            catch (SemaphoreFullException)
-            {
-                // Should not happen with binary semaphore, but handle gracefully
-            }
-        }
+
+        // Wake any waiting TryDequeue
+        _signal.Set();
 
         _channel.Unsubscribe(this);
-        _semaphore.Dispose();
+        _signal.Dispose();
     }
 }
