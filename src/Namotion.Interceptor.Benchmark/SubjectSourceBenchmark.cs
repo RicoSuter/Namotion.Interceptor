@@ -89,7 +89,7 @@ public class SubjectSourceBenchmark
     {
         _source.Reset();
 
-        var observable = _context.GetService<PropertyChangedChannel>();
+        var queue = _context.GetService<PropertyChangedQueue>();
         for (var i = 0; i < _propertyNames.Length; i++)
         {
             var context = new PropertyWriteContext<int>(
@@ -97,7 +97,7 @@ public class SubjectSourceBenchmark
                 0, 
                 i);
 
-            observable.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});
+            queue.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});
         }
         
         _source.Wait();

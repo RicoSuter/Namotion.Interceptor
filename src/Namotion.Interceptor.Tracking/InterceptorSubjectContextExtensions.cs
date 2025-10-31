@@ -97,7 +97,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithPropertyChangedChannel(this IInterceptorSubjectContext context)
     {
         return context
-            .WithService(() => new PropertyChangedChannel());
+            .WithService(() => new PropertyChangedQueue());
     }
 
     /// <summary>
@@ -106,10 +106,10 @@ public static class InterceptorSubjectContextExtensions
     /// <param name="context">The context.</param>
     /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).</param>
     /// <returns>The observable.</returns>
-    public static PropertyChangedChannelSubscription CreatePropertyChangedChannelSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
+    public static PropertyChangedQueueSubscription CreatePropertyChangedChannelSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
     {
         return context
-            .GetService<PropertyChangedChannel>()
+            .GetService<PropertyChangedQueue>()
             .Subscribe();
     }
 
