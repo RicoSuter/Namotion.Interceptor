@@ -14,7 +14,17 @@ internal static class WriteInterceptorFactory<TProperty>
 
         var chain = new WriteInterceptorChain<IWriteInterceptor, TProperty>(
             interceptorArray,
-            static (interceptor, ref context, next) => interceptor.WriteProperty(ref context, next),
+            static (interceptor, ref context, next) =>
+            {
+                if (interceptor.ShouldInterceptWrite)
+                {
+                    interceptor.WriteProperty(ref context, next);
+                }
+                else
+                {
+                    next(ref context);
+                }
+            },
             static (ref interception, innerWriteValue) =>
             {
                 innerWriteValue(interception.Property.Subject, interception.NewValue);

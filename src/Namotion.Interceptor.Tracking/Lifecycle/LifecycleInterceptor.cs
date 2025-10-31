@@ -125,6 +125,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
+    public bool ShouldInterceptWrite
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         var currentValue = context.CurrentValue;
