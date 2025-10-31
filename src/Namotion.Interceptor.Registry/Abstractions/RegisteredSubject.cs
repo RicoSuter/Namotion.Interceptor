@@ -83,14 +83,14 @@ public class RegisteredSubject
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
     {
         ImmutableInterlocked.Update(ref _parents, 
-            static (arr, state) => arr.Add(state), 
+            static (array, state) => array.Add(state), 
             new SubjectPropertyParent { Property = parent, Index = index });
     }
 
     internal void RemoveParent(RegisteredSubjectProperty parent, object? index)
     { 
         ImmutableInterlocked.Update(ref _parents, 
-            static (arr, state) => arr.Remove(state), 
+            static (array, state) => array.Remove(state), 
             new SubjectPropertyParent { Property = parent, Index = index });
     }
 
