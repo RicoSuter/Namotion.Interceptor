@@ -8,7 +8,6 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
     private readonly PropertyChangedChannel _channel;
     private readonly ConcurrentQueue<SubjectPropertyChange> _queue = new();
     private readonly SemaphoreSlim _semaphore = new(0);
-    private volatile int _pendingCount;
     private volatile bool _completed;
 
     public PropertyChangedChannelSubscription(PropertyChangedChannel channel)
@@ -26,11 +25,16 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
 
         _queue.Enqueue(item);
         
-        // Only release semaphore if we successfully increment the pending count
-        // This prevents semaphore overflow by capping releases
-        if (Interlocked.Increment(ref _pendingCount) == 1)
+        // Signal that an item is available
+        // SemaphoreSlim will handle the count internally
+        try
         {
             _semaphore.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // Should not happen with semaphore(0) initial count
+            // but handle gracefully if it does
         }
     }
 
@@ -38,21 +42,20 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
     {
         while (true)
         {
-            // Drain the queue first before waiting
-            if (_queue.TryDequeue(out item))
-            {
-                return true;
-            }
-
-            // Check completion after failed dequeue
+            // First check completion to avoid waiting if already done
             if (_completed)
             {
+                // Drain any remaining items before returning false
+                if (_queue.TryDequeue(out item))
+                {
+                    return true;
+                }
+                
                 item = default!;
                 return false;
             }
 
-            // Reset pending count before waiting since queue is confirmed empty
-            Interlocked.Exchange(ref _pendingCount, 0);
+            // Wait for signal that items are available
             try
             {
                 _semaphore.Wait(ct);
@@ -62,6 +65,16 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
                 item = default!;
                 return false;
             }
+
+            // After being signaled, try to dequeue
+            // This matches the Release() call in Enqueue
+            if (_queue.TryDequeue(out item))
+            {
+                return true;
+            }
+            
+            // If queue is empty after being signaled, it might be a completion signal
+            // Loop back to check _completed at the top
         }
     }
 
@@ -73,6 +86,8 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
         }
 
         _completed = true;
+        
+        // Signal to wake up any waiting TryDequeue calls
         try
         {
             _semaphore.Release();
