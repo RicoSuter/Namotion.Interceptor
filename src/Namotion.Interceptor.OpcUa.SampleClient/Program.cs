@@ -21,7 +21,9 @@ var context = InterceptorSubjectContext
     .WithDataAnnotationValidation()
     .WithHostedServices(builder.Services);
 
+#pragma warning disable CS0618 // Type or member is obsolete
 Utils.SetTraceMask(Utils.TraceMasks.All);
+#pragma warning restore CS0618 // Type or member is obsolete
 
 var root = new Root(context);
 context.AddService(root);
