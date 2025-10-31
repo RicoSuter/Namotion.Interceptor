@@ -34,7 +34,7 @@ var context = InterceptorSubjectContext
     .WithFullPropertyTracking();
 
 context
-    .GetPropertyChangedObservable()
+    .GetPropertyChangeObservable()
     .Subscribe(change =>
     {
         Console.WriteLine(
@@ -234,7 +234,7 @@ var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking();
 
-context.GetPropertyChangedObservable().Subscribe(change => {
+context.GetPropertyChangeObservable().Subscribe(change => {
     Console.WriteLine($"{change.Property.Name}: {change.OldValue} → {change.NewValue}");
 });
 ```
@@ -242,8 +242,8 @@ context.GetPropertyChangedObservable().Subscribe(change => {
 **Methods:**
 
 - `WithLifecycle()` - Subject attach and detach callbacks
-- `WithFullPropertyTracking()` → `WithEqualityCheck()`, `WithContextInheritance()`, `WithDerivedPropertyChangeDetection()`, `WithPropertyChangedObservable()`
-- `WithPropertyChangedObservable()` - Observable property change notifications
+- `WithFullPropertyTracking()` → `WithEqualityCheck()`, `WithContextInheritance()`, `WithDerivedPropertyChangeDetection()`, `WithPropertyChangeObservable()`
+- `WithPropertyChangeObservable()` - Observable property change notifications
 - `WithDerivedPropertyChangeDetection()` → `WithLifecycle()` - Automatic derived property updates
 - `WithContextInheritance()` → `WithLifecycle()` - Child subjects inherit parent context
 - `WithEqualityCheck()` - Only trigger changes when values actually change

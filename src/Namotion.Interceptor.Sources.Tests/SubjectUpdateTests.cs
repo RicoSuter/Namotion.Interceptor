@@ -209,7 +209,7 @@ public class SubjectUpdateTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
             .WithRegistry();
 
         var child1 = new Person { FirstName = "Child1" };
@@ -225,7 +225,7 @@ public class SubjectUpdateTests
         // Act
         var changes = new List<SubjectPropertyChange>();
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(c => changes.Add(c));
 
         person.Mother = new Person { FirstName = "MyMother" };

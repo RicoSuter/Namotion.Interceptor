@@ -101,7 +101,7 @@ namespace Namotion.Interceptor.Mqtt
             return Task.FromResult<Action?>(null);
         }
 
-        public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public async ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
             foreach (var (path, change) in changes
                 .Where(c => !c.Property.GetRegisteredProperty().HasChildSubjects)
@@ -132,7 +132,7 @@ namespace Namotion.Interceptor.Mqtt
             return Task.CompletedTask;
         }
 
-        private async Task PublishPropertyValueAsync(string path, object? value, CancellationToken cancellationToken)
+        private async ValueTask PublishPropertyValueAsync(string path, object? value, CancellationToken cancellationToken)
         {
             await _mqttServer!.InjectApplicationMessage(
                 new InjectedMqttApplicationMessage(
