@@ -46,17 +46,17 @@ public sealed class PropertyChangeQueue : IWriteInterceptor, IDisposable
             }
         }
     }
-
-    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    
+    public bool ShouldInterceptWrite
     {
         // ReSharper disable once InconsistentlySynchronizedField
-        var subscriptions = _subscriptions; // volatile read
-        if (subscriptions.Length == 0)
-        {
-            next(ref context);
-            return;
-        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _subscriptions.Length > 0;
+    }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
         var oldValue = context.CurrentValue;
         next(ref context);
         var newValue = context.GetFinalValue();

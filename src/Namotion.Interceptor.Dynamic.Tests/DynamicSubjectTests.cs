@@ -134,6 +134,8 @@ public class DynamicSubjectTests
             return result;
         }
 
+        public bool ShouldInterceptWrite => true;
+
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
             _logs.Add($"{_name}: Before write {context.Property.Name}");

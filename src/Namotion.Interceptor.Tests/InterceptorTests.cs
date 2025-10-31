@@ -76,6 +76,8 @@ public class InterceptorTests
             _logs = logs;
         }
 
+        public bool ShouldInterceptWrite => true;
+
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
             _logs.Add($"{_name}: Before write {context.Property.Name}");
