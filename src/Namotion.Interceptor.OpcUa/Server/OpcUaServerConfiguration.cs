@@ -45,16 +45,18 @@ public class OpcUaServerConfiguration
 
     public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync(CancellationToken cancellationToken)
     {
-        var application = new ApplicationInstance
+#pragma warning disable CS0618 // Type or member is obsolete
+        var application = new ApplicationInstance(new DefaultTelemetry())
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Server
         };
+#pragma warning restore CS0618 // Type or member is obsolete
 
         var host = System.Net.Dns.GetHostName();
         var applicationUri = $"urn:{host}:Namotion.Interceptor:{ApplicationName}";
 
-        var config = new ApplicationConfiguration
+        var config = new ApplicationConfiguration(new DefaultTelemetry())
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Server,
@@ -158,7 +160,9 @@ public class OpcUaServerConfiguration
                 TraceMasks = 519, // Security, errors, service result exceptions & trace
                 DeleteOnLoad = true
             },
-            CertificateValidator = new CertificateValidator()
+#pragma warning disable CS0618 // Type or member is obsolete
+            CertificateValidator = new CertificateValidator(new DefaultTelemetry())
+#pragma warning restore CS0618 // Type or member is obsolete
         };
 
         // Register the certificate validator with the configuration.

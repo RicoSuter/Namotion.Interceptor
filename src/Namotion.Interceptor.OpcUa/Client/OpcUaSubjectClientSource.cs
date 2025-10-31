@@ -58,9 +58,12 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 await application.CheckApplicationInstanceCertificatesAsync(false, null, stoppingToken);
 
                 var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
-                var endpointDescription = await CoreClientUtils.SelectEndpointAsync(application.ApplicationConfiguration, _configuration.ServerUrl, false, stoppingToken);
+#pragma warning disable CS0618 // Type or member is obsolete
+                var endpointDescription = await CoreClientUtils.SelectEndpointAsync(application.ApplicationConfiguration, _configuration.ServerUrl, false, 5 * 1000, new DefaultTelemetry(), stoppingToken);
+#pragma warning restore CS0618 // Type or member is obsolete
                 var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
 
+#pragma warning disable CS0618 // Type or member is obsolete
                 _session = await Session.CreateAsync(
                     application.ApplicationConfiguration,
                     null,
@@ -72,6 +75,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                     new UserIdentity(),
                     [], 
                     stoppingToken);
+#pragma warning restore CS0618 // Type or member is obsolete
 
                 var cancellationTokenSource = new CancellationTokenSource();
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, cancellationTokenSource.Token);
