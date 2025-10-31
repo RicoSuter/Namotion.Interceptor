@@ -70,7 +70,7 @@ var allChangedLatencies = new List<double>();
 var allReceivedLatencies = new List<double?>();
 var allThroughputSamples = new List<double>();
 
-context.GetPropertyChangedObservable(ImmediateScheduler.Instance).Subscribe(change =>
+context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
 {
     var now = DateTimeOffset.UtcNow;
     allUpdatesSinceLastSample++;

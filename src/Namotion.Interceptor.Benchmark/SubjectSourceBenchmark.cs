@@ -89,7 +89,7 @@ public class SubjectSourceBenchmark
     {
         _source.Reset();
 
-        var observable = _context.GetService<PropertyChangedObservable>();
+        var queue = _context.GetService<PropertyChangeQueue>();
         for (var i = 0; i < _propertyNames.Length; i++)
         {
             var context = new PropertyWriteContext<int>(
@@ -97,7 +97,7 @@ public class SubjectSourceBenchmark
                 0, 
                 i);
 
-            observable.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});
+            queue.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});
         }
         
         _source.Wait();
@@ -145,16 +145,16 @@ public class SubjectSourceBenchmark
             return Task.FromResult<Action?>(null);
         }
 
-        public Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
-            _count += changes.Count();
+            _count += changes.Count;
 
             if (_count >= _targetCount)
             {
                 _signal.Set();
             }
 
-            return Task.CompletedTask;
+            return ValueTask.CompletedTask;
         }
     }
 }

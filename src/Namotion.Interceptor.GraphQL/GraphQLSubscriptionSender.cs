@@ -20,7 +20,7 @@ namespace Namotion.Interceptor.GraphQL
         {
             await foreach (var changes in _subject
                 .Context
-                .GetPropertyChangedObservable()
+                .GetPropertyChangeObservable()
                 .ToAsyncEnumerable()
                 .WithCancellation(stoppingToken))
             {
