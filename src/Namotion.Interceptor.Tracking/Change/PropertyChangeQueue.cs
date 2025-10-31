@@ -3,11 +3,20 @@ using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
+/// <summary>
+/// High-performance property change queue that distributes property changes to multiple subscriptions.
+/// Thread-safe for concurrent property writes from multiple threads.
+/// </summary>
 public sealed class PropertyChangeQueue : IWriteInterceptor, IDisposable
 {
     private volatile PropertyChangeQueueSubscription[] _subscriptions = [];
     private readonly Lock _subscriptionsModificationLock = new();
 
+    /// <summary>
+    /// Creates a new subscription to receive property changes.
+    /// Each subscription has its own isolated queue and should be consumed by a single dedicated thread.
+    /// </summary>
+    /// <returns>A new subscription that must be disposed when no longer needed.</returns>
     public PropertyChangeQueueSubscription Subscribe()
     {
         var subscription = new PropertyChangeQueueSubscription(this);
