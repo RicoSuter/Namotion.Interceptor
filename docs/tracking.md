@@ -1,6 +1,6 @@
 # Tracking
 
-The `Namotion.Interceptor.Tracking` package provides comprehensive change tracking for interceptor subjects, including property value changes, derived property updates, subject lifecycle events, and parent-child relationships. It offers two high-performance mechanisms for observing changes: **Observable** (Rx-based) and **Channel** (System.Threading.Channels-based), with Channel being the preferred choice for high-throughput scenarios.
+The `Namotion.Interceptor.Tracking` package provides comprehensive change tracking for interceptor subjects, including property value changes, derived property updates, subject lifecycle events, and parent-child relationships. It offers two mechanisms for observing changes: **Observable** (Rx-based) and the **(high performance) queue**, with the queue being the preferred choice for high-throughput scenarios.
 
 ## Setup
 
@@ -17,11 +17,11 @@ This is a convenience method that registers:
 - Context inheritance for child subjects
 - Derived property change detection
 - Property changed observable (Rx-based)
-- Property changed channel (high-performance)
+- Property changed queue (high performance)
 
 You can also enable features individually for more granular control.
 
-## Change Tracking: Observable vs Channel
+## Change Tracking: Observable vs (High Performance) Queue
 
 The Tracking package provides two mechanisms for monitoring property changes, each optimized for different use cases.
 
@@ -61,18 +61,18 @@ var person = new Person(context)
 - Slightly lower throughput in high-frequency scenarios
 - Subject synchronization overhead
 
-### Property Changed Channel (High Performance)
+### Property Changed Queue (High Performance)
 
-The Channel approach uses `System.Threading.Channels` and is optimized for maximum throughput with minimal allocations. **This is the preferred mechanism for high-performance scenarios** such as background services, IoT data processing, and source synchronization:
+The queue approach uses a lock-free, allocation-conscious queue and is optimized for maximum throughput with minimal allocations. This is the preferred mechanism for high-performance scenarios such as background services, IoT data processing, and source synchronization:
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithPropertyChangedChannel();
+    .WithPropertyChangedQueue();
 
-using var subscription = context.CreatePropertyChangedChannelSubscription();
+using var subscription = context.CreatePropertyChangeQueueSubscription();
 
-await foreach (var change in subscription.Reader.ReadAllAsync(cancellationToken))
+while (subscription.TryDequeue(out var change, cancellationToken))
 {
     Console.WriteLine(
         $"Property '{change.Property.Name}' changed " +
@@ -80,14 +80,14 @@ await foreach (var change in subscription.Reader.ReadAllAsync(cancellationToken)
 }
 ```
 
-**Channel Performance Characteristics:**
+**Queue Performance Characteristics:**
 
-1. **Zero-allocation value storage**: Primitive types (int, decimal, bool, etc.) and small structs are stored inline without boxing
-2. **Lock-free queuing**: Uses unbounded channels with lock-free write operations
-3. **Backpressure handling**: Natural flow control through channel capacity
-4. **Single-reader optimization**: Designed for efficient single-consumer scenarios
+1. Zero-allocation value storage: Primitive types (int, decimal, bool, etc.) and small structs are stored inline without boxing
+2. Lock-free queuing: Uses `ConcurrentQueue<T>` for non-blocking writes and low-overhead consumer wake-ups
+3. Efficient signaling: `ManualResetEventSlim` is used to wake the consumer without busy-waiting
+4. Single-reader optimization: Designed for efficient single-consumer scenarios
 
-**Channel Use Cases:**
+**Queue Use Cases:**
 - Source synchronization (MQTT, OPC UA, databases)
 - Background data processing services
 - High-frequency property change scenarios (>1000 changes/second)
@@ -257,7 +257,7 @@ This is primarily used internally by the derived property change detection syste
 
 **Observable**: Thread-safe through `Subject.Synchronize()`, but observers may receive events on different threads.
 
-**Channel**: Lock-free writes, thread-safe reads. Each subscription gets its own channel for isolation.
+**Queue**: Lock-free writes, thread-safe reads. Each subscription gets its own queue for isolation. Use one subscription per consumer thread.
 
 **Change Sources**: Use `SubjectMutationContext.ApplyChangesWithSource()` to mark changes as coming from external sources:
 
@@ -277,7 +277,7 @@ The Tracking package is foundational and used by:
 
 - **Registry**: Requires `WithLifecycle()` for subject/property registration
 - **Hosting**: Requires `WithLifecycle()` for hosted service management  
-- **Sources**: Uses `WithPropertyChangedChannel()` for high-performance synchronization
+- **Sources**: Uses the high-performance queue via `WithPropertyChangedQueue()` for synchronization
 - **Validation**: Can trigger validation on property changes
 - **Blazor**: Uses `WithPropertyChangedObservable()` for UI updates
 

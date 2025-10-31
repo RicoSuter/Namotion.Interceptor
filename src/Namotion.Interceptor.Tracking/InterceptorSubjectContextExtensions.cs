@@ -21,7 +21,7 @@ public static class InterceptorSubjectContextExtensions
             .WithEqualityCheck()
             .WithDerivedPropertyChangeDetection()
             .WithPropertyChangedObservable()
-            .WithPropertyChangedChannel()
+            .WithPropertyChangedQueue()
             .WithContextInheritance();
     }
     
@@ -94,7 +94,7 @@ public static class InterceptorSubjectContextExtensions
     /// </summary>
     /// <param name="context">The collection.</param>
     /// <returns>The collection.</returns>
-    public static IInterceptorSubjectContext WithPropertyChangedChannel(this IInterceptorSubjectContext context)
+    public static IInterceptorSubjectContext WithPropertyChangedQueue(this IInterceptorSubjectContext context)
     {
         return context
             .WithService(() => new PropertyChangeQueue());
@@ -106,7 +106,7 @@ public static class InterceptorSubjectContextExtensions
     /// <param name="context">The context.</param>
     /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).</param>
     /// <returns>The observable.</returns>
-    public static PropertyChangeQueueSubscription CreatePropertyChangedChannelSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
+    public static PropertyChangeQueueSubscription CreatePropertyChangeQueueSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
     {
         return context
             .GetService<PropertyChangeQueue>()
