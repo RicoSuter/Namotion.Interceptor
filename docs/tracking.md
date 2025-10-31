@@ -257,7 +257,11 @@ This is primarily used internally by the derived property change detection syste
 
 **Observable**: Thread-safe through `Subject.Synchronize()`, but observers may receive events on different threads.
 
-**Queue**: Lock-free writes, thread-safe reads. Each subscription gets its own queue for isolation. Use one subscription per consumer thread.
+**Queue Threading Model**:
+- **Enqueue (producer side)**: Fully thread-safe. Can be called concurrently from multiple threads without any synchronization.
+- **TryDequeue (consumer side)**: Designed for single-threaded consumption per subscription. Each subscription must have only one consumer thread calling `TryDequeue`.
+- **Multiple Subscriptions**: Each subscription is independent with its own isolated queue. Different subscriptions can be consumed by different threads concurrently.
+- **Guarantees**: The implementation is deadlock-free, never loses updates, and ensures all enqueued items are processed before disposal completes.
 
 **Change Sources**: Use `SubjectMutationContext.ApplyChangesWithSource()` to mark changes as coming from external sources:
 
