@@ -32,10 +32,10 @@ The Observable approach uses Reactive Extensions (Rx) and is ideal for UI scenar
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithPropertyChangedObservable();
+    .WithPropertyChangeObservable();
 
 context
-    .GetPropertyChangedObservable()
+    .GetPropertyChangeObservable()
     .Subscribe(change =>
     {
         Console.WriteLine(
@@ -68,7 +68,7 @@ The queue approach uses a lock-free, allocation-conscious queue and is optimized
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithPropertyChangedQueue();
+    .WithPropertyChangeQueue();
 
 using var subscription = context.CreatePropertyChangeQueueSubscription();
 
@@ -127,9 +127,9 @@ public partial class Person
 var context = InterceptorSubjectContext
     .Create()
     .WithDerivedPropertyChangeDetection()
-    .WithPropertyChangedObservable();
+    .WithPropertyChangeObservable();
 
-context.GetPropertyChangedObservable().Subscribe(change =>
+context.GetPropertyChangeObservable().Subscribe(change =>
 {
     Console.WriteLine($"{change.Property.Name}: {change.GetOldValue<object>()} → {change.GetNewValue<object>()}");
 });
@@ -281,8 +281,8 @@ The Tracking package is foundational and used by:
 
 - **Registry**: Requires `WithLifecycle()` for subject/property registration
 - **Hosting**: Requires `WithLifecycle()` for hosted service management  
-- **Sources**: Uses the high-performance queue via `WithPropertyChangedQueue()` for synchronization
+- **Sources**: Uses the high-performance queue via `WithPropertyChangeQueue()` for synchronization
 - **Validation**: Can trigger validation on property changes
-- **Blazor**: Uses `WithPropertyChangedObservable()` for UI updates
+- **Blazor**: Uses `WithPropertyChangeObservable()` for UI updates
 
 See the individual package documentation for integration details.
