@@ -98,7 +98,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 }
                 
                 // Subscribe to property changes and sync them to the source
-                using var subscription = _context.CreatePropertyChangedChannelSubscription();
+                using var subscription = _context.CreatePropertyChangeQueueSubscription();
                 await ProcessPropertyChangesAsync(subscription, stoppingToken);
             }
             catch (Exception ex)
@@ -124,7 +124,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
         var flushTask = periodicTimer is not null
-            ? RunPeriodicFlushAsync(periodicTimer, linkedTokenSource.Token)
+            // ReSharper disable AccessToDisposedClosure
+            ? Task.Run(async () => await RunPeriodicFlushAsync(periodicTimer, linkedTokenSource.Token), linkedTokenSource.Token)
             : Task.CompletedTask;
 
         try
