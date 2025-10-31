@@ -7,7 +7,8 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
 {
     private readonly PropertyChangedChannel _channel;
     private readonly ConcurrentQueue<SubjectPropertyChange> _queue = new();
-    private readonly SemaphoreSlim _semaphore = new(0);
+    private readonly SemaphoreSlim _semaphore = new(0, 1); // Binary semaphore (max count = 1)
+    private volatile int _hasItems; // 0 = no items, 1 = has items
     private volatile bool _completed;
 
     public PropertyChangedChannelSubscription(PropertyChangedChannel channel)
@@ -25,16 +26,11 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
 
         _queue.Enqueue(item);
         
-        // Signal that an item is available
-        // SemaphoreSlim will handle the count internally
-        try
+        // Use binary signaling: only signal if transitioning from 0 to 1
+        // This prevents semaphore overflow with large queues
+        if (Interlocked.CompareExchange(ref _hasItems, 1, 0) == 0)
         {
             _semaphore.Release();
-        }
-        catch (SemaphoreFullException)
-        {
-            // Should not happen with semaphore(0) initial count
-            // but handle gracefully if it does
         }
     }
 
@@ -42,20 +38,31 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
     {
         while (true)
         {
-            // First check completion to avoid waiting if already done
+            // Try to dequeue first in case items are already available
+            if (_queue.TryDequeue(out item))
+            {
+                return true;
+            }
+
+            // Check completion after failed dequeue
             if (_completed)
             {
-                // Drain any remaining items before returning false
-                if (_queue.TryDequeue(out item))
-                {
-                    return true;
-                }
-                
                 item = default!;
                 return false;
             }
 
-            // Wait for signal that items are available
+            // Mark as no items before waiting
+            // This must be done BEFORE checking the queue again
+            Interlocked.Exchange(ref _hasItems, 0);
+            
+            // Double-check queue after marking as no items
+            // This prevents race where item is enqueued after our first TryDequeue
+            if (_queue.TryDequeue(out item))
+            {
+                return true;
+            }
+
+            // Queue is empty, wait for signal
             try
             {
                 _semaphore.Wait(ct);
@@ -65,16 +72,8 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
                 item = default!;
                 return false;
             }
-
-            // After being signaled, try to dequeue
-            // This matches the Release() call in Enqueue
-            if (_queue.TryDequeue(out item))
-            {
-                return true;
-            }
             
-            // If queue is empty after being signaled, it might be a completion signal
-            // Loop back to check _completed at the top
+            // After being signaled, loop back to try dequeuing again
         }
     }
 
@@ -88,13 +87,17 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
         _completed = true;
         
         // Signal to wake up any waiting TryDequeue calls
-        try
+        // Use CompareExchange to avoid semaphore overflow
+        if (Interlocked.CompareExchange(ref _hasItems, 1, 0) == 0)
         {
-            _semaphore.Release();
-        }
-        catch (SemaphoreFullException)
-        {
-            // Already signaled, ignore
+            try
+            {
+                _semaphore.Release();
+            }
+            catch (SemaphoreFullException)
+            {
+                // Should not happen with binary semaphore, but handle gracefully
+            }
         }
 
         _channel.Unsubscribe(this);
