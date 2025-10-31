@@ -32,7 +32,7 @@ public sealed class PropertyChangedChannel : IWriteInterceptor, IDisposable
             {
                 var updatedSubscriptions = new PropertyChangedChannelSubscription[subscriptions.Length - 1];
                 Array.Copy(subscriptions, 0, updatedSubscriptions, 0, index);
-                Array.Copy(subscriptions, index + 1, updatedSubscriptions, index, _subscriptions.Length - index - 1);
+                Array.Copy(subscriptions, index + 1, updatedSubscriptions, index, subscriptions.Length - index - 1);
                 _subscriptions = updatedSubscriptions;
             }
         }

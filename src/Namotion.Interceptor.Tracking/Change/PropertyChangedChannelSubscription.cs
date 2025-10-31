@@ -7,8 +7,8 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
 {
     private readonly PropertyChangedChannel _channel;
     private readonly ConcurrentQueue<SubjectPropertyChange> _queue = new();
-    private readonly SemaphoreSlim _semaphore = new(0);
-    private volatile int _pendingCount;
+    private readonly SemaphoreSlim _semaphore = new(0, 1); // Binary semaphore (max count = 1)
+    private volatile int _hasItems; // 0 = no items, 1 = has items
     private volatile bool _completed;
 
     public PropertyChangedChannelSubscription(PropertyChangedChannel channel)
@@ -26,9 +26,9 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
 
         _queue.Enqueue(item);
         
-        // Only release semaphore if we successfully increment the pending count
-        // This prevents semaphore overflow by capping releases
-        if (Interlocked.Increment(ref _pendingCount) == 1)
+        // Use binary signaling: only signal if transitioning from 0 to 1
+        // This prevents semaphore overflow with large queues
+        if (Interlocked.CompareExchange(ref _hasItems, 1, 0) == 0)
         {
             _semaphore.Release();
         }
@@ -38,7 +38,7 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
     {
         while (true)
         {
-            // Drain the queue first before waiting
+            // Try to dequeue first in case items are already available
             if (_queue.TryDequeue(out item))
             {
                 return true;
@@ -51,8 +51,18 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
                 return false;
             }
 
-            // Reset pending count before waiting since queue is confirmed empty
-            Interlocked.Exchange(ref _pendingCount, 0);
+            // Mark as no items before waiting
+            // This must be done BEFORE checking the queue again
+            Interlocked.Exchange(ref _hasItems, 0);
+            
+            // Double-check queue after marking as no items
+            // This prevents race where item is enqueued after our first TryDequeue
+            if (_queue.TryDequeue(out item))
+            {
+                return true;
+            }
+
+            // Queue is empty, wait for signal
             try
             {
                 _semaphore.Wait(ct);
@@ -62,6 +72,8 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
                 item = default!;
                 return false;
             }
+            
+            // After being signaled, loop back to try dequeuing again
         }
     }
 
@@ -73,13 +85,19 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
         }
 
         _completed = true;
-        try
+        
+        // Signal to wake up any waiting TryDequeue calls
+        // Use CompareExchange to avoid semaphore overflow
+        if (Interlocked.CompareExchange(ref _hasItems, 1, 0) == 0)
         {
-            _semaphore.Release();
-        }
-        catch (SemaphoreFullException)
-        {
-            // Already signaled, ignore
+            try
+            {
+                _semaphore.Release();
+            }
+            catch (SemaphoreFullException)
+            {
+                // Should not happen with binary semaphore, but handle gracefully
+            }
         }
 
         _channel.Unsubscribe(this);
