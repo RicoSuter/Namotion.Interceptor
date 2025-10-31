@@ -3,18 +3,18 @@ using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-public sealed class PropertyChangedChannel : IWriteInterceptor, IDisposable
+public sealed class PropertyChangedQueue : IWriteInterceptor, IDisposable
 {
-    private volatile PropertyChangedChannelSubscription[] _subscriptions = [];
+    private volatile PropertyChangedQueueSubscription[] _subscriptions = [];
     private readonly Lock _subscriptionsModificationLock = new();
 
-    public PropertyChangedChannelSubscription Subscribe()
+    public PropertyChangedQueueSubscription Subscribe()
     {
-        var subscription = new PropertyChangedChannelSubscription(this);
+        var subscription = new PropertyChangedQueueSubscription(this);
         lock (_subscriptionsModificationLock)
         {
             var subscriptions = _subscriptions; // volatile read
-            var updatedSubscriptions = new PropertyChangedChannelSubscription[subscriptions.Length + 1];
+            var updatedSubscriptions = new PropertyChangedQueueSubscription[subscriptions.Length + 1];
             Array.Copy(subscriptions, updatedSubscriptions, subscriptions.Length);
             updatedSubscriptions[subscriptions.Length] = subscription;
             _subscriptions = updatedSubscriptions;
@@ -22,7 +22,7 @@ public sealed class PropertyChangedChannel : IWriteInterceptor, IDisposable
         return subscription;
     }
 
-    public void Unsubscribe(PropertyChangedChannelSubscription subscription)
+    public void Unsubscribe(PropertyChangedQueueSubscription subscription)
     {
         lock (_subscriptionsModificationLock)
         {
@@ -30,7 +30,7 @@ public sealed class PropertyChangedChannel : IWriteInterceptor, IDisposable
             var index = Array.IndexOf(subscriptions, subscription);
             if (index >= 0)
             {
-                var updatedSubscriptions = new PropertyChangedChannelSubscription[subscriptions.Length - 1];
+                var updatedSubscriptions = new PropertyChangedQueueSubscription[subscriptions.Length - 1];
                 Array.Copy(subscriptions, 0, updatedSubscriptions, 0, index);
                 Array.Copy(subscriptions, index + 1, updatedSubscriptions, index, subscriptions.Length - index - 1);
                 _subscriptions = updatedSubscriptions;

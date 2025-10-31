@@ -3,20 +3,20 @@ using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-public sealed class PropertyChangedChannelSubscription : IDisposable
+public sealed class PropertyChangedQueueSubscription : IDisposable
 {
-    private readonly PropertyChangedChannel _channel;
+    private readonly PropertyChangedQueue _changedQueue;
     private readonly ConcurrentQueue<SubjectPropertyChange> _queue = new();
     private readonly ManualResetEventSlim _signal = new(false); // non-counting signal
     private volatile bool _completed;
 
-    public PropertyChangedChannelSubscription(PropertyChangedChannel channel)
+    public PropertyChangedQueueSubscription(PropertyChangedQueue queue)
     {
-        _channel = channel;
+        _changedQueue = queue;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Enqueue(SubjectPropertyChange item)
+    internal void Enqueue(SubjectPropertyChange item)
     {
         if (_completed)
         {
@@ -41,22 +41,6 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
             {
                 item = default!;
                 return false;
-            }
-
-            // Short spin to handle bursts without kernel waits
-            var spinner = new SpinWait();
-            while (!spinner.NextSpinWillYield)
-            {
-                spinner.SpinOnce();
-                if (_queue.TryDequeue(out item))
-                {
-                    return true;
-                }
-                if (_completed)
-                {
-                    item = default!;
-                    return false;
-                }
             }
 
             // Reset the signal and re-check via TryDequeue to avoid lost wake-ups
@@ -92,7 +76,7 @@ public sealed class PropertyChangedChannelSubscription : IDisposable
         // Wake any waiting TryDequeue
         _signal.Set();
 
-        _channel.Unsubscribe(this);
+        _changedQueue.Unsubscribe(this);
         _signal.Dispose();
     }
 }

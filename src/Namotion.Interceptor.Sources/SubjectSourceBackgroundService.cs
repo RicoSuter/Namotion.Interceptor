@@ -116,7 +116,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
-    private async Task ProcessPropertyChangesAsync(PropertyChangedChannelSubscription subscription, CancellationToken stoppingToken)
+    private async Task ProcessPropertyChangesAsync(PropertyChangedQueueSubscription subscription, CancellationToken stoppingToken)
     {
         ResetState();
 
