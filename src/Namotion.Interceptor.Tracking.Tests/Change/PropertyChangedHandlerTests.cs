@@ -13,10 +13,10 @@ public class PropertyChangedHandlerTests
         var changes = new List<SubjectPropertyChange>();
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable();
+            .WithPropertyChangeObservable();
 
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(changes.Add);
 
         // Act
