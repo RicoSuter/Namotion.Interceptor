@@ -43,6 +43,16 @@ public class OpcUaServerConfiguration
     /// </summary>
     public bool CleanCertificateStore { get; init; } = true;
 
+    /// <summary>
+    /// Gets or sets the time window to buffer incoming changes (default: 8ms).
+    /// </summary>
+    public TimeSpan? BufferTime { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the retry time (default: 10s).
+    /// </summary>
+    public TimeSpan? RetryTime { get; set; }
+
     public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync(CancellationToken cancellationToken)
     {
 #pragma warning disable CS0618 // Type or member is obsolete
@@ -166,7 +176,7 @@ public class OpcUaServerConfiguration
         };
 
         // Register the certificate validator with the configuration.
-        await config.CertificateValidator.UpdateAsync(config);
+        await config.CertificateValidator.UpdateAsync(config, cancellationToken);
 
         application.ApplicationConfiguration = config;
         return application;

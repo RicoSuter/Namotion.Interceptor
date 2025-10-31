@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.SampleConsole
                 .WithFullPropertyTracking();
 
             context
-                .GetPropertyChangedObservable()
+                .GetPropertyChangeObservable()
                 .Subscribe((change) => 
                     Console.WriteLine($"Property {change.Property.Name} changed from {change.GetOldValue<object?>()} to {change.GetNewValue<object?>()}."));
 

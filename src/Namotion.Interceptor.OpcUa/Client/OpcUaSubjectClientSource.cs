@@ -256,7 +256,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         return Task.FromResult<Action?>(null);
     }
 
-    public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public async ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (_session is null)
         {
@@ -264,7 +264,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             return;
         }
 
-        var writeValues = new WriteValueCollection();
+        var writeValues = new WriteValueCollection(changes.Count);
         foreach (var change in changes)
         {
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)
