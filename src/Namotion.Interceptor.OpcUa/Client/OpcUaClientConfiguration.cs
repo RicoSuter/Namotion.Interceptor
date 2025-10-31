@@ -83,6 +83,16 @@ public class OpcUaClientConfiguration
     /// </summary>
     public bool DefaultDiscardOldest { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets the time window to buffer incoming changes (default: 8ms).
+    /// </summary>
+    public TimeSpan? BufferTime { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the retry time (default: 10s).
+    /// </summary>
+    public TimeSpan? RetryTime { get; set; }
+
     public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync(CancellationToken cancellationToken)
     {
         var application = new ApplicationInstance(new DefaultTelemetry())
@@ -145,7 +155,7 @@ public class OpcUaClientConfiguration
 #pragma warning restore CS0618 // Type or member is obsolete
         };
 
-        await config.CertificateValidator.UpdateAsync(config);
+        await config.CertificateValidator.UpdateAsync(config, cancellationToken);
 
         application.ApplicationConfiguration = config;
         return application;
