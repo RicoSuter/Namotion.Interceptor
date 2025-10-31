@@ -23,7 +23,7 @@ public class TimestampTests
         var mother = new Person(context);
         var changes = new List<SubjectPropertyChange>();
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(c => changes.Add(c));
        
         var timestamp = DateTimeOffset.Now.AddDays(-200);
