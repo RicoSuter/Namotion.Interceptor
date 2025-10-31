@@ -116,7 +116,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
-    private async Task ProcessPropertyChangesAsync(PropertyChangedQueueSubscription subscription, CancellationToken stoppingToken)
+    private async Task ProcessPropertyChangesAsync(PropertyChangeQueueSubscription subscription, CancellationToken stoppingToken)
     {
         ResetState();
 
@@ -132,7 +132,6 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
             // Ensure we don't block the startup process
             await Task.Yield(); 
 
-            // Wait + drain loop (avoids async-iterator allocations from ReadAllAsync)
             while (subscription.TryDequeue(out var item, linkedTokenSource.Token))
             {
                 if (item.Source == _source || !_source.IsPropertyIncluded(item.Property.GetRegisteredProperty()))

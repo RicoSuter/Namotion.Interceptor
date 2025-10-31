@@ -3,16 +3,16 @@ using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-public sealed class PropertyChangedQueueSubscription : IDisposable
+public sealed class PropertyChangeQueueSubscription : IDisposable
 {
-    private readonly PropertyChangedQueue _changedQueue;
+    private readonly PropertyChangeQueue _changeQueue;
     private readonly ConcurrentQueue<SubjectPropertyChange> _queue = new();
     private readonly ManualResetEventSlim _signal = new(false); // non-counting signal
     private volatile bool _completed;
 
-    public PropertyChangedQueueSubscription(PropertyChangedQueue queue)
+    public PropertyChangeQueueSubscription(PropertyChangeQueue queue)
     {
-        _changedQueue = queue;
+        _changeQueue = queue;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -76,7 +76,7 @@ public sealed class PropertyChangedQueueSubscription : IDisposable
         // Wake any waiting TryDequeue
         _signal.Set();
 
-        _changedQueue.Unsubscribe(this);
+        _changeQueue.Unsubscribe(this);
         _signal.Dispose();
     }
 }

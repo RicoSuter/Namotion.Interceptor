@@ -89,7 +89,7 @@ public class SubjectSourceBenchmark
     {
         _source.Reset();
 
-        var queue = _context.GetService<PropertyChangedQueue>();
+        var queue = _context.GetService<PropertyChangeQueue>();
         for (var i = 0; i < _propertyNames.Length; i++)
         {
             var context = new PropertyWriteContext<int>(
