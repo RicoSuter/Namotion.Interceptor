@@ -70,7 +70,7 @@ public class SubjectSourceBackgroundServiceTests
     public async Task WhenPropertyChangeIsTriggered_ThenWriteToSourceAsyncIsCalled()
     {
         // Arrange
-        var propertyChangedChannel = new PropertyChangedQueue();
+        var propertyChangedChannel = new PropertyChangeQueue();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();

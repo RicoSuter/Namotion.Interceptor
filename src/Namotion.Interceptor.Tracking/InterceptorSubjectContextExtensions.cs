@@ -70,7 +70,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithPropertyChangedObservable(this IInterceptorSubjectContext context)
     {
         return context
-            .WithService(() => new PropertyChangedObservable());
+            .WithService(() => new PropertyChangeObservable());
     }
 
     /// <summary>
@@ -83,7 +83,7 @@ public static class InterceptorSubjectContextExtensions
     {
         scheduler ??= Scheduler.Default;
         return context
-            .GetService<PropertyChangedObservable>()
+            .GetService<PropertyChangeObservable>()
             .Publish()
             .RefCount() // single upstream subscription (shared)
             .ObserveOn(scheduler); // per-subscriber queue; producer will not be blocked
@@ -97,7 +97,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithPropertyChangedChannel(this IInterceptorSubjectContext context)
     {
         return context
-            .WithService(() => new PropertyChangedQueue());
+            .WithService(() => new PropertyChangeQueue());
     }
 
     /// <summary>
@@ -106,10 +106,10 @@ public static class InterceptorSubjectContextExtensions
     /// <param name="context">The context.</param>
     /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).</param>
     /// <returns>The observable.</returns>
-    public static PropertyChangedQueueSubscription CreatePropertyChangedChannelSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
+    public static PropertyChangeQueueSubscription CreatePropertyChangedChannelSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
     {
         return context
-            .GetService<PropertyChangedQueue>()
+            .GetService<PropertyChangeQueue>()
             .Subscribe();
     }
 

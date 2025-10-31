@@ -3,12 +3,12 @@ using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWriteInterceptor
+public class PropertyChangeObservable : IObservable<SubjectPropertyChange>, IWriteInterceptor
 {
     private readonly Subject<SubjectPropertyChange> _subject = new();
     private readonly ISubject<SubjectPropertyChange> _syncSubject;
 
-    public PropertyChangedObservable()
+    public PropertyChangeObservable()
     {
         _syncSubject = Subject.Synchronize(_subject);
     }

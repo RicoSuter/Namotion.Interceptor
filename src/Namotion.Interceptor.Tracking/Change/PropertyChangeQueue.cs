@@ -3,18 +3,18 @@ using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-public sealed class PropertyChangedQueue : IWriteInterceptor, IDisposable
+public sealed class PropertyChangeQueue : IWriteInterceptor, IDisposable
 {
-    private volatile PropertyChangedQueueSubscription[] _subscriptions = [];
+    private volatile PropertyChangeQueueSubscription[] _subscriptions = [];
     private readonly Lock _subscriptionsModificationLock = new();
 
-    public PropertyChangedQueueSubscription Subscribe()
+    public PropertyChangeQueueSubscription Subscribe()
     {
-        var subscription = new PropertyChangedQueueSubscription(this);
+        var subscription = new PropertyChangeQueueSubscription(this);
         lock (_subscriptionsModificationLock)
         {
             var subscriptions = _subscriptions; // volatile read
-            var updatedSubscriptions = new PropertyChangedQueueSubscription[subscriptions.Length + 1];
+            var updatedSubscriptions = new PropertyChangeQueueSubscription[subscriptions.Length + 1];
             Array.Copy(subscriptions, updatedSubscriptions, subscriptions.Length);
             updatedSubscriptions[subscriptions.Length] = subscription;
             _subscriptions = updatedSubscriptions;
@@ -22,7 +22,7 @@ public sealed class PropertyChangedQueue : IWriteInterceptor, IDisposable
         return subscription;
     }
 
-    public void Unsubscribe(PropertyChangedQueueSubscription subscription)
+    public void Unsubscribe(PropertyChangeQueueSubscription subscription)
     {
         lock (_subscriptionsModificationLock)
         {
@@ -30,7 +30,7 @@ public sealed class PropertyChangedQueue : IWriteInterceptor, IDisposable
             var index = Array.IndexOf(subscriptions, subscription);
             if (index >= 0)
             {
-                var updatedSubscriptions = new PropertyChangedQueueSubscription[subscriptions.Length - 1];
+                var updatedSubscriptions = new PropertyChangeQueueSubscription[subscriptions.Length - 1];
                 Array.Copy(subscriptions, 0, updatedSubscriptions, 0, index);
                 Array.Copy(subscriptions, index + 1, updatedSubscriptions, index, subscriptions.Length - index - 1);
                 _subscriptions = updatedSubscriptions;
