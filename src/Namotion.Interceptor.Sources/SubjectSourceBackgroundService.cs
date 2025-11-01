@@ -51,14 +51,12 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
     /// <inheritdoc />
     public void EnqueueOrApplyUpdate<TState>(TState state, Action<TState> update)
     {
-        // Use Volatile.Read to ensure memory visibility of the field across threads
-        var beforeInitializationUpdates = Volatile.Read(ref _beforeInitializationUpdates);
+        var beforeInitializationUpdates = _beforeInitializationUpdates;
         if (beforeInitializationUpdates is not null)
         {
             lock (_lock)
             {
-                // Re-check inside lock with consistent volatile semantics
-                beforeInitializationUpdates = Volatile.Read(ref _beforeInitializationUpdates);
+                beforeInitializationUpdates = _beforeInitializationUpdates;
                 if (beforeInitializationUpdates is not null)
                 {
                     // Still initializing, buffer the update (cold path, allocations acceptable)
@@ -95,7 +93,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
             {
                 lock (_lock)
                 {
-                    Volatile.Write(ref _beforeInitializationUpdates, []);
+                    _beforeInitializationUpdates = [];
                 }
 
                 // Start listening for changes from the source
@@ -107,8 +105,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
                     applyAction?.Invoke();
 
                     // Replay previously buffered updates
-                    var beforeInitializationUpdates = Volatile.Read(ref _beforeInitializationUpdates);
-                    Volatile.Write(ref _beforeInitializationUpdates, null);
+                    var beforeInitializationUpdates = _beforeInitializationUpdates;
+                    _beforeInitializationUpdates = null;
 
                     foreach (var action in beforeInitializationUpdates!)
                     {
