@@ -211,27 +211,25 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             return;
         }
 
-        // Chunk the read to respect server operation limits
-        var limit = (int)Math.Max(1, (long)(_session.OperationLimits?.MaxNodesPerRead ?? 0));
-        var chunkSize = limit > 0 ? limit : 500; // fallback if server didn't provide limits
-        for (var offset = 0; offset < itemCount; offset += chunkSize)
+        try
         {
-            var take = Math.Min(chunkSize, itemCount - offset);
-            var readValues = new ReadValueId[take];
-            for (var i = 0; i < take; i++)
+            var result = new Dictionary<RegisteredSubjectProperty, DataValue>();
+            var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerRead ?? 500);
+            for (var offset = 0; offset < itemCount; offset += chunkSize)
             {
-                readValues[i] = new ReadValueId
+                var take = Math.Min(chunkSize, itemCount - offset);
+                var readValues = new ReadValueId[take];
+                for (var i = 0; i < take; i++)
                 {
-                    NodeId = monitoredItems[offset + i].StartNodeId,
-                    AttributeId = Opc.Ua.Attributes.Value
-                };
-            }
+                    readValues[i] = new ReadValueId
+                    {
+                        NodeId = monitoredItems[offset + i].StartNodeId,
+                        AttributeId = Opc.Ua.Attributes.Value
+                    };
+                }
 
-            try
-            {
-                var readResponse = await _session.ReadAsync(null, 0, _configuration.TimestampsToReturn, readValues, cancellationToken);
+                var readResponse = await _session.ReadAsync(null, 0, TimestampsToReturn.Source, readValues, cancellationToken);
                 var resultCount = Math.Min(readResponse.Results.Count, take);
-
                 for (var i = 0; i < resultCount; i++)
                 {
                     if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
@@ -240,19 +238,25 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                         var monitoredItem = monitoredItems[offset + i];
                         if (monitoredItem.Handle is RegisteredSubjectProperty property)
                         {
-                            var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
-                            property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
+                            result[property] = dataValue;
                         }
                     }
                 }
             }
-            catch (Exception ex)
+        
+            foreach (var (property, dataValue) in result)
             {
-                _logger.LogError(ex, "Failed to read initial values for monitored items (chunk starting at {Offset}).", offset);
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
+                property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
             }
-        }
 
-        _logger.LogInformation("Successfully read initial values of {Count} nodes.", itemCount);
+            _logger.LogInformation("Successfully read initial values of {Count} nodes.", itemCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read initial values for monitored items.");
+            throw;
+        }
     }
 
     public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
@@ -268,15 +272,12 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             return;
         }
 
-        // Chunked writes to respect server max nodes per write
-        var limit = (int)Math.Max(1, (long)(_session.OperationLimits?.MaxNodesPerWrite ?? 0));
-        var chunkSize = limit > 0 ? limit : 500;
+        var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerWrite ?? 500);
         var changeList = changes as IList<SubjectPropertyChange> ?? changes.ToList();
         for (var offset = 0; offset < changeList.Count; offset += chunkSize)
         {
             var take = Math.Min(chunkSize, changeList.Count - offset);
             var writeValues = new WriteValueCollection(take);
-
             for (var i = 0; i < take; i++)
             {
                 var change = changeList[offset + i];
