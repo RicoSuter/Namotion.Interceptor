@@ -43,8 +43,8 @@ public class OpcUaClientConfiguration
     /// If the function returns true, the node is added as a dynamic property to the given subject.
     /// Default is add all missing as dynamic properties.
     /// </summary>
-    public Func<ReferenceDescription, CancellationToken, Task<bool>>? ShouldAddDynamicProperties { get; init; } = 
-        (_, _) => Task.FromResult(true);
+    public Func<ReferenceDescription, CancellationToken, Task<bool>>? ShouldAddDynamicProperty { get; init; } = 
+        static (_, _) => Task.FromResult(true);
     
     /// <summary>
     /// Gets the source path provider used to map between OPC UA node browse names and C# property names.
@@ -69,6 +69,16 @@ public class OpcUaClientConfiguration
     public required OpcUaSubjectFactory SubjectFactory { get; init; }
 
     /// <summary>
+    /// Gets or sets the time window to buffer incoming changes (default: 8ms).
+    /// </summary>
+    public TimeSpan? BufferTime { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the retry time (default: 10s).
+    /// </summary>
+    public TimeSpan? RetryTime { get; set; }
+
+    /// <summary>
     /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute (default: 0).
     /// </summary>
     public int DefaultSamplingInterval { get; set; }
@@ -84,14 +94,56 @@ public class OpcUaClientConfiguration
     public bool DefaultDiscardOldest { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets the time window to buffer incoming changes (default: 8ms).
+    /// Gets or sets the default publishing interval for subscriptions in milliseconds (default: 0).
+    /// Larger values reduce overhead by batching more notifications per publish.
     /// </summary>
-    public TimeSpan? BufferTime { get; set; }
-    
+    public int DefaultPublishingInterval { get; set; } = 0;
+
     /// <summary>
-    /// Gets or sets the retry time (default: 10s).
+    /// Gets or sets the subscription keep-alive count (default: 10).
     /// </summary>
-    public TimeSpan? RetryTime { get; set; }
+    public uint SubscriptionKeepAliveCount { get; set; } = 10;
+
+    /// <summary>
+    /// Gets or sets the subscription lifetime count (default: 100).
+    /// </summary>
+    public uint SubscriptionLifetimeCount { get; set; } = 100;
+
+    /// <summary>
+    /// Gets or sets the subscription priority (default: 0 = server default).
+    /// </summary>
+    public byte SubscriptionPriority { get; set; } = 0;
+
+    /// <summary>
+    /// Gets or sets the maximum notifications per publish that the client requests (default: 0 = server default).
+    /// </summary>
+    public uint SubscriptionMaximumNotificationsPerPublish { get; set; } = 0;
+
+    /// <summary>
+    /// Gets or sets which timestamps to return for data changes (default: Source).
+    /// Reducing timestamps can shrink payload size.
+    /// </summary>
+    public TimestampsToReturn TimestampsToReturn { get; set; } = TimestampsToReturn.Source;
+
+    /// <summary>
+    /// Optional percent deadband (0..100) applied via DataChangeFilter to numeric items to reduce traffic. Null to disable.
+    /// </summary>
+    public double? DefaultPercentDeadband { get; set; }
+
+    /// <summary>
+    /// Optional absolute deadband applied via DataChangeFilter to numeric items. Ignored if <see cref="DefaultPercentDeadband"/> is set.
+    /// </summary>
+    public double? DefaultAbsoluteDeadband { get; set; }
+
+    /// <summary>
+    /// The data change trigger used for monitored items (default: StatusValue).
+    /// </summary>
+    public DataChangeTrigger DefaultDataChangeTrigger { get; set; } = DataChangeTrigger.StatusValue;
+
+    /// <summary>
+    /// Browsing: maximum references per node to request. 0 uses server default.
+    /// </summary>
+    public uint MaximumReferencesPerNode { get; init; } = 0;
 
     public virtual ApplicationInstance CreateApplicationInstance()
     {
@@ -133,10 +185,10 @@ public class OpcUaClientConfiguration
             },
             TransportQuotas = new TransportQuotas
             {
-                OperationTimeout = 15000,
-                MaxStringLength = 1_048_576,
-                MaxByteStringLength = 1_048_576,
-                MaxMessageSize = 4_194_304,
+                OperationTimeout = 60000,
+                MaxStringLength = 4_194_304,
+                MaxByteStringLength = 16_777_216,
+                MaxMessageSize = 16_777_216,
                 ChannelLifetime = 600000,
                 SecurityTokenLifetime = 3600000
             },
