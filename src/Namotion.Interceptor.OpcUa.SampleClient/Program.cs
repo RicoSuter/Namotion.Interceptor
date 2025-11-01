@@ -42,12 +42,11 @@ void PrintStats(string title, List<double> changedLatencyData, List<double?> rec
 {
     var avgThroughput = throughputData.Average();
     var maxThroughput = throughputData.Max();
+    var p50ThroughputIndex = (int)Math.Ceiling(throughputData.Count * 0.99) - 1;
+    var p50Throughput = throughputData[Math.Max(0, Math.Min(p50ThroughputIndex, throughputData.Count - 1))];
     var p99ThroughputIndex = (int)Math.Ceiling(throughputData.Count * 0.99) - 1;
     var p99Throughput = throughputData[Math.Max(0, Math.Min(p99ThroughputIndex, throughputData.Count - 1))];
-
-    Console.WriteLine($"=== {title} ===");
-    Console.WriteLine($"Total updates: {changedLatencyData.Count}");
-
+    
     // Memory metrics
     var proc = Process.GetCurrentProcess();
     var workingSetMb = proc.WorkingSet64 / (1024.0 * 1024.0);
@@ -58,17 +57,17 @@ void PrintStats(string title, List<double> changedLatencyData, List<double?> rec
     var allocRateBytesPerSec = allocatedBytesDelta / elapsedSec;
     var allocRateMbPerSec = allocRateBytesPerSec / (1024.0 * 1024.0);
 
-    Console.WriteLine($"Process memory: {workingSetMb,2} MB");
-    Console.WriteLine($"Avg allocations over last {elapsedSec}s: {allocRateMbPerSec,2} MB/s");
+    Console.WriteLine($"=== {title} ===");
+    Console.WriteLine($"Total processed updates:         {changedLatencyData.Count}");
+    Console.WriteLine($"Process memory:                  {Math.Round(workingSetMb, 2)} MB");
+    Console.WriteLine($"Avg allocations over last {elapsedSec}s:   {Math.Round(allocRateMbPerSec, 2)} MB/s");
 
-    Console.WriteLine($"Throughput:      Avg: {avgThroughput,8:F2} | P99: {p99Throughput,8:F2} | Max: {maxThroughput,8:F2} updates/sec");
+    Console.WriteLine($"Throughput:      Avg: {avgThroughput,8:F2} | P50: {p50Throughput,8:F2} | P99: {p99Throughput,8:F2} | Max: {maxThroughput,8:F2} updates/sec");
 
     // Client side processing: From receiving it on client to processing here
     PrintLatencies("Client latency:  ", receivedLatencyData.OfType<double>()); 
     // Real E2E: from setting property on server to processing here
     PrintLatencies("Source latency:  ", changedLatencyData); 
-    
-    
 }
 
 void PrintLatencies(string title, IEnumerable<double> doubles)
@@ -78,10 +77,12 @@ void PrintLatencies(string title, IEnumerable<double> doubles)
     {
         var avgLatency = sortedLatencies.Average();
         var maxLatency = sortedLatencies.Max();
+        var p50LatencyIndex = (int)Math.Ceiling(sortedLatencies.Length * 0.50) - 1;
+        var p50Latency = sortedLatencies[Math.Max(0, Math.Min(p50LatencyIndex, sortedLatencies.Length - 1))];
         var p99LatencyIndex = (int)Math.Ceiling(sortedLatencies.Length * 0.99) - 1;
         var p99Latency = sortedLatencies[Math.Max(0, Math.Min(p99LatencyIndex, sortedLatencies.Length - 1))];
 
-        Console.WriteLine($"{title}Avg: {avgLatency,8:F2} | P99: {p99Latency,8:F2} | Max: {maxLatency,8:F2} ms | count: {sortedLatencies.Length}");
+        Console.WriteLine($"{title}Avg: {avgLatency,8:F2} | P50: {p50Latency,8:F2} | P99: {p99Latency,8:F2} | Max: {maxLatency,8:F2} ms | count: {sortedLatencies.Length}");
     }
 }
 
