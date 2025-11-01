@@ -1,21 +1,60 @@
-﻿using System.Collections.Frozen;
+﻿using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Registry.Performance;
+using Namotion.Interceptor.Tracking.Lifecycle;
+using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
-using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Interceptors;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubject
 {
+    private static readonly ObjectPool<RegisteredSubject> Pool = new(static () => new RegisteredSubject());
+
     private readonly Lock _lock = new();
 
-    private FrozenDictionary<string, RegisteredSubjectProperty> _properties;
+    private FrozenDictionary<string, RegisteredSubjectProperty> _properties = FrozenDictionary<string, RegisteredSubjectProperty>.Empty;
     private readonly HashSet<SubjectPropertyParent> _parents = []; // TODO(perf): Use a FrozenSet?
-    
-    [JsonIgnore] public IInterceptorSubject Subject { get; }
+
+#pragma warning disable CS8618
+    private RegisteredSubject()
+    {
+    }
+
+    public static RegisteredSubject Create(IInterceptorSubject subject)
+    {
+        var registeredSubject = Pool.Rent();
+        registeredSubject.Subject = subject;
+        registeredSubject._properties = subject
+            .Properties
+            .ToFrozenDictionary(
+                p => p.Key,
+                p => RegisteredSubjectProperty.Create(
+                    registeredSubject, p.Key, p.Value.Type, p.Value.Attributes));
+
+        return registeredSubject;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void Return()
+    {
+        _parents.Clear();
+        
+        var properties = Interlocked.Exchange( 
+            ref _properties, 
+            FrozenDictionary<string, RegisteredSubjectProperty>.Empty).Values;
+
+        for (int i = 0; i < properties.Length; i++)
+        {
+            properties[i].Return();
+        }
+
+        Pool.Return(this);
+    }
+
+    [JsonIgnore] public IInterceptorSubject Subject { get; private set; }
 
     public ICollection<SubjectPropertyParent> Parents
     {
@@ -70,17 +109,6 @@ public class RegisteredSubject
             return _properties.GetValueOrDefault(propertyName);
     }
 
-    public RegisteredSubject(IInterceptorSubject subject)
-    {
-        Subject = subject;
-        _properties = subject
-            .Properties
-            .ToFrozenDictionary(
-                p => p.Key,
-                p => new RegisteredSubjectProperty(
-                    this, p.Key, p.Value.Type, p.Value.Attributes));
-    }
-
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
     {
         lock (_lock)
@@ -101,14 +129,14 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddDerivedProperty<TProperty>(string name, 
+    public RegisteredSubjectProperty AddDerivedProperty<TProperty>(string name,
         Func<IInterceptorSubject, TProperty?>? getValue,
         Action<IInterceptorSubject, TProperty?>? setValue = null,
         params Attribute[] attributes)
     {
-        return AddProperty(name, typeof(TProperty), 
-            getValue is not null ? x => (TProperty)getValue(x)! : null, 
-            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null, 
+        return AddProperty(name, typeof(TProperty),
+            getValue is not null ? x => (TProperty)getValue(x)! : null,
+            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null,
             attributes.Concat([new DerivedAttribute()]).ToArray());
     }
 
@@ -120,14 +148,14 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddProperty<TProperty>(string name, 
+    public RegisteredSubjectProperty AddProperty<TProperty>(string name,
         Func<IInterceptorSubject, TProperty?>? getValue,
         Action<IInterceptorSubject, TProperty?>? setValue = null,
         params Attribute[] attributes)
     {
-        return AddProperty(name, typeof(TProperty), 
-            getValue is not null ? x => (TProperty)getValue(x)! : null, 
-            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null, 
+        return AddProperty(name, typeof(TProperty),
+            getValue is not null ? x => (TProperty)getValue(x)! : null,
+            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null,
             attributes);
     }
 
@@ -140,7 +168,7 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddDerivedProperty(string name, 
+    public RegisteredSubjectProperty AddDerivedProperty(string name,
         Type type,
         Func<IInterceptorSubject, object?>? getValue,
         Action<IInterceptorSubject, object?>? setValue = null,
@@ -160,7 +188,7 @@ public class RegisteredSubject
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
     public RegisteredSubjectProperty AddProperty(
-        string name, 
+        string name,
         Type type,
         Func<IInterceptorSubject, object?>? getValue,
         Action<IInterceptorSubject, object?>? setValue,
@@ -186,7 +214,7 @@ public class RegisteredSubject
 
     private RegisteredSubjectProperty AddPropertyInternal(string name, Type type, Attribute[] attributes)
     {
-        var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
+        var subjectProperty = RegisteredSubjectProperty.Create(this, name, type, attributes);
 
         lock (_lock)
         {
