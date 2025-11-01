@@ -43,7 +43,7 @@ public class SubjectUpdate
                 propertyUpdates = SubjectUpdatePools.RentPropertyUpdates();
             }
 
-            var update = CreateCompleteUpdateInternal(subject, processors, knownSubjectUpdates, propertyUpdates);
+            var update = CreateUpdate(subject, processors, knownSubjectUpdates, propertyUpdates);
             if (processors.Length > 0 && propertyUpdates is not null && propertyUpdates.Count > 0)
             {
                 ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
@@ -71,20 +71,24 @@ public class SubjectUpdate
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates, 
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
-        return CreateCompleteUpdateInternal(subject, processors, knownSubjectUpdates, propertyUpdates);
+        if (knownSubjectUpdates.TryGetValue(subject, out var update))
+        {
+            // Stop cycles with empty update
+            return new SubjectUpdate();
+        }
+        
+        return CreateUpdate(subject, processors, knownSubjectUpdates, propertyUpdates);
     }
 
-    private static SubjectUpdate CreateCompleteUpdateInternal(IInterceptorSubject subject,
+    internal static SubjectUpdate CreateUpdate(IInterceptorSubject subject,
         ReadOnlySpan<ISubjectUpdateProcessor> processors, 
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
-        if (knownSubjectUpdates.ContainsKey(subject))
+        if (knownSubjectUpdates.TryGetValue(subject, out var update))
         {
-            // Avoid cycles: If subject already has an update then we have a cycle and break it here
-            
-            // TODO(cycle): Add reference to another update?
-            return new SubjectUpdate();
+            // Stop here when already generated in previous step
+            return update;
         }
 
         var subjectUpdate = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
@@ -146,7 +150,11 @@ public class SubjectUpdate
                 {
                     // handle property changes
                     var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredProperty, knownSubjectUpdates, propertyUpdates);
-                    propertyUpdate.ApplyValue(registeredProperty, change.ChangedTimestamp, change.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
+                
+                    propertyUpdate.ApplyValue(
+                        registeredProperty, change.ChangedTimestamp, change.GetNewValue<object?>(), 
+                        completeUpdate: false, processors, knownSubjectUpdates, propertyUpdates);
+                    
                     subjectUpdate.Properties[registeredProperty.Name] = propertyUpdate;
                 }
                 else
@@ -265,7 +273,9 @@ public class SubjectUpdate
         // Apply value if needed
         if (changeProperty is not null && change.HasValue)
         {
-            finalAttributeUpdate.ApplyValue(changeProperty, change.Value.ChangedTimestamp, change.Value.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
+            finalAttributeUpdate.ApplyValue(
+                changeProperty, change.Value.ChangedTimestamp, change.Value.GetNewValue<object?>(), 
+                completeUpdate: false, processors, knownSubjectUpdates, propertyUpdates: propertyUpdates);
         }
 
         return (rootPropertyUpdate, rootProperty.Name);

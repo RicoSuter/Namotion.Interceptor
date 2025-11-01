@@ -37,6 +37,11 @@
                   }
                 }
               },
+              fullName: {
+                Kind: Value,
+                Type: String,
+                Value: Child3 
+              },
               lastName: {
                 Kind: Value,
                 Type: String
@@ -80,6 +85,11 @@
                     }
                   }
                 }
+              },
+              fullName: {
+                Kind: Value,
+                Type: String,
+                Value: John 
               },
               lastName: {
                 Kind: Value,
@@ -127,6 +137,11 @@
               }
             }
           },
+          fullName: {
+            Kind: Value,
+            Type: String,
+            Value: MyFather 
+          },
           lastName: {
             Kind: Value,
             Type: String
@@ -171,6 +186,11 @@
                 }
               }
             }
+          },
+          fullName: {
+            Kind: Value,
+            Type: String,
+            Value: Jane 
           },
           lastName: {
             Kind: Value,
