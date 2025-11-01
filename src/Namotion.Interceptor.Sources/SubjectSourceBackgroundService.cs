@@ -57,7 +57,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
         {
             lock (_lock)
             {
-                beforeInitializationUpdates = _beforeInitializationUpdates;
+                // Re-check inside lock with consistent volatile semantics
+                beforeInitializationUpdates = Volatile.Read(ref _beforeInitializationUpdates);
                 if (beforeInitializationUpdates is not null)
                 {
                     // Still initializing, buffer the update (cold path, allocations acceptable)
@@ -106,7 +107,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
                     applyAction?.Invoke();
 
                     // Replay previously buffered updates
-                    var beforeInitializationUpdates = _beforeInitializationUpdates;
+                    var beforeInitializationUpdates = Volatile.Read(ref _beforeInitializationUpdates);
                     Volatile.Write(ref _beforeInitializationUpdates, null);
 
                     foreach (var action in beforeInitializationUpdates!)
