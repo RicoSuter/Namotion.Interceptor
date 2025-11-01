@@ -4,6 +4,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Sources;
 
@@ -50,14 +51,16 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
     /// <inheritdoc />
     public void EnqueueOrApplyUpdate<TState>(TState state, Action<TState> update)
     {
-        if (_beforeInitializationUpdates is not null)
+        var beforeInitializationUpdates = _beforeInitializationUpdates;
+        if (beforeInitializationUpdates is not null)
         {
             lock (_lock)
             {
-                if (_beforeInitializationUpdates is not null)
+                beforeInitializationUpdates = _beforeInitializationUpdates;
+                if (beforeInitializationUpdates is not null)
                 {
-                    // Still initializing, buffer the update (memory allocations are ok here)
-                    _beforeInitializationUpdates.Add(() => update(state));
+                    // Still initializing, buffer the update (cold path, allocations acceptable)
+                    AddBeforeInitializationUpdate(beforeInitializationUpdates, state, update);
                     return;
                 }
             }
@@ -71,6 +74,14 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
         {
             _logger.LogError(e, "Failed to apply subject update.");
         }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void AddBeforeInitializationUpdate<TState>(List<Action> beforeInitializationUpdates, TState state, Action<TState> update)
+    {
+        // The allocation for the closure happens only on the cold path (needs to be in an own non-inlined method
+        // to avoid capturing unnecessary locals and causing allocations on the hot path).
+        beforeInitializationUpdates.Add(() => update(state));
     }
 
     /// <inheritdoc />
