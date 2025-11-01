@@ -5,7 +5,6 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Sources;
 
@@ -27,7 +26,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
     // Scratch buffers used only while holding the write semaphore (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
-    private readonly HashSet<PropertyReference> _flushTouchedChanges = new(PropertyReferenceComparer.Instance);
+    private readonly HashSet<PropertyReference> _flushTouchedChanges = new(PropertyReference.Comparer);
     private readonly List<SubjectPropertyChange> _flushDedupedChanges = [];
 
     // Reusable single-item buffer for the no-buffer (immediate) path
@@ -269,32 +268,6 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         catch (Exception e)
         {
             _logger.LogError(e, "Failed to write changes to source.");
-        }
-    }
-
-    // Custom comparer for PropertyReference optimized for identity of Subject and ordinal Name
-    private sealed class PropertyReferenceComparer : IEqualityComparer<PropertyReference>
-    {
-        internal static readonly PropertyReferenceComparer Instance = new();
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool Equals(PropertyReference x, PropertyReference y)
-        {
-            return ReferenceEquals(x.Subject, y.Subject) && string.Equals(x.Name, y.Name, StringComparison.Ordinal);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int GetHashCode(PropertyReference obj)
-        {
-            var subject = obj.Subject;
-            var name = obj.Name;
-
-            // Identity-based hash for subject; ordinal hash for name
-            var h1 = subject is null ? 0 : RuntimeHelpers.GetHashCode(subject);
-            var h2 = name is null ? 0 : StringComparer.Ordinal.GetHashCode(name);
-
-            // Fast combine
-            return (h1 * 397) ^ h2;
         }
     }
 
