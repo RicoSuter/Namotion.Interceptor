@@ -70,8 +70,8 @@ internal class OpcUaSubjectLoader
                     continue;
                 }
 
-                var addAsDynamic = _configuration.ShouldAddDynamicProperties is not null &&
-                    await _configuration.ShouldAddDynamicProperties(nodeRef, cancellationToken);
+                var addAsDynamic = _configuration.ShouldAddDynamicProperty is not null &&
+                    await _configuration.ShouldAddDynamicProperty(nodeRef, cancellationToken);
 
                 if (!addAsDynamic)
                 {
@@ -79,9 +79,13 @@ internal class OpcUaSubjectLoader
                 }
 
                 // Infer CLR type from OPC UA variable metadata if possible
-                var inferredType = await _configuration.TypeResolver.GetTypeForNodeAsync(session, nodeRef, cancellationToken);
-                if (inferredType == typeof(object))
+                var inferredType = await _configuration.TypeResolver.TryGetTypeForNodeAsync(session, nodeRef, cancellationToken);
+                if (inferredType is null)
                 {
+                    _logger.LogWarning(
+                        "Could not infer type for dynamic property '{PropertyName}' (NodeId: {NodeId}). Skipping property.",
+                        dynamicPropertyName, nodeRef.NodeId);
+
                     continue;
                 }
 
@@ -209,6 +213,19 @@ internal class OpcUaSubjectLoader
         return _configuration.SourcePathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
     }
 
+    private static bool IsNumericType(Type t)
+    {
+        var type = Nullable.GetUnderlyingType(t) ?? t;
+        if (type.IsArray)
+        {
+            return false;
+        }
+
+        return type == typeof(sbyte) || type == typeof(byte) || type == typeof(short) || type == typeof(ushort)
+            || type == typeof(int) || type == typeof(uint) || type == typeof(long) || type == typeof(ulong)
+            || type == typeof(float) || type == typeof(double) || type == typeof(decimal);
+    }
+
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
     {
         var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
@@ -227,6 +244,20 @@ internal class OpcUaSubjectLoader
             // Store the property on the item itself for later reference.
             Handle = property
         };
+
+        // Optional deadband to reduce traffic for numeric types
+        if (IsNumericType(property.Type) && 
+            (_configuration.DefaultPercentDeadband.HasValue || 
+             _configuration.DefaultAbsoluteDeadband.HasValue))
+        {
+            var filter = new DataChangeFilter
+            {
+                Trigger = _configuration.DefaultDataChangeTrigger,
+                DeadbandType = _configuration.DefaultPercentDeadband.HasValue ? (uint)DeadbandType.Percent : (uint)DeadbandType.Absolute,
+                DeadbandValue = _configuration.DefaultPercentDeadband ?? _configuration.DefaultAbsoluteDeadband ?? 0
+            };
+            monitoredItem.Filter = filter;
+        }
 
         property.Reference.SetPropertyData(OpcVariableKey, nodeId);
         _propertiesWithOpcData.Add(property.Reference);
@@ -251,13 +282,48 @@ internal class OpcUaSubjectLoader
             }
         };
 
+        var results = new ReferenceDescriptionCollection();
+
         var response = await session.BrowseAsync(
             null,
             null,
-            0u,
+            _configuration.MaximumReferencesPerNode,
             browseDescriptions,
             cancellationToken);
 
-        return response.Results.Count > 0 ? response.Results[0].References : new ReferenceDescriptionCollection();
+        if (response.Results.Count > 0)
+        {
+            if (response.Results[0].References is { Count: > 0 } references)
+            {
+                foreach (var reference in references)
+                {
+                    results.Add(reference);
+                }
+            }
+
+            var continuationPoint = response.Results[0].ContinuationPoint;
+            while (continuationPoint is { Length: > 0 })
+            {
+                var nextResponse = await session.BrowseNextAsync(null, false, new ByteStringCollection { continuationPoint }, cancellationToken);
+                if (nextResponse.Results.Count > 0)
+                {
+                    var r0 = nextResponse.Results[0];
+                    if (r0.References is { Count: > 0 } nextReferences)
+                    {
+                        foreach (var reference in nextReferences)
+                        {
+                            results.Add(reference);
+                        }
+                    }
+                    continuationPoint = r0.ContinuationPoint;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+
+        return results;
     }
 }

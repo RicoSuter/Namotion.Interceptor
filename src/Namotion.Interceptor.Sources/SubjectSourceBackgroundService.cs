@@ -1,14 +1,13 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using System.Collections.Concurrent;
 
 namespace Namotion.Interceptor.Sources;
 
-public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutationDispatcher
+public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
 {
     private readonly Lock _lock = new();
     private readonly ISubjectSource _source;
@@ -18,7 +17,6 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     private readonly TimeSpan _retryTime;
 
     private List<Action>? _beforeInitializationUpdates = [];
-    private ISubjectRegistry? _subjectRegistry;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
@@ -50,7 +48,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     }
 
     /// <inheritdoc />
-    public void EnqueueSubjectUpdate(Action update)
+    public void EnqueueOrApplyUpdate<TState>(TState state, Action<TState> update)
     {
         if (_beforeInitializationUpdates is not null)
         {
@@ -58,7 +56,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
             {
                 if (_beforeInitializationUpdates is not null)
                 {
-                    _beforeInitializationUpdates.Add(update);
+                    // Still initializing, buffer the update (memory allocations are ok here)
+                    _beforeInitializationUpdates.Add(() => update(state));
                     return;
                 }
             }
@@ -66,12 +65,11 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
         try
         {
-            _subjectRegistry ??= _context.GetService<ISubjectRegistry>();
-            _subjectRegistry.ExecuteSubjectUpdate(update);
+            update(state);
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Failed to execute subject update.");
+            _logger.LogError(e, "Failed to apply subject update.");
         }
     }
 
@@ -101,7 +99,14 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
                     foreach (var action in beforeInitializationUpdates!)
                     {
-                        EnqueueSubjectUpdate(action);
+                        try
+                        {
+                            action();
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.LogError(e, "Failed to apply subject update.");
+                        }
                     }
                 }
                 
