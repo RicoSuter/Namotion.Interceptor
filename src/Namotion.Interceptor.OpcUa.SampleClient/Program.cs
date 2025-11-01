@@ -9,6 +9,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 using Opc.Ua;
+using System.Diagnostics;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -30,6 +31,13 @@ builder.Services.AddSingleton(root);
 builder.Services.AddOpcUaSubjectClient<Root>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 builder.Services.AddHostedService<Worker>();
 
+// Window and allocation tracking state (moved above PrintStats)
+var allUpdatesSinceLastSample = 0;
+var hasShownIntermediateStats = false;
+var windowStartTime = DateTimeOffset.UtcNow;
+var lastAllThroughputTime = DateTimeOffset.UtcNow;
+long windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: false); // track allocation baseline per window
+
 void PrintStats(string title, List<double> changedLatencyData, List<double?> receivedLatencyData, List<double> throughputData)
 {
     var avgThroughput = throughputData.Average();
@@ -39,12 +47,28 @@ void PrintStats(string title, List<double> changedLatencyData, List<double?> rec
 
     Console.WriteLine($"=== {title} ===");
     Console.WriteLine($"Total updates: {changedLatencyData.Count}");
+
+    // Memory metrics
+    var proc = Process.GetCurrentProcess();
+    var workingSetMb = proc.WorkingSet64 / (1024.0 * 1024.0);
+    var now = DateTimeOffset.UtcNow;
+    var elapsedSec = Math.Round((now - windowStartTime).TotalSeconds, 0);
+    var totalAllocatedBytesNow = GC.GetTotalAllocatedBytes(precise: false);
+    var allocatedBytesDelta = Math.Max(0, totalAllocatedBytesNow - windowStartTotalAllocatedBytes);
+    var allocRateBytesPerSec = allocatedBytesDelta / elapsedSec;
+    var allocRateMbPerSec = allocRateBytesPerSec / (1024.0 * 1024.0);
+
+    Console.WriteLine($"Process memory: {workingSetMb,2} MB");
+    Console.WriteLine($"Avg allocations over last {elapsedSec}s: {allocRateMbPerSec,2} MB/s");
+
     Console.WriteLine($"Throughput:      Avg: {avgThroughput,8:F2} | P99: {p99Throughput,8:F2} | Max: {maxThroughput,8:F2} updates/sec");
 
     // Client side processing: From receiving it on client to processing here
     PrintLatencies("Client latency:  ", receivedLatencyData.OfType<double>()); 
     // Real E2E: from setting property on server to processing here
     PrintLatencies("Source latency:  ", changedLatencyData); 
+    
+    
 }
 
 void PrintLatencies(string title, IEnumerable<double> doubles)
@@ -60,11 +84,6 @@ void PrintLatencies(string title, IEnumerable<double> doubles)
         Console.WriteLine($"{title}Avg: {avgLatency,8:F2} | P99: {p99Latency,8:F2} | Max: {maxLatency,8:F2} ms | count: {sortedLatencies.Length}");
     }
 }
-
-var allUpdatesSinceLastSample = 0;
-var hasShownIntermediateStats = false;
-var windowStartTime = DateTimeOffset.UtcNow;
-var lastAllThroughputTime = DateTimeOffset.UtcNow;
 
 var allChangedLatencies = new List<double>();
 var allReceivedLatencies = new List<double?>();
@@ -124,6 +143,7 @@ context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(chang
         
         windowStartTime = now;
         lastAllThroughputTime = now;
+        windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: false); // reset baseline for next window
     }
 });
 

@@ -4,6 +4,8 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Sources;
 
@@ -19,13 +21,20 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     private List<Action>? _beforeInitializationUpdates = [];
     private ISubjectRegistry? _subjectRegistry;
 
-    private List<SubjectPropertyChange> _changes = [];
-    private readonly SemaphoreSlim _writeSemaphore = new(1, 1);
+    // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
+    private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
+    private int _flushGate = 0; // 0 = free, 1 = flushing
 
-    private List<SubjectPropertyChange> _flushChanges = [];
-    private readonly HashSet<PropertyReference> _flushTouchedChanges = [];
+    // Scratch buffers used only while holding the write semaphore (single-threaded access)
+    private readonly List<SubjectPropertyChange> _flushChanges = [];
+    private readonly HashSet<PropertyReference> _flushTouchedChanges = new(PropertyReferenceComparer.Instance);
     private readonly List<SubjectPropertyChange> _flushDedupedChanges = [];
-    private DateTimeOffset _flushLastTime = DateTimeOffset.MinValue;
+
+    // Reusable single-item buffer for the no-buffer (immediate) path
+    private readonly List<SubjectPropertyChange> _immediateChanges = new(1);
+
+    // Use ticks to avoid torn reads of DateTimeOffset across threads
+    private long _flushLastTicks = 0L;
 
     public SubjectSourceBackgroundService(
         ISubjectSource source,
@@ -140,25 +149,32 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                     continue;
                 }
 
-                _changes.Add(item);
-
                 if (periodicTimer is null)
                 {
-                    await WriteToSourceAsync(_changes, linkedTokenSource.Token).ConfigureAwait(false);
-                    _changes.Clear();
+                    // Immediate path: send the single change without buffering using a reusable list (no allocations)
+                    _immediateChanges.Add(item);
+                    await WriteToSourceAsync(_immediateChanges, linkedTokenSource.Token).ConfigureAwait(false);
+                    _immediateChanges.Clear();
                 }
                 else
                 {
-                    if (item.ChangedTimestamp - _flushLastTime >= _bufferTime)
-                    {
-                        await TryFlushBufferAsync(item.ChangedTimestamp, linkedTokenSource.Token).ConfigureAwait(false);
-                    }
+                    // Buffered path: enqueue lock-free; periodic timer handles flushing
+                    _changes.Enqueue(item);
+                    
+                    // Flush directly when needed (currently disabled in favor of periodic flush only)
+                    // var lastTicks = Volatile.Read(ref _flushLastTicks);
+                    // if (item.ChangedTimestamp.UtcTicks - lastTicks >= _bufferTime.Ticks)
+                    // {
+                    //     await TryFlushBufferAsync(item.ChangedTimestamp.UtcTicks, linkedTokenSource.Token).ConfigureAwait(false);
+                    // }
                 }
             }
         }
         finally
         {
             try { await linkedTokenSource.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
+            // Final best-effort flush after cancel to drain any residual items
+            await TryFlushBufferAsync(DateTimeOffset.UtcNow.UtcTicks, CancellationToken.None).ConfigureAwait(false);
             await flushTask.ConfigureAwait(false);
         }
     }
@@ -169,11 +185,11 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         {
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
-                var now = DateTimeOffset.UtcNow;
-                var changes = Volatile.Read(ref _changes);
-                if (changes.Count > 0 && now - _flushLastTime >= _bufferTime)
+                var nowTicks = DateTimeOffset.UtcNow.UtcTicks;
+                var lastTicks = Volatile.Read(ref _flushLastTicks);
+                if (nowTicks - lastTicks >= _bufferTime.Ticks)
                 {
-                    await TryFlushBufferAsync(now, cancellationToken).ConfigureAwait(false);
+                    await TryFlushBufferAsync(nowTicks, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -183,28 +199,39 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
-    private async ValueTask TryFlushBufferAsync(DateTimeOffset newFlushTime, CancellationToken cancellationToken)
+    private async ValueTask TryFlushBufferAsync(long newFlushTicks, CancellationToken cancellationToken)
     {
-        // Use synchronous try-enter to avoid Task allocation from WaitAsync
-        // ReSharper disable once MethodHasAsyncOverload
-        if (!_writeSemaphore.Wait(0, cancellationToken))
+        // Fast, allocation-free try-enter
+        if (Interlocked.Exchange(ref _flushGate, 1) == 1)
         {
             return;
         }
 
         try
         {
-            if (_changes.Count == 0)
+            // Drain the concurrent queue into the scratch buffer under exclusive flush
+            _flushChanges.Clear();
+            while (_changes.TryDequeue(out var change))
+            {
+                System.Diagnostics.Debug.Assert(change.Property.Subject is not null);
+                _flushChanges.Add(change);
+            }
+
+            if (_flushChanges.Count == 0)
             {
                 return;
             }
 
-            _flushChanges = Interlocked.Exchange(ref _changes, _flushChanges);
-            _flushLastTime = newFlushTime;
+            Volatile.Write(ref _flushLastTicks, newFlushTicks);
 
             _flushTouchedChanges.Clear();
             _flushDedupedChanges.Clear();
 
+            // Pre-size to avoid resizes under bursts
+            _flushTouchedChanges.EnsureCapacity(_flushChanges.Count);
+            _flushDedupedChanges.EnsureCapacity(_flushChanges.Count);
+
+            // Deduplicate by Property, keeping the last write, and preserve order of last occurrences
             for (var i = _flushChanges.Count - 1; i >= 0; i--)
             {
                 var change = _flushChanges[i];
@@ -214,20 +241,26 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 }
             }
 
-            _flushChanges.Clear();
-
+            // Reverse in place to keep ascending order of last occurrences without allocations
+            if (_flushDedupedChanges.Count > 1)
+            {
+                _flushDedupedChanges.Reverse();
+            }
+            
             if (_flushDedupedChanges.Count > 0)
             {
                 await WriteToSourceAsync(_flushDedupedChanges, cancellationToken).ConfigureAwait(false);
             }
+
+            _flushChanges.Clear();
         }
         finally
         {
-            _writeSemaphore.Release();
+            Volatile.Write(ref _flushGate, 0);
         }
     }
 
-    private async ValueTask WriteToSourceAsync(List<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    private async ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         try
         {
@@ -239,10 +272,30 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
-    public override void Dispose()
+    // Custom comparer for PropertyReference optimized for identity of Subject and ordinal Name
+    private sealed class PropertyReferenceComparer : IEqualityComparer<PropertyReference>
     {
-        _writeSemaphore.Dispose();
-        base.Dispose();
+        internal static readonly PropertyReferenceComparer Instance = new();
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool Equals(PropertyReference x, PropertyReference y)
+        {
+            return ReferenceEquals(x.Subject, y.Subject) && string.Equals(x.Name, y.Name, StringComparison.Ordinal);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int GetHashCode(PropertyReference obj)
+        {
+            var subject = obj.Subject;
+            var name = obj.Name;
+
+            // Identity-based hash for subject; ordinal hash for name
+            var h1 = subject is null ? 0 : RuntimeHelpers.GetHashCode(subject);
+            var h2 = name is null ? 0 : StringComparer.Ordinal.GetHashCode(name);
+
+            // Fast combine
+            return (h1 * 397) ^ h2;
+        }
     }
 
     private void ResetState()
@@ -251,6 +304,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         _flushChanges.Clear();
         _flushTouchedChanges.Clear();
         _flushDedupedChanges.Clear();
-        _flushLastTime = DateTimeOffset.MinValue;
+        Volatile.Write(ref _flushLastTicks, 0L);
+        Volatile.Write(ref _flushGate, 0);
     }
 }
