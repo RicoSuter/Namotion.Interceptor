@@ -120,27 +120,6 @@ public class OpcUaClientConfiguration
     public uint SubscriptionMaximumNotificationsPerPublish { get; set; } = 0;
 
     /// <summary>
-    /// Gets or sets which timestamps to return for data changes (default: Source).
-    /// Reducing timestamps can shrink payload size.
-    /// </summary>
-    public TimestampsToReturn TimestampsToReturn { get; set; } = TimestampsToReturn.Source;
-
-    /// <summary>
-    /// Optional percent deadband (0..100) applied via DataChangeFilter to numeric items to reduce traffic. Null to disable.
-    /// </summary>
-    public double? DefaultPercentDeadband { get; set; }
-
-    /// <summary>
-    /// Optional absolute deadband applied via DataChangeFilter to numeric items. Ignored if <see cref="DefaultPercentDeadband"/> is set.
-    /// </summary>
-    public double? DefaultAbsoluteDeadband { get; set; }
-
-    /// <summary>
-    /// The data change trigger used for monitored items (default: StatusValue).
-    /// </summary>
-    public DataChangeTrigger DefaultDataChangeTrigger { get; set; } = DataChangeTrigger.StatusValue;
-
-    /// <summary>
     /// Browsing: maximum references per node to request. 0 uses server default.
     /// </summary>
     public uint MaximumReferencesPerNode { get; init; } = 0;

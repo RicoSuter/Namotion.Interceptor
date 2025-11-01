@@ -213,19 +213,6 @@ internal class OpcUaSubjectLoader
         return _configuration.SourcePathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
     }
 
-    private static bool IsNumericType(Type t)
-    {
-        var type = Nullable.GetUnderlyingType(t) ?? t;
-        if (type.IsArray)
-        {
-            return false;
-        }
-
-        return type == typeof(sbyte) || type == typeof(byte) || type == typeof(short) || type == typeof(ushort)
-            || type == typeof(int) || type == typeof(uint) || type == typeof(long) || type == typeof(ulong)
-            || type == typeof(float) || type == typeof(double) || type == typeof(decimal);
-    }
-
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
     {
         var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
@@ -244,20 +231,6 @@ internal class OpcUaSubjectLoader
             // Store the property on the item itself for later reference.
             Handle = property
         };
-
-        // Optional deadband to reduce traffic for numeric types
-        if (IsNumericType(property.Type) && 
-            (_configuration.DefaultPercentDeadband.HasValue || 
-             _configuration.DefaultAbsoluteDeadband.HasValue))
-        {
-            var filter = new DataChangeFilter
-            {
-                Trigger = _configuration.DefaultDataChangeTrigger,
-                DeadbandType = _configuration.DefaultPercentDeadband.HasValue ? (uint)DeadbandType.Percent : (uint)DeadbandType.Absolute,
-                DeadbandValue = _configuration.DefaultPercentDeadband ?? _configuration.DefaultAbsoluteDeadband ?? 0
-            };
-            monitoredItem.Filter = filter;
-        }
 
         property.Reference.SetPropertyData(OpcVariableKey, nodeId);
         _propertiesWithOpcData.Add(property.Reference);
