@@ -54,21 +54,28 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             {
                 _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}...", _configuration.ServerUrl);
                 
-                var application = _configuration.CreateApplicationInstance();
-                await application.CheckApplicationInstanceCertificates(false);
+                var application = await _configuration.CreateApplicationInstanceAsync(stoppingToken);
+                await application.CheckApplicationInstanceCertificatesAsync(false, null, stoppingToken);
 
                 var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
-                var endpointDescription = CoreClientUtils.SelectEndpoint(application.ApplicationConfiguration, _configuration.ServerUrl, false);
+#pragma warning disable CS0618 // Type or member is obsolete
+                var endpointDescription = await CoreClientUtils.SelectEndpointAsync(application.ApplicationConfiguration, _configuration.ServerUrl, false, 5 * 1000, new DefaultTelemetry(), stoppingToken);
+#pragma warning restore CS0618 // Type or member is obsolete
                 var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
 
-                _session = await Session.Create(
+#pragma warning disable CS0618 // Type or member is obsolete
+                _session = await Session.CreateAsync(
                     application.ApplicationConfiguration,
+                    null,
                     endpoint,
+                    false,
                     false,
                     application.ApplicationName,
                     60000,
                     new UserIdentity(),
-                    null, stoppingToken);
+                    [], 
+                    stoppingToken);
+#pragma warning restore CS0618 // Type or member is obsolete
 
                 var cancellationTokenSource = new CancellationTokenSource();
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, cancellationTokenSource.Token);
@@ -131,7 +138,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             }
             finally
             {
-                _subscriptionManager.Cleanup();
+                await _subscriptionManager.CleanupAsync(stoppingToken);
                 CleanUpProperties();
 
                 var session = _session;
