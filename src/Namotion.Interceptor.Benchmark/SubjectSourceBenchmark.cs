@@ -64,10 +64,9 @@ public class SubjectSourceBenchmark
         _updates = Enumerable
             .Range(1, 1000000)
             .Select(c => c < 1000000
-                ? new Action<object?>(_ => { c++; })
+                ? new Action<object?>(static _ => { })
                 : _ =>
                 {
-                    c++;
                     _signal.Set();
                 })
             .ToArray();
