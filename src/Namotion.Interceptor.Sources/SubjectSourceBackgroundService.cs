@@ -94,7 +94,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
             {
                 lock (_lock)
                 {
-                    _beforeInitializationUpdates = [];
+                    Volatile.Write(ref _beforeInitializationUpdates, []);
                 }
 
                 // Start listening for changes from the source
@@ -107,7 +107,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
 
                     // Replay previously buffered updates
                     var beforeInitializationUpdates = _beforeInitializationUpdates;
-                    _beforeInitializationUpdates = null;
+                    Volatile.Write(ref _beforeInitializationUpdates, null);
 
                     foreach (var action in beforeInitializationUpdates!)
                     {
