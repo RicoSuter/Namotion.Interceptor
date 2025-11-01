@@ -51,7 +51,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
     /// <inheritdoc />
     public void EnqueueOrApplyUpdate<TState>(TState state, Action<TState> update)
     {
-        var beforeInitializationUpdates = _beforeInitializationUpdates;
+        // Use Volatile.Read to ensure memory visibility of the field across threads
+        var beforeInitializationUpdates = Volatile.Read(ref _beforeInitializationUpdates);
         if (beforeInitializationUpdates is not null)
         {
             lock (_lock)
