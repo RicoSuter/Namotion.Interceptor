@@ -1,4 +1,5 @@
 ﻿using System.Reactive.Subjects;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
@@ -13,18 +14,17 @@ public class PropertyChangeObservable : IObservable<SubjectPropertyChange>, IWri
         _syncSubject = Subject.Synchronize(_subject);
     }
 
+    public bool ShouldInterceptWrite
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _subject.HasObservers;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        if (!_subject.HasObservers)
-        {
-            next(ref context);
-            return;
-        }
-
         var oldValue = context.CurrentValue;
-        
         next(ref context);
-
         var newValue = context.GetFinalValue();
 
         var changeContext = SubjectChangeContext.Current;

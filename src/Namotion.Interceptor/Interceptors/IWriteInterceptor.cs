@@ -1,7 +1,18 @@
-﻿namespace Namotion.Interceptor.Interceptors;
+﻿using System.Runtime.CompilerServices;
+
+namespace Namotion.Interceptor.Interceptors;
 
 public interface IWriteInterceptor
 {
+    /// <summary>
+    /// Gets a value indicating whether this interceptor should intercept write operations (otherwise it is skipped for performance reasons).
+    /// </summary>
+    bool ShouldInterceptWrite
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get;
+    }
+    
     void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next);
 }
 
