@@ -123,7 +123,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
                 
                 // Subscribe to property changes and sync them to the source
                 using var subscription = _context.CreatePropertyChangeQueueSubscription();
-                await ProcessPropertyChangesAsync(subscription, stoppingToken);
+                await ProcessPropertyChangesAsync(subscription, stoppingToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -135,7 +135,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
                 _logger.LogError(ex, "Failed to listen for changes in source.");
                 ResetState();
 
-                await Task.Delay(_retryTime, stoppingToken);
+                await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
             }
         }
     }
@@ -149,7 +149,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
 
         var flushTask = periodicTimer is not null
             // ReSharper disable AccessToDisposedClosure
-            ? Task.Run(async () => await RunPeriodicFlushAsync(periodicTimer, linkedTokenSource.Token), linkedTokenSource.Token)
+            ? Task.Run(async () => await RunPeriodicFlushAsync(
+                periodicTimer, linkedTokenSource.Token).ConfigureAwait(false), linkedTokenSource.Token)
             : Task.CompletedTask;
 
         try
@@ -277,7 +278,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
     {
         try
         {
-            await _source.WriteToSourceAsync(changes, cancellationToken);
+            await _source.WriteToSourceAsync(changes, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e)
         {
