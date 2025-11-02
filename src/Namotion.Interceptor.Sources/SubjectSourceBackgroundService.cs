@@ -1,14 +1,14 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Sources;
 
-public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutationDispatcher
+public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
 {
     private readonly Lock _lock = new();
     private readonly ISubjectSource _source;
@@ -18,7 +18,6 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     private readonly TimeSpan _retryTime;
 
     private List<Action>? _beforeInitializationUpdates = [];
-    private ISubjectRegistry? _subjectRegistry;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
@@ -50,15 +49,18 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     }
 
     /// <inheritdoc />
-    public void EnqueueSubjectUpdate(Action update)
+    public void EnqueueOrApplyUpdate<TState>(TState state, Action<TState> update)
     {
-        if (_beforeInitializationUpdates is not null)
+        var beforeInitializationUpdates = _beforeInitializationUpdates;
+        if (beforeInitializationUpdates is not null)
         {
             lock (_lock)
             {
-                if (_beforeInitializationUpdates is not null)
+                beforeInitializationUpdates = _beforeInitializationUpdates;
+                if (beforeInitializationUpdates is not null)
                 {
-                    _beforeInitializationUpdates.Add(update);
+                    // Still initializing, buffer the update (cold path, allocations acceptable)
+                    AddBeforeInitializationUpdate(beforeInitializationUpdates, state, update);
                     return;
                 }
             }
@@ -66,13 +68,20 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
         try
         {
-            _subjectRegistry ??= _context.GetService<ISubjectRegistry>();
-            _subjectRegistry.ExecuteSubjectUpdate(update);
+            update(state);
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Failed to execute subject update.");
+            _logger.LogError(e, "Failed to apply subject update.");
         }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void AddBeforeInitializationUpdate<TState>(List<Action> beforeInitializationUpdates, TState state, Action<TState> update)
+    {
+        // The allocation for the closure happens only on the cold path (needs to be in an own non-inlined method
+        // to avoid capturing unnecessary locals and causing allocations on the hot path).
+        beforeInitializationUpdates.Add(() => update(state));
     }
 
     /// <inheritdoc />
@@ -101,13 +110,20 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
                     foreach (var action in beforeInitializationUpdates!)
                     {
-                        EnqueueSubjectUpdate(action);
+                        try
+                        {
+                            action();
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.LogError(e, "Failed to apply subject update.");
+                        }
                     }
                 }
                 
                 // Subscribe to property changes and sync them to the source
                 using var subscription = _context.CreatePropertyChangeQueueSubscription();
-                await ProcessPropertyChangesAsync(subscription, stoppingToken);
+                await ProcessPropertyChangesAsync(subscription, stoppingToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -119,7 +135,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 _logger.LogError(ex, "Failed to listen for changes in source.");
                 ResetState();
 
-                await Task.Delay(_retryTime, stoppingToken);
+                await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
             }
         }
     }
@@ -133,7 +149,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
         var flushTask = periodicTimer is not null
             // ReSharper disable AccessToDisposedClosure
-            ? Task.Run(async () => await RunPeriodicFlushAsync(periodicTimer, linkedTokenSource.Token), linkedTokenSource.Token)
+            ? Task.Run(async () => await RunPeriodicFlushAsync(
+                periodicTimer, linkedTokenSource.Token).ConfigureAwait(false), linkedTokenSource.Token)
             : Task.CompletedTask;
 
         try
@@ -172,8 +189,6 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         finally
         {
             try { await linkedTokenSource.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
-            // Final best-effort flush after cancel to drain any residual items
-            await TryFlushBufferAsync(DateTimeOffset.UtcNow.UtcTicks, CancellationToken.None).ConfigureAwait(false);
             await flushTask.ConfigureAwait(false);
         }
     }
@@ -263,7 +278,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     {
         try
         {
-            await _source.WriteToSourceAsync(changes, cancellationToken);
+            await _source.WriteToSourceAsync(changes, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e)
         {

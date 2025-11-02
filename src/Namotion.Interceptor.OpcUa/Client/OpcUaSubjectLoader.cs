@@ -70,8 +70,8 @@ internal class OpcUaSubjectLoader
                     continue;
                 }
 
-                var addAsDynamic = _configuration.ShouldAddDynamicProperties is not null &&
-                    await _configuration.ShouldAddDynamicProperties(nodeRef, cancellationToken);
+                var addAsDynamic = _configuration.ShouldAddDynamicProperty is not null &&
+                    await _configuration.ShouldAddDynamicProperty(nodeRef, cancellationToken);
 
                 if (!addAsDynamic)
                 {
@@ -79,9 +79,13 @@ internal class OpcUaSubjectLoader
                 }
 
                 // Infer CLR type from OPC UA variable metadata if possible
-                var inferredType = await _configuration.TypeResolver.GetTypeForNodeAsync(session, nodeRef, cancellationToken);
-                if (inferredType == typeof(object))
+                var inferredType = await _configuration.TypeResolver.TryGetTypeForNodeAsync(session, nodeRef, cancellationToken);
+                if (inferredType is null)
                 {
+                    _logger.LogWarning(
+                        "Could not infer type for dynamic property '{PropertyName}' (NodeId: {NodeId}). Skipping property.",
+                        dynamicPropertyName, nodeRef.NodeId);
+
                     continue;
                 }
 
@@ -251,13 +255,48 @@ internal class OpcUaSubjectLoader
             }
         };
 
+        var results = new ReferenceDescriptionCollection();
+
         var response = await session.BrowseAsync(
             null,
             null,
-            0u,
+            _configuration.MaximumReferencesPerNode,
             browseDescriptions,
             cancellationToken);
 
-        return response.Results.Count > 0 ? response.Results[0].References : new ReferenceDescriptionCollection();
+        if (response.Results.Count > 0)
+        {
+            if (response.Results[0].References is { Count: > 0 } references)
+            {
+                foreach (var reference in references)
+                {
+                    results.Add(reference);
+                }
+            }
+
+            var continuationPoint = response.Results[0].ContinuationPoint;
+            while (continuationPoint is { Length: > 0 })
+            {
+                var nextResponse = await session.BrowseNextAsync(null, false, new ByteStringCollection { continuationPoint }, cancellationToken);
+                if (nextResponse.Results.Count > 0)
+                {
+                    var r0 = nextResponse.Results[0];
+                    if (r0.References is { Count: > 0 } nextReferences)
+                    {
+                        foreach (var reference in nextReferences)
+                        {
+                            results.Add(reference);
+                        }
+                    }
+                    continuationPoint = r0.ContinuationPoint;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+
+        return results;
     }
 }

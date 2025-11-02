@@ -102,10 +102,10 @@ public class OpcUaServerConfiguration
             TransportQuotas = new TransportQuotas
             {
                 OperationTimeout = 600000,
-                MaxStringLength = 1_048_576,
-                MaxByteStringLength = 1_048_576,
-                MaxMessageSize = 4_194_304,
-                MaxArrayLength = 65_535,
+                MaxStringLength = 4_194_304,
+                MaxByteStringLength = 16_777_216,
+                MaxMessageSize = 16_777_216,
+                MaxArrayLength = 1_000_000,
                 MaxBufferSize = 65_535,
                 ChannelLifetime = 300000,
                 SecurityTokenLifetime = 3_600_000
@@ -134,29 +134,29 @@ public class OpcUaServerConfiguration
                 MaxSessionCount = 100,
                 MinSessionTimeout = 10_000,
                 MaxSessionTimeout = 3_600_000,
-                MaxBrowseContinuationPoints = 10,
+                MaxBrowseContinuationPoints = 100,
                 MaxQueryContinuationPoints = 10,
                 MaxHistoryContinuationPoints = 100,
                 MaxRequestAge = 600000,
-                MinPublishingInterval = 100,
+                MinPublishingInterval = 50,
                 MaxPublishingInterval = 3_600_000,
-                PublishingResolution = 50,
+                PublishingResolution = 25,
                 MaxSubscriptionLifetime = 3_600_000,
-                MaxMessageQueueSize = 100,
-                MaxNotificationQueueSize = 100,
-                MaxNotificationsPerPublish = 1000,
+                MaxMessageQueueSize = 10_000,
+                MaxNotificationQueueSize = 10_000,
+                MaxNotificationsPerPublish = 10_000,
                 MinMetadataSamplingInterval = 1000,
                 MaxEventQueueSize = 10_000,
                 AuditingEnabled = true,
                 // From XML -> minimal operation limits relevant for typical interactions.
                 OperationLimits = new OperationLimits
                 {
-                    MaxNodesPerRead = 1000,
-                    MaxNodesPerWrite = 1000,
-                    MaxNodesPerMethodCall = 250,
-                    MaxNodesPerBrowse = 2500,
-                    MaxNodesPerTranslateBrowsePathsToNodeIds = 1000,
-                    MaxMonitoredItemsPerCall = 1000
+                    MaxNodesPerRead = 4000,
+                    MaxNodesPerWrite = 4000,
+                    MaxNodesPerMethodCall = 1000,
+                    MaxNodesPerBrowse = 4000,
+                    MaxNodesPerTranslateBrowsePathsToNodeIds = 2000,
+                    MaxMonitoredItemsPerCall = 4000
                 },
                 // Minimal capability list (DA) to reflect XML ServerCapabilities.
                 ServerCapabilities = ["DA"]
