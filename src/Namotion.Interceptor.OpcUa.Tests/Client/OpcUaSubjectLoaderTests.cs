@@ -33,7 +33,7 @@ public class OpcUaSubjectLoaderTests
             TypeResolver = new OpcUaTypeResolver(_mockLogger.Object),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(new DefaultSubjectFactory()),
-            ShouldAddDynamicProperties = (_, _) => Task.FromResult(false) // Don't add dynamic properties
+            ShouldAddDynamicProperty = static (_, _) => Task.FromResult(false) // Don't add dynamic properties
         };
     }
 
@@ -110,7 +110,7 @@ public class OpcUaSubjectLoaderTests
         // Arrange: override base configuration for this loader
         var mockTypeResolver = new Mock<OpcUaTypeResolver>(_mockLogger.Object);
         mockTypeResolver
-            .Setup(t => t.GetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
+            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(typeof(int));
 
         var loader = CreateLoader(
@@ -163,8 +163,8 @@ public class OpcUaSubjectLoaderTests
         // Arrange: override base configuration for this loader
         var mockTypeResolver = new Mock<OpcUaTypeResolver>(_mockLogger.Object);
         mockTypeResolver
-            .Setup(t => t.GetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(typeof(object)); // Simulate unresolved type (should return DynamicObject or similar when an expandable object is required)
+            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Type?)null); // Simulate unresolved type (should return DynamicObject or similar when an expandable object is required)
 
         var loader = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
@@ -228,7 +228,7 @@ public class OpcUaSubjectLoaderTests
             TypeResolver = typeResolver ?? _baseConfiguration.TypeResolver,
             ValueConverter = _baseConfiguration.ValueConverter,
             SubjectFactory = _baseConfiguration.SubjectFactory,
-            ShouldAddDynamicProperties = shouldAddDynamicProperties ?? _baseConfiguration.ShouldAddDynamicProperties,
+            ShouldAddDynamicProperty = shouldAddDynamicProperties ?? _baseConfiguration.ShouldAddDynamicProperty,
             DefaultNamespaceUri = _baseConfiguration.DefaultNamespaceUri
         };
 
