@@ -120,9 +120,9 @@ public class OpcUaClientConfiguration
     public uint SubscriptionMaximumNotificationsPerPublish { get; set; } = 0;
 
     /// <summary>
-    /// Browsing: maximum references per node to request. 0 uses server default.
+    /// Gets or sets the maximum references per node to read per browse request. 0 uses server default.
     /// </summary>
-    public uint MaximumReferencesPerNode { get; init; } = 0;
+    public uint MaximumReferencesPerNode { get; set; } = 0;
 
     public virtual ApplicationInstance CreateApplicationInstance()
     {

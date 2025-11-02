@@ -188,8 +188,6 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
         finally
         {
             try { await linkedTokenSource.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
-            // Final best-effort flush after cancel to drain any residual items
-            await TryFlushBufferAsync(DateTimeOffset.UtcNow.UtcTicks, CancellationToken.None).ConfigureAwait(false);
             await flushTask.ConfigureAwait(false);
         }
     }
