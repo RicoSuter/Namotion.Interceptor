@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Interceptors;
+﻿using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Change;
@@ -11,7 +12,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 {
     [ThreadStatic]
     private static Stack<HashSet<PropertyReference>>? _currentTouchedProperties;
-    
+
+    public bool ShouldInterceptWrite
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => true;
+    }
+
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
         if (change.Property.Metadata.IsDerived)
@@ -30,6 +37,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
         var result = next(ref context);
@@ -37,6 +45,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         return result;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         next(ref context);
