@@ -6,34 +6,40 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// <summary>
 /// Handles derived properties and triggers change events and recalculations when dependent properties are changed.
 /// Requires LifecycleInterceptor to be added after this interceptor.
+/// Thread-safe lock-free implementation with allocation-free steady state.
 /// </summary>
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
     [ThreadStatic]
-    private static Stack<HashSet<PropertyReference>>? _currentTouchedProperties;
-    
+    private static DerivedPropertyRecordingBuffer? _recordingBuffer;
+
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
         if (change.Property.Metadata.IsDerived)
         {
-            TryStartRecordTouchedProperties();
-
+            // Record dependencies during initial evaluation
+            StartRecording();
             var result = change.Property.Metadata.GetValue?.Invoke(change.Subject);
             change.Property.SetLastKnownValue(result);
-
-            StoreRecordedTouchedProperties(change.Property);
-            TouchProperty(change.Property);
+            UpdateDependencyLinks(change.Property);
         }
     }
 
     public void DetachProperty(SubjectPropertyLifecycleChange change)
     {
+        // No cleanup needed - dependencies are managed per-property
     }
 
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
         var result = next(ref context);
-        TouchProperty(context.Property);
+
+        if (_recordingBuffer?.IsRecording == true)
+        {
+            var property = context.Property;
+            _recordingBuffer.TouchProperty(ref property);
+        }
+
         return result;
     }
 
@@ -42,82 +48,95 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         next(ref context);
 
         var usedByProperties = context.Property.GetUsedByProperties();
-        if (usedByProperties.Count == 0) // TODO(ts): Here we have a potential race condition with not locking usedByProperties (find lock free solution)
+        if (usedByProperties.Count == 0)
+        {
+            return; // No derived properties depend on this property
+        }
+
+        // Get timestamp from lifecycle interceptor (or use current)
+        var timestamp = context.Property.TryGetWriteTimestamp()
+            ?? SubjectChangeContext.Current.ChangedTimestamp;
+
+        // Iterate over stable snapshot of dependents (thread-safe, lock-free)
+        var snapshot = usedByProperties.AsSpan();
+        for (int i = 0; i < snapshot.Length; i++)
+        {
+            var dependent = snapshot[i];
+            if (dependent == context.Property)
+            {
+                continue; // Skip self-references
+            }
+
+            RecalculateDerivedProperty(ref dependent, timestamp);
+        }
+    }
+
+    /// <summary>
+    /// Recalculates a derived property and updates its dependencies.
+    /// </summary>
+    private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, DateTimeOffset timestamp)
+    {
+        // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
+        var oldValue = derivedProperty.GetLastKnownValue();
+
+        // Record dependencies during recalculation
+        StartRecording();
+        var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
+        UpdateDependencyLinks(derivedProperty);
+
+        derivedProperty.SetLastKnownValue(newValue);
+        derivedProperty.SetWriteTimestamp(timestamp);
+
+        // Trigger change event (derived changes have null source)
+        using (SubjectChangeContext.WithSource(null))
+        {
+            derivedProperty.SetPropertyValueWithInterception(newValue, _ => oldValue, delegate { });
+        }
+    }
+
+    /// <summary>
+    /// Starts recording property accesses for dependency tracking.
+    /// </summary>
+    private static void StartRecording()
+    {
+        _recordingBuffer ??= new DerivedPropertyRecordingBuffer();
+        _recordingBuffer.StartRecording();
+    }
+
+    /// <summary>
+    /// Updates dependency links based on recorded property accesses.
+    /// </summary>
+    private static void UpdateDependencyLinks(PropertyReference derivedProperty)
+    {
+        var recordedDependencies = _recordingBuffer!.FinishRecording();
+        var previousDependencies = derivedProperty.GetRequiredProperties();
+
+        // Early exit if dependencies haven't changed (allocation-free)
+        if (previousDependencies.SequenceEqual(recordedDependencies))
         {
             return;
         }
-        
-        // Read timestamp from property which has been set by lifecycle interceptor before
-        var timestamp = context.Property.TryGetWriteTimestamp() 
-            ?? SubjectChangeContext.Current.ChangedTimestamp;
 
-        lock (usedByProperties)
+        // Remove derived property from old dependencies that are no longer used
+        var previousSpan = previousDependencies.AsSpan();
+        foreach (ref readonly var oldDependency in previousSpan)
         {
-            foreach (var usedByProperty in usedByProperties)
+            if (!recordedDependencies.Contains(oldDependency))
             {
-                if (usedByProperty == context.Property)
-                {
-                    continue;
-                }
-                
-                var oldValue = usedByProperty.GetLastKnownValue();
-
-                TryStartRecordTouchedProperties();
-
-                var newValue = usedByProperty.Metadata.GetValue?.Invoke(usedByProperty.Subject);
-
-                StoreRecordedTouchedProperties(usedByProperty);
-                TouchProperty(usedByProperty);
-
-                usedByProperty.SetLastKnownValue(newValue);
-                usedByProperty.SetWriteTimestamp(timestamp);
-
-                // Trigger change event (derived change has local process as source (null))
-                using (SubjectChangeContext.WithSource(null))
-                {
-                    usedByProperty.SetPropertyValueWithInterception(newValue, _ => oldValue, delegate { });
-                }
+                oldDependency.GetUsedByProperties().Remove(derivedProperty);
             }
         }
-    }
 
-    private static void TryStartRecordTouchedProperties()
-    {
-        _currentTouchedProperties ??= new Stack<HashSet<PropertyReference>>();
-        _currentTouchedProperties.Push([]);
-    }
+        // Update stored dependencies
+        derivedProperty.SetRequiredProperties(recordedDependencies);
 
-    private static void StoreRecordedTouchedProperties(PropertyReference property)
-    {
-        var newProperties = _currentTouchedProperties!.Pop();
-
-        var previouslyRequiredProperties = property.GetRequiredProperties();
-        foreach (var previouslyRequiredProperty in previouslyRequiredProperties.Except(newProperties))
+        // Add derived property to new dependencies
+        foreach (ref readonly var newDependency in recordedDependencies)
         {
-            var usedByProperties = previouslyRequiredProperty.GetUsedByProperties();
-            lock (usedByProperties)
-                usedByProperties.Remove(previouslyRequiredProperty);
-        }
-
-        property.SetRequiredProperties(newProperties);
-
-        foreach (var newlyRequiredProperty in newProperties.Except(previouslyRequiredProperties))
-        {
-            var usedByProperties = newlyRequiredProperty.GetUsedByProperties();
-            lock (usedByProperties)
-                usedByProperties.Add(new PropertyReference(property.Subject, property.Name));
-        }
-    }
-
-    private static void TouchProperty(PropertyReference property)
-    {
-        if (_currentTouchedProperties?.TryPeek(out var touchedProperties) == true)
-        {
-            touchedProperties.Add(property);
-        }
-        else
-        {
-            _currentTouchedProperties = null;
+            if (!previousSpan.Contains(newDependency))
+            {
+                newDependency.GetUsedByProperties().Add(derivedProperty);
+            }
         }
     }
 }
