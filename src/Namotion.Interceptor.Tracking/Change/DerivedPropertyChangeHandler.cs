@@ -26,7 +26,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             StartRecordingTouchedProperties();
             var result = change.Property.Metadata.GetValue?.Invoke(change.Subject);
             change.Property.SetLastKnownValue(result);
-            UpdatePropertyDependencies(change.Property);
+            StoreRecordedTouchedProperties(change.Property);
         }
     }
 
@@ -85,7 +85,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var oldValue = derivedProperty.GetLastKnownValue();
         StartRecordingTouchedProperties();
         var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
-        UpdatePropertyDependencies(derivedProperty);
+        StoreRecordedTouchedProperties(derivedProperty);
 
         derivedProperty.SetLastKnownValue(newValue);
         derivedProperty.SetWriteTimestamp(timestamp);
@@ -114,7 +114,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// - No change: Early exit (allocation-free)
     /// Use version to prevent ABA problem where two threads think they have exclusive access.
     /// </summary>
-    private static void UpdatePropertyDependencies(PropertyReference derivedProperty)
+    private static void StoreRecordedTouchedProperties(PropertyReference derivedProperty)
     {
         var recordedDependencies = _recorder!.FinishRecording();
         var requiredProps = derivedProperty.GetRequiredProperties();
