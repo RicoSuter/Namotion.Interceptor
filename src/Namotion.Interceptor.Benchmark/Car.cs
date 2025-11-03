@@ -40,11 +40,13 @@ namespace Namotion.Interceptor.Benchmark
             get 
             {
                 var tires = Tires;
+
                 var total = 0m;
-                foreach (var tire in tires)
+                for (var index = 0; index < tires.Length; index++)
                 {
-                    total += tire.Pressure;
+                    total += tires[index].Pressure;
                 }
+
                 return total / tires.Length;
                 //return Tires.Average(t => t.Pressure);
             }
