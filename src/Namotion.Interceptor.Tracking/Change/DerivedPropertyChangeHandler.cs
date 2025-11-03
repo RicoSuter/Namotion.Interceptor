@@ -5,6 +5,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
 /// Handles derived property tracking and automatic recalculation using dependency recording.
+/// Requires LifecycleInterceptor to be added after this interceptor.
 /// </summary>
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
@@ -63,7 +64,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             ?? SubjectChangeContext.Current.ChangedTimestamp;
 
         // Iterate over stable snapshot of dependents (copy-on-write ensures safety)
-        var snapshot = usedByProperties.AsSpan();
+        var snapshot = usedByProperties.Items;
         for (int i = 0; i < snapshot.Length; i++)
         {
             var dependent = snapshot[i];
@@ -121,7 +122,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         // Read version twice to detect concurrent modifications (allocation-free double-check)
         var version1 = requiredProps.Version;
-        var previousItems = requiredProps.AsSpan();
+        var previousItems = requiredProps.Items;
         var version2 = requiredProps.Version;
 
         // Detect concurrent modification during read
