@@ -3,7 +3,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// <summary>
 /// Lock-free, copy-on-write collection for property dependencies.
 /// Concurrency Model:
-/// - Reads: Allocation-free via <see cref="AsSpan"/>. Always returns stable snapshot.
+/// - Reads: Allocation-free via <see cref="Items"/>. Always returns stable snapshot.
 /// - Writes: Lock-free CAS (Compare-And-Swap) with automatic retry on contention.
 /// - Version: Monotonically increasing counter for optimistic concurrency control.
 /// Design: Copy-on-write ensures readers never see partial updates. Version counter detects ABA problems.
@@ -28,8 +28,7 @@ public sealed class DerivedPropertyDependencies
     /// Gets a stable snapshot for iteration (thread-safe, allocation-free).
     /// <para>Snapshot won't change even if collection is modified concurrently - copy-on-write semantics.</para>
     /// </summary>
-    public ReadOnlySpan<PropertyReference> AsSpan() => Volatile.Read(ref _items);
-
+    public ReadOnlySpan<PropertyReference> Items => Volatile.Read(ref _items);
 
     /// <summary>
     /// Adds a dependency using lock-free CAS (compare-and-swap).
