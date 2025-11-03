@@ -1,5 +1,9 @@
-﻿namespace Namotion.Interceptor.Tracking.Change;
+namespace Namotion.Interceptor.Tracking.Change;
 
+/// <summary>
+/// Extension methods for derived property dependency tracking.
+/// Stores dependency graph and cached values in PropertyReference metadata dictionary.
+/// </summary>
 public static class DerivedPropertyChangeHandlerExtensions
 {
     private const string UsedByPropertiesKey = "Namotion.Interceptor.UsedByProperties";
@@ -7,46 +11,38 @@ public static class DerivedPropertyChangeHandlerExtensions
     private const string LastKnownValueKey = "Namotion.Interceptor.LastKnownValue";
 
     /// <summary>
-    /// Gets the lock-free collection of properties that depend on this property (used-by relationships).
-    /// Reading is allocation-free; modifications use lock-free CAS.
+    /// Gets backward dependencies: Which derived properties depend on this property.
+    /// Example: If FullName depends on FirstName, then FirstName.GetUsedByProperties() includes FullName.
     /// </summary>
-    public static DerivedPropertyDependencies GetUsedByProperties(this PropertyReference property)
-    {
-        return property.GetOrAddPropertyData(UsedByPropertiesKey, static () => new DerivedPropertyDependencies());
-    }
+    public static DerivedPropertyDependencies GetUsedByProperties(this PropertyReference property) =>
+        property.GetOrAddPropertyData(UsedByPropertiesKey, static () => new DerivedPropertyDependencies());
 
     /// <summary>
-    /// Gets the lock-free collection of properties that this property depends on (required dependencies).
-    /// Reading is allocation-free; modifications use lock-free CAS.
+    /// Gets forward dependencies: Which properties this derived property depends on.
+    /// Example: FullName.GetRequiredProperties() includes FirstName and LastName.
     /// </summary>
-    public static DerivedPropertyDependencies GetRequiredProperties(this PropertyReference property)
-    {
-        return property.GetOrAddPropertyData(RequiredPropertiesKey, static () => new DerivedPropertyDependencies());
-    }
+    public static DerivedPropertyDependencies GetRequiredProperties(this PropertyReference property) =>
+        property.GetOrAddPropertyData(RequiredPropertiesKey, static () => new DerivedPropertyDependencies());
 
     /// <summary>
-    /// Updates the required dependencies for this property from recorded accesses.
+    /// Gets the cached last known value of a derived property.
+    /// Used for change detection (compare old vs new value).
     /// </summary>
-    internal static void SetRequiredProperties(this PropertyReference property, ReadOnlySpan<PropertyReference> dependencies)
-    {
-        property.GetRequiredProperties().ReplaceWith(dependencies);
-    }
+    internal static object? GetLastKnownValue(this PropertyReference property) =>
+        property.GetOrAddPropertyData(LastKnownValueKey, static () => new LastKnownValueWrapper()).Value;
 
-    internal static object? GetLastKnownValue(this PropertyReference property)
-    {
-        return property.GetOrAddPropertyData(LastKnownValueKey, static () => new LastKnownValueWrapper()).Value;
-    }
-
-    // TODO(perf): Use a struct-based/ref approach somehow to avoid allocations here in SetLastKnownValue
-    internal static void SetLastKnownValue(this PropertyReference property, object? value)
-    {
+    /// <summary>
+    /// Sets the cached last known value of a derived property.
+    /// </summary>
+    internal static void SetLastKnownValue(this PropertyReference property, object? value) =>
         property.AddOrUpdatePropertyData<LastKnownValueWrapper, object?>(
             LastKnownValueKey, static (wrapper, val) => wrapper.Value = val, value);
-    }
-    
-    // Wrapper used to avoid boxing when the stored value happens to be a value type
-    // The wrapper itself is a reference type, so only one allocation per property is needed
-    private class LastKnownValueWrapper
+
+    /// <summary>
+    /// Wrapper to avoid repeated boxing of value types.
+    /// Allocated once per property (stored in metadata dict), then reused for all updates.
+    /// </summary>
+    private sealed class LastKnownValueWrapper
     {
         public object? Value { get; set; }
     }
