@@ -7,28 +7,29 @@ public static class DerivedPropertyChangeHandlerExtensions
     private const string LastKnownValueKey = "Namotion.Interceptor.LastKnownValue";
 
     /// <summary>
-    /// Gets a list of properties that use this property.
+    /// Gets the lock-free collection of properties that depend on this property (used-by relationships).
+    /// Reading is allocation-free; modifications use lock-free CAS.
     /// </summary>
-    /// <param name="property">The property.</param>
-    /// <returns>The property list.</returns>
-    public static HashSet<PropertyReference> GetUsedByProperties(this PropertyReference property)
+    public static DerivedPropertyDependencies GetUsedByProperties(this PropertyReference property)
     {
-        return property.GetOrAddPropertyData(UsedByPropertiesKey, static () => new HashSet<PropertyReference>());
+        return property.GetOrAddPropertyData(UsedByPropertiesKey, static () => new DerivedPropertyDependencies());
     }
 
     /// <summary>
-    /// Sets the list of properties that are used by in this property's implementation (dependencies).
+    /// Gets the lock-free collection of properties that this property depends on (required dependencies).
+    /// Reading is allocation-free; modifications use lock-free CAS.
     /// </summary>
-    /// <param name="property">The property.</param>
-    /// <returns>The property list.</returns>
-    public static HashSet<PropertyReference> GetRequiredProperties(this PropertyReference property)
+    public static DerivedPropertyDependencies GetRequiredProperties(this PropertyReference property)
     {
-        return property.GetOrAddPropertyData(RequiredPropertiesKey, () => new HashSet<PropertyReference>());
+        return property.GetOrAddPropertyData(RequiredPropertiesKey, static () => new DerivedPropertyDependencies());
     }
 
-    internal static void SetRequiredProperties(this PropertyReference property, HashSet<PropertyReference> requiredProperties)
+    /// <summary>
+    /// Updates the required dependencies for this property from recorded accesses.
+    /// </summary>
+    internal static void SetRequiredProperties(this PropertyReference property, ReadOnlySpan<PropertyReference> dependencies)
     {
-        property.SetPropertyData(RequiredPropertiesKey, requiredProperties);
+        property.GetRequiredProperties().ReplaceWith(dependencies);
     }
 
     internal static object? GetLastKnownValue(this PropertyReference property)
