@@ -2,12 +2,10 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
 /// Lock-free, copy-on-write collection for property dependencies.
-///
 /// Concurrency Model:
 /// - Reads: Allocation-free via <see cref="AsSpan"/>. Always returns stable snapshot.
 /// - Writes: Lock-free CAS (Compare-And-Swap) with automatic retry on contention.
 /// - Version: Monotonically increasing counter for optimistic concurrency control.
-///
 /// Design: Copy-on-write ensures readers never see partial updates. Version counter detects ABA problems.
 /// </summary>
 public sealed class DerivedPropertyDependencies
@@ -35,8 +33,8 @@ public sealed class DerivedPropertyDependencies
 
     /// <summary>
     /// Adds a dependency using lock-free CAS (compare-and-swap).
-    /// <para><b>Thread-safe:</b> Multiple threads can call concurrently. CAS loop retries on contention.</para>
-    /// <para><b>Idempotent:</b> Adding same item multiple times is safe (no duplicates).</para>
+    /// Thread-safe: Multiple threads can call concurrently. CAS loop retries on contention.
+    /// Idempotent: Adding same item multiple times is safe (no duplicates).
     /// </summary>
     /// <returns>True if item was added; false if already exists.</returns>
     internal bool Add(in PropertyReference item)
