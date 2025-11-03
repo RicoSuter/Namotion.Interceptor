@@ -14,6 +14,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 internal sealed class DerivedPropertyRecorder
 {
     private readonly ArrayPool<PropertyReference> _pool = ArrayPool<PropertyReference>.Shared;
+    
     private RecordingFrame[] _frames = [];
     private int _depth; // Current nesting level (usually 0 or 1)
 

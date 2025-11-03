@@ -23,7 +23,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         if (change.Property.Metadata.IsDerived)
         {
-            // Record dependencies during initial evaluation
             StartRecordingTouchedProperties();
             var result = change.Property.Metadata.GetValue?.Invoke(change.Subject);
             change.Property.SetLastKnownValue(result);
@@ -56,10 +55,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var usedByProperties = context.Property.GetUsedByProperties();
         if (usedByProperties.Count == 0)
         {
-            return; // Fast path: No derived properties depend on this
+            return;
         }
 
-        // Get timestamp from lifecycle interceptor (or use current)
         var timestamp = context.Property.TryGetWriteTimestamp()
             ?? SubjectChangeContext.Current.ChangedTimestamp;
 
@@ -71,7 +69,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             if (dependent == context.Property)
                 continue; // Skip self-references (rare edge case)
 
-            RecalculateDerivedProperty(ref dependent, timestamp);
+            RecalculateDerivedProperty(ref dependent, ref timestamp);
         }
     }
 
@@ -79,7 +77,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// Recalculates a derived property when one of its dependencies changes.
     /// Records new dependencies during evaluation and updates dependency graph.
     /// </summary>
-    private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, DateTimeOffset timestamp)
+    private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, ref DateTimeOffset timestamp)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
@@ -132,13 +130,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        // Fast path: Dependencies unchanged (most common case)
         if (previousItems.SequenceEqual(recordedDependencies))
         {
             return;
         }
 
-        // Try atomic replace with version check (optimistic concurrency)
         if (!requiredProps.TryReplace(recordedDependencies, version1))
         {
             // Version changed = concurrent write detected, use conservative merge
@@ -148,7 +144,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         // Success: Exclusive access confirmed, safe to update backlinks
         // Note: previousItems span still valid (points to old array kept alive by GC)
-
         // Remove this derived property from old dependencies no longer used
         foreach (ref readonly var oldDependency in previousItems)
         {
