@@ -56,7 +56,8 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     private void ApplyChange(SubjectPropertyChange change)
     {
-        if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) && data is BaseDataVariableState node)
+        if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
+            data is BaseDataVariableState node)
         {
             var value = change.GetNewValue<object?>();
             var convertedValue = _configuration.ValueConverter
