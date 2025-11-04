@@ -27,7 +27,7 @@ public class SubjectSourceBenchmark
     private string[] _propertyNames;
 
     private readonly AutoResetEvent _signal = new(false);
-    private Action[] _updates;
+    private Action<object?>[] _updates;
 
     [GlobalSetup]
     public async Task Setup()
@@ -64,10 +64,9 @@ public class SubjectSourceBenchmark
         _updates = Enumerable
             .Range(1, 1000000)
             .Select(c => c < 1000000
-                ? new Action(() => { c++; })
-                : () =>
+                ? new Action<object?>(static _ => { })
+                : _ =>
                 {
-                    c++;
                     _signal.Set();
                 })
             .ToArray();
@@ -78,7 +77,7 @@ public class SubjectSourceBenchmark
     {
         for (var i = 0; i < _updates.Length; i++)
         {
-            _service.EnqueueSubjectUpdate(_updates[i]);
+            _service.EnqueueOrApplyUpdate(null, _updates[i]);
         }
 
         _signal.WaitOne();
@@ -135,7 +134,7 @@ public class SubjectSourceBenchmark
         
         public bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
 
-        public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
+        public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
         {
             return Task.FromResult<IDisposable?>(null);
         }
