@@ -138,6 +138,12 @@ Core library for property and method interception with source generation support
 
 - **`SubjectPropertyMetadata`** - Property descriptor containing type information, access methods, and interception flags that tells the system how to work with each property.
 
+Thread-safety and correctness:
+
+- Property field reads and writes are synchronized via the subject's `SyncRoot` lock when interceptors are present, ensuring the interception pipeline executes safely across threads.
+- Without interceptors, properties behave like standard C# POCOs (no locking).
+- **Warning**: External use of `SyncRoot` for custom locking should be done with care, as it may lead to performance degradation or deadlocks if not coordinated properly with the interception system.
+
 ### Namotion.Interceptor.Generator
 
 Source generator that creates the interception logic for classes marked with `[InterceptorSubject]`. Automatically included when you install the main `Namotion.Interceptor` package.

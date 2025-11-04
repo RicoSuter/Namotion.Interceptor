@@ -128,6 +128,9 @@ namespace {namespaceName}
         [JsonIgnore]
         IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
 
+        [JsonIgnore]
+        object IInterceptorSubject.SyncRoot {{ get; }} = new object();
+
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {{
             _properties = (_properties ?? DefaultProperties)
