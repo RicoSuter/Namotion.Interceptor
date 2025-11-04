@@ -304,7 +304,7 @@ public class SubjectUpdateTests
 
         var changes = new List<SubjectPropertyChange>();
         using var _ = context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(c => changes.Add(c));
 
         // Act
