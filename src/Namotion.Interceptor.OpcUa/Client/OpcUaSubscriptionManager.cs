@@ -172,17 +172,22 @@ internal class OpcUaSubscriptionManager
             return;
         }
 
-        var receivedTimestamp = DateTimeOffset.Now;
-        var state = (source: this, subscription, receivedTimestamp, changes: notification.MonitoredItems);
+        var state = (source: this, monitoredItems: _monitoredItems, 
+            configuration: _configuration, logger: _logger,
+            receivedTimestamp: DateTimeOffset.Now, 
+            items: notification.MonitoredItems);
+
         _updater?.EnqueueOrApplyUpdate(state, static s =>
         {
-            Parallel.ForEach(s.changes, item =>
+            // Parallel.ForEach will lead to a delegate allocation here (capturing s).
+            Parallel.ForEach(s.items, item =>
             {
-                if (s.source._monitoredItems.TryGetValue(item.ClientHandle, out var property))
+                if (s.monitoredItems.TryGetValue(item.ClientHandle, out var property))
                 {
                     try
                     {
-                        var value = s.source._configuration
+                        var value = s
+                            .configuration
                             .ValueConverter
                             .ConvertToPropertyValue(item.Value.Value, property);
 
@@ -191,7 +196,9 @@ internal class OpcUaSubscriptionManager
                     }
                     catch (Exception e)
                     {
-                        s.source._logger.LogError(e, "Failed to apply change for OPC UA {Path}.", property.Reference.Name);
+                        s.logger.LogError(e, 
+                            "Failed to apply change for OPC UA {Path}.", 
+                            property.Reference.Name);
                     }
                 }
             });
