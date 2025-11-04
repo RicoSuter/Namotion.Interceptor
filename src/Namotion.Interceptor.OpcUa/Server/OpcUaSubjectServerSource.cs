@@ -6,6 +6,7 @@ using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Configuration;
+using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
@@ -19,7 +20,8 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     private OpcUaSubjectServer? _server;
     private ISubjectUpdater? _updater;
-    
+    private ServerSystemContext? _systemContext;
+
     public OpcUaSubjectServerSource(
         IInterceptorSubject subject,
         OpcUaServerConfiguration configuration,
@@ -48,22 +50,26 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     public ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        foreach (var change in changes)
-        {
-            if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) && 
-                data is BaseDataVariableState node)
-            {
-                var value = change.GetNewValue<object?>();
-                var convertedValue = _configuration.ValueConverter
-                    .ConvertToNodeValue(value, change.Property.GetRegisteredProperty());
+        Parallel.ForEach(changes, ApplyChange);
+        return ValueTask.CompletedTask;
+    }
 
+    private void ApplyChange(SubjectPropertyChange change)
+    {
+        if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
+            data is BaseDataVariableState node)
+        {
+            var value = change.GetNewValue<object?>();
+            var convertedValue = _configuration.ValueConverter
+                .ConvertToNodeValue(value, change.Property.GetRegisteredProperty());
+
+            lock (node)
+            {
                 node.Value = convertedValue;
                 node.Timestamp = change.ChangedTimestamp.UtcDateTime;
-                node.ClearChangeMasks(_server?.CurrentInstance.DefaultSystemContext, false);
+                node.ClearChangeMasks(_systemContext, false);
             }
         }
-
-        return ValueTask.CompletedTask;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -84,6 +90,8 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
                 await application.CheckApplicationInstanceCertificates(true);
                 await application.Start(_server);
+
+                _systemContext = _server.CurrentInstance.DefaultSystemContext;
 
                 await Task.Delay(-1, stoppingToken);
             }
