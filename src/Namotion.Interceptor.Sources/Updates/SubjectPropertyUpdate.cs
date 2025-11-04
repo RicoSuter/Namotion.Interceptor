@@ -159,7 +159,7 @@ public class SubjectPropertyUpdate
         {
             Kind = SubjectPropertyUpdateKind.Item;
             Item = value is IInterceptorSubject itemSubject ? 
-                SubjectUpdate.CreateCompleteUpdate(itemSubject, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates) :
+                SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates) :
                 null;
         }
         else
@@ -183,7 +183,7 @@ public class SubjectPropertyUpdate
             collectionUpdates.Add(new SubjectPropertyCollectionUpdate
             {
                 Item = item is not null ? 
-                    SubjectUpdate.CreateCompleteUpdate(item, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates) : 
+                    SubjectUpdate.GetOrCreateCompleteUpdate(item, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates) : 
                     null,
                 Index = key
             });
@@ -207,7 +207,7 @@ public class SubjectPropertyUpdate
             {
                 collectionUpdates.Add(new SubjectPropertyCollectionUpdate
                 {
-                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates),
+                    Item = SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates),
                     Index = index++
                 });
             }
@@ -222,7 +222,7 @@ public class SubjectPropertyUpdate
             {
                 collectionUpdates.Add(new SubjectPropertyCollectionUpdate
                 {
-                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates),
+                    Item = SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates),
                     Index = index++
                 });
             }

@@ -43,7 +43,7 @@ public class SubjectUpdate
                 propertyUpdates = SubjectUpdatePools.RentPropertyUpdates();
             }
 
-            var update = CreateCompleteUpdate(subject, withCycleCheck: true, processors, knownSubjectUpdates, propertyUpdates);
+            var update = GetOrCreateCompleteUpdate(subject, withCycleCheck: true, processors, knownSubjectUpdates, propertyUpdates);
             if (processors.Length > 0 && propertyUpdates is not null && propertyUpdates.Count > 0)
             {
                 ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
@@ -62,12 +62,12 @@ public class SubjectUpdate
     /// Creates a complete update with all objects and properties for the given subject as root.
     /// </summary>
     /// <param name="subject">The root subject.</param>
-    /// <param name="withCycleCheck"></param>
+    /// <param name="withCycleCheck">When update already exists returns an empty update instead of existing update.</param>
     /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
     /// <param name="propertyUpdates">The list to collect property updates for transformation.</param>
     /// <returns>The update.</returns>
-    internal static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject,
+    internal static SubjectUpdate GetOrCreateCompleteUpdate(IInterceptorSubject subject,
         bool withCycleCheck,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates, 
