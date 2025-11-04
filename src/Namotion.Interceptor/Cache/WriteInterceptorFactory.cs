@@ -15,10 +15,13 @@ internal static class WriteInterceptorFactory<TProperty>
         var chain = new WriteInterceptorChain<IWriteInterceptor, TProperty>(
             interceptorArray,
             static (interceptor, ref context, next) => interceptor.WriteProperty(ref context, next),
-            static (ref interception, innerWriteValue) =>
+            static (ref context, innerWriteValue) =>
             {
-                innerWriteValue(interception.Property.Subject, interception.NewValue);
-                return interception.NewValue;
+                lock (context.Property.Subject.SyncRoot)
+                {
+                    innerWriteValue(context.Property.Subject, context.NewValue);
+                }
+                return context.NewValue;
             }
         );
         return chain.Execute;
