@@ -238,7 +238,7 @@ public class LifecycleInterceptorTests
         var person = new Person(context);
         
         // Assert
-        Assert.Single(events, e => e == "Attached property:  .FooBar"); // should attach FooBar only once
+        Assert.Single(events, e => e == "Attached property: { }.FooBar"); // should attach FooBar only once
         return Verify(events);
     }
 

@@ -1,5 +1,4 @@
 ﻿{
-  Type: Person,
   Properties: {
     children: {
       Kind: Collection,
@@ -9,7 +8,6 @@
         {
           Index: 0,
           Item: {
-            Type: Person,
             Properties: {
               children: {
                 Kind: Collection,
@@ -38,6 +36,11 @@
                   }
                 }
               },
+              fullName: {
+                Kind: Value,
+                Type: String,
+                Value: Child1 
+              },
               lastName: {
                 Kind: Value,
                 Type: String
@@ -52,7 +55,6 @@
         {
           Index: 1,
           Item: {
-            Type: Person,
             Properties: {
               children: {
                 Kind: Collection,
@@ -81,6 +83,11 @@
                   }
                 }
               },
+              fullName: {
+                Kind: Value,
+                Type: String,
+                Value: Child2 
+              },
               lastName: {
                 Kind: Value,
                 Type: String
@@ -95,7 +102,6 @@
         {
           Index: 2,
           Item: {
-            Type: Person,
             Properties: {
               children: {
                 Kind: Collection,
@@ -124,6 +130,11 @@
                   }
                 }
               },
+              fullName: {
+                Kind: Value,
+                Type: String,
+                Value: Child3 
+              },
               lastName: {
                 Kind: Value,
                 Type: String
@@ -142,7 +153,6 @@
       Type: Person,
       Timestamp: {Scrubbed},
       Item: {
-        Type: Person,
         Properties: {
           children: {
             Kind: Collection,
@@ -170,6 +180,11 @@
                 }
               }
             }
+          },
+          fullName: {
+            Kind: Value,
+            Type: String,
+            Value: Father 
           },
           lastName: {
             Kind: Value,
@@ -202,6 +217,11 @@
         }
       }
     },
+    fullName: {
+      Kind: Value,
+      Type: String,
+      Value: NewPerson 
+    },
     lastName: {
       Kind: Value,
       Type: String
@@ -211,7 +231,6 @@
       Type: Person,
       Timestamp: {Scrubbed},
       Item: {
-        Type: Person,
         Properties: {
           children: {
             Kind: Collection,
@@ -239,6 +258,11 @@
                 }
               }
             }
+          },
+          fullName: {
+            Kind: Value,
+            Type: String,
+            Value: Mother 
           },
           lastName: {
             Kind: Value,

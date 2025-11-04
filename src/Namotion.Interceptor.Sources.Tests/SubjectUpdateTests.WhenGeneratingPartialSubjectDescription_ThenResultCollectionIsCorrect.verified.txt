@@ -1,5 +1,4 @@
 ﻿{
-  Type: Person,
   Properties: {
     children: {
       Kind: Collection,
@@ -8,7 +7,6 @@
         {
           Index: 0,
           Item: {
-            Type: Person,
             Properties: {
               children: {
                 Kind: Collection,
@@ -37,6 +35,11 @@
                   }
                 }
               },
+              fullName: {
+                Kind: Value,
+                Type: String,
+                Value: Child3 
+              },
               lastName: {
                 Kind: Value,
                 Type: String
@@ -51,7 +54,6 @@
         {
           Index: 1,
           Item: {
-            Type: Person,
             Properties: {
               children: {
                 Kind: Collection,
@@ -81,6 +83,11 @@
                   }
                 }
               },
+              fullName: {
+                Kind: Value,
+                Type: String,
+                Value: John 
+              },
               lastName: {
                 Kind: Value,
                 Type: String
@@ -98,7 +105,6 @@
       Kind: Item,
       Timestamp: {Scrubbed},
       Item: {
-        Type: Person,
         Properties: {
           children: {
             Kind: Collection,
@@ -127,6 +133,11 @@
               }
             }
           },
+          fullName: {
+            Kind: Value,
+            Type: String,
+            Value: MyFather 
+          },
           lastName: {
             Kind: Value,
             Type: String
@@ -142,7 +153,6 @@
       Kind: Item,
       Timestamp: {Scrubbed},
       Item: {
-        Type: Person,
         Properties: {
           children: {
             Kind: Collection,
@@ -171,6 +181,11 @@
                 }
               }
             }
+          },
+          fullName: {
+            Kind: Value,
+            Type: String,
+            Value: Jane 
           },
           lastName: {
             Kind: Value,

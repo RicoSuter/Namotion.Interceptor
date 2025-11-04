@@ -16,10 +16,4 @@ public interface ISubjectRegistry
     /// <param name="subject">The subject.</param>
     /// <returns>The registered subject or null if it is not registered with the registry.</returns>
     RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject);
-    
-    /// <summary>
-    /// Executes an update to be applied to the subject in a synchronized way.
-    /// </summary>
-    /// <param name="update">The update action.</param>
-    void ExecuteSubjectUpdate(Action update);
 }
