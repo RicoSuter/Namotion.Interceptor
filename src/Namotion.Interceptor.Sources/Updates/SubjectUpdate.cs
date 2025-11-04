@@ -43,7 +43,7 @@ public class SubjectUpdate
                 propertyUpdates = SubjectUpdatePools.RentPropertyUpdates();
             }
 
-            var update = CreateUpdate(subject, processors, knownSubjectUpdates, propertyUpdates);
+            var update = CreateCompleteUpdate(subject, processors, knownSubjectUpdates, propertyUpdates);
             if (processors.Length > 0 && propertyUpdates is not null && propertyUpdates.Count > 0)
             {
                 ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
@@ -66,7 +66,7 @@ public class SubjectUpdate
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
     /// <param name="propertyUpdates">The list to collect property updates for transformation.</param>
     /// <returns>The update.</returns>
-    internal static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject,
+    internal static SubjectUpdate CreateCompleteUpdateWithCycleCheck(IInterceptorSubject subject,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates, 
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
@@ -77,10 +77,10 @@ public class SubjectUpdate
             return new SubjectUpdate();
         }
         
-        return CreateUpdate(subject, processors, knownSubjectUpdates, propertyUpdates);
+        return CreateCompleteUpdate(subject, processors, knownSubjectUpdates, propertyUpdates);
     }
 
-    internal static SubjectUpdate CreateUpdate(IInterceptorSubject subject,
+    internal static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject,
         ReadOnlySpan<ISubjectUpdateProcessor> processors, 
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
@@ -153,7 +153,7 @@ public class SubjectUpdate
                 
                     propertyUpdate.ApplyValue(
                         registeredProperty, change.ChangedTimestamp, change.GetNewValue<object?>(), 
-                        completeUpdate: false, processors, knownSubjectUpdates, propertyUpdates);
+                        withCycleCheck: false, processors, knownSubjectUpdates, propertyUpdates);
                     
                     subjectUpdate.Properties[registeredProperty.Name] = propertyUpdate;
                 }
@@ -275,7 +275,7 @@ public class SubjectUpdate
         {
             finalAttributeUpdate.ApplyValue(
                 changeProperty, change.Value.ChangedTimestamp, change.Value.GetNewValue<object?>(), 
-                completeUpdate: false, processors, knownSubjectUpdates, propertyUpdates: propertyUpdates);
+                withCycleCheck: false, processors, knownSubjectUpdates, propertyUpdates: propertyUpdates);
         }
 
         return (rootPropertyUpdate, rootProperty.Name);
