@@ -95,7 +95,7 @@ public class SubjectPropertyUpdate
 
         propertyUpdate.ApplyValue(
             property, property.Reference.TryGetWriteTimestamp(), property.GetValue(),
-            withCycleCheck: true, processors, knownSubjectUpdates, propertyUpdates);
+            createReferenceUpdate: true, processors, knownSubjectUpdates, propertyUpdates);
 
         return propertyUpdate;
     }
@@ -129,12 +129,12 @@ public class SubjectPropertyUpdate
     /// <param name="property">The property.</param>
     /// <param name="timestamp">The timestamp of the value change.</param>
     /// <param name="value">The value to apply.</param>
-    /// <param name="withCycleCheck"></param>
+    /// <param name="createReferenceUpdate">Create update with reference instead of returning existing update.</param>
     /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
     /// <param name="propertyUpdates">Optional list to collect property updates for transformation.</param>
     internal void ApplyValue(RegisteredSubjectProperty property, DateTimeOffset? timestamp, object? value,
-        bool withCycleCheck,
+        bool createReferenceUpdate,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates = null)
@@ -145,21 +145,21 @@ public class SubjectPropertyUpdate
         {
             Kind = SubjectPropertyUpdateKind.Collection;
             Collection = value is IReadOnlyDictionary<string, IInterceptorSubject?> dictionary
-                ? CreateDictionaryCollectionUpdates(dictionary, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates)
+                ? CreateDictionaryCollectionUpdates(dictionary, createReferenceUpdate, processors, knownSubjectUpdates, propertyUpdates)
                 : null;
         }
         else if (property.IsSubjectCollection)
         {
             Kind = SubjectPropertyUpdateKind.Collection;
             Collection = value is IEnumerable<IInterceptorSubject> collection
-                ? CreateEnumerableCollectionUpdates(collection, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates)
+                ? CreateEnumerableCollectionUpdates(collection, createReferenceUpdate, processors, knownSubjectUpdates, propertyUpdates)
                 : null;
         }
         else if (property.IsSubjectReference)
         {
             Kind = SubjectPropertyUpdateKind.Item;
             Item = value is IInterceptorSubject itemSubject ? 
-                SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates) :
+                SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, createReferenceUpdate, processors, knownSubjectUpdates, propertyUpdates) :
                 null;
         }
         else
@@ -171,7 +171,7 @@ public class SubjectPropertyUpdate
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static List<SubjectPropertyCollectionUpdate> CreateDictionaryCollectionUpdates(IReadOnlyDictionary<string, IInterceptorSubject?> dictionary,
-        bool withCycleCheck,
+        bool createReferenceUpdate,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
@@ -183,7 +183,7 @@ public class SubjectPropertyUpdate
             collectionUpdates.Add(new SubjectPropertyCollectionUpdate
             {
                 Item = item is not null ? 
-                    SubjectUpdate.GetOrCreateCompleteUpdate(item, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates) : 
+                    SubjectUpdate.GetOrCreateCompleteUpdate(item, createReferenceUpdate, processors, knownSubjectUpdates, propertyUpdates) : 
                     null,
                 Index = key
             });
@@ -194,7 +194,7 @@ public class SubjectPropertyUpdate
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static List<SubjectPropertyCollectionUpdate> CreateEnumerableCollectionUpdates(IEnumerable<IInterceptorSubject> enumerable,
-        bool withCycleCheck,
+        bool createReferenceUpdate,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
@@ -207,7 +207,7 @@ public class SubjectPropertyUpdate
             {
                 collectionUpdates.Add(new SubjectPropertyCollectionUpdate
                 {
-                    Item = SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates),
+                    Item = SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, createReferenceUpdate, processors, knownSubjectUpdates, propertyUpdates),
                     Index = index++
                 });
             }
@@ -222,7 +222,7 @@ public class SubjectPropertyUpdate
             {
                 collectionUpdates.Add(new SubjectPropertyCollectionUpdate
                 {
-                    Item = SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates),
+                    Item = SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, createReferenceUpdate, processors, knownSubjectUpdates, propertyUpdates),
                     Index = index++
                 });
             }

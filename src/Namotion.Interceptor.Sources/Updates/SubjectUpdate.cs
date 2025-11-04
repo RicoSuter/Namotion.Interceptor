@@ -48,7 +48,7 @@ public class SubjectUpdate
                 propertyUpdates = SubjectUpdatePools.RentPropertyUpdates();
             }
 
-            var update = GetOrCreateCompleteUpdate(subject, withCycleCheck: true, processors, knownSubjectUpdates, propertyUpdates);
+            var update = GetOrCreateCompleteUpdate(subject, createReferenceUpdate: true, processors, knownSubjectUpdates, propertyUpdates);
             if (processors.Length > 0 && propertyUpdates is not null && propertyUpdates.Count > 0)
             {
                 ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
@@ -67,18 +67,18 @@ public class SubjectUpdate
     /// Creates a complete update with all objects and properties for the given subject as root.
     /// </summary>
     /// <param name="subject">The root subject.</param>
-    /// <param name="withCycleCheck">When update already exists returns an empty update instead of existing update.</param>
+    /// <param name="createReferenceUpdate">Create update with reference instead of returning existing update.</param>
     /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
     /// <param name="propertyUpdates">The list to collect property updates for transformation.</param>
     /// <returns>The update.</returns>
     internal static SubjectUpdate GetOrCreateCompleteUpdate(IInterceptorSubject subject,
-        bool withCycleCheck,
+        bool createReferenceUpdate,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates, 
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
-        if (withCycleCheck && knownSubjectUpdates.TryGetValue(subject, out var u))
+        if (createReferenceUpdate && knownSubjectUpdates.TryGetValue(subject, out var u))
         {
             // Stop cycle with reference to already created update
             u.Id ??= Guid.NewGuid().ToString();
@@ -156,7 +156,7 @@ public class SubjectUpdate
                 
                     propertyUpdate.ApplyValue(
                         registeredProperty, change.ChangedTimestamp, change.GetNewValue<object?>(), 
-                        withCycleCheck: false, processors, knownSubjectUpdates, propertyUpdates);
+                        createReferenceUpdate: false, processors, knownSubjectUpdates, propertyUpdates);
                     
                     subjectUpdate.Properties[registeredProperty.Name] = propertyUpdate;
                 }
@@ -278,7 +278,7 @@ public class SubjectUpdate
         {
             finalAttributeUpdate.ApplyValue(
                 changeProperty, change.Value.ChangedTimestamp, change.Value.GetNewValue<object?>(), 
-                withCycleCheck: false, processors, knownSubjectUpdates, propertyUpdates: propertyUpdates);
+                createReferenceUpdate: false, processors, knownSubjectUpdates, propertyUpdates: propertyUpdates);
         }
 
         return (rootPropertyUpdate, rootProperty.Name);
