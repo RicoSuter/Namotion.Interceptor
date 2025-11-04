@@ -332,4 +332,63 @@ public class DerivedPropertyChangeHandlerTests
         var usedByArray = usedBy.Items.ToArray();
         Assert.Contains(usedByArray, p => p.Name == nameof(Person.FullName));
     }
+    
+    [Fact]
+    public async Task WhenPropertyIsChanged_ThenTimestampIsCorrectInDerivedPropertyChanges()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
+
+        var person = new Person(context)
+        {
+            FirstName = "Parent",
+            Children = [child1, child2]
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        using var _ = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c));
+
+        // Act
+        var date = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        using (SubjectChangeContext.WithChangedTimestamp(date))
+        {
+            person.Mother = new Person // should trigger only mother property update itself (no new object properties)
+            { 
+                FirstName = "Mother"
+            };
+            person.Mother.LastName = "MyMotherLN"; // should trigger FullName and FullNameWithPrefix updates
+        }
+
+        var update1 = changes
+            .Select(c => $"{c.ChangedTimestamp:O}: {((Person)c.Property.Subject).FirstName}.{c.Property.Name} = {c.GetNewValue<object?>()}")
+            .ToArray();
+
+        changes.Clear();
+
+        using (SubjectChangeContext.WithChangedTimestamp(date.AddSeconds(1)))
+        {
+            person.FirstName = "Parent-Updated"; // should trigger FullName and FullNameWithPrefix updates
+            person.Mother = null;
+        }
+
+        var update2 = changes
+            .Select(c => $"{c.ChangedTimestamp:O}: {((Person)c.Property.Subject).FirstName}.{c.Property.Name} = {c.GetNewValue<object?>()}")
+            .ToArray();
+
+        changes.Clear();
+
+        // Assert
+        await Verify(new
+        {
+            Update1 = update1,
+            Update2 = update2,
+        });
+    }
 }
