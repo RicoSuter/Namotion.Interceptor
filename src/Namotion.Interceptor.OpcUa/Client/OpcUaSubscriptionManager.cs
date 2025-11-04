@@ -1,12 +1,10 @@
-﻿using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Registry;
+﻿using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
-using System.Collections.Concurrent;
-using Namotion.Interceptor.Registry.Performance;
-using Namotion.Interceptor.Sources;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 

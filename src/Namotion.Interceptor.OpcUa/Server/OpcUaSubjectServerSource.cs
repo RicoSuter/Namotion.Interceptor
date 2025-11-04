@@ -57,7 +57,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             {
                 var value = change.GetNewValue<object?>();
                 var convertedValue = _configuration.ValueConverter
-                    .ConvertToNodeValue(value, change.Property.GetRegisteredProperty().Type);
+                    .ConvertToNodeValue(value, change.Property.GetRegisteredProperty());
                 
                 lock (node)
                 {
