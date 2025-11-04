@@ -55,15 +55,13 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) && 
                 data is BaseDataVariableState node)
             {
-                var actualValue = change.GetNewValue<object?>();
-                if (actualValue is decimal)
-                {
-                    actualValue = Convert.ToDouble(actualValue);
-                }
-
+                var value = change.GetNewValue<object?>();
+                var convertedValue = _configuration.ValueConverter
+                    .ConvertToNodeValue(value, change.Property.GetRegisteredProperty().Type);
+                
                 lock (node)
                 {
-                    node.Value = actualValue;
+                    node.Value = convertedValue;
                     node.Timestamp = change.ChangedTimestamp.UtcDateTime;
                     node.ClearChangeMasks(systemContext, false);
                 }

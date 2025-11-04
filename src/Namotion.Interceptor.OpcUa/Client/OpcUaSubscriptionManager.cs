@@ -12,9 +12,6 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal class OpcUaSubscriptionManager
 {
-    private static readonly ObjectPool<List<OpcUaPropertyUpdate>> ChangesPool 
-        = new(() => new List<OpcUaPropertyUpdate>(16));
-
     private readonly ILogger _logger;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
@@ -178,56 +175,28 @@ internal class OpcUaSubscriptionManager
         }
 
         var receivedTimestamp = DateTimeOffset.Now;
-        var changes = ChangesPool.Rent();
-        
-        for (var i = 0; i < monitoredItemsCount; i++)
+        var state = (source: this, subscription, receivedTimestamp, changes: notification.MonitoredItems);
+        _updater?.EnqueueOrApplyUpdate(state, static s =>
         {
-            var item = notification.MonitoredItems[i];
-            if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
+            Parallel.ForEach(s.changes, item =>
             {
-                changes.Add(new OpcUaPropertyUpdate
+                if (s.source._monitoredItems.TryGetValue(item.ClientHandle, out var property))
                 {
-                    Property = property,
-                    Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
-                    Timestamp = item.Value.SourceTimestamp
-                });
-            }
-        }
-        
-        if (changes.Count > 0)
-        {
-            var state = (source: this, subscription, receivedTimestamp, changes);
-            _updater?.EnqueueOrApplyUpdate(state, static s =>
-            {
-                for (var i = 0; i < s.changes.Count; i++)
-                {
-                    var change = s.changes[i];
                     try
                     {
-                        change.Property.SetValueFromSource(s.source, change.Timestamp, s.receivedTimestamp, change.Value);
+                        var value = s.source._configuration
+                            .ValueConverter
+                            .ConvertToPropertyValue(item.Value.Value, property);
+
+                        property.Reference.SetValueFromSource(
+                            s.source, item.Value.SourceTimestamp, s.receivedTimestamp, value);
                     }
                     catch (Exception e)
                     {
-                        s.source._logger.LogError(e, "Failed to apply change for OPC UA {Path}.", change.Property.Name);
+                        s.source._logger.LogError(e, "Failed to apply change for OPC UA {Path}.", property.Reference.Name);
                     }
                 }
-
-                s.changes.Clear();
-                ChangesPool.Return(s.changes);
             });
-        }
-        else
-        {
-            ChangesPool.Return(changes);
-        }
-    }
-
-    private struct OpcUaPropertyUpdate
-    {
-        public PropertyReference Property { get; init; }
-        
-        public DateTimeOffset Timestamp { get; init; }
-        
-        public object? Value { get; init; }
+        });
     }
 }
