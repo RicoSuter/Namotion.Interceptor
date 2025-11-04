@@ -26,8 +26,8 @@ public class RegisteredSubject
     /// </summary>
     public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
     {
-        var properties = _properties;
-        foreach (var property in properties.Values)
+        var properties = _properties.Values;
+        foreach (var property in properties)
         {
             if (property.IsAttribute && property.AttributeMetadata.PropertyName == propertyName)
             {
@@ -44,8 +44,8 @@ public class RegisteredSubject
     /// <returns>The attribute property.</returns>
     public RegisteredSubjectProperty? TryGetPropertyAttribute(string propertyName, string attributeName)
     {
-        var properties = _properties;
-        foreach (var property in properties.Values)
+        var properties = _properties.Values;
+        foreach (var property in properties)
         {
             if (property.IsAttribute && 
                 property.AttributeMetadata.PropertyName == propertyName && 
