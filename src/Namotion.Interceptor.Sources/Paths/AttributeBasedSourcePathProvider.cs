@@ -117,23 +117,18 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
         return null;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private SourcePathAttribute? TryGetSourcePathAttribute(RegisteredSubjectProperty property)
     {
-        // TODO(performance): Cache the result of this method (use ReflectionAttributes as key)
-        
-        var attributes = property.ReflectionAttributes;
-        if (attributes.Count == 0)
+        if (property.ReflectionAttributes is Attribute[] array)
         {
-            return null;
-        }
-
-        var name = _sourceName;
-        if (attributes is Attribute[] array)
-        {
-            for (int i = 0; i < array.Length; i++)
+            if (array.Length == 0)
             {
-                if (array[i] is SourcePathAttribute spa && spa.SourceName == name)
+                return null;
+            }
+            
+            for (var i = 0; i < array.Length; i++)
+            {
+                if (array[i] is SourcePathAttribute spa && spa.SourceName == _sourceName)
                 {
                     return spa;
                 }
@@ -141,15 +136,21 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
 
             return null;
         }
-        
+
+        var attributes = property.ReflectionAttributes;
+        if (attributes.Count == 0)
+        {
+            return null;
+        }
+            
         foreach (var attribute in attributes)
         {
-            if (attribute is SourcePathAttribute spa && spa.SourceName == name)
+            if (attribute is SourcePathAttribute spa && spa.SourceName == _sourceName)
             {
                 return spa;
             }
         }
-
+        
         return null;
     }
 }
