@@ -1,6 +1,5 @@
-{
+﻿{
   Update1: {
-    Type: Person,
     Properties: {
       children: {
         Kind: Collection,
@@ -9,7 +8,6 @@
           {
             Index: 0,
             Item: {
-              Type: Person,
               Properties: {
                 firstName: {
                   Kind: Value,
@@ -29,7 +27,6 @@
     }
   },
   Update2: {
-    Type: Person,
     Properties: {
       children: {
         Kind: Collection,
@@ -37,7 +34,6 @@
           {
             Index: 0,
             Item: {
-              Type: Person,
               Properties: {
                 firstName: {
                   Kind: Value,
@@ -57,7 +53,6 @@
     }
   },
   Update3: {
-    Type: Person,
     Properties: {
       firstName: {
         Kind: Value,

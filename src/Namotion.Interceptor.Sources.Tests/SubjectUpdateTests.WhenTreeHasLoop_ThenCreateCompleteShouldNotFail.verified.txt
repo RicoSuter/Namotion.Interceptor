@@ -1,5 +1,5 @@
-{
-  Type: Person,
+﻿{
+  Id: Guid_1,
   Properties: {
     children: {
       Kind: Collection,
@@ -10,7 +10,6 @@
       Type: Person,
       Timestamp: {Scrubbed},
       Item: {
-        Type: Person,
         Properties: {
           children: {
             Kind: Collection,
@@ -20,7 +19,9 @@
             Kind: Item,
             Type: Person,
             Timestamp: {Scrubbed},
-            Item: {}
+            Item: {
+              Reference: Guid_1
+            }
           },
           firstName: {
             Kind: Value,

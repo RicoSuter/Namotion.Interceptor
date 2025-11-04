@@ -10,9 +10,14 @@ namespace Namotion.Interceptor.Sources.Updates;
 public class SubjectUpdate
 {
     /// <summary>
-    /// Gets the type of the subject.
+    /// Gets or sets the unique ID of the subject (only set if there is a reference pointing to it).
     /// </summary>
-    public string? Type { get; init; }
+    public string? Id { get; set; }
+
+    /// <summary>
+    /// Gets or sets the reference ID of an already existing subject.
+    /// </summary>
+    public string? Reference { get; set; }
 
     /// <summary>
     /// Gets a dictionary of property updates.
@@ -73,15 +78,19 @@ public class SubjectUpdate
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates, 
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
-        if (withCycleCheck && knownSubjectUpdates.TryGetValue(subject, out _))
+        if (withCycleCheck && knownSubjectUpdates.TryGetValue(subject, out var u))
         {
-            // Stop cycles with empty update
-            return new SubjectUpdate();
+            // Stop cycle with reference to already created update
+            u.Id ??= Guid.NewGuid().ToString();
+            return new SubjectUpdate
+            {
+                Reference = u.Id
+            };
         }
 
         if (knownSubjectUpdates.TryGetValue(subject, out var update))
         {
-            // Stop here when already generated in previous step
+            // In case of partial update, return existing update so that properties can be added
             return update;
         }
 
@@ -334,10 +343,8 @@ public class SubjectUpdate
         {
             return subjectUpdate;
         }
-        subjectUpdate = new SubjectUpdate
-        {
-            Type = subject.GetType().Name
-        };
+
+        subjectUpdate = new SubjectUpdate();
         knownSubjectUpdates[subject] = subjectUpdate;
         return subjectUpdate;
     }

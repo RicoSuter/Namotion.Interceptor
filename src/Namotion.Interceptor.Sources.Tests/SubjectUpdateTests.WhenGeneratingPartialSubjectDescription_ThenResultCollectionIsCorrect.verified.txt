@@ -1,5 +1,4 @@
 ﻿{
-  Type: Person,
   Properties: {
     children: {
       Kind: Collection,
@@ -8,7 +7,6 @@
         {
           Index: 0,
           Item: {
-            Type: Person,
             Properties: {
               children: {
                 Kind: Collection,
@@ -56,7 +54,6 @@
         {
           Index: 1,
           Item: {
-            Type: Person,
             Properties: {
               children: {
                 Kind: Collection,
@@ -108,7 +105,6 @@
       Kind: Item,
       Timestamp: {Scrubbed},
       Item: {
-        Type: Person,
         Properties: {
           children: {
             Kind: Collection,
@@ -157,7 +153,6 @@
       Kind: Item,
       Timestamp: {Scrubbed},
       Item: {
-        Type: Person,
         Properties: {
           children: {
             Kind: Collection,
