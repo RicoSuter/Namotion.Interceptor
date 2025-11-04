@@ -341,13 +341,9 @@ public class DerivedPropertyChangeHandlerTests
             .Create()
             .WithFullPropertyTracking();
 
-        var child1 = new Person { FirstName = "Child1" };
-        var child2 = new Person { FirstName = "Child2" };
-
         var person = new Person(context)
         {
-            FirstName = "Parent",
-            Children = [child1, child2]
+            FirstName = "Parent"
         };
 
         var changes = new List<SubjectPropertyChange>();
