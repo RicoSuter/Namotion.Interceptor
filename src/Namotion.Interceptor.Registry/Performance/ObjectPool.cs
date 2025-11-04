@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Registry.Performance;
 
-internal sealed class ObjectPool<T> where T : class
+public sealed class ObjectPool<T> where T : class
 {
     private readonly ConcurrentBag<T> _objects;
     private readonly Func<T> _factory;

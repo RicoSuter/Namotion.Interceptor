@@ -40,9 +40,9 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         return _configuration.SourcePathProvider.IsPropertyIncluded(property);
     }
 
-    public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
+    public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
     {
-        _subscriptionManager.SetDispatcher(dispatcher);
+        _subscriptionManager.SetUpdater(updater);
         return Task.FromResult<IDisposable?>(null);
     }
 
@@ -206,34 +206,48 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     private async Task ReadAndApplyInitialValuesAsync(IReadOnlyList<MonitoredItem> monitoredItems, CancellationToken cancellationToken)
     {
         var itemCount = monitoredItems.Count;
-        var readValues = new ReadValueId[itemCount];
-        
-        for (var i = 0; i < itemCount; i++)
+        if (itemCount == 0 || _session is null)
         {
-            readValues[i] = new ReadValueId
-            {
-                NodeId = monitoredItems[i].StartNodeId,
-                AttributeId = Opc.Ua.Attributes.Value
-            };
+            return;
         }
 
         try
         {
-            var readResponse = await _session!.ReadAsync(null, 0, TimestampsToReturn.Source, readValues, cancellationToken);
-            var resultCount = Math.Min(readResponse.Results.Count, itemCount);
-
-            for (var i = 0; i < resultCount; i++)
+            var result = new Dictionary<RegisteredSubjectProperty, DataValue>();
+            var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerRead ?? 500);
+            for (var offset = 0; offset < itemCount; offset += chunkSize)
             {
-                if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
+                var take = Math.Min(chunkSize, itemCount - offset);
+                var readValues = new ReadValueId[take];
+                for (var i = 0; i < take; i++)
                 {
-                    var dataValue = readResponse.Results[i];
-                    var monitoredItem = monitoredItems[i];
-                    if (monitoredItem.Handle is RegisteredSubjectProperty property)
+                    readValues[i] = new ReadValueId
                     {
-                        var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property.Type);
-                        property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
+                        NodeId = monitoredItems[offset + i].StartNodeId,
+                        AttributeId = Opc.Ua.Attributes.Value
+                    };
+                }
+
+                var readResponse = await _session.ReadAsync(null, 0, TimestampsToReturn.Source, readValues, cancellationToken);
+                var resultCount = Math.Min(readResponse.Results.Count, take);
+                for (var i = 0; i < resultCount; i++)
+                {
+                    if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
+                    {
+                        var dataValue = readResponse.Results[i];
+                        var monitoredItem = monitoredItems[offset + i];
+                        if (monitoredItem.Handle is RegisteredSubjectProperty property)
+                        {
+                            result[property] = dataValue;
+                        }
                     }
                 }
+            }
+        
+            foreach (var (property, dataValue) in result)
+            {
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
+                property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
             }
 
             _logger.LogInformation("Successfully read initial values of {Count} nodes.", itemCount);
@@ -241,6 +255,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to read initial values for monitored items.");
+            throw;
         }
     }
 
@@ -249,58 +264,55 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         return Task.FromResult<Action?>(null);
     }
 
-    public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public async ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        if (_session is null)
+        if (_session is null || changes.Count == 0)
         {
-            // TODO: What to do here? Store and write with the next write?
+            // TODO: What to do when session is null? Store and write with the next write?
             return;
         }
 
-        var writeValues = new WriteValueCollection();
-        foreach (var change in changes)
+        var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerWrite ?? 500);
+        var changeList = changes as IList<SubjectPropertyChange> ?? changes.ToList();
+        for (var offset = 0; offset < changeList.Count; offset += chunkSize)
         {
-            if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)
+            var take = Math.Min(chunkSize, changeList.Count - offset);
+            var writeValues = new WriteValueCollection(take);
+            for (var i = 0; i < take; i++)
             {
-                var registeredProperty = change.Property.GetRegisteredProperty();
-                if (registeredProperty.HasSetter)
+                var change = changeList[offset + i];
+                if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)
                 {
-                    var value = _configuration.ValueConverter.ConvertToNodeValue(change.GetNewValue<object?>(), registeredProperty.Type);
-                    writeValues.Add(new WriteValue
+                    var registeredProperty = change.Property.GetRegisteredProperty();
+                    if (registeredProperty.HasSetter)
                     {
-                        NodeId = nodeId,
-                        AttributeId = Opc.Ua.Attributes.Value,
-                        Value = new DataValue
+                        var value = _configuration.ValueConverter.ConvertToNodeValue(change.GetNewValue<object?>(), registeredProperty.Type);
+                        writeValues.Add(new WriteValue
                         {
-                            Value = value,
-                            StatusCode = StatusCodes.Good,
-                            //ServerTimestamp = DateTime.UtcNow,
-                            SourceTimestamp = change.ChangedTimestamp.UtcDateTime
-                        }
-                    });
+                            NodeId = nodeId,
+                            AttributeId = Opc.Ua.Attributes.Value,
+                            Value = new DataValue
+                            {
+                                Value = value,
+                                StatusCode = StatusCodes.Good,
+                                //ServerTimestamp = DateTime.UtcNow,
+                                SourceTimestamp = change.ChangedTimestamp.UtcDateTime
+                            }
+                        });
+                    }
                 }
             }
-        }
-        
-        if (writeValues.Count == 0)
-        {
-            return;
-        }
-        
-        var writeResponse = await _session.WriteAsync(null, writeValues, cancellationToken);
-        if (writeResponse.Results.Any(StatusCode.IsBad))
-        {
-            _logger.LogError("Failed to write some variables.");
-
-            // var badVariableStatusCodes = writeResponse.Results
-            //     .Where(StatusCode.IsBad)
-            //     .ToDictionary(wr => , wr => wr.Code);
-            //
-            // throw new ConnectionException(_connectionOptions,
-            //     $"Unexpected Error during writing variables. Variables: {badVariableStatusCodes.Keys.Join(Environment.NewLine)}")
-            // {
-            //     Data = { ["BadVariableStatusCodeDictionary"] = badVariableStatusCodes }
-            // };
+            
+            if (writeValues.Count == 0)
+            {
+                continue;
+            }
+            
+            var writeResponse = await _session.WriteAsync(null, writeValues, cancellationToken);
+            if (writeResponse.Results.Any(StatusCode.IsBad))
+            {
+                _logger.LogError("Failed to write some variables (chunk starting at {Offset}).", offset);
+            }
         }
     }
 

@@ -28,7 +28,7 @@ namespace Namotion.Interceptor.Mqtt
         private int _numberOfClients = 0;
         private MqttServer? _mqttServer;
 
-        private ISubjectMutationDispatcher? _dispatcher;
+        private ISubjectUpdater? _updater;
 
         public int Port { get; set; } = 1883;
 
@@ -90,9 +90,9 @@ namespace Namotion.Interceptor.Mqtt
             return _sourcePathProvider.IsPropertyIncluded(property);
         }
 
-        public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
+        public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
         {
-            _dispatcher = dispatcher;
+            _updater = updater;
             return Task.FromResult<IDisposable?>(null);
         }
 
@@ -101,7 +101,7 @@ namespace Namotion.Interceptor.Mqtt
             return Task.FromResult<Action?>(null);
         }
 
-        public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public async ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
             foreach (var (path, change) in changes
                 .Where(c => !c.Property.GetRegisteredProperty().HasChildSubjects)
@@ -132,7 +132,7 @@ namespace Namotion.Interceptor.Mqtt
             return Task.CompletedTask;
         }
 
-        private async Task PublishPropertyValueAsync(string path, object? value, CancellationToken cancellationToken)
+        private async ValueTask PublishPropertyValueAsync(string path, object? value, CancellationToken cancellationToken)
         {
             await _mqttServer!.InjectApplicationMessage(
                 new InjectedMqttApplicationMessage(
@@ -158,19 +158,20 @@ namespace Namotion.Interceptor.Mqtt
             var path = args.ApplicationMessage.Topic;
             var payload = Encoding.UTF8.GetString(args.ApplicationMessage.Payload);
 
-            _dispatcher?.EnqueueSubjectUpdate(() =>
+            var state = (source: this, path, payload);
+            _updater?.EnqueueOrApplyUpdate(state, static s =>
             {
                 try
                 {
-                    var document = JsonDocument.Parse(payload);
-                    _subject.UpdatePropertyValueFromSourcePath(path,
+                    var document = JsonDocument.Parse(s.payload);
+                    s.source._subject.UpdatePropertyValueFromSourcePath(s.path,
                         DateTimeOffset.Now, // TODO: What timestamp to use here?
                         (property, _) => document.Deserialize(property.Type),
-                        _sourcePathProvider, this);
+                        s.source._sourcePathProvider, s.source);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to deserialize MQTT payload.");
+                    s.source._logger.LogError(ex, "Failed to deserialize MQTT payload.");
                 }
             });
             

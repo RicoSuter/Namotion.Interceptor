@@ -20,7 +20,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
     private readonly OpcUaServerConfiguration _configuration;
 
     private OpcUaSubjectServer? _server;
-    private ISubjectMutationDispatcher? _dispatcher;
+    private ISubjectUpdater? _updater;
     
     public OpcUaSubjectServerSource(
         IInterceptorSubject subject,
@@ -37,9 +37,9 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         return _configuration.SourcePathProvider.IsPropertyIncluded(property);
     }
 
-    public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
+    public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
     {
-        _dispatcher = dispatcher;
+        _updater = updater;
         return Task.FromResult<IDisposable?>(null);
     }
 
@@ -48,7 +48,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         return Task.FromResult<Action?>(null);
     }
 
-    public Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         foreach (var change in changes)
         {
@@ -67,7 +67,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             }
         }
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -110,7 +110,12 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
     
     private static void CleanCertificateStore(ApplicationInstance application)
     {
-        var path = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.StorePath;
+        var path = application
+            .ApplicationConfiguration
+            .SecurityConfiguration
+            .ApplicationCertificate
+            .StorePath;
+        
         if (Directory.Exists(path))
         {
             Directory.Delete(path, true);
@@ -121,12 +126,12 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
     {
         var receivedTimestamp = DateTimeOffset.Now;
 
-        var targetType = property.GetRegisteredProperty().Type;
-        var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, targetType);
-        
-        _dispatcher?.EnqueueSubjectUpdate(() =>
-        {
-            property.SetValueFromSource(this, changedTimestamp, receivedTimestamp, convertedValue);
-        });
+        var registeredProperty = property.GetRegisteredProperty();
+        var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, registeredProperty);
+
+        var state = (source: this, property, changedTimestamp, receivedTimestamp, value: convertedValue);
+        _updater?.EnqueueOrApplyUpdate(state,
+            static s => s.property.SetValueFromSource(
+                s.source, s.changedTimestamp, s.receivedTimestamp, s.value));
     }
 }

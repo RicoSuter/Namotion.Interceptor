@@ -7,7 +7,6 @@ namespace Namotion.Interceptor.Registry;
 
 public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLifecycleHandler
 {
-    private readonly Lock _lock = new();
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     
     /// <inheritdoc />
@@ -27,16 +26,6 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
         lock (_knownSubjects)
         {
             return _knownSubjects.GetValueOrDefault(subject);
-        }
-    }
-
-    /// <inheritdoc />
-    public void ExecuteSubjectUpdate(Action update)
-    {
-        // TODO: Use this method in every property read/write to ensure thread safety
-        lock (_lock)
-        {
-            update();
         }
     }
 
