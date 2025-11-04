@@ -26,6 +26,9 @@ public partial class Person
     public partial string FirstName_MaxLength_Unit { get; set; }
 
     public partial string? LastName { get; set; }
+    
+    [Derived]
+    public string FullName => $"{FirstName} {LastName}";
 
     public partial Person? Father { get; set; }
 

@@ -2,7 +2,7 @@ namespace Namotion.Interceptor.Sources.Updates;
 
 public enum SubjectPropertyUpdateKind
 {
-    Null,
+    None,
     Value,
     Item,
     Collection
