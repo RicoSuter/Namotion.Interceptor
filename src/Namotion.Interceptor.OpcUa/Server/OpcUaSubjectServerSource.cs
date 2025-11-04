@@ -6,6 +6,7 @@ using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Configuration;
+using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
@@ -19,7 +20,8 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     private OpcUaSubjectServer? _server;
     private ISubjectUpdater? _updater;
-    
+    private ServerSystemContext? _systemContext;
+
     public OpcUaSubjectServerSource(
         IInterceptorSubject subject,
         OpcUaServerConfiguration configuration,
@@ -64,7 +66,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             {
                 node.Value = convertedValue;
                 node.Timestamp = change.ChangedTimestamp.UtcDateTime;
-                node.ClearChangeMasks(_server?.CurrentInstance.DefaultSystemContext, false);
+                node.ClearChangeMasks(_systemContext, false);
             }
         }
     }
@@ -87,6 +89,8 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
                 await application.CheckApplicationInstanceCertificates(true);
                 await application.Start(_server);
+
+                _systemContext = _server.CurrentInstance.DefaultSystemContext;
 
                 await Task.Delay(-1, stoppingToken);
             }
