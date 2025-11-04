@@ -10,8 +10,6 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubject
 {
-    private readonly Lock _lock = new();
-
     private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
     private ImmutableArray<SubjectPropertyParent> _parents = ImmutableArray<SubjectPropertyParent>.Empty;
     
@@ -189,18 +187,14 @@ public class RegisteredSubject
     {
         var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
 
-        lock (_lock)
-        {
-            var properties = _properties;
-            properties = properties
-                .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
-                .ToFrozenDictionary(p => p.Key, p => p.Value);
+        var properties = _properties;
+        _properties = properties
+            .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
+            .ToFrozenDictionary(p => p.Key, p => p.Value);
 
-            _properties = properties;
-            foreach (var property in _properties.Values)
-            {
-                property.AttributesCache = null;
-            }
+        foreach (var property in properties.Values)
+        {
+            property.AttributesCache = null;
         }
 
         Subject.AttachSubjectProperty(subjectProperty.Reference);
