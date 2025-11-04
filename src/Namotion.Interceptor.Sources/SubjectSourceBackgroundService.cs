@@ -1,13 +1,14 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Sources;
 
-public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutationDispatcher
+public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
 {
     private readonly Lock _lock = new();
     private readonly ISubjectSource _source;
@@ -17,15 +18,21 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     private readonly TimeSpan _retryTime;
 
     private List<Action>? _beforeInitializationUpdates = [];
-    private ISubjectRegistry? _subjectRegistry;
 
-    private List<SubjectPropertyChange> _changes = [];
-    private readonly SemaphoreSlim _writeSemaphore = new(1, 1);
+    // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
+    private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
+    private int _flushGate = 0; // 0 = free, 1 = flushing
 
-    private List<SubjectPropertyChange> _flushChanges = [];
-    private readonly HashSet<PropertyReference> _flushTouchedChanges = [];
+    // Scratch buffers used only while holding the write semaphore (single-threaded access)
+    private readonly List<SubjectPropertyChange> _flushChanges = [];
+    private readonly HashSet<PropertyReference> _flushTouchedChanges = new(PropertyReference.Comparer);
     private readonly List<SubjectPropertyChange> _flushDedupedChanges = [];
-    private DateTimeOffset _flushLastTime = DateTimeOffset.MinValue;
+
+    // Reusable single-item buffer for the no-buffer (immediate) path
+    private readonly List<SubjectPropertyChange> _immediateChanges = new(1);
+
+    // Use ticks to avoid torn reads of DateTimeOffset across threads
+    private long _flushLastTicks = 0L;
 
     public SubjectSourceBackgroundService(
         ISubjectSource source,
@@ -42,15 +49,18 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
     }
 
     /// <inheritdoc />
-    public void EnqueueSubjectUpdate(Action update)
+    public void EnqueueOrApplyUpdate<TState>(TState state, Action<TState> update)
     {
-        if (_beforeInitializationUpdates is not null)
+        var beforeInitializationUpdates = _beforeInitializationUpdates;
+        if (beforeInitializationUpdates is not null)
         {
             lock (_lock)
             {
-                if (_beforeInitializationUpdates is not null)
+                beforeInitializationUpdates = _beforeInitializationUpdates;
+                if (beforeInitializationUpdates is not null)
                 {
-                    _beforeInitializationUpdates.Add(update);
+                    // Still initializing, buffer the update (cold path, allocations acceptable)
+                    AddBeforeInitializationUpdate(beforeInitializationUpdates, state, update);
                     return;
                 }
             }
@@ -58,13 +68,20 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
         try
         {
-            _subjectRegistry ??= _context.GetService<ISubjectRegistry>();
-            _subjectRegistry.ExecuteSubjectUpdate(update);
+            update(state);
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Failed to execute subject update.");
+            _logger.LogError(e, "Failed to apply subject update.");
         }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void AddBeforeInitializationUpdate<TState>(List<Action> beforeInitializationUpdates, TState state, Action<TState> update)
+    {
+        // The allocation for the closure happens only on the cold path (needs to be in an own non-inlined method
+        // to avoid capturing unnecessary locals and causing allocations on the hot path).
+        beforeInitializationUpdates.Add(() => update(state));
     }
 
     /// <inheritdoc />
@@ -93,13 +110,20 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
                     foreach (var action in beforeInitializationUpdates!)
                     {
-                        EnqueueSubjectUpdate(action);
+                        try
+                        {
+                            action();
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.LogError(e, "Failed to apply subject update.");
+                        }
                     }
                 }
                 
                 // Subscribe to property changes and sync them to the source
                 using var subscription = _context.CreatePropertyChangeQueueSubscription();
-                await ProcessPropertyChangesAsync(subscription, stoppingToken);
+                await ProcessPropertyChangesAsync(subscription, stoppingToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -111,7 +135,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 _logger.LogError(ex, "Failed to listen for changes in source.");
                 ResetState();
 
-                await Task.Delay(_retryTime, stoppingToken);
+                await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
             }
         }
     }
@@ -125,7 +149,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
 
         var flushTask = periodicTimer is not null
             // ReSharper disable AccessToDisposedClosure
-            ? Task.Run(async () => await RunPeriodicFlushAsync(periodicTimer, linkedTokenSource.Token), linkedTokenSource.Token)
+            ? Task.Run(async () => await RunPeriodicFlushAsync(
+                periodicTimer, linkedTokenSource.Token).ConfigureAwait(false), linkedTokenSource.Token)
             : Task.CompletedTask;
 
         try
@@ -140,19 +165,24 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                     continue;
                 }
 
-                _changes.Add(item);
-
                 if (periodicTimer is null)
                 {
-                    await WriteToSourceAsync(_changes, linkedTokenSource.Token).ConfigureAwait(false);
-                    _changes.Clear();
+                    // Immediate path: send the single change without buffering using a reusable list (no allocations)
+                    _immediateChanges.Add(item);
+                    await WriteToSourceAsync(_immediateChanges, linkedTokenSource.Token).ConfigureAwait(false);
+                    _immediateChanges.Clear();
                 }
                 else
                 {
-                    if (item.ChangedTimestamp - _flushLastTime >= _bufferTime)
-                    {
-                        await TryFlushBufferAsync(item.ChangedTimestamp, linkedTokenSource.Token).ConfigureAwait(false);
-                    }
+                    // Buffered path: enqueue lock-free; periodic timer handles flushing
+                    _changes.Enqueue(item);
+                    
+                    // Flush directly when needed (currently disabled in favor of periodic flush only)
+                    // var lastTicks = Volatile.Read(ref _flushLastTicks);
+                    // if (item.ChangedTimestamp.UtcTicks - lastTicks >= _bufferTime.Ticks)
+                    // {
+                    //     await TryFlushBufferAsync(item.ChangedTimestamp.UtcTicks, linkedTokenSource.Token).ConfigureAwait(false);
+                    // }
                 }
             }
         }
@@ -169,11 +199,11 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         {
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
-                var now = DateTimeOffset.UtcNow;
-                var changes = Volatile.Read(ref _changes);
-                if (changes.Count > 0 && now - _flushLastTime >= _bufferTime)
+                var nowTicks = DateTimeOffset.UtcNow.UtcTicks;
+                var lastTicks = Volatile.Read(ref _flushLastTicks);
+                if (nowTicks - lastTicks >= _bufferTime.Ticks)
                 {
-                    await TryFlushBufferAsync(now, cancellationToken).ConfigureAwait(false);
+                    await TryFlushBufferAsync(nowTicks, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -183,28 +213,39 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         }
     }
 
-    private async ValueTask TryFlushBufferAsync(DateTimeOffset newFlushTime, CancellationToken cancellationToken)
+    private async ValueTask TryFlushBufferAsync(long newFlushTicks, CancellationToken cancellationToken)
     {
-        // Use synchronous try-enter to avoid Task allocation from WaitAsync
-        // ReSharper disable once MethodHasAsyncOverload
-        if (!_writeSemaphore.Wait(0, cancellationToken))
+        // Fast, allocation-free try-enter
+        if (Interlocked.Exchange(ref _flushGate, 1) == 1)
         {
             return;
         }
 
         try
         {
-            if (_changes.Count == 0)
+            // Drain the concurrent queue into the scratch buffer under exclusive flush
+            _flushChanges.Clear();
+            while (_changes.TryDequeue(out var change))
+            {
+                System.Diagnostics.Debug.Assert(change.Property.Subject is not null);
+                _flushChanges.Add(change);
+            }
+
+            if (_flushChanges.Count == 0)
             {
                 return;
             }
 
-            _flushChanges = Interlocked.Exchange(ref _changes, _flushChanges);
-            _flushLastTime = newFlushTime;
+            Volatile.Write(ref _flushLastTicks, newFlushTicks);
 
             _flushTouchedChanges.Clear();
             _flushDedupedChanges.Clear();
 
+            // Pre-size to avoid resizes under bursts
+            _flushTouchedChanges.EnsureCapacity(_flushChanges.Count);
+            _flushDedupedChanges.EnsureCapacity(_flushChanges.Count);
+
+            // Deduplicate by Property, keeping the last write, and preserve order of last occurrences
             for (var i = _flushChanges.Count - 1; i >= 0; i--)
             {
                 var change = _flushChanges[i];
@@ -214,35 +255,35 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
                 }
             }
 
-            _flushChanges.Clear();
-
+            // Reverse in place to keep ascending order of last occurrences without allocations
+            if (_flushDedupedChanges.Count > 1)
+            {
+                _flushDedupedChanges.Reverse();
+            }
+            
             if (_flushDedupedChanges.Count > 0)
             {
                 await WriteToSourceAsync(_flushDedupedChanges, cancellationToken).ConfigureAwait(false);
             }
+
+            _flushChanges.Clear();
         }
         finally
         {
-            _writeSemaphore.Release();
+            Volatile.Write(ref _flushGate, 0);
         }
     }
 
-    private async ValueTask WriteToSourceAsync(List<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    private async ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         try
         {
-            await _source.WriteToSourceAsync(changes, cancellationToken);
+            await _source.WriteToSourceAsync(changes, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e)
         {
             _logger.LogError(e, "Failed to write changes to source.");
         }
-    }
-
-    public override void Dispose()
-    {
-        _writeSemaphore.Dispose();
-        base.Dispose();
     }
 
     private void ResetState()
@@ -251,6 +292,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectMutatio
         _flushChanges.Clear();
         _flushTouchedChanges.Clear();
         _flushDedupedChanges.Clear();
-        _flushLastTime = DateTimeOffset.MinValue;
+        Volatile.Write(ref _flushLastTicks, 0L);
+        Volatile.Write(ref _flushGate, 0);
     }
 }
