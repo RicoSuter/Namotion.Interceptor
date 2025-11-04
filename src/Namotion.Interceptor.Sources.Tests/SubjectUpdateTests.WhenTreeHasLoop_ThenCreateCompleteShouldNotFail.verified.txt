@@ -1,0 +1,95 @@
+﻿{
+  Id: Guid_1,
+  Properties: {
+    children: {
+      Kind: Collection,
+      Type: List`1
+    },
+    father: {
+      Kind: Item,
+      Type: Person,
+      Timestamp: {Scrubbed},
+      Item: {
+        Properties: {
+          children: {
+            Kind: Collection,
+            Type: List`1
+          },
+          father: {
+            Kind: Item,
+            Type: Person,
+            Timestamp: {Scrubbed},
+            Item: {
+              Reference: Guid_1
+            }
+          },
+          firstName: {
+            Kind: Value,
+            Type: String,
+            Value: Father,
+            Attributes: {
+              maxLength: {
+                Kind: Value,
+                Type: Int32,
+                Value: 123,
+                Attributes: {
+                  unit: {
+                    Kind: Value,
+                    Type: String,
+                    Value: Count
+                  }
+                }
+              }
+            }
+          },
+          fullName: {
+            Kind: Value,
+            Type: String,
+            Value: Father 
+          },
+          lastName: {
+            Kind: Value,
+            Type: String
+          },
+          mother: {
+            Kind: Item,
+            Type: Person
+          }
+        }
+      }
+    },
+    firstName: {
+      Kind: Value,
+      Type: String,
+      Value: Child,
+      Timestamp: {Scrubbed},
+      Attributes: {
+        maxLength: {
+          Kind: Value,
+          Type: Int32,
+          Value: 123,
+          Attributes: {
+            unit: {
+              Kind: Value,
+              Type: String,
+              Value: Count
+            }
+          }
+        }
+      }
+    },
+    fullName: {
+      Kind: Value,
+      Type: String,
+      Value: Child 
+    },
+    lastName: {
+      Kind: Value,
+      Type: String
+    },
+    mother: {
+      Kind: Item,
+      Type: Person
+    }
+  }
+}

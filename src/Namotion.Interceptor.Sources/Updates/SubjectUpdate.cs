@@ -10,9 +10,14 @@ namespace Namotion.Interceptor.Sources.Updates;
 public class SubjectUpdate
 {
     /// <summary>
-    /// Gets the type of the subject.
+    /// Gets or sets the unique ID of the subject (only set if there is a reference pointing to it).
     /// </summary>
-    public string? Type { get; init; }
+    public string? Id { get; set; }
+
+    /// <summary>
+    /// Gets or sets the reference ID of an already existing subject.
+    /// </summary>
+    public string? Reference { get; set; }
 
     /// <summary>
     /// Gets a dictionary of property updates.
@@ -43,7 +48,7 @@ public class SubjectUpdate
                 propertyUpdates = SubjectUpdatePools.RentPropertyUpdates();
             }
 
-            var update = CreateCompleteUpdateInternal(subject, processors, knownSubjectUpdates, propertyUpdates);
+            var update = GetOrCreateCompleteUpdate(subject, createReferenceUpdate: true, processors, knownSubjectUpdates, propertyUpdates);
             if (processors.Length > 0 && propertyUpdates is not null && propertyUpdates.Count > 0)
             {
                 ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
@@ -62,29 +67,31 @@ public class SubjectUpdate
     /// Creates a complete update with all objects and properties for the given subject as root.
     /// </summary>
     /// <param name="subject">The root subject.</param>
+    /// <param name="createReferenceUpdate">Create update with reference instead of returning existing update.</param>
     /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
     /// <param name="propertyUpdates">The list to collect property updates for transformation.</param>
     /// <returns>The update.</returns>
-    internal static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject,
+    internal static SubjectUpdate GetOrCreateCompleteUpdate(IInterceptorSubject subject,
+        bool createReferenceUpdate,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates, 
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
-        return CreateCompleteUpdateInternal(subject, processors, knownSubjectUpdates, propertyUpdates);
-    }
-
-    private static SubjectUpdate CreateCompleteUpdateInternal(IInterceptorSubject subject,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors, 
-        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
-    {
-        if (knownSubjectUpdates.ContainsKey(subject))
+        if (createReferenceUpdate && knownSubjectUpdates.TryGetValue(subject, out var u))
         {
-            // Avoid cycles: If subject already has an update then we have a cycle and break it here
-            
-            // TODO(cycle): Add reference to another update?
-            return new SubjectUpdate();
+            // Stop cycle with reference to already created update
+            u.Id ??= Guid.NewGuid().ToString();
+            return new SubjectUpdate
+            {
+                Reference = u.Id
+            };
+        }
+
+        if (knownSubjectUpdates.TryGetValue(subject, out var update))
+        {
+            // In case of partial update, return existing update so that properties can be added
+            return update;
         }
 
         var subjectUpdate = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
@@ -146,7 +153,11 @@ public class SubjectUpdate
                 {
                     // handle property changes
                     var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredProperty, knownSubjectUpdates, propertyUpdates);
-                    propertyUpdate.ApplyValue(registeredProperty, change.ChangedTimestamp, change.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
+                
+                    propertyUpdate.ApplyValue(
+                        registeredProperty, change.ChangedTimestamp, change.GetNewValue<object?>(), 
+                        createReferenceUpdate: false, processors, knownSubjectUpdates, propertyUpdates);
+                    
                     subjectUpdate.Properties[registeredProperty.Name] = propertyUpdate;
                 }
                 else
@@ -265,7 +276,9 @@ public class SubjectUpdate
         // Apply value if needed
         if (changeProperty is not null && change.HasValue)
         {
-            finalAttributeUpdate.ApplyValue(changeProperty, change.Value.ChangedTimestamp, change.Value.GetNewValue<object?>(), processors, knownSubjectUpdates, propertyUpdates);
+            finalAttributeUpdate.ApplyValue(
+                changeProperty, change.Value.ChangedTimestamp, change.Value.GetNewValue<object?>(), 
+                createReferenceUpdate: false, processors, knownSubjectUpdates, propertyUpdates: propertyUpdates);
         }
 
         return (rootPropertyUpdate, rootProperty.Name);
@@ -330,10 +343,8 @@ public class SubjectUpdate
         {
             return subjectUpdate;
         }
-        subjectUpdate = new SubjectUpdate
-        {
-            Type = subject.GetType().Name
-        };
+
+        subjectUpdate = new SubjectUpdate();
         knownSubjectUpdates[subject] = subjectUpdate;
         return subjectUpdate;
     }

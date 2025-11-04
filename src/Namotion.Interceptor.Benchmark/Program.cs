@@ -19,8 +19,8 @@ public static class Program
 
     private static void Run()
     {
-        var benchmark = new RegistryBenchmark();
-        benchmark.Type = "interceptor";
+        var benchmark = new SubjectUpdateBenchmark();
+        // benchmark.Type = "interceptor";
         Console.WriteLine($"Setup...");
         benchmark.Setup();//.GetAwaiter().GetResult();
         Console.WriteLine($"Benchmark...");
@@ -30,7 +30,7 @@ public static class Program
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void RunCode(RegistryBenchmark benchmark)
+    private static void RunCode(SubjectUpdateBenchmark benchmark)
     {
         var watch = Stopwatch.StartNew();
 
@@ -45,7 +45,7 @@ public static class Program
             {
                 // benchmark.ProcessSourceChanges();
                 //benchmark.ProcessLocalChanges();
-                benchmark.IncrementDerivedAverage();
+                benchmark.CreatePartialUpdate();
             }
             Console.WriteLine($"{i * inner}/{total} ({watch.ElapsedMilliseconds / (decimal)inner} ms)");
         }
