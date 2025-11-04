@@ -43,7 +43,7 @@ public class SubjectUpdate
                 propertyUpdates = SubjectUpdatePools.RentPropertyUpdates();
             }
 
-            var update = CreateCompleteUpdate(subject, processors, knownSubjectUpdates, propertyUpdates);
+            var update = CreateCompleteUpdate(subject, withCycleCheck: true, processors, knownSubjectUpdates, propertyUpdates);
             if (processors.Length > 0 && propertyUpdates is not null && propertyUpdates.Count > 0)
             {
                 ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
@@ -62,29 +62,23 @@ public class SubjectUpdate
     /// Creates a complete update with all objects and properties for the given subject as root.
     /// </summary>
     /// <param name="subject">The root subject.</param>
+    /// <param name="withCycleCheck"></param>
     /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
     /// <param name="propertyUpdates">The list to collect property updates for transformation.</param>
     /// <returns>The update.</returns>
-    internal static SubjectUpdate CreateCompleteUpdateWithCycleCheck(IInterceptorSubject subject,
+    internal static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject,
+        bool withCycleCheck,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates, 
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
-        if (knownSubjectUpdates.TryGetValue(subject, out var update))
+        if (withCycleCheck && knownSubjectUpdates.TryGetValue(subject, out _))
         {
             // Stop cycles with empty update
             return new SubjectUpdate();
         }
-        
-        return CreateCompleteUpdate(subject, processors, knownSubjectUpdates, propertyUpdates);
-    }
 
-    internal static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors, 
-        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
-    {
         if (knownSubjectUpdates.TryGetValue(subject, out var update))
         {
             // Stop here when already generated in previous step
