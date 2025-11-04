@@ -15,8 +15,13 @@ internal static class ReadInterceptorFactory<TProperty>
         var chain = new ReadInterceptorChain<IReadInterceptor, TProperty>(
             interceptorArray,
             static (interceptor, ref interception, next) => interceptor.ReadProperty(ref interception, next),
-            static (ref interception, innerReadValue) => innerReadValue(interception.Property.Subject)
-        );
+            static (ref context, innerReadValue) =>
+            {
+                lock (context.Property.Subject.SyncRoot)
+                {
+                    return innerReadValue(context.Property.Subject);
+                }
+            });
         return chain.Execute;
     }
 }

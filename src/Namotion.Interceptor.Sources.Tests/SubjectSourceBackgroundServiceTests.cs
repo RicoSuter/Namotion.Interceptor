@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Interceptors;
@@ -29,11 +28,11 @@ public class SubjectSourceBackgroundServiceTests
 
         var updates = new List<string>();
         subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<ISubjectMutationDispatcher>(), It.IsAny<CancellationToken>()))
-            .Callback((ISubjectMutationDispatcher dispatcher, CancellationToken _) =>
+            .Setup(s => s.StartListeningAsync(It.IsAny<ISubjectUpdater>(), It.IsAny<CancellationToken>()))
+            .Callback((ISubjectUpdater updater, CancellationToken _) =>
             {
-                dispatcher.EnqueueSubjectUpdate(() => updates.Add("Update1"));
-                dispatcher.EnqueueSubjectUpdate(() => updates.Add("Update2"));
+                updater.EnqueueOrApplyUpdate(updates, u => u.Add("Update1"));
+                updater.EnqueueOrApplyUpdate(updates, u => u.Add("Update2"));
             })
             .ReturnsAsync((IDisposable?)null);
 
@@ -84,7 +83,7 @@ public class SubjectSourceBackgroundServiceTests
             .Returns(true);
 
         subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<ISubjectMutationDispatcher>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.StartListeningAsync(It.IsAny<ISubjectUpdater>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((IDisposable?)null);
 
         subjectSourceMock

@@ -34,6 +34,22 @@ namespace Namotion.Interceptor.Benchmark
 
         public partial Car[]? PreviousCars { get; set; }
 
-        public decimal AveragePressure => Tires.Average(t => t.Pressure);
+        [Derived]
+        public decimal AveragePressure
+        {
+            get 
+            {
+                var tires = Tires;
+
+                var total = 0m;
+                for (var index = 0; index < tires.Length; index++)
+                {
+                    total += tires[index].Pressure;
+                }
+
+                return total / tires.Length;
+                //return Tires.Average(t => t.Pressure);
+            }
+        }
     }
 }
