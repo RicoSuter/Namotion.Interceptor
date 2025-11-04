@@ -48,27 +48,25 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     public ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        var systemContext = _server?.CurrentInstance.DefaultSystemContext;
-
-        Parallel.ForEach(changes, change =>
-        {
-            if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) && 
-                data is BaseDataVariableState node)
-            {
-                var value = change.GetNewValue<object?>();
-                var convertedValue = _configuration.ValueConverter
-                    .ConvertToNodeValue(value, change.Property.GetRegisteredProperty());
-                
-                lock (node)
-                {
-                    node.Value = convertedValue;
-                    node.Timestamp = change.ChangedTimestamp.UtcDateTime;
-                    node.ClearChangeMasks(systemContext, false);
-                }
-            }
-        });
-
+        Parallel.ForEach(changes, ApplyChange);
         return ValueTask.CompletedTask;
+    }
+
+    private void ApplyChange(SubjectPropertyChange change)
+    {
+        if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) && data is BaseDataVariableState node)
+        {
+            var value = change.GetNewValue<object?>();
+            var convertedValue = _configuration.ValueConverter
+                .ConvertToNodeValue(value, change.Property.GetRegisteredProperty());
+
+            lock (node)
+            {
+                node.Value = convertedValue;
+                node.Timestamp = change.ChangedTimestamp.UtcDateTime;
+                node.ClearChangeMasks(_server?.CurrentInstance.DefaultSystemContext, false);
+            }
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
