@@ -64,7 +64,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
 
     void IPropertyLifecycleHandler.AttachProperty(SubjectPropertyLifecycleChange change)
     {
-        var property = TryGetRegisteredProperty(change.Property);
+        var property = TryGetRegisteredSubject(change.Property.Subject)?.TryGetProperty(change.Property.Name);
         if (property is not null)
         {
             // handle property initializers from attributes
@@ -90,24 +90,21 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
 
     void ILifecycleHandler.DetachSubject(SubjectLifecycleChange change)
     {
-        lock (_knownSubjects)
+        if (change is { ReferenceCount: 0, Property: not null })
         {
-            if (change.ReferenceCount == 0)
+            lock (_knownSubjects)
             {
-                var registeredSubject = TryGetRegisteredSubject(change.Subject);
-                if (registeredSubject is null)
-                {
-                    return;
-                }
+                // TODO(perf): Use concurrent dictionary in registry?
 
-                if (change.Property is not null)
+                var property = change.Property.Value;
+                if (_knownSubjects.TryGetValue(property.Subject, out var subject))
                 {
-                    var property = TryGetRegisteredProperty(change.Property.Value);
-                    property?
+                    var registeredProperty = subject.TryGetProperty(property.Name);
+                    registeredProperty?
                         .Parent
-                        .RemoveParent(property, change.Index);
+                        .RemoveParent(registeredProperty, change.Index);
                     
-                    property?
+                    registeredProperty?
                         .RemoveChild(new SubjectPropertyChild
                         {
                             Subject = change.Subject,
@@ -122,11 +119,5 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
 
     void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
     {
-    }
-    
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)
-    {
-        return TryGetRegisteredSubject(property.Subject)?.TryGetProperty(property.Name);
     }
 }
