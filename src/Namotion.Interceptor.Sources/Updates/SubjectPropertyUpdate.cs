@@ -159,9 +159,7 @@ public class SubjectPropertyUpdate
         {
             Kind = SubjectPropertyUpdateKind.Item;
             Item = value is IInterceptorSubject itemSubject ? 
-                withCycleCheck ? 
-                    SubjectUpdate.CreateCompleteUpdateWithCycleCheck(itemSubject, processors, knownSubjectUpdates, propertyUpdates) : 
-                    SubjectUpdate.CreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates) : 
+                SubjectUpdate.CreateCompleteUpdate(itemSubject, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates) :
                 null;
         }
         else
@@ -185,9 +183,7 @@ public class SubjectPropertyUpdate
             collectionUpdates.Add(new SubjectPropertyCollectionUpdate
             {
                 Item = item is not null ? 
-                    withCycleCheck ?
-                        SubjectUpdate.CreateCompleteUpdateWithCycleCheck(item, processors, knownSubjectUpdates, propertyUpdates) : 
-                        SubjectUpdate.CreateCompleteUpdate(item, processors, knownSubjectUpdates, propertyUpdates) : 
+                    SubjectUpdate.CreateCompleteUpdate(item, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates) : 
                     null,
                 Index = key
             });
@@ -211,9 +207,7 @@ public class SubjectPropertyUpdate
             {
                 collectionUpdates.Add(new SubjectPropertyCollectionUpdate
                 {
-                    Item = withCycleCheck ? 
-                        SubjectUpdate.CreateCompleteUpdateWithCycleCheck(itemSubject, processors, knownSubjectUpdates, propertyUpdates) :
-                        SubjectUpdate.CreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates),
+                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates),
                     Index = index++
                 });
             }
@@ -228,9 +222,7 @@ public class SubjectPropertyUpdate
             {
                 collectionUpdates.Add(new SubjectPropertyCollectionUpdate
                 {
-                    Item = withCycleCheck ?
-                        SubjectUpdate.CreateCompleteUpdateWithCycleCheck(itemSubject, processors, knownSubjectUpdates, propertyUpdates) :
-                        SubjectUpdate.CreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates),
+                    Item = SubjectUpdate.CreateCompleteUpdate(itemSubject, withCycleCheck, processors, knownSubjectUpdates, propertyUpdates),
                     Index = index++
                 });
             }
