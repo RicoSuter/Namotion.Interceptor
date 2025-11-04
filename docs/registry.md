@@ -45,22 +45,6 @@ foreach (var attribute in property!.Attributes)
 }
 ```
 
-
-## Thread safety mutations
-
-The registry provides thread-safe access to all data and includes a synchronization mechanism for updates:
-
-```csharp
-var registry = context.GetRequiredService<ISubjectRegistry>();
-registry.ExecuteSubjectUpdate(() => {
-    // All updates here are synchronized
-    tire.Pressure = 2.5m;
-    tire.Pressure_Minimum = 2.0m;
-});
-```
-
-This ensures consistent state when multiple threads are modifying subjects or when the registry needs to update its internal tracking structures.
-
 ## Define attributes using properties
 
 Property attributes solve the common problem of where to store metadata about your properties. Instead of external configuration or attributes that disappear at runtime, you can define metadata as actual properties:
