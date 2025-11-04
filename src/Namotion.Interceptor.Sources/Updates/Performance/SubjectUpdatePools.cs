@@ -21,10 +21,10 @@ internal static class SubjectUpdatePools
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void ReturnKnownSubjectUpdates(Dictionary<IInterceptorSubject, SubjectUpdate> d)
+    public static void ReturnKnownSubjectUpdates(Dictionary<IInterceptorSubject, SubjectUpdate> dictionary)
     {
-        d.Clear();
-        KnownSubjectUpdatesPool.Return(d);
+        dictionary.Clear();
+        KnownSubjectUpdatesPool.Return(dictionary);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -34,12 +34,12 @@ internal static class SubjectUpdatePools
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void ReturnPropertyUpdates(Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? d)
+    public static void ReturnPropertyUpdates(Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? dictionary)
     {
-        if (d is not null)
+        if (dictionary is not null)
         {
-            d.Clear();
-            PropertyUpdatesPool.Return(d);
+            dictionary.Clear();
+            PropertyUpdatesPool.Return(dictionary);
         }
     }
 
@@ -50,9 +50,9 @@ internal static class SubjectUpdatePools
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void ReturnProcessedParentPaths(HashSet<IInterceptorSubject> s)
+    public static void ReturnProcessedParentPaths(HashSet<IInterceptorSubject> hashSet)
     {
-        s.Clear();
-        ProcessedParentPathsPool.Return(s);
+        hashSet.Clear();
+        ProcessedParentPathsPool.Return(hashSet);
     }
 }
