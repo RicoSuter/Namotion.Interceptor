@@ -59,7 +59,10 @@ public class OpcUaSubscriptionManagerTests
     public void Cleanup_ShouldNotThrowWhenNoSubscriptions()
     {
         // Act & Assert
-        var exception = Record.Exception(() => _subscriptionManager.Cleanup());
+        var exception = Record.Exception(() => _subscriptionManager
+            .CleanupAsync(default)
+            .GetAwaiter()
+            .GetResult());
         
         Assert.Null(exception);
     }
@@ -70,8 +73,8 @@ public class OpcUaSubscriptionManagerTests
         // Act & Assert - Multiple cleanup calls should be safe
         var exception = Record.Exception(() =>
         {
-            _subscriptionManager.Cleanup();
-            _subscriptionManager.Cleanup();
+            _subscriptionManager.CleanupAsync(default).GetAwaiter().GetResult();
+            _subscriptionManager.CleanupAsync(default).GetAwaiter().GetResult();
         });
         
         Assert.Null(exception);
