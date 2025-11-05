@@ -42,7 +42,9 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
             .GetPropertyChangeObservable()
             .Subscribe(change =>
             {
-                if (_properties.TryGetValue(change.Property, out _))
+                // TODO: Find fix for thsi
+                
+                //if (_properties.TryGetValue(change.Property, out _))
                 {
                     InvokeAsync(StateHasChanged);
                 }
