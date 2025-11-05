@@ -14,11 +14,6 @@ public class SubjectPropertyUpdate
     public SubjectPropertyUpdateKind Kind { get; internal set; }
 
     /// <summary>
-    /// Gets the type of the property value.
-    /// </summary>
-    public string? Type { get; init; }
-
-    /// <summary>
     /// Gets or sets the value of the property update if kind is Value.
     /// </summary>
     public object? Value { get; set; }
@@ -56,7 +51,6 @@ public class SubjectPropertyUpdate
     {
         return new SubjectPropertyUpdate
         {
-            Type = typeof(T).Name,
             Kind = SubjectPropertyUpdateKind.Value,
             Value = value,
             Timestamp = timestamp
@@ -89,7 +83,6 @@ public class SubjectPropertyUpdate
     {
         var propertyUpdate = new SubjectPropertyUpdate
         {
-            Type = property.Type.Name,
             Attributes = CreateAttributeUpdates(property, processors, knownSubjectUpdates, propertyUpdates)
         };
 
