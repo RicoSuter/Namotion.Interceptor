@@ -32,10 +32,10 @@ public class OpcUaSubscriptionManagerTests
     public void SetDispatcher_ShouldStoreDispatcher()
     {
         // Arrange
-        var mockDispatcher = new Mock<ISubjectMutationDispatcher>();
+        var mockUpdater = new Mock<ISubjectUpdater>();
 
         // Act
-        _subscriptionManager.SetDispatcher(mockDispatcher.Object);
+        _subscriptionManager.SetUpdater(mockUpdater.Object);
 
         // Assert - No exception means dispatcher was stored successfully
         Assert.True(true);
@@ -45,8 +45,8 @@ public class OpcUaSubscriptionManagerTests
     public void Clear_ShouldClearInternalCollections()
     {
         // Arrange
-        var mockDispatcher = new Mock<ISubjectMutationDispatcher>();
-        _subscriptionManager.SetDispatcher(mockDispatcher.Object);
+        var mockUpdater = new Mock<ISubjectUpdater>();
+        _subscriptionManager.SetUpdater(mockUpdater.Object);
 
         // Act
         _subscriptionManager.Clear();

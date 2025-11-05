@@ -3,19 +3,18 @@ using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWriteInterceptor
+public class PropertyChangeObservable : IObservable<SubjectPropertyChange>, IWriteInterceptor
 {
     private readonly Subject<SubjectPropertyChange> _subject = new();
     private readonly ISubject<SubjectPropertyChange> _syncSubject;
 
-    public PropertyChangedObservable()
+    public PropertyChangeObservable()
     {
         _syncSubject = Subject.Synchronize(_subject);
     }
 
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        // Fast-path: if nobody observes property changes, skip all tracking overhead
         if (!_subject.HasObservers)
         {
             next(ref context);
@@ -27,14 +26,17 @@ public class PropertyChangedObservable : IObservable<SubjectPropertyChange>, IWr
         next(ref context);
 
         var newValue = context.GetFinalValue();
-        var changedContext = SubjectPropertyChange.Create(
+
+        var changeContext = SubjectChangeContext.Current;
+        var propertyChange = SubjectPropertyChange.Create(
             context.Property, 
-            SubjectMutationContext.GetCurrentSource(),
-            SubjectMutationContext.GetCurrentTimestamp(),
+            changeContext.Source,
+            changeContext.ChangedTimestamp,
+            changeContext.ReceivedTimestamp,
             oldValue, 
             newValue);
         
-        _syncSubject.OnNext(changedContext);
+        _syncSubject.OnNext(propertyChange);
     }
 
     public IDisposable Subscribe(IObserver<SubjectPropertyChange> observer)

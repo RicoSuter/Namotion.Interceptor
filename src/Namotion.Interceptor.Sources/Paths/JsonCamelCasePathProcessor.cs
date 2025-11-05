@@ -45,11 +45,19 @@ public class JsonCamelCasePathProcessor : ISubjectUpdateProcessor
         {
             // Single pass: collect keys that need transformation
             var index = 0;
-            foreach (var key in dictionary.Keys)
+            foreach (var kvp in dictionary)
             {
-                var transformedKey = JsonCamelCaseSourcePathProvider.ConvertToSourcePath(key);
-                if (transformedKey != key)
+                var key = kvp.Key;
+                if (key.Length > 0 && char.IsUpper(key[0]))
                 {
+                    var transformedKey = key.Length > 1
+                        ? string.Create(key.Length, key, static (span, k) =>
+                        {
+                            span[0] = char.ToLowerInvariant(k[0]);
+                            k.AsSpan(1).CopyTo(span[1..]);
+                        })
+                        : key.ToLowerInvariant();
+
                     keyPairs[index++] = key;
                     keyPairs[index++] = transformedKey;
                 }

@@ -39,7 +39,7 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
     {
         _subscription = Subject?
             .Context
-            .GetPropertyChangedObservable()
+            .GetPropertyChangeObservable()
             .Subscribe(change =>
             {
                 if (_properties.TryGetValue(change.Property, out _))

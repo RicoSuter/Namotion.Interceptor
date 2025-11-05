@@ -1,5 +1,4 @@
 ﻿{
-  Type: Person,
   Properties: {
     children: {
       Kind: Collection,
@@ -8,7 +7,6 @@
         {
           Index: 0,
           Item: {
-            Type: Person,
             Properties: {
               children: {
                 Kind: Collection,
@@ -21,7 +19,26 @@
               firstName: {
                 Kind: Value,
                 Type: String,
-                Value: Child3
+                Value: Child3,
+                Attributes: {
+                  maxLength: {
+                    Kind: Value,
+                    Type: Int32,
+                    Value: 123,
+                    Attributes: {
+                      unit: {
+                        Kind: Value,
+                        Type: String,
+                        Value: Count
+                      }
+                    }
+                  }
+                }
+              },
+              fullName: {
+                Kind: Value,
+                Type: String,
+                Value: Child3 
               },
               lastName: {
                 Kind: Value,
@@ -37,7 +54,6 @@
         {
           Index: 1,
           Item: {
-            Type: Person,
             Properties: {
               children: {
                 Kind: Collection,
@@ -51,7 +67,26 @@
                 Kind: Value,
                 Type: String,
                 Value: John,
-                Timestamp: {Scrubbed}
+                Timestamp: {Scrubbed},
+                Attributes: {
+                  maxLength: {
+                    Kind: Value,
+                    Type: Int32,
+                    Value: 123,
+                    Attributes: {
+                      unit: {
+                        Kind: Value,
+                        Type: String,
+                        Value: Count
+                      }
+                    }
+                  }
+                }
+              },
+              fullName: {
+                Kind: Value,
+                Type: String,
+                Value: John 
               },
               lastName: {
                 Kind: Value,
@@ -70,7 +105,6 @@
       Kind: Item,
       Timestamp: {Scrubbed},
       Item: {
-        Type: Person,
         Properties: {
           children: {
             Kind: Collection,
@@ -83,7 +117,26 @@
           firstName: {
             Kind: Value,
             Type: String,
-            Value: MyFather
+            Value: MyFather,
+            Attributes: {
+              maxLength: {
+                Kind: Value,
+                Type: Int32,
+                Value: 123,
+                Attributes: {
+                  unit: {
+                    Kind: Value,
+                    Type: String,
+                    Value: Count
+                  }
+                }
+              }
+            }
+          },
+          fullName: {
+            Kind: Value,
+            Type: String,
+            Value: MyFather 
           },
           lastName: {
             Kind: Value,
@@ -100,7 +153,6 @@
       Kind: Item,
       Timestamp: {Scrubbed},
       Item: {
-        Type: Person,
         Properties: {
           children: {
             Kind: Collection,
@@ -114,7 +166,26 @@
             Kind: Value,
             Type: String,
             Value: Jane,
-            Timestamp: {Scrubbed}
+            Timestamp: {Scrubbed},
+            Attributes: {
+              maxLength: {
+                Kind: Value,
+                Type: Int32,
+                Value: 123,
+                Attributes: {
+                  unit: {
+                    Kind: Value,
+                    Type: String,
+                    Value: Count
+                  }
+                }
+              }
+            }
+          },
+          fullName: {
+            Kind: Value,
+            Type: String,
+            Value: Jane 
           },
           lastName: {
             Kind: Value,

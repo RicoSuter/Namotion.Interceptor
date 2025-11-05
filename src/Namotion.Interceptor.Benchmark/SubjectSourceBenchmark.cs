@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
@@ -23,6 +24,10 @@ public class SubjectSourceBenchmark
     private IInterceptorSubjectContext _context;
     private CancellationTokenSource _cts;
     private Car _car;
+    private string[] _propertyNames;
+
+    private readonly AutoResetEvent _signal = new(false);
+    private Action<object?>[] _updates;
 
     [GlobalSetup]
     public async Task Setup()
@@ -32,7 +37,12 @@ public class SubjectSourceBenchmark
             .WithFullPropertyTracking()
             .WithRegistry();
 
-        _source = new TestSubjectSource();
+        _propertyNames = Enumerable
+            .Range(1, 5000)
+            .Select(i => $"Name{i}")
+            .ToArray();
+
+        _source = new TestSubjectSource(_propertyNames.Length);
         _service = new SubjectSourceBackgroundService(
             _source,
             _context,
@@ -41,33 +51,55 @@ public class SubjectSourceBenchmark
             retryTime: TimeSpan.FromSeconds(1));
 
         _car = new Car(_context);
-        
+
+        foreach (var name in _propertyNames)
+        {
+            _car.TryGetRegisteredSubject()!
+                .AddProperty(name, typeof(string), static _ => "foo", static (_, _) => { });
+        }
+
         _cts = new CancellationTokenSource();
         await _service.StartAsync(_cts.Token);
+
+        _updates = Enumerable
+            .Range(1, 1000000)
+            .Select(c => c < 1000000
+                ? new Action<object?>(static _ => { })
+                : _ =>
+                {
+                    _signal.Set();
+                })
+            .ToArray();
     }
 
     [Benchmark]
-    public void ProcessSourceChanges()
+    public void WriteToRegistrySubjects()
     {
-        for (int i = 0; i < 100000; i++)
+        for (var i = 0; i < _updates.Length; i++)
         {
-            _service.EnqueueSubjectUpdate(() => { });
+            _service.EnqueueOrApplyUpdate(null, _updates[i]);
         }
+
+        _signal.WaitOne();
     }
 
     [Benchmark]
-    public void ProcessLocalChanges()
+    public void WriteToSource()
     {
-        var observable = _context.GetService<PropertyChangedObservable>();
-        for (var i = 0; i < 100000; i++)
+        _source.Reset();
+
+        var queue = _context.GetService<PropertyChangeQueue>();
+        for (var i = 0; i < _propertyNames.Length; i++)
         {
             var context = new PropertyWriteContext<int>(
-                new PropertyReference(_car, "Name"), 
+                new PropertyReference(_car, _propertyNames[i]), 
                 0, 
                 i);
 
-            observable.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});
+            queue.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});
         }
+        
+        _source.Wait();
     }
 
     [GlobalCleanup]
@@ -81,9 +113,28 @@ public class SubjectSourceBenchmark
 
     private class TestSubjectSource : ISubjectSource
     {
-        public bool IsPropertyIncluded(RegisteredSubjectProperty property) => false;
+        private int _count;
+        private readonly int _targetCount;
+        private readonly AutoResetEvent _signal = new(false);
 
-        public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
+        public TestSubjectSource(int targetCount)
+        {
+            _targetCount = targetCount;
+        }
+
+        public void Reset()
+        {
+            _count = 0;
+        }
+        
+        public void Wait()
+        {
+            _signal.WaitOne();
+        }
+        
+        public bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
+
+        public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
         {
             return Task.FromResult<IDisposable?>(null);
         }
@@ -93,9 +144,16 @@ public class SubjectSourceBenchmark
             return Task.FromResult<Action?>(null);
         }
 
-        public Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
-            return Task.CompletedTask;
+            _count += changes.Count;
+
+            if (_count >= _targetCount)
+            {
+                _signal.Set();
+            }
+
+            return ValueTask.CompletedTask;
         }
     }
 }

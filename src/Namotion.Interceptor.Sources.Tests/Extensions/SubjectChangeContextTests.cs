@@ -9,7 +9,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Tests.Extensions;
 
-public class SubjectMutationContextTests
+public class SubjectChangeContextTests
 {
     [Fact]
     public void WhenSetValueFromSource_ThenIsChangingFromSourceShouldReturnTrue()
@@ -18,14 +18,14 @@ public class SubjectMutationContextTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
-            .WithPropertyChangedObservable();
+            .WithPropertyChangeObservable();
         
         var person = new Person(context);
         var propertyName = nameof(Person.FirstName);
         
         var changes = new List<SubjectPropertyChange>();
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(c => changes.Add(c));
         
         var source = Mock.Of<ISubjectSource>();
