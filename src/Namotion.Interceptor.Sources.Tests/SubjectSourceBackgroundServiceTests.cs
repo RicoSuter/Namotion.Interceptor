@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Interceptors;
@@ -29,11 +28,11 @@ public class SubjectSourceBackgroundServiceTests
 
         var updates = new List<string>();
         subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<ISubjectMutationDispatcher>(), It.IsAny<CancellationToken>()))
-            .Callback((ISubjectMutationDispatcher dispatcher, CancellationToken _) =>
+            .Setup(s => s.StartListeningAsync(It.IsAny<ISubjectUpdater>(), It.IsAny<CancellationToken>()))
+            .Callback((ISubjectUpdater updater, CancellationToken _) =>
             {
-                dispatcher.EnqueueSubjectUpdate(() => updates.Add("Update1"));
-                dispatcher.EnqueueSubjectUpdate(() => updates.Add("Update2"));
+                updater.EnqueueOrApplyUpdate(updates, u => u.Add("Update1"));
+                updater.EnqueueOrApplyUpdate(updates, u => u.Add("Update2"));
             })
             .ReturnsAsync((IDisposable?)null);
 
@@ -42,8 +41,8 @@ public class SubjectSourceBackgroundServiceTests
             .ReturnsAsync(() => { updates.Add("Complete"); });
 
         subjectSourceMock
-            .Setup(s => s.WriteToSourceAsync(It.IsAny<IEnumerable<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .Setup(s => s.WriteToSourceAsync(It.IsAny<IReadOnlyCollection<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.CompletedTask);
 
         var cancellationTokenSource = new CancellationTokenSource();
 
@@ -70,11 +69,11 @@ public class SubjectSourceBackgroundServiceTests
     public async Task WhenPropertyChangeIsTriggered_ThenWriteToSourceAsyncIsCalled()
     {
         // Arrange
-        var propertyChangedObservable = new PropertyChangedObservable();
+        var propertyChangedChannel = new PropertyChangeQueue();
 
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
-        context.AddService(propertyChangedObservable);
+        context.AddService(propertyChangedChannel);
 
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
@@ -84,7 +83,7 @@ public class SubjectSourceBackgroundServiceTests
             .Returns(true);
 
         subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<ISubjectMutationDispatcher>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.StartListeningAsync(It.IsAny<ISubjectUpdater>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((IDisposable?)null);
 
         subjectSourceMock
@@ -94,9 +93,9 @@ public class SubjectSourceBackgroundServiceTests
         IEnumerable<SubjectPropertyChange>? changes = null;
 
         subjectSourceMock
-            .Setup(s => s.WriteToSourceAsync(It.IsAny<IEnumerable<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.WriteToSourceAsync(It.IsAny<IReadOnlyCollection<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback((IEnumerable<SubjectPropertyChange> c, CancellationToken _) => changes = c)
-            .Returns(Task.CompletedTask);
+            .Returns(ValueTask.CompletedTask);
 
         var cancellationTokenSource = new CancellationTokenSource();
 
@@ -107,7 +106,7 @@ public class SubjectSourceBackgroundServiceTests
         var writeContext = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Bar");
 
-        propertyChangedObservable.WriteProperty(ref writeContext, (ref _) => { });
+        propertyChangedChannel.WriteProperty(ref writeContext, (ref _) => { });
         
         await Task.Delay(1000, cancellationTokenSource.Token);
         await service.StopAsync(cancellationTokenSource.Token);

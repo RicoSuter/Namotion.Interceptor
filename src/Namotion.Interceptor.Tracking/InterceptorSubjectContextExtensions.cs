@@ -1,5 +1,6 @@
 ﻿using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using System.Threading.Channels;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
@@ -10,22 +11,6 @@ namespace Namotion.Interceptor.Tracking;
 public static class InterceptorSubjectContextExtensions
 {
     /// <summary>
-    /// Gets the property changed observable which is registered in the context.
-    /// </summary>
-    /// <param name="context">The context.</param>
-    /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).</param>
-    /// <returns>The observable.</returns>
-    public static IObservable<SubjectPropertyChange> GetPropertyChangedObservable(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
-    {
-        scheduler ??= Scheduler.Default;
-        return context
-            .GetService<PropertyChangedObservable>()
-            .Publish()
-            .RefCount() // single upstream subscription (shared)
-            .ObserveOn(scheduler); // per-subscriber queue; producer will not be blocked
-    }
-    
-    /// <summary>
     /// Registers full property tracking including equality checks, context inheritance, derived property change detection, and property changed observable.
     /// </summary>
     /// <param name="context">The context.</param>
@@ -35,7 +20,8 @@ public static class InterceptorSubjectContextExtensions
         return context
             .WithEqualityCheck()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
+            .WithPropertyChangeQueue()
             .WithContextInheritance();
     }
     
@@ -58,7 +44,7 @@ public static class InterceptorSubjectContextExtensions
     /// <returns>The context.</returns>
     public static IInterceptorSubjectContext WithDerivedPropertyChangeDetection(this IInterceptorSubjectContext context)
     {
-        context
+        context // must be before lifecycle!
             .WithService(() => new DerivedPropertyChangeHandler());
 
         return context
@@ -77,14 +63,54 @@ public static class InterceptorSubjectContextExtensions
     }
 
     /// <summary>
-    /// Registers the property changed observable which can be retrieved using subject.GetPropertyChangedObservable().
+    /// Registers the property changed observable which can be retrieved using subject.GetPropertyChangeObservable().
     /// </summary>
     /// <param name="context">The collection.</param>
     /// <returns>The collection.</returns>
-    public static IInterceptorSubjectContext WithPropertyChangedObservable(this IInterceptorSubjectContext context)
+    public static IInterceptorSubjectContext WithPropertyChangeObservable(this IInterceptorSubjectContext context)
     {
         return context
-            .WithService(() => new PropertyChangedObservable());
+            .WithService(() => new PropertyChangeObservable());
+    }
+
+    /// <summary>
+    /// Gets the property changed observable which is registered in the context.
+    /// </summary>
+    /// <param name="context">The context.</param>
+    /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).</param>
+    /// <returns>The observable.</returns>
+    public static IObservable<SubjectPropertyChange> GetPropertyChangeObservable(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
+    {
+        scheduler ??= Scheduler.Default;
+        return context
+            .GetService<PropertyChangeObservable>()
+            .Publish()
+            .RefCount() // single upstream subscription (shared)
+            .ObserveOn(scheduler); // per-subscriber queue; producer will not be blocked
+    }
+
+    /// <summary>
+    /// Registers the property changed observable which can be retrieved using subject.GetPropertyChangeObservable().
+    /// </summary>
+    /// <param name="context">The collection.</param>
+    /// <returns>The collection.</returns>
+    public static IInterceptorSubjectContext WithPropertyChangeQueue(this IInterceptorSubjectContext context)
+    {
+        return context
+            .WithService(() => new PropertyChangeQueue());
+    }
+
+    /// <summary>
+    /// Gets the property changed observable which is registered in the context.
+    /// </summary>
+    /// <param name="context">The context.</param>
+    /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).</param>
+    /// <returns>The observable.</returns>
+    public static PropertyChangeQueueSubscription CreatePropertyChangeQueueSubscription(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
+    {
+        return context
+            .GetService<PropertyChangeQueue>()
+            .Subscribe();
     }
 
     /// <summary>

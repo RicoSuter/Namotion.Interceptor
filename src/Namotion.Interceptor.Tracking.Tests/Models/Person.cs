@@ -30,6 +30,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
 
         public partial Person[] Children { get; set; }
 
-        public override string ToString() => FullName;
+        public override string ToString() => $"{{{FullName}}}";
     }
 }

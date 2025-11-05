@@ -1,6 +1,6 @@
 # Sources
 
-The Sources package enables binding subject properties to external data sources like MQTT, OPC UA, or custom providers. It provides a powerful abstraction layer that automatically synchronizes property values with external systems while maintaining full type safety and change tracking.
+The `Namotion.Interceptor.Sources` package enables binding subject properties to external data sources like MQTT, OPC UA, or custom providers. It provides a powerful abstraction layer that automatically synchronizes property values with external systems while maintaining full type safety and change tracking.
 
 ## Setup
 
@@ -123,3 +123,11 @@ Built-in providers include:
 
 - **DefaultSourcePathProvider** - Uses paths exactly as specified in attributes
 - **JsonCamelCaseSourcePathProvider** - Converts property names to camelCase for JSON APIs
+
+## Thread Safety with Concurrent Sources
+
+When multiple sources update properties concurrently, the library provides automatic thread-safety at the property field access level. Individual property updates are atomic and thread-safe without requiring additional synchronization in your source implementation.
+
+**Source responsibility**: While the library ensures thread-safe property access, **sources are responsible for maintaining correct update ordering** according to their protocol semantics. When implementing `ISubjectSource`, use the provided `ISubjectUpdater` to enqueue updates, which handles sequencing and prevents race conditions where newer values could be overwritten by delayed older updates.
+
+Custom source implementations should ensure that the temporal ordering of external events is preserved when applying property updates. This is critical for maintaining data consistency when events arrive out of order or concurrently from the same source.

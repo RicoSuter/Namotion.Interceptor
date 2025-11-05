@@ -4,9 +4,9 @@ namespace Namotion.Interceptor.Sources.Updates;
 
 public interface ISubjectUpdateProcessor
 {
-    bool IsIncluded(RegisteredSubjectProperty property);
-    
-    SubjectUpdate TransformSubjectUpdate(IInterceptorSubject subject, SubjectUpdate update);
+    public bool IsIncluded(RegisteredSubjectProperty property) => true;
 
-    SubjectPropertyUpdate TransformSubjectPropertyUpdate(RegisteredSubjectProperty property, SubjectPropertyUpdate update);
+    public SubjectUpdate TransformSubjectUpdate(IInterceptorSubject subject, SubjectUpdate update) => update;
+
+    public SubjectPropertyUpdate TransformSubjectPropertyUpdate(RegisteredSubjectProperty property, SubjectPropertyUpdate update) => update;
 }

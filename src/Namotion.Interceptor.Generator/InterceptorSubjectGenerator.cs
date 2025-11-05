@@ -37,6 +37,12 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                             {
                                 Property = p,
                                 Type = model.GetTypeInfo(p.Type, ct),
+                                AccessModifier = 
+                                    p.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) ? "public" :
+                                    p.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword)) ? "internal" :
+                                    p.Modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)) ? "protected" : 
+                                    "private",
+
                                 IsPartial = p.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)),
                                 IsDerived = HasDerivedAttribute(p, model, ct),
                                 IsRequired = p.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword)),
@@ -122,6 +128,9 @@ namespace {namespaceName}
         [JsonIgnore]
         IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
 
+        [JsonIgnore]
+        object IInterceptorSubject.SyncRoot {{ get; }} = new object();
+
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {{
             _properties = (_properties ?? DefaultProperties)
@@ -142,9 +151,7 @@ namespace {namespaceName}
                 {{
                     ""{propertyName}"",       
                     new SubjectPropertyMetadata(
-                        nameof({propertyName}), 
-                        typeof({className}).GetProperty(nameof({propertyName})).PropertyType!, 
-                        typeof({className}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, 
+                        typeof({className}).GetProperty(nameof({propertyName}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
                         {(property.HasGetter ? ($"(o) => (({className})o).{propertyName}") : "null")}, 
                         {(property.HasSetter ? ($"(o, v) => (({className})o).{propertyName} = ({fullyQualifiedName})v") : "null")}, 
                         isIntercepted: {(property.IsPartial ? "true" : "false")},
@@ -189,11 +196,7 @@ namespace {namespaceName}
                     {
                         var fullyQualifiedName = property.Type.Type!.ToString();
                         var propertyName = property.Property.Identifier.Value;
-                        var propertyModifier =
-                            property.Property.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) ? "public" :
-                            property.Property.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword)) ? "internal" :
-                            property.Property.Modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)) ? "protected" : 
-                            "private";
+                        var propertyModifier = property.AccessModifier;
 
                         generatedCode +=
     $@"

@@ -1,6 +1,6 @@
 # Registry
 
-The Registry package provides a powerful tracking system that automatically discovers and manages interceptor subjects and their properties. It enables advanced features like property attributes (metadata attached to properties), dynamic property discovery, and hierarchical subject relationships. Unlike reflection-based approaches, the registry maintains full type safety while providing dynamic capabilities.
+The `Namotion.Interceptor.Registry` package provides a powerful tracking system that automatically discovers and manages interceptor subjects and their properties. It enables advanced features like property attributes (metadata attached to properties), dynamic property discovery, and hierarchical subject relationships. Unlike reflection-based approaches, the registry maintains full type safety while providing dynamic capabilities.
 
 ![Registry Domain](registry-domain.png)
 
@@ -44,22 +44,6 @@ foreach (var attribute in property!.Attributes)
     Console.WriteLine($"{attribute.AttributeMetadata.AttributeName}: {attribute.Reference.GetValue()}");
 }
 ```
-
-
-## Thread safety mutations
-
-The registry provides thread-safe access to all data and includes a synchronization mechanism for updates:
-
-```csharp
-var registry = context.GetRequiredService<ISubjectRegistry>();
-registry.ExecuteSubjectUpdate(() => {
-    // All updates here are synchronized
-    tire.Pressure = 2.5m;
-    tire.Pressure_Minimum = 2.0m;
-});
-```
-
-This ensures consistent state when multiple threads are modifying subjects or when the registry needs to update its internal tracking structures.
 
 ## Define attributes using properties
 

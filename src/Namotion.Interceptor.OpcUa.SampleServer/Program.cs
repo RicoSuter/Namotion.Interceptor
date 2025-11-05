@@ -19,16 +19,17 @@ var context = InterceptorSubjectContext
     .WithDataAnnotationValidation()
     .WithHostedServices(builder.Services);
 
-var root = new Root(context)
-{
-    Persons = Enumerable
-        .Range(0, 1000).Select(i => new Person
-        {
-            FirstName = "John " + i,
-            LastName = "Doe" + i
-        })
-        .ToArray()
-};
+var root = new Root(context);
+context.AddService(root);
+
+root.Persons = Enumerable
+    .Range(0, 10000)
+    .Select(i => new Person
+    {
+        FirstName = "John " + i,
+        LastName = "Doe" + i
+    })
+    .ToArray();
 
 builder.Services.AddSingleton(root);
 builder.Services.AddOpcUaSubjectServer<Root>("opc", rootName: "Root");

@@ -14,7 +14,8 @@ public readonly struct SubjectPropertyChange
     private SubjectPropertyChange(
         PropertyReference property,
         object? source,
-        DateTimeOffset timestamp,
+        DateTimeOffset changedTimestamp,
+        DateTimeOffset? receivedTimestamp,
         InlineValueStorage oldValueStorage,
         InlineValueStorage newValueStorage,
         object? oldBoxedHolder,
@@ -22,7 +23,8 @@ public readonly struct SubjectPropertyChange
     {
         Property = property;
         Source = source;
-        Timestamp = timestamp;
+        ChangedTimestamp = changedTimestamp;
+        ReceivedTimestamp = receivedTimestamp;
         _oldValueStorage = oldValueStorage;
         _newValueStorage = newValueStorage;
         _oldBoxedHolder = oldBoxedHolder;
@@ -33,13 +35,16 @@ public readonly struct SubjectPropertyChange
 
     public object? Source { get; }
 
-    public DateTimeOffset Timestamp { get; }
+    public DateTimeOffset ChangedTimestamp { get; }
+
+    public DateTimeOffset? ReceivedTimestamp { get; }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static SubjectPropertyChange Create<TValue>(
         PropertyReference property,
         object? source,
-        DateTimeOffset timestamp,
+        DateTimeOffset changedTimestamp,
+        DateTimeOffset? receivedTimestamp,
         TValue oldValue,
         TValue newValue)
     {
@@ -49,7 +54,8 @@ public readonly struct SubjectPropertyChange
             return new SubjectPropertyChange(
                 property,
                 source,
-                timestamp,
+                changedTimestamp,
+                receivedTimestamp,
                 InlineValueStorage.Create(oldValue),
                 InlineValueStorage.Create(newValue),
                 null,
@@ -60,7 +66,8 @@ public readonly struct SubjectPropertyChange
         return new SubjectPropertyChange(
             property,
             source,
-            timestamp,
+            changedTimestamp,
+            receivedTimestamp,
             default,
             default,
             new BoxedValueHolder<TValue>(oldValue),

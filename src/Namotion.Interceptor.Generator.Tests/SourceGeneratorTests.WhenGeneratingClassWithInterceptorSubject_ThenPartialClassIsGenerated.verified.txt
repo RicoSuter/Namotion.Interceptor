@@ -33,6 +33,9 @@ namespace YourDefaultNamespace
         [JsonIgnore]
         IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
 
+        [JsonIgnore]
+        object IInterceptorSubject.SyncRoot { get; } = new object();
+
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {
             _properties = (_properties ?? DefaultProperties)
@@ -46,22 +49,18 @@ namespace YourDefaultNamespace
                 {
                     "Value",       
                     new SubjectPropertyMetadata(
-                        nameof(Value), 
-                        typeof(SampleSubject).GetProperty(nameof(Value)).PropertyType!, 
-                        typeof(SampleSubject).GetProperty(nameof(Value)).GetCustomAttributes().ToArray()!, 
-                        null, 
-                        null, 
+                        typeof(SampleSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
+                        (o) => ((SampleSubject)o).Value, 
+                        (o, v) => ((SampleSubject)o).Value = (int)v, 
                         isIntercepted: true,
                         isDynamic: false)
                 },
                 {
                     "Name",       
                     new SubjectPropertyMetadata(
-                        nameof(Name), 
-                        typeof(SampleSubject).GetProperty(nameof(Name)).PropertyType!, 
-                        typeof(SampleSubject).GetProperty(nameof(Name)).GetCustomAttributes().ToArray()!, 
-                        null, 
-                        null, 
+                        typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
+                        (o) => ((SampleSubject)o).Name, 
+                        (o, v) => ((SampleSubject)o).Name = (string)v, 
                         isIntercepted: true,
                         isDynamic: false)
                 },
@@ -82,12 +81,16 @@ namespace YourDefaultNamespace
 
         public partial int Value
         {
+             get => GetPropertyValue<int>(nameof(Value), static (o) => ((SampleSubject)o)._Value);
+             set => SetPropertyValue(nameof(Value), value, static (o) => ((SampleSubject)o)._Value, static (o, v) => ((SampleSubject)o)._Value = v);
         }
 
         private string _Name;
 
         public partial string Name
         {
+             get => GetPropertyValue<string>(nameof(Name), static (o) => ((SampleSubject)o)._Name);
+             set => SetPropertyValue(nameof(Name), value, static (o) => ((SampleSubject)o)._Name, static (o, v) => ((SampleSubject)o)._Name = v);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
