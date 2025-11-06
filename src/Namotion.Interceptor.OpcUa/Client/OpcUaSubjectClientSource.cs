@@ -218,18 +218,18 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             for (var offset = 0; offset < itemCount; offset += chunkSize)
             {
                 var take = Math.Min(chunkSize, itemCount - offset);
-                var readValues = new ReadValueId[take];
+                var readValues = new ReadValueIdCollection(take);
                 for (var i = 0; i < take; i++)
                 {
-                    readValues[i] = new ReadValueId
+                    readValues.Add(new ReadValueId
                     {
                         NodeId = monitoredItems[offset + i].StartNodeId,
                         AttributeId = Opc.Ua.Attributes.Value
-                    };
+                    });
                 }
 
                 var readResponse = await _session.ReadAsync(null, 0, TimestampsToReturn.Source, readValues, cancellationToken);
-                var resultCount = Math.Min(readResponse.Results.Count, take);
+                var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
                 for (var i = 0; i < resultCount; i++)
                 {
                     if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
