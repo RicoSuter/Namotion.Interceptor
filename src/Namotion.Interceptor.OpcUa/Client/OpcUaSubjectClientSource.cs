@@ -12,6 +12,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 {
     private const string OpcVariableKey = "OpcVariable";
+    private const int DefaultChunkSize = 512;
 
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
@@ -214,7 +215,10 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         try
         {
             var result = new Dictionary<RegisteredSubjectProperty, DataValue>();
-            var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerRead ?? 500);
+
+            var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
+            chunkSize = chunkSize == 0 ? int.MaxValue : chunkSize;
+
             for (var offset = 0; offset < itemCount; offset += chunkSize)
             {
                 var take = Math.Min(chunkSize, itemCount - offset);
@@ -272,7 +276,9 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             return;
         }
 
-        var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerWrite ?? 500);
+        var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerWrite ?? DefaultChunkSize);
+        chunkSize = chunkSize == 0 ? int.MaxValue : chunkSize;
+        
         var changeList = changes as IList<SubjectPropertyChange> ?? changes.ToList();
         for (var offset = 0; offset < changeList.Count; offset += chunkSize)
         {
