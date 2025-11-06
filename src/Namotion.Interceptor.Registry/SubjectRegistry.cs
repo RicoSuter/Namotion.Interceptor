@@ -46,12 +46,12 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                     registeredSubject = RegisterSubject(change.Property.Value.Subject);
                 }
 
-                var property = registeredSubject.TryGetProperty(change.Property.Value.Name) ?? 
+                var property = registeredSubject.TryGetProperty(change.Property.Value.Name) ??
                     throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
-                    
+
                 subject
                     .AddParent(property, change.Index);
-                
+
                 property
                     .AddChild(new SubjectPropertyChild
                     {
@@ -92,29 +92,36 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     {
         lock (_knownSubjects)
         {
+            var registeredSubject = TryGetRegisteredSubject(change.Subject);
+            if (registeredSubject is null)
+            {
+                return;
+            }
+
+            // Always update parent-child relationships when a property reference is removed,
+            // regardless of reference count. This ensures the Children collection stays accurate
+            // even when the subject has multiple references from different properties.
+            if (change.Property is not null)
+            {
+                var property = TryGetRegisteredProperty(change.Property.Value);
+                if (property is not null)
+                {
+                    // Remove parent relationship from the child subject
+                    registeredSubject.RemoveParent(property, change.Index);
+
+                    // Remove child from the parent property's Children collection
+                    // Using struct initialization - no heap allocation
+                    property.RemoveChild(new SubjectPropertyChild
+                    {
+                        Subject = change.Subject,
+                        Index = change.Index
+                    });
+                }
+            }
+
+            // Only remove the subject from the registry when its reference count reaches zero
             if (change.ReferenceCount == 0)
             {
-                var registeredSubject = TryGetRegisteredSubject(change.Subject);
-                if (registeredSubject is null)
-                {
-                    return;
-                }
-
-                if (change.Property is not null)
-                {
-                    var property = TryGetRegisteredProperty(change.Property.Value);
-                    property?
-                        .Parent
-                        .RemoveParent(property, change.Index);
-                    
-                    property?
-                        .RemoveChild(new SubjectPropertyChild
-                        {
-                            Subject = change.Subject,
-                            Index = change.Index
-                        });
-                }
-
                 _knownSubjects.Remove(change.Subject);
             }
         }
