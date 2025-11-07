@@ -39,9 +39,9 @@ public class RegisteredSubjectProperty
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void Return()
     {
-        lock (_children)
-            _children.Clear();
-
+        // No need to lock because the subject containing this property is removed from the registry already
+        // ReSharper disable once InconsistentlySynchronizedField
+        _children.Clear();
         Pool.Return(this);
     }
 

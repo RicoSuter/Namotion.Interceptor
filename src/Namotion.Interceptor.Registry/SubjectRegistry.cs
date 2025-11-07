@@ -84,8 +84,11 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                 var property = TryGetRegisteredProperty(change.Property.Value);
                 if (property is not null)
                 {
-                    // Remove parent relationship from the child subject
-                    registeredSubject.RemoveParent(property, change.Index);
+                    // Remove parent relationship from the child subject (only when it is returned anyway)
+                    if (change.ReferenceCount != 0)
+                    {
+                        registeredSubject.RemoveParent(property, change.Index);
+                    }
 
                     // Remove child from the parent property's Children collection
                     // Using struct initialization - no heap allocation
