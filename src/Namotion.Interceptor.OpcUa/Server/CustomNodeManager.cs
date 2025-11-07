@@ -140,7 +140,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private void CreateVariableNode(string propertyName, RegisteredSubjectProperty property, NodeId parentNodeId, string parentPath)
     {
-        var value = _configuration.ValueConverter.ConvertToNodeValue(property.GetValue(), property.Type);
+        var value = _configuration.ValueConverter.ConvertToNodeValue(property.GetValue(), property);
         var typeInfo = _configuration.ValueConverter.GetNodeTypeInfo(property.Type);
 
         var nodeId = GetNodeId(property, parentPath + propertyName);
