@@ -14,7 +14,7 @@ public class OpcUaTypeResolver
         _logger = logger;
     }
     
-    public virtual async Task<Type> GetTypeForNodeAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
+    public virtual async Task<Type?> TryGetTypeForNodeAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
     {
         var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
 
@@ -52,7 +52,7 @@ public class OpcUaTypeResolver
         {
             if (nodeId is null)
             {
-                return typeof(object);
+                return null;
             }
 
             var nodesToRead = new ReadValueIdCollection
@@ -68,23 +68,18 @@ public class OpcUaTypeResolver
                 if (dataTypeId != null)
                 {
                     var builtIn = TypeInfo.GetBuiltInType(dataTypeId);
-                    var elementType = MapBuiltInType(builtIn);
-
-                    // If ValueRank >= 0 we treat it as (at least) an array - simplification for multi-dim arrays.
-                    var valueRank = response.Results[1].Value is int vr ? vr : -1; // -1 => scalar
-                    if (valueRank >= 0)
+                    var elementType = TryMapBuiltInType(builtIn);
+                    if (elementType is not null)
                     {
-                        try
+                        // If ValueRank >= 0 we treat it as (at least) an array - simplification for multi-dim arrays.
+                        var valueRank = response.Results[1].Value is int vr ? vr : -1; // -1 => scalar
+                        if (valueRank >= 0)
                         {
                             return elementType.MakeArrayType();
                         }
-                        catch
-                        {
-                            return typeof(object[]);
-                        }
-                    }
 
-                    return elementType;
+                        return elementType;
+                    }
                 }
             }
         }
@@ -93,10 +88,10 @@ public class OpcUaTypeResolver
             _logger.LogDebug(ex, "Failed to infer CLR type for node {BrowseName}", reference.BrowseName.Name);
         }
 
-        return typeof(object);
+        return null;
     }
 
-    private static Type MapBuiltInType(BuiltInType builtInType) => builtInType switch
+    private static Type? TryMapBuiltInType(BuiltInType builtInType) => builtInType switch
     {
         BuiltInType.Boolean => typeof(bool),
         BuiltInType.SByte => typeof(sbyte),
@@ -121,6 +116,6 @@ public class OpcUaTypeResolver
         BuiltInType.DiagnosticInfo => typeof(DiagnosticInfo),
         BuiltInType.DataValue => typeof(DataValue),
         BuiltInType.Enumeration => typeof(int), // map enum to underlying Int32
-        _ => typeof(object)
+        _ => null
     };
 }

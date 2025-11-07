@@ -1,4 +1,5 @@
-﻿using Opc.Ua;
+﻿using Namotion.Interceptor.Registry.Abstractions;
+using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa;
 
@@ -7,13 +8,14 @@ public class OpcUaValueConverter
     /// <summary>
     /// Converts an OPC UA node value to the CLR property type while handling.
     /// </summary>
-    public virtual object? ConvertToPropertyValue(object? nodeValue, Type propertyType)
+    public virtual object? ConvertToPropertyValue(object? nodeValue, RegisteredSubjectProperty property)
     {
         if (nodeValue is null)
         {
             return null;
         }
 
+        var propertyType = property.Type;
         var targetType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
         if (targetType == typeof(decimal))
         {
@@ -42,8 +44,9 @@ public class OpcUaValueConverter
     /// <summary>
     /// Converts a CLR property value to an OPC UA compatible value.
     /// </summary>
-    public virtual object? ConvertToNodeValue(object? propertyValue, Type propertyType)
+    public virtual object? ConvertToNodeValue(object? propertyValue, RegisteredSubjectProperty property)
     {
+        var propertyType = property.Type;
         var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
         if (type == typeof(decimal))
         {

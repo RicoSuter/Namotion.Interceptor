@@ -1,50 +1,44 @@
 ﻿{
-  Type: Person,
   Properties: {
     children: {
       Kind: Collection,
-      Type: List`1,
       Timestamp: {Scrubbed},
       Collection: [
         {
           Index: 0,
           Item: {
-            Type: Person,
             Properties: {
               children: {
-                Kind: Collection,
-                Type: List`1
+                Kind: Collection
               },
               father: {
-                Kind: Item,
-                Type: Person
+                Kind: Item
               },
               firstName: {
                 Kind: Value,
-                Type: String,
                 Value: Child1,
                 Attributes: {
                   maxLength: {
                     Kind: Value,
-                    Type: Int32,
                     Value: 123,
                     Attributes: {
                       unit: {
                         Kind: Value,
-                        Type: String,
                         Value: Count
                       }
                     }
                   }
                 }
               },
-              lastName: {
+              fullName: {
                 Kind: Value,
-                Type: String
+                Value: Child1 
+              },
+              lastName: {
+                Kind: Value
               },
               mother: {
-                Kind: Item,
-                Type: Person
+                Kind: Item
               }
             }
           }
@@ -52,42 +46,38 @@
         {
           Index: 1,
           Item: {
-            Type: Person,
             Properties: {
               children: {
-                Kind: Collection,
-                Type: List`1
+                Kind: Collection
               },
               father: {
-                Kind: Item,
-                Type: Person
+                Kind: Item
               },
               firstName: {
                 Kind: Value,
-                Type: String,
                 Value: Child2,
                 Attributes: {
                   maxLength: {
                     Kind: Value,
-                    Type: Int32,
                     Value: 123,
                     Attributes: {
                       unit: {
                         Kind: Value,
-                        Type: String,
                         Value: Count
                       }
                     }
                   }
                 }
               },
-              lastName: {
+              fullName: {
                 Kind: Value,
-                Type: String
+                Value: Child2 
+              },
+              lastName: {
+                Kind: Value
               },
               mother: {
-                Kind: Item,
-                Type: Person
+                Kind: Item
               }
             }
           }
@@ -95,42 +85,38 @@
         {
           Index: 2,
           Item: {
-            Type: Person,
             Properties: {
               children: {
-                Kind: Collection,
-                Type: List`1
+                Kind: Collection
               },
               father: {
-                Kind: Item,
-                Type: Person
+                Kind: Item
               },
               firstName: {
                 Kind: Value,
-                Type: String,
                 Value: Child3,
                 Attributes: {
                   maxLength: {
                     Kind: Value,
-                    Type: Int32,
                     Value: 123,
                     Attributes: {
                       unit: {
                         Kind: Value,
-                        Type: String,
                         Value: Count
                       }
                     }
                   }
                 }
               },
-              lastName: {
+              fullName: {
                 Kind: Value,
-                Type: String
+                Value: Child3 
+              },
+              lastName: {
+                Kind: Value
               },
               mother: {
-                Kind: Item,
-                Type: Person
+                Kind: Item
               }
             }
           }
@@ -139,114 +125,104 @@
     },
     father: {
       Kind: Item,
-      Type: Person,
       Timestamp: {Scrubbed},
       Item: {
-        Type: Person,
         Properties: {
           children: {
-            Kind: Collection,
-            Type: List`1
+            Kind: Collection
           },
           father: {
-            Kind: Item,
-            Type: Person
+            Kind: Item
           },
           firstName: {
             Kind: Value,
-            Type: String,
             Value: Father,
             Attributes: {
               maxLength: {
                 Kind: Value,
-                Type: Int32,
                 Value: 123,
                 Attributes: {
                   unit: {
                     Kind: Value,
-                    Type: String,
                     Value: Count
                   }
                 }
               }
             }
           },
-          lastName: {
+          fullName: {
             Kind: Value,
-            Type: String
+            Value: Father 
+          },
+          lastName: {
+            Kind: Value
           },
           mother: {
-            Kind: Item,
-            Type: Person
+            Kind: Item
           }
         }
       }
     },
     firstName: {
       Kind: Value,
-      Type: String,
       Value: NewPerson,
       Timestamp: {Scrubbed},
       Attributes: {
         maxLength: {
           Kind: Value,
-          Type: Int32,
           Value: 123,
           Attributes: {
             unit: {
               Kind: Value,
-              Type: String,
               Value: Count
             }
           }
         }
       }
     },
-    lastName: {
+    fullName: {
       Kind: Value,
-      Type: String
+      Value: NewPerson 
+    },
+    lastName: {
+      Kind: Value
     },
     mother: {
       Kind: Item,
-      Type: Person,
       Timestamp: {Scrubbed},
       Item: {
-        Type: Person,
         Properties: {
           children: {
-            Kind: Collection,
-            Type: List`1
+            Kind: Collection
           },
           father: {
-            Kind: Item,
-            Type: Person
+            Kind: Item
           },
           firstName: {
             Kind: Value,
-            Type: String,
             Value: Mother,
             Attributes: {
               maxLength: {
                 Kind: Value,
-                Type: Int32,
                 Value: 123,
                 Attributes: {
                   unit: {
                     Kind: Value,
-                    Type: String,
                     Value: Count
                   }
                 }
               }
             }
           },
-          lastName: {
+          fullName: {
             Kind: Value,
-            Type: String
+            Value: Mother 
+          },
+          lastName: {
+            Kind: Value
           },
           mother: {
-            Kind: Item,
-            Type: Person
+            Kind: Item
           }
         }
       }
