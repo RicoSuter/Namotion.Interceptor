@@ -68,16 +68,18 @@ public class OpcUaTypeResolver
                 if (dataTypeId != null)
                 {
                     var builtIn = TypeInfo.GetBuiltInType(dataTypeId);
-                    var elementType = MapBuiltInType(builtIn);
-
-                    // If ValueRank >= 0 we treat it as (at least) an array - simplification for multi-dim arrays.
-                    var valueRank = response.Results[1].Value is int vr ? vr : -1; // -1 => scalar
-                    if (valueRank >= 0)
+                    var elementType = TryMapBuiltInType(builtIn);
+                    if (elementType is not null)
                     {
-                        return elementType.MakeArrayType();
-                    }
+                        // If ValueRank >= 0 we treat it as (at least) an array - simplification for multi-dim arrays.
+                        var valueRank = response.Results[1].Value is int vr ? vr : -1; // -1 => scalar
+                        if (valueRank >= 0)
+                        {
+                            return elementType.MakeArrayType();
+                        }
 
-                    return elementType;
+                        return elementType;
+                    }
                 }
             }
         }
@@ -89,7 +91,7 @@ public class OpcUaTypeResolver
         return null;
     }
 
-    private static Type MapBuiltInType(BuiltInType builtInType) => builtInType switch
+    private static Type? TryMapBuiltInType(BuiltInType builtInType) => builtInType switch
     {
         BuiltInType.Boolean => typeof(bool),
         BuiltInType.SByte => typeof(sbyte),
@@ -114,6 +116,6 @@ public class OpcUaTypeResolver
         BuiltInType.DiagnosticInfo => typeof(DiagnosticInfo),
         BuiltInType.DataValue => typeof(DataValue),
         BuiltInType.Enumeration => typeof(int), // map enum to underlying Int32
-        _ => typeof(object)
+        _ => null
     };
 }

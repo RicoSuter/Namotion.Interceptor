@@ -44,8 +44,9 @@ public class OpcUaValueConverter
     /// <summary>
     /// Converts a CLR property value to an OPC UA compatible value.
     /// </summary>
-    public virtual object? ConvertToNodeValue(object? propertyValue, Type propertyType)
+    public virtual object? ConvertToNodeValue(object? propertyValue, RegisteredSubjectProperty property)
     {
+        var propertyType = property.Type;
         var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
         if (type == typeof(decimal))
         {
