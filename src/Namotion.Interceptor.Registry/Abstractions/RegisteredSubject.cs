@@ -40,17 +40,14 @@ public class RegisteredSubject
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void Return()
     {
-        _parents.Clear();
-        
-        var properties = Interlocked.Exchange( 
-            ref _properties, 
-            FrozenDictionary<string, RegisteredSubjectProperty>.Empty).Values;
-
-        for (int i = 0; i < properties.Length; i++)
+        // No need to clean _properties as it is overwritten in Create() anyway
+        var properties = _properties.Values.AsSpan();
+        for (var i = 0; i < properties.Length; i++)
         {
             properties[i].Return();
         }
 
+        _parents.Clear();
         Pool.Return(this);
     }
 
