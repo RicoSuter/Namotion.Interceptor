@@ -24,8 +24,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         if (change.Property.Metadata.IsDerived)
         {
             StartRecordingTouchedProperties();
+
             var result = change.Property.Metadata.GetValue?.Invoke(change.Subject);
             change.Property.SetLastKnownValue(result);
+            change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ChangedTimestamp);
+            
             StoreRecordedTouchedProperties(change.Property);
         }
     }
@@ -58,8 +61,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        var timestamp = context.Property.TryGetWriteTimestamp()
-            ?? SubjectChangeContext.Current.ChangedTimestamp;
+        var timestamp = SubjectChangeContext.Current.ChangedTimestamp;
 
         // Iterate over stable snapshot of dependents (copy-on-write ensures safety)
         var snapshot = usedByProperties.Items;
@@ -85,7 +87,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         StartRecordingTouchedProperties();
         var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
         StoreRecordedTouchedProperties(derivedProperty);
-
+        
         derivedProperty.SetLastKnownValue(newValue);
         derivedProperty.SetWriteTimestamp(timestamp);
 
