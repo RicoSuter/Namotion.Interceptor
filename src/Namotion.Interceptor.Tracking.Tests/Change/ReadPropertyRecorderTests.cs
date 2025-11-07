@@ -11,7 +11,7 @@ public class ReadPropertyRecorderTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
             .WithReadPropertyRecorder();
 
         // Act

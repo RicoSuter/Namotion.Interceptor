@@ -58,7 +58,7 @@ public class AttributeTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
             .WithDerivedPropertyChangeDetection()
             .WithRegistry();
 
@@ -75,7 +75,7 @@ public class AttributeTests
             .AddDerivedProperty<string>("DynamicDerivedProperty", _ => "Mr. " + person.FirstName);
 
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property == dynamicDerivedProperty)
             .Subscribe(a => changes.Add(a));
 
@@ -91,7 +91,7 @@ public class AttributeTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
             .WithDerivedPropertyChangeDetection()
             .WithRegistry();
 
@@ -109,7 +109,7 @@ public class AttributeTests
             .AddDerivedAttribute("DynamicDerivedAttribute", typeof(string), _ => "Mr. " + person.FirstName, null);
 
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property == dynamicDerivedAttribute)
             .Subscribe(a => changes.Add(a));
 
@@ -125,7 +125,7 @@ public class AttributeTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
             .WithDerivedPropertyChangeDetection()
             .WithRegistry();
 
@@ -144,7 +144,7 @@ public class AttributeTests
             .AddProperty("DynamicProperty", typeof(string), _ => value, (_, v) => value = (string)v!);
 
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property == dynamicProperty)
             .Subscribe(a => changes.Add(a));
 
@@ -160,7 +160,7 @@ public class AttributeTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
             .WithDerivedPropertyChangeDetection()
             .WithRegistry();
 
@@ -179,7 +179,7 @@ public class AttributeTests
             .AddAttribute("DynamicAttribute", typeof(string), _ => value, (_, v) => value = (string)v!);
 
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property == dynamicAttribute)
             .Subscribe(a => changes.Add(a));
 

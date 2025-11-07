@@ -19,12 +19,12 @@ public interface ISubjectSource
     /// <summary>
     /// Initializes the source and starts listening for changes.
     /// </summary>
-    /// <param name="dispatcher">The dispatcher to enqueue subject mutation actions.</param>
+    /// <param name="updater">The updater to enqueue or apply subject property mutations.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>
     /// A disposable that can be used to stop listening for changes. Returns <c>null</c> if there is no active listener or nothing needs to be disposed.
     /// </returns>
-    Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken);
+    Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken);
 
     /// <summary>
     /// Loads the complete state of the source and returns a delegate that applies the loaded state to the associated subject.
@@ -40,7 +40,7 @@ public interface ISubjectSource
     /// </summary>
     /// <param name="changes">The collection of subject property changes.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken);
+    ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken);
     
     // TODO(perf): Use readonly span here for WriteToSourceAsync changes
 }
