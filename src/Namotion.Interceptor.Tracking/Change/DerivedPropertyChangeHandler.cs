@@ -55,21 +55,20 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         next(ref context);
 
-        var usedByProperties = context.Property.GetUsedByProperties();
-        if (usedByProperties.Count == 0)
+        var usedByProperties = context.Property.GetUsedByProperties().Items;
+        if (usedByProperties.Length == 0)
         {
             return;
         }
 
         var timestamp = SubjectChangeContext.Current.ChangedTimestamp;
-
-        // Iterate over stable snapshot of dependents (copy-on-write ensures safety)
-        var snapshot = usedByProperties.Items;
-        for (int i = 0; i < snapshot.Length; i++)
+        for (var i = 0; i < usedByProperties.Length; i++)
         {
-            var dependent = snapshot[i];
+            var dependent = usedByProperties[i];
             if (dependent == context.Property)
+            {
                 continue; // Skip self-references (rare edge case)
+            }
 
             RecalculateDerivedProperty(ref dependent, ref timestamp);
         }
