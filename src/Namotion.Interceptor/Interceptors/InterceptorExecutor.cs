@@ -9,12 +9,6 @@ public class InterceptorExecutor : InterceptorSubjectContext
         _subject = subject;
     }
 
-    public object? InvokeMethod(string methodName, object?[] parameters, Func<IInterceptorSubject, object?[], object?> invokeMethod)
-    {
-        var context = new MethodInvocationContext(_subject, methodName, parameters);
-        return _subject.Context.ExecuteInterceptedInvoke(ref context, invokeMethod);
-    }
-
     public override bool AddFallbackContext(IInterceptorSubjectContext context)
     {
         var result = base.AddFallbackContext(context);
