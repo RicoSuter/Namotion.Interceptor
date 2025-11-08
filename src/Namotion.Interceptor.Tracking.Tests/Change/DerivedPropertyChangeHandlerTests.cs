@@ -356,7 +356,7 @@ public class DerivedPropertyChangeHandlerTests
         using (SubjectChangeContext.WithChangedTimestamp(date))
         {
             person.Mother = new Person // should trigger only mother property update itself (no new object properties)
-            { 
+            {
                 FirstName = "Mother"
             };
             person.Mother.LastName = "MyMotherLN"; // should trigger FullName and FullNameWithPrefix updates
