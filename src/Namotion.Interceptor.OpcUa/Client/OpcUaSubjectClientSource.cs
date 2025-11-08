@@ -268,7 +268,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         return Task.FromResult<Action?>(null);
     }
 
-    public async ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public async ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (_session is null || changes.Count == 0)
         {
@@ -278,15 +278,15 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 
         var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerWrite ?? DefaultChunkSize);
         chunkSize = chunkSize == 0 ? int.MaxValue : chunkSize;
-        
-        var changeList = changes as IList<SubjectPropertyChange> ?? changes.ToList();
-        for (var offset = 0; offset < changeList.Count; offset += chunkSize)
+
+        var count = changes.Count; 
+        for (var offset = 0; offset < count; offset += chunkSize)
         {
-            var take = Math.Min(chunkSize, changeList.Count - offset);
+            var take = Math.Min(chunkSize, count - offset);
             var writeValues = new WriteValueCollection(take);
             for (var i = 0; i < take; i++)
             {
-                var change = changeList[offset + i];
+                var change = changes[offset + i];
                 if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)
                 {
                     var registeredProperty = change.Property.GetRegisteredProperty();

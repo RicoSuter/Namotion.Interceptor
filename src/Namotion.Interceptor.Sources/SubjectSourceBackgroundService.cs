@@ -274,7 +274,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
         }
     }
 
-    private async ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    private async ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         try
         {

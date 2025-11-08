@@ -46,11 +46,13 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         return Task.FromResult<Action?>(null);
     }
 
-    public ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        foreach (var change in changes)
+        var count = changes.Count;
+        for (var i = 0; i < count; i++)
         {
-            if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) && 
+            var change = changes[i];
+            if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
                 data is BaseDataVariableState node)
             {
                 var value = change.GetNewValue<object?>();
