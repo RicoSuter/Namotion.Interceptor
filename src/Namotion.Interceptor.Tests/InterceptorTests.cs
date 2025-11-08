@@ -125,4 +125,24 @@ public class InterceptorTests
             _logs.Add($"{_name}: Detached");
         }
     }
+    
+    [Fact]
+    public Task WhenReadingMetadata_ThenItShouldBeCorrect()
+    {
+        // Arrange
+        var logs = new List<string>();
+        
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithService(() => new TestReadInterceptor("a", logs), _ => false)
+            .WithService(() => new TestReadInterceptor("b", logs), _ => false);
+        
+        var car = new Car(context) as IInterceptorSubject;
+
+        // Act
+        var properties = car.Properties;
+
+        // Assert
+        return Verify(properties);
+    }
 }

@@ -98,9 +98,10 @@ public class DynamicSubjectFactory
             }
             else
             {
-                invocation.ReturnValue = context.InvokeMethod(
-                    subject,
-                    invocation.Method.Name, invocation.Arguments, parameters =>
+                var invocationContext = new MethodInvocationContext(subject, invocation.Method.Name, invocation.Arguments);
+                invocation.ReturnValue = context.ExecuteInterceptedInvoke(
+                    // TODO: Should we really throw away subject here?
+                    ref invocationContext, (_, parameters) =>
                     {
                         parameters.CopyTo(invocation.Arguments, 0);
                         invocation.Proceed();

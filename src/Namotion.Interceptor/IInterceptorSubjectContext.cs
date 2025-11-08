@@ -16,8 +16,8 @@ public interface IInterceptorSubjectContext
 
     void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue);
 
-    object? InvokeMethod(IInterceptorSubject subject, string methodName, object?[] parameters, Func<object?[], object?> invokeMethod);
-    
+    object? ExecuteInterceptedInvoke(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> invokeMethod);
+
     bool AddFallbackContext(IInterceptorSubjectContext context);
 
     bool RemoveFallbackContext(IInterceptorSubjectContext context);

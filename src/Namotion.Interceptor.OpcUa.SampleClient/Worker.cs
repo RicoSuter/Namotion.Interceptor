@@ -16,7 +16,7 @@ public class Worker : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            _root.Number++;
+            //_root.Number++;
             await Task.Delay(1000, stoppingToken);
         }
     }
