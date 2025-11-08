@@ -104,7 +104,7 @@ public class SubjectSourceBackgroundServiceTests
         await service.StartAsync(cancellationTokenSource.Token);
         
         var writeContext = new PropertyWriteContext<string?>(
-            subject.GetPropertyReference(nameof(Person.FirstName)), null, "Bar");
+            subject, nameof(Person.FirstName), _ => null, "Bar");
 
         propertyChangedChannel.WriteProperty(ref writeContext, (ref _) => { });
         

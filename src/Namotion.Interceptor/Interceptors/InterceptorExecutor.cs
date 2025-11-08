@@ -1,36 +1,12 @@
 ﻿namespace Namotion.Interceptor.Interceptors;
 
-public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecutor
+public class InterceptorExecutor : InterceptorSubjectContext
 {
     private readonly IInterceptorSubject _subject;
 
     public InterceptorExecutor(IInterceptorSubject subject)
     {
         _subject = subject;
-    }
-    
-    public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
-    {
-        var context = new PropertyReadContext(new PropertyReference(_subject, propertyName));
-        return _subject.Context.ExecuteInterceptedRead(ref context, readValue);
-    }
-    
-    public void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty>? readValue, Action<IInterceptorSubject, TProperty> writeValue)
-    {
-        // TODO(perf): Reading current value (invoke getter) here might be a performance problem. 
-
-        var context = new PropertyWriteContext<TProperty>(
-            new PropertyReference(_subject, propertyName), 
-            readValue is not null ? readValue(_subject) : default!, 
-            newValue); 
-
-        _subject.Context.ExecuteInterceptedWrite(ref context, writeValue);
-    }
-
-    public object? InvokeMethod(string methodName, object?[] parameters, Func<IInterceptorSubject, object?[], object?> invokeMethod)
-    {
-        var context = new MethodInvocationContext(_subject, methodName, parameters);
-        return _subject.Context.ExecuteInterceptedInvoke(ref context, invokeMethod);
     }
 
     public override bool AddFallbackContext(IInterceptorSubjectContext context)

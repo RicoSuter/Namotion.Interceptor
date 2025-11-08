@@ -71,7 +71,7 @@ public class DynamicSubjectFactory
             }
             
             var subject = (IInterceptorSubject)invocation.Proxy;
-            var context = (IInterceptorExecutor)subject.Context;
+            var context = subject.Context;
 
             if (invocation.Method.IsSpecialName &&
                 invocation.Method.Name.StartsWith("get_"))
@@ -79,7 +79,8 @@ public class DynamicSubjectFactory
                 var propertyName = invocation.Method.Name[4..];
                 var propertyType = invocation.Method.ReturnType;
 
-                var value = context.GetPropertyValue(propertyName, _ => ReadProperty(propertyName, propertyType));
+                var readContext = new PropertyReadContext(subject, propertyName);
+                var value = context.ExecuteInterceptedRead(ref readContext, _ => ReadProperty(propertyName, propertyType));
 
                 invocation.ReturnValue = value;
             }
@@ -89,17 +90,18 @@ public class DynamicSubjectFactory
                 var propertyName = invocation.Method.Name[4..];
                 var newValue = invocation.Arguments[0];
                 var propertyType = invocation.Method.GetParameters().Single().ParameterType;
-                context.SetPropertyValue(propertyName, newValue,
-                    _ => ReadProperty(propertyName, propertyType),
-                    (_, value) => WriteProperty(propertyName, value));
+                
+                var writeContext = new PropertyWriteContext<object?>(subject, propertyName, _ => ReadProperty(propertyName, propertyType), newValue);
+                context.ExecuteInterceptedWrite(ref writeContext, (_, value) => WriteProperty(propertyName, value));
 
                 invocation.ReturnValue = null;
             }
             else
             {
-                invocation.ReturnValue = context.InvokeMethod(
+                var invocationContext = new MethodInvocationContext(subject, invocation.Method.Name, invocation.Arguments);
+                invocation.ReturnValue = context.ExecuteInterceptedInvoke(
                     // TODO: Should we really throw away subject here?
-                    invocation.Method.Name, invocation.Arguments, (_, parameters) =>
+                    ref invocationContext, (_, parameters) =>
                     {
                         parameters.CopyTo(invocation.Arguments, 0);
                         invocation.Proceed();

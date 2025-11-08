@@ -12,7 +12,7 @@ public static class PropertyReferenceExtensions
     public static void SetPropertyValueWithInterception(this PropertyReference property, object? newValue, 
         Func<IInterceptorSubject, object?>? readValue, Action<IInterceptorSubject, object?> writeValue)
     {
-        var executor = property.Subject.Context as IInterceptorExecutor;
-        executor?.SetPropertyValue(property.Name, newValue, readValue, writeValue);
+        var context = new PropertyWriteContext<object?>(property.Subject, property.Name, readValue, newValue); 
+        property.Subject.Context.ExecuteInterceptedWrite(ref context, writeValue);
     }
 }

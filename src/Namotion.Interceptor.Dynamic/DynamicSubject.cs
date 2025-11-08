@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Dynamic;
 
 public class DynamicSubject : IInterceptorSubject
 {
-    private IInterceptorExecutor? _context;
+    private IInterceptorSubjectContext? _context;
     private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties;
 
     public DynamicSubject(IInterceptorSubjectContext context) : this()

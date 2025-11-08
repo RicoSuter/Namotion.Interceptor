@@ -116,7 +116,7 @@ namespace {namespaceName}
 {{
     public partial class {className} : IInterceptorSubject
     {{
-        private IInterceptorExecutor? _context;
+        private IInterceptorSubjectContext? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
         [JsonIgnore]
@@ -276,26 +276,39 @@ namespace {namespaceName}
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
         {{
-            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+            if (_context is not null)
+            {{
+                var readContext = new PropertyReadContext(this, propertyName);
+                return _context.ExecuteInterceptedRead(ref readContext, readValue);
+            }}
+
+            return readValue(this);
         }}
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
         {{
-            if (_context is null)
+            if (_context is not null)
             {{
-                setValue(this, newValue);
+                var writeContext = new PropertyWriteContext<TProperty>(this, propertyName, readValue, newValue);
+                _context.ExecuteInterceptedWrite(ref writeContext, setValue);
             }}
             else
             {{
-                _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                setValue(this, newValue);
             }}
         }}
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
         {{
-            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
+            if (_context is not null)
+            {{
+                var invocationContext = new MethodInvocationContext(this, methodName, parameters);
+                return _context.ExecuteInterceptedInvoke(ref invocationContext, invokeMethod);
+            }}
+
+            return invokeMethod(this, parameters);
         }}
     }}
 }}
