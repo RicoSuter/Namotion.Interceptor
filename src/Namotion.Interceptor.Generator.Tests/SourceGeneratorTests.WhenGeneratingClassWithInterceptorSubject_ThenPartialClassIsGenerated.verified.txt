@@ -21,7 +21,7 @@ namespace YourDefaultNamespace
 {
     public partial class SampleSubject : IInterceptorSubject
     {
-        private IInterceptorSubjectContext? _context;
+        private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
         [JsonIgnore]
@@ -32,6 +32,9 @@ namespace YourDefaultNamespace
 
         [JsonIgnore]
         IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
+
+        [JsonIgnore]
+        object IInterceptorSubject.SyncRoot { get; } = new object();
 
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {
@@ -46,22 +49,18 @@ namespace YourDefaultNamespace
                 {
                     "Value",       
                     new SubjectPropertyMetadata(
-                        nameof(Value), 
-                        typeof(SampleSubject).GetProperty(nameof(Value)).PropertyType!, 
-                        typeof(SampleSubject).GetProperty(nameof(Value)).GetCustomAttributes().ToArray()!, 
-                        null, 
-                        null, 
+                        typeof(SampleSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
+                        (o) => ((SampleSubject)o).Value, 
+                        (o, v) => ((SampleSubject)o).Value = (int)v, 
                         isIntercepted: true,
                         isDynamic: false)
                 },
                 {
                     "Name",       
                     new SubjectPropertyMetadata(
-                        nameof(Name), 
-                        typeof(SampleSubject).GetProperty(nameof(Name)).PropertyType!, 
-                        typeof(SampleSubject).GetProperty(nameof(Name)).GetCustomAttributes().ToArray()!, 
-                        null, 
-                        null, 
+                        typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
+                        (o) => ((SampleSubject)o).Name, 
+                        (o, v) => ((SampleSubject)o).Name = (string)v, 
                         isIntercepted: true,
                         isDynamic: false)
                 },
@@ -82,44 +81,41 @@ namespace YourDefaultNamespace
 
         public partial int Value
         {
+             get => GetPropertyValue<int>(nameof(Value), static (o) => ((SampleSubject)o)._Value);
+             set => SetPropertyValue(nameof(Value), value, static (o) => ((SampleSubject)o)._Value, static (o, v) => ((SampleSubject)o)._Value = v);
         }
 
         private string _Name;
 
         public partial string Name
         {
+             get => GetPropertyValue<string>(nameof(Name), static (o) => ((SampleSubject)o)._Name);
+             set => SetPropertyValue(nameof(Name), value, static (o) => ((SampleSubject)o)._Name, static (o, v) => ((SampleSubject)o)._Name = v);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
         {
-            if (_context is not null)
-            {
-                var readContext = new PropertyReadContext(this, propertyName);
-                return _context.ExecuteInterceptedRead(ref readContext, readValue);
-            }
-
-            return readValue(this);
+            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
         {
-            if (_context is not null)
+            if (_context is null)
             {
-                var writeContext = new PropertyWriteContext<TProperty>(this, propertyName, readValue, newValue);
-                _context.ExecuteInterceptedWrite(ref writeContext, setValue);
+                setValue(this, newValue);
             }
             else
             {
-                setValue(this, newValue);
+                _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
+        private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
         {
-            return _context is not null ? _context.InvokeMethod(this, methodName, parameters, invokeMethod) : invokeMethod(parameters);
+            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }
     }
 }

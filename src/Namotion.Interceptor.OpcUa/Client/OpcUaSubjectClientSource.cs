@@ -6,25 +6,23 @@ using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
-using System.Collections.Concurrent;
-using Namotion.Interceptor.Sources.Paths.Attributes;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
 internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 {
-    private const string PathDelimiter = ".";
     private const string OpcVariableKey = "OpcVariable";
+    private const int DefaultChunkSize = 512;
 
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
-    private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
-    private readonly List<Subscription> _activeSubscriptions = [];
+    private readonly List<PropertyReference> _propertiesWithOpcData = [];
 
-    private ISubjectMutationDispatcher? _dispatcher;
     private Session? _session;
 
     private readonly OpcUaClientConfiguration _configuration;
+    private readonly OpcUaSubjectLoader _subjectLoader;
+    private readonly OpcUaSubscriptionManager _subscriptionManager;
 
     public OpcUaSubjectClientSource(
         IInterceptorSubject subject,
@@ -33,8 +31,9 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
     {
         _subject = subject;
         _logger = logger;
-
         _configuration = configuration;
+        _subjectLoader = new OpcUaSubjectLoader(configuration, _propertiesWithOpcData, this, logger);
+        _subscriptionManager = new OpcUaSubscriptionManager(configuration, logger);
     }
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
@@ -42,9 +41,9 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         return _configuration.SourcePathProvider.IsPropertyIncluded(property);
     }
 
-    public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
+    public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
     {
-        _dispatcher = dispatcher;
+        _subscriptionManager.SetUpdater(updater);
         return Task.FromResult<IDisposable?>(null);
     }
 
@@ -54,6 +53,8 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         {
             try
             {
+                _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}...", _configuration.ServerUrl);
+                
                 var application = _configuration.CreateApplicationInstance();
                 await application.CheckApplicationInstanceCertificates(false);
 
@@ -61,7 +62,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 var endpointDescription = CoreClientUtils.SelectEndpoint(application.ApplicationConfiguration, _configuration.ServerUrl, false);
                 var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
 
-                using var session = await Session.Create(
+                _session = await Session.Create(
                     application.ApplicationConfiguration,
                     endpoint,
                     false,
@@ -73,444 +74,271 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
                 var cancellationTokenSource = new CancellationTokenSource();
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, cancellationTokenSource.Token);
                 
-                _session = session;
+                _session.KeepAlive += (_, e) =>
+                {
+                    if (!ServiceResult.IsGood(e.Status))
+                    {
+                        _logger.LogWarning("KeepAlive failed with status: {Status}. Connection may be lost.", e.Status);
+                        if (e.CurrentState == ServerState.Unknown || e.CurrentState == ServerState.Failed)
+                        {
+                            _logger.LogError("Server connection lost. Triggering reconnect...");
+                            cancellationTokenSource.Cancel();
+                        }
+                    }
+                };
+                
                 _session.SessionClosing += (_, _) =>
                 {
+                    _logger.LogWarning("Session closing event received. Triggering reconnect...");
                     cancellationTokenSource.Cancel();
                 };
 
-                // Clear client-handle map on (re)connect
-                _monitoredItems.Clear();
-                _activeSubscriptions.Clear();
+                _subscriptionManager.Clear();
+                _propertiesWithOpcData.Clear();
 
-                // Browse the Root folder
-                var (_, _, references, _) = await session.BrowseAsync(
-                    null,
-                    null,
-                    [ObjectIds.ObjectsFolder],
-                    0u,
-                    BrowseDirection.Forward,
-                    ReferenceTypeIds.HierarchicalReferences,
-                    true,
-                    (uint)NodeClass.Variable | (uint)NodeClass.Object | (uint)NodeClass.Method,
-                    linked.Token);
+                _logger.LogInformation("Connected to OPC UA server successfully.");
 
-                var rootNode = 
-                    _configuration.RootName is not null ?
-                    references
-                        .SelectMany(c => c)
-                        .FirstOrDefault(r => r.BrowseName.Name == _configuration.RootName) :
-                    new ReferenceDescription
-                    {
-                        NodeId = new ExpandedNodeId(ObjectIds.ObjectsFolder),
-                        BrowseName = new QualifiedName("Objects", 0)
-                    };
-
+                var rootNode = await TryGetRootNodeAsync(linked.Token);
                 if (rootNode is not null)
                 {
-                    var monitoredItems = new List<MonitoredItem>();
-                    await LoadSubjectAsync(_subject, rootNode, monitoredItems, _configuration.RootName ?? string.Empty, linked.Token);
-
+                    var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, _session, linked.Token);
                     if (monitoredItems.Count > 0)
                     {
-                        await ReadAndApplyInitialValuesAsync(monitoredItems, session, linked.Token);
-                        await CreateBatchedSubscriptionsAsync(monitoredItems, session, linked.Token);
+                        await ReadAndApplyInitialValuesAsync(monitoredItems, linked.Token);
+                        await _subscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, _session, linked.Token);
                     }
+                    
+                    _logger.LogInformation("OPC UA client initialization complete. Monitoring {Count} items.", monitoredItems.Count);
                 }
 
-                await Task.Delay(-1, linked.Token);
+                await Task.Delay(Timeout.Infinite, linked.Token);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("OPC UA client is stopping.");
+                break;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("OPC UA session was cancelled. Will attempt to reconnect.");
+            }
+            catch (ServiceResultException ex)
+            {
+                _logger.LogError(ex, "OPC UA service error: {Message}. Will attempt to reconnect.", ex.Message);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to connect to OPC UA server.");
-                await Task.Delay(1000, stoppingToken);
+                _logger.LogError(ex, "Failed to connect to OPC UA server: {Message}. Will attempt to reconnect.", ex.Message);
             }
             finally
             {
-                // Explicitly detach callbacks to avoid holding references
-                foreach (var subscription in _activeSubscriptions)
+                _subscriptionManager.Cleanup();
+                CleanUpProperties();
+
+                var session = _session;
+                if (session is not null)
                 {
+                    _session = null;
                     try
                     {
-                        subscription.FastDataChangeCallback -= FastDataChangeCallback;
+                        try
+                        {
+                            await session.CloseAsync(stoppingToken);
+                        }
+                        finally
+                        {
+                            session.Dispose();
+                        }
                     }
-                    catch { /* ignore cleanup exceptions */ }
-                }
-                _activeSubscriptions.Clear();
-                _session = null;
-            }
-        }
-    }
-
-    private async Task CreateBatchedSubscriptionsAsync(List<MonitoredItem> monitoredItems, Session session, CancellationToken cancellationToken)
-    {
-        for (var i = 0; i < monitoredItems.Count; i += _configuration.MaxItemsPerSubscription)
-        {
-            var subscription = new Subscription(session.DefaultSubscription)
-            {
-                PublishingEnabled = true,
-                PublishingInterval = 0, // TODO: Set to a reasonable value
-                DisableMonitoredItemCache = true,
-                MinLifetimeInterval = 60_000,
-            };
-
-            if (session.AddSubscription(subscription))
-            {
-                await subscription.CreateAsync(cancellationToken);
-                subscription.FastDataChangeCallback += FastDataChangeCallback;
-                _activeSubscriptions.Add(subscription);
-
-                foreach (var item in monitoredItems
-                    .Skip(i)
-                    .Take(_configuration.MaxItemsPerSubscription))
-                {
-                    // Add the item to the subscription first so the SDK assigns a ClientHandle
-                    subscription.AddItem(item);
-
-                    // Map the assigned ClientHandle to our property for fast callbacks
-                    if (item.Handle is RegisteredSubjectProperty p)
+                    catch (Exception ex)
                     {
-                        _monitoredItems[item.ClientHandle] = p;
+                        _logger.LogWarning(ex, "Error while disposing session.");
                     }
                 }
-
-                try
-                {
-                    await subscription.ApplyChangesAsync(cancellationToken);
-                }
-                catch (ServiceResultException sre)
-                {
-                    _logger.LogWarning(sre, "ApplyChanges failed for a batch; attempting to keep valid monitored items by removing failed ones.");
-                }
-
-                // Remove any items that failed to create, keep the rest
-                var removed = await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken);
-                if (removed > 0)
-                {
-                    _logger.LogWarning("Removed {Removed} monitored items that failed to create in subscription {Id}.", removed, subscription.Id);
-                }
             }
-            else
+
+            if (!stoppingToken.IsCancellationRequested)
             {
-                throw new InvalidOperationException("Failed to add subscription.");
+                var reconnectDelay = _configuration.ReconnectDelay;
+                _logger.LogInformation("Waiting {Delay} before reconnecting...", reconnectDelay);
+                await Task.Delay(reconnectDelay, stoppingToken);
             }
         }
+        
+        _logger.LogInformation("OPC UA client has stopped.");
     }
 
-    private async Task<int> FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
+    private async Task<ReferenceDescription?> TryGetRootNodeAsync(CancellationToken cancellationToken)
     {
-        var itemsToRemove = new List<MonitoredItem>();
-        foreach (var monitoredItem in subscription.MonitoredItems.ToList())
+        if (_configuration.RootName is not null)
         {
-            var statusCode = monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good;
-            var hasFailed = !monitoredItem.Created || StatusCode.IsBad(statusCode);
-            if (hasFailed)
+            foreach (var reference in await BrowseNodeAsync(ObjectIds.ObjectsFolder, cancellationToken))
             {
-                itemsToRemove.Add(monitoredItem);
-                _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
-                _logger.LogError("Monitored item creation failed for {DisplayName} (Handle={Handle}): {Status}", monitoredItem.DisplayName, monitoredItem.ClientHandle, statusCode);
+                if (reference.BrowseName.Name == _configuration.RootName)
+                {
+                    return reference;
+                }
             }
+
+            return null;
         }
 
-        if (itemsToRemove.Count > 0)
+        return new ReferenceDescription
         {
-            foreach (var monitoredItem in itemsToRemove)
-            {
-                subscription.RemoveItem(monitoredItem);
-            }
+            NodeId = new ExpandedNodeId(ObjectIds.ObjectsFolder),
+            BrowseName = new QualifiedName("Objects", 0)
+        };
+    }
 
+    private void CleanUpProperties()
+    {
+        foreach (var property in _propertiesWithOpcData)
+        {
             try
             {
-                await subscription.ApplyChangesAsync(cancellationToken);
+                property.SetPropertyData(OpcVariableKey, null);
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "ApplyChanges after removing failed items still failed. Continuing with remaining items.");
-            }
+            catch { /* ignore cleanup exceptions */ }
         }
 
-        return itemsToRemove.Count;
+        _propertiesWithOpcData.Clear();
     }
 
-    private async Task ReadAndApplyInitialValuesAsync(List<MonitoredItem> monitoredItems, Session session, CancellationToken cancellationToken)
+    private async Task ReadAndApplyInitialValuesAsync(IReadOnlyList<MonitoredItem> monitoredItems, CancellationToken cancellationToken)
     {
-        var readValues = monitoredItems
-            .Select(item => new ReadValueId
-            {
-                NodeId = item.StartNodeId,
-                AttributeId = Opc.Ua.Attributes.Value
-            })
-            .ToArray();
+        var itemCount = monitoredItems.Count;
+        if (itemCount == 0 || _session is null)
+        {
+            return;
+        }
 
         try
         {
-            var readResponse = await session.ReadAsync(null, 0, TimestampsToReturn.Source, readValues, cancellationToken);
+            var result = new Dictionary<RegisteredSubjectProperty, DataValue>();
 
-            for (var idx = 0; idx < readResponse.Results.Count && idx < monitoredItems.Count; idx++)
+            var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
+            chunkSize = chunkSize == 0 ? int.MaxValue : chunkSize;
+
+            for (var offset = 0; offset < itemCount; offset += chunkSize)
             {
-                if (StatusCode.IsGood(readResponse.Results[idx].StatusCode))
+                var take = Math.Min(chunkSize, itemCount - offset);
+                var readValues = new ReadValueIdCollection(take);
+                for (var i = 0; i < take; i++)
                 {
-                    var dataValue = readResponse.Results[idx];
-
-                    var monitoredItem = monitoredItems[idx];
-                    if (monitoredItem.Handle is RegisteredSubjectProperty property)
+                    readValues.Add(new ReadValueId
                     {
-                        var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property.Type);
-                        property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
+                        NodeId = monitoredItems[offset + i].StartNodeId,
+                        AttributeId = Opc.Ua.Attributes.Value
+                    });
+                }
+
+                var readResponse = await _session.ReadAsync(null, 0, TimestampsToReturn.Source, readValues, cancellationToken);
+                var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
+                for (var i = 0; i < resultCount; i++)
+                {
+                    if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
+                    {
+                        var dataValue = readResponse.Results[i];
+                        var monitoredItem = monitoredItems[offset + i];
+                        if (monitoredItem.Handle is RegisteredSubjectProperty property)
+                        {
+                            result[property] = dataValue;
+                        }
                     }
                 }
             }
+        
+            foreach (var (property, dataValue) in result)
+            {
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
+                property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
+            }
 
-            _logger.LogInformation("Successfully read initial values for {Count} monitored items.", monitoredItems.Count);
+            _logger.LogInformation("Successfully read initial values of {Count} nodes.", itemCount);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to read initial values for monitored items.");
+            throw;
         }
-    }
-
-    private void FastDataChangeCallback(Subscription subscription, DataChangeNotification notification, IList<string> stringtable)
-    {
-        var changes = new List<SubjectPropertyChange>();
-        foreach (var i in notification.MonitoredItems)
-        {
-            if (_monitoredItems.TryGetValue(i.ClientHandle, out var property))
-            {
-                changes.Add(new SubjectPropertyChange
-                {
-                    Property = property,
-                    NewValue = _configuration.ValueConverter.ConvertToPropertyValue(i.Value.Value, property.Type),
-                    OldValue = null,
-                    Timestamp = i.Value.SourceTimestamp
-                });
-            }
-        }
-        
-        if (changes.Count == 0)
-        {
-            return;
-        }
-        
-        _dispatcher?.EnqueueSubjectUpdate(() =>
-        {
-            foreach (var change in changes)
-            {
-                try
-                {
-                    change.Property.SetValueFromSource(this, change.Timestamp, change.NewValue);
-                }
-                catch (Exception e)
-                {
-                    _logger.LogError(e, "Failed to apply change for {Path}.", change.Property.Name);
-                }
-            }
-        });
-    }
-
-    private async Task LoadSubjectAsync(IInterceptorSubject subject, ReferenceDescription node, List<MonitoredItem> monitoredItems, string prefix, CancellationToken cancellationToken)
-    {
-        var registeredSubject = subject.TryGetRegisteredSubject();
-        if (registeredSubject is not null && _session is not null)
-        {
-            var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, _session.NamespaceUris);
-            var (_, _ , nodeProperties, _) = await _session.BrowseAsync(
-                null,
-                null,
-                [nodeId],
-                0u,
-                BrowseDirection.Forward,
-                ReferenceTypeIds.HierarchicalReferences,
-                true,
-                (uint)NodeClass.Variable | (uint)NodeClass.Object,
-                cancellationToken);
-            
-            foreach (var nodeRef in nodeProperties.SelectMany(p => p))
-            {
-                var property = _configuration.SourcePathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
-                if (property is null)
-                {
-                    if (!_configuration.AddUnknownNodesAsDynamicProperties)
-                        continue;
-                    
-                    // Infer CLR type from OPC UA variable metadata if possible
-                    var inferredType = await _configuration.TypeResolver.GetTypeForNodeAsync(_session, nodeRef, cancellationToken);
-                    if (inferredType == typeof(object))
-                        continue;
-
-                    object? value = null;
-                    property = registeredSubject.AddProperty(
-                        nodeRef.BrowseName.Name,
-                        inferredType,
-                        _ => value,
-                        (_, o) => value = o,
-                        new SourcePathAttribute("opc", nodeRef.BrowseName.Name));
-                }
-                
-                var propertyName = GetPropertyName(property);
-                if (propertyName is not null)
-                {
-                    // TODO: Do the same in the server
-                    if (property.IsSubjectReference)
-                    {
-                        var collectionPath = CombinePath(prefix, propertyName);
-
-                        var children = property.Children;
-                        if (children.Count != 0)
-                        {
-                            await LoadSubjectAsync(children.Single().Subject, node, monitoredItems, collectionPath, cancellationToken);
-                        }
-                        else
-                        {
-                            var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeRef, _session, cancellationToken);
-                            newSubject.Context.AddFallbackContext(subject.Context);
-                            await LoadSubjectAsync(newSubject, nodeRef, monitoredItems, collectionPath, cancellationToken);
-                            property.SetValueFromSource(this, null, newSubject);
-                        }
-                    }
-                    else if (property.IsSubjectCollection)
-                    {
-                        // TODO: Reuse property.Children?
-
-                        var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, _session.NamespaceUris);
-                        var (_, _ , childNodeProperties, _) = await _session.BrowseAsync(
-                            null,
-                            null,
-                            [childNodeId],
-                            0u,
-                            BrowseDirection.Forward,
-                            ReferenceTypeIds.HierarchicalReferences,
-                            true,
-                            (uint)NodeClass.Variable | (uint)NodeClass.Object,
-                            cancellationToken);
-                        
-                        var childSubjectList = childNodeProperties
-                            .SelectMany(p => p)
-                            .Select(p => new
-                            {
-                                Node = p, // TODO: Use ISubjectFactory to create the subject
-                                Subject = (IInterceptorSubject)Activator.CreateInstance(
-                                    property.Type.IsArray ? property.Type.GetElementType()! : property.Type.GenericTypeArguments[0])!
-                            })
-                            .ToList();
-
-                        var collection = DefaultSubjectFactory.Instance.CreateSubjectCollection(property.Type, childSubjectList.Select(p => p.Subject));
-                        property.SetValue(collection);
-
-                        var pathIndex = 0;
-                        foreach (var child in childSubjectList)
-                        {
-                            var fullPath = CombinePath(prefix, propertyName) + $"[{pathIndex}]";
-                            await LoadSubjectAsync(child.Subject, child.Node, monitoredItems, fullPath, cancellationToken);
-                            pathIndex++;
-                        }
-                    }
-                    else if (property.IsSubjectDictionary)
-                    {
-                        // TODO: Implement dictionary support
-                    }
-                    else
-                    {
-                        MonitorValueNode(CombinePath(prefix, propertyName), property, node, monitoredItems);
-                    }
-                }
-            }
-        }
-    }
-
-    private static string CombinePath(string prefix, string segment)
-    {
-        return string.IsNullOrEmpty(prefix) ? segment : prefix + PathDelimiter + segment;
-    }
-
-    private void MonitorValueNode(string fullPath, RegisteredSubjectProperty property, ReferenceDescription node, List<MonitoredItem> monitoredItems)
-    {
-        // Monitor reads for all properties; write capability is enforced on server side via AccessLevel
-        var nodeId = new NodeId(fullPath, node.NodeId.NamespaceIndex);
-        var monitoredItem = new MonitoredItem
-        {
-            StartNodeId = nodeId,
-            MonitoringMode = MonitoringMode.Reporting,
-            AttributeId = Opc.Ua.Attributes.Value,
-            DisplayName = fullPath,
-            SamplingInterval = 0,
-
-            // Delay ClientHandle mapping until after the item is added to a subscription.
-            // Store the property on the item itself for later reference.
-            Handle = property
-
-            // QueueSize = 10, // TODO: Set to a reasonable value
-            // DiscardOldest = true
-        };
-
-        property.Reference.SetPropertyData(OpcVariableKey, nodeId);
-        monitoredItems.Add(monitoredItem);
-
-        _logger.LogInformation("Prepared monitoring for '{Path}'", nodeId);
     }
 
     public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
     {
         return Task.FromResult<Action?>(null);
     }
-    
-    private string? GetPropertyName(RegisteredSubjectProperty property)
-    {
-        if (property.IsAttribute)
-        {
-            var attributedProperty = property.GetAttributedProperty();
-            var propertyName = _configuration.SourcePathProvider.TryGetPropertySegment(property);
-            if (propertyName is null)
-                return null;
-            
-            // TODO: Create property reference node instead of __?
-            return GetPropertyName(attributedProperty) + "__" + propertyName;
-        }
-        
-        return _configuration.SourcePathProvider.TryGetPropertySegment(property);
-    }
 
-    public async Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public async ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        if (_session is null)
+        if (_session is null || changes.Count == 0)
+        {
+            // TODO: What to do when session is null? Store and write with the next write?
             return;
+        }
 
-        foreach (var change in changes)
+        var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerWrite ?? DefaultChunkSize);
+        chunkSize = chunkSize == 0 ? int.MaxValue : chunkSize;
+        
+        var changeList = changes as IList<SubjectPropertyChange> ?? changes.ToList();
+        for (var offset = 0; offset < changeList.Count; offset += chunkSize)
         {
-            if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)
+            var take = Math.Min(chunkSize, changeList.Count - offset);
+            var writeValues = new WriteValueCollection(take);
+            for (var i = 0; i < take; i++)
             {
-                var registeredProperty = change.Property.GetRegisteredProperty();
-                var value = _configuration.ValueConverter.ConvertToNodeValue(change.NewValue, registeredProperty.Type);
-                var writeValue = new WriteValue
+                var change = changeList[offset + i];
+                if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)
                 {
-                    NodeId = nodeId,
-                    AttributeId = Opc.Ua.Attributes.Value,
-                    Value = new DataValue
+                    var registeredProperty = change.Property.GetRegisteredProperty();
+                    if (registeredProperty.HasSetter)
                     {
-                        Value = value,
-                        StatusCode = StatusCodes.Good,
-                        //ServerTimestamp = DateTime.UtcNow,
-                        SourceTimestamp = change.Timestamp.UtcDateTime
+                        var value = _configuration.ValueConverter.ConvertToNodeValue(change.GetNewValue<object?>(), registeredProperty);
+                        writeValues.Add(new WriteValue
+                        {
+                            NodeId = nodeId,
+                            AttributeId = Opc.Ua.Attributes.Value,
+                            Value = new DataValue
+                            {
+                                Value = value,
+                                StatusCode = StatusCodes.Good,
+                                //ServerTimestamp = DateTime.UtcNow,
+                                SourceTimestamp = change.ChangedTimestamp.UtcDateTime
+                            }
+                        });
                     }
-                };
-
-                var writeValues = new WriteValueCollection { writeValue };
-                var writeResponse = await _session.WriteAsync(null, writeValues, cancellationToken);
-
-                if (writeResponse.Results.Any(StatusCode.IsBad))
-                {
-                    _logger.LogError("Failed to write some variables.");
-
-                    // var badVariableStatusCodes = writeResponse.Results
-                    //     .Where(StatusCode.IsBad)
-                    //     .ToDictionary(wr => , wr => wr.Code);
-                    //
-                    // throw new ConnectionException(_connectionOptions,
-                    //     $"Unexpected Error during writing variables. Variables: {badVariableStatusCodes.Keys.Join(Environment.NewLine)}")
-                    // {
-                    //     Data = { ["BadVariableStatusCodeDictionary"] = badVariableStatusCodes }
-                    // };
                 }
             }
+            
+            if (writeValues.Count == 0)
+            {
+                continue;
+            }
+            
+            var writeResponse = await _session.WriteAsync(null, writeValues, cancellationToken);
+            if (writeResponse.Results.Any(StatusCode.IsBad))
+            {
+                _logger.LogError("Failed to write some variables (chunk starting at {Offset}).", offset);
+            }
         }
+    }
+
+    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
+        NodeId nodeId, 
+        CancellationToken cancellationToken)
+    {
+        const uint nodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
+        
+        var (_, _, nodeProperties, _) = await _session!.BrowseAsync(
+            null,
+            null,
+            [nodeId],
+            0u,
+            BrowseDirection.Forward,
+            ReferenceTypeIds.HierarchicalReferences,
+            true,
+            nodeClassMask,
+            cancellationToken);
+
+        return nodeProperties[0];
     }
 }

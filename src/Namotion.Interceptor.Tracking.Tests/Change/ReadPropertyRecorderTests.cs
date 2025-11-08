@@ -11,16 +11,13 @@ public class ReadPropertyRecorderTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
             .WithReadPropertyRecorder();
 
         // Act
         var person = new Person(context);
 
-        var recorder = context
-            .GetService<ReadPropertyRecorder>()
-            .StartPropertyAccessRecording();
-        
+        var recorder = ReadPropertyRecorder.Start();
         using (recorder)
         {
              var firstName = person.FirstName;
@@ -30,14 +27,10 @@ public class ReadPropertyRecorderTests
         
         // TODO: Check whether recording also works with additional registered properties or attributes (registry)
 
-        var allProperties = recorder.Properties;
-        var properties = recorder.GetPropertiesAndReset();
-        var propertiesAgain = recorder.GetPropertiesAndDispose();
+        var properties = recorder.GetPropertiesAndDispose();
         
         // Assert
         Assert.Single(properties);
-        Assert.Single(allProperties);
-        Assert.Empty(propertiesAgain);
-        Assert.Contains(allProperties, p => p.Name == "FirstName");
+        Assert.Contains(properties, p => p.Name == "FirstName");
     }
 }

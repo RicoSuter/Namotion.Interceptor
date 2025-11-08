@@ -37,6 +37,12 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                             {
                                 Property = p,
                                 Type = model.GetTypeInfo(p.Type, ct),
+                                AccessModifier = 
+                                    p.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) ? "public" :
+                                    p.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword)) ? "internal" :
+                                    p.Modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)) ? "protected" : 
+                                    "private",
+
                                 IsPartial = p.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)),
                                 IsDerived = HasDerivedAttribute(p, model, ct),
                                 IsRequired = p.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword)),
@@ -122,6 +128,9 @@ namespace {namespaceName}
         [JsonIgnore]
         IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
 
+        [JsonIgnore]
+        object IInterceptorSubject.SyncRoot {{ get; }} = new object();
+
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {{
             _properties = (_properties ?? DefaultProperties)
@@ -142,9 +151,7 @@ namespace {namespaceName}
                 {{
                     ""{propertyName}"",       
                     new SubjectPropertyMetadata(
-                        nameof({propertyName}), 
-                        typeof({className}).GetProperty(nameof({propertyName})).PropertyType!, 
-                        typeof({className}).GetProperty(nameof({propertyName})).GetCustomAttributes().ToArray()!, 
+                        typeof({className}).GetProperty(nameof({propertyName}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
                         {(property.HasGetter ? ($"(o) => (({className})o).{propertyName}") : "null")}, 
                         {(property.HasSetter ? ($"(o, v) => (({className})o).{propertyName} = ({fullyQualifiedName})v") : "null")}, 
                         isIntercepted: {(property.IsPartial ? "true" : "false")},
@@ -189,11 +196,7 @@ namespace {namespaceName}
                     {
                         var fullyQualifiedName = property.Type.Type!.ToString();
                         var propertyName = property.Property.Identifier.Value;
-                        var propertyModifier =
-                            property.Property.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) ? "public" :
-                            property.Property.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword)) ? "internal" :
-                            property.Property.Modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)) ? "protected" : 
-                            "private";
+                        var propertyModifier = property.AccessModifier;
 
                         generatedCode +=
     $@"
@@ -208,7 +211,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} get => GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), (o) => (({className})o)._{propertyName});";
+            {modifiers} get => GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), static (o) => (({className})o)._{propertyName});";
 
                         }
 
@@ -223,7 +226,7 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, (o) => (({className})o)._{propertyName}, (o, v) => (({className})o)._{propertyName} = v);";
+            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, static (o) => (({className})o)._{propertyName}, static (o, v) => (({className})o)._{propertyName} = v);";
                         }
 
                         generatedCode +=
@@ -252,7 +255,7 @@ namespace {namespaceName}
     $@"
         public {returnType} {methodName}({string.Join(", ", parameters.Select(p => p.Type + " " + p.Name))})
         {{
-            return ({returnType})InvokeMethod(""{methodName}"", p => {fullMethodName}({directParameterCode}){invokeParameterCode})!;
+            return ({returnType})InvokeMethod(""{methodName}"", static (s, p) => (({className})s).{fullMethodName}({directParameterCode}){invokeParameterCode})!;
         }}
 ";
                         }
@@ -262,7 +265,7 @@ namespace {namespaceName}
     $@"
         public {returnType} {methodName}({string.Join(", ", parameters.Select(p => p.Type + " " + p.Name))})
         {{
-            InvokeMethod(""{methodName}"", p => {{ {fullMethodName}({directParameterCode}); return null; }}{invokeParameterCode});
+            InvokeMethod(""{methodName}"", static (s, p) => {{ (({className})s).{fullMethodName}({directParameterCode}); return null; }}{invokeParameterCode});
         }}
 ";
                         }
@@ -297,9 +300,17 @@ namespace {namespaceName}
         }}
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
+        private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
         {{
-            return _context is not null ? _context.InvokeMethod(this, methodName, parameters, invokeMethod) : invokeMethod(parameters);
+            if (_context is not null)
+            {{
+                var invocationContext = new MethodInvocationContext<TProperty>(this, methodName, parameters);
+                _context.ExecuteInterceptedInvoke(ref invocationContext, invokeMethod);
+            }}
+            else
+            {{
+                return invokeMethod(this, parameters);
+            }}
         }}
     }}
 }}

@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
@@ -8,7 +7,7 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 #pragma warning disable CS8618, CS9264
 
-public record RegisteredSubjectProperty
+public class RegisteredSubjectProperty
 {
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectReferenceCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
@@ -160,6 +159,43 @@ public record RegisteredSubjectProperty
             }
         }
     }
+    
+    /// <summary>
+    /// Adds an attribute to the property.
+    /// </summary>
+    /// <param name="name">The name of the attribute.</param>
+    /// <param name="getValue">The value getter function.</param>
+    /// <param name="setValue">The value setter action.</param>
+    /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
+    /// <returns>The created attribute property.</returns>
+    public RegisteredSubjectProperty AddAttribute<TProperty>(
+        string name,
+        Func<IInterceptorSubject, TProperty?>? getValue,
+        Action<IInterceptorSubject, TProperty?>? setValue = null,
+        params Attribute[] attributes)
+    {
+        return AddAttribute(name, typeof(TProperty), 
+            getValue is not null ? x => (TProperty)getValue(x)! : null, 
+            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null, 
+            attributes);
+    }
+
+    /// <summary>
+    /// Adds an attribute to the property.
+    /// </summary>
+    /// <param name="name">The name of the attribute.</param>
+    /// <param name="getValue">The value getter function.</param>
+    /// <param name="setValue">The value setter action.</param>
+    /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
+    /// <returns>The created attribute property.</returns>
+    public RegisteredSubjectProperty AddAttribute<TProperty>(
+        string name,
+        Func<IInterceptorSubject, object?>? getValue,
+        Action<IInterceptorSubject, object?>? setValue = null,
+        params Attribute[] attributes)
+    {
+        return AddAttribute(name, typeof(TProperty), getValue, setValue, attributes);
+    }
 
     /// <summary>
     /// Adds an attribute to the property.
@@ -218,11 +254,13 @@ public record RegisteredSubjectProperty
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
-    public IEnumerable<RegisteredSubjectProperty> Attributes
+    public RegisteredSubjectProperty[] Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Parent.GetPropertyAttributes(Name);
+        get => AttributesCache = (AttributesCache ?? Parent.GetPropertyAttributes(Name).ToArray());
     }
+    
+    internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
     /// <summary>
     /// Gets a property attribute by name.

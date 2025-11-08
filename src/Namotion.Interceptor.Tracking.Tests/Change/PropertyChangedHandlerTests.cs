@@ -13,10 +13,10 @@ public class PropertyChangedHandlerTests
         var changes = new List<SubjectPropertyChange>();
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable();
+            .WithPropertyChangeObservable();
 
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(changes.Add);
 
         // Act
@@ -26,7 +26,7 @@ public class PropertyChangedHandlerTests
         // Assert
         Assert.Contains(changes, c => 
             c.Property.Name == "FirstName" &&
-            c.OldValue is null &&
-            c.NewValue?.ToString() == "Rico");
+            c.GetOldValue<object?>() is null &&
+            c.GetNewValue<object?>()?.ToString() == "Rico");
     }
 }
