@@ -307,10 +307,8 @@ namespace {namespaceName}
                 var invocationContext = new MethodInvocationContext(this, methodName, parameters);
                 return _context.ExecuteInterceptedInvoke(ref invocationContext, invokeMethod);
             }}
-            else
-            {{
-                return invokeMethod(this, parameters);
-            }}
+
+            return invokeMethod(this, parameters);
         }}
     }}
 }}
