@@ -92,8 +92,9 @@ public class SubjectSourceBenchmark
         for (var i = 0; i < _propertyNames.Length; i++)
         {
             var context = new PropertyWriteContext<int>(
-                new PropertyReference(_car, _propertyNames[i]), 
-                0, 
+                _car, 
+                _propertyNames[i], 
+                static _ => 0, 
                 i);
 
             queue.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});

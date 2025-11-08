@@ -304,8 +304,8 @@ namespace {namespaceName}
         {{
             if (_context is not null)
             {{
-                var invocationContext = new MethodInvocationContext<TProperty>(this, methodName, parameters);
-                _context.ExecuteInterceptedInvoke(ref invocationContext, invokeMethod);
+                var invocationContext = new MethodInvocationContext(this, methodName, parameters);
+                return _context.ExecuteInterceptedInvoke(ref invocationContext, invokeMethod);
             }}
             else
             {{
