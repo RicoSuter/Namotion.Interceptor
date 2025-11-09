@@ -50,6 +50,7 @@ internal class OpcUaSubscriptionManager
     {
         _monitoredItems.Clear();
         _subscriptions = ImmutableArray<Subscription>.Empty;
+        Interlocked.MemoryBarrier(); // Ensure write is visible to all threads
     }
 
     public async Task CreateBatchedSubscriptionsAsync(
@@ -119,11 +120,11 @@ internal class OpcUaSubscriptionManager
             _logger.LogInformation("Created OPC UA subscription {SubscriptionId} with {Count} monitored items.", subscription.Id, subscription.MonitoredItems.Count());
         }
 
-        // Atomically replace the subscriptions array with memory barriers to ensure visibility
+        // Replace subscriptions array with memory barrier to ensure visibility across threads
+        // ImmutableArray is a struct, so we use memory barrier instead of Volatile.Write
         var newSubscriptions = builder.ToImmutable();
-        Interlocked.MemoryBarrier();
         _subscriptions = newSubscriptions;
-        Interlocked.MemoryBarrier();
+        Interlocked.MemoryBarrier(); // Ensure write is visible to all threads
     }
 
     public void StartHealthMonitoring()
@@ -153,20 +154,21 @@ internal class OpcUaSubscriptionManager
             subscription.FastDataChangeCallback += OnFastDataChange;
         }
 
-        // Atomically update subscription reference with memory barrier
+        // Update subscription reference with memory barrier to ensure visibility across threads
+        // ImmutableArray is a struct, so we use memory barrier instead of Volatile.Write
         var newSubscriptions = builder.ToImmutable();
-        Interlocked.MemoryBarrier();
         _subscriptions = newSubscriptions;
-        Interlocked.MemoryBarrier();
+        Interlocked.MemoryBarrier(); // Ensure write is visible to all threads
 
         _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions", subscriptionList.Count);
     }
     
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
-        // This callback is called in sequence/in order per subscription.
-        // The EnqueueOrApplyUpdate we ensure that changes either applied in order directly
-        // or enqueued in the same order (and thus no synchronization is needed here).
+        // Thread-safety: This callback is invoked sequentially per subscription (OPC UA stack guarantee).
+        // Multiple subscriptions can invoke callbacks concurrently, but each subscription manages
+        // distinct monitored items (no overlap), so concurrent callbacks won't interfere.
+        // The EnqueueOrApplyUpdate ensures changes are applied/enqueued in order.
         
         if (_updater is null)
         {
@@ -269,19 +271,31 @@ internal class OpcUaSubscriptionManager
     {
         _healthMonitor.Stop();
 
-        // Capture current subscriptions and atomically clear (lock-free)
+        // Capture current subscriptions and clear with memory barrier (lock-free)
         var subscriptions = _subscriptions;
         _subscriptions = ImmutableArray<Subscription>.Empty;
+        Interlocked.MemoryBarrier(); // Ensure write is visible to all threads
 
-        // Clean up captured subscriptions
+        // Clean up captured subscriptions - unsubscribe before delete to prevent callbacks on disposed objects
         foreach (var subscription in subscriptions)
         {
             try
             {
                 subscription.FastDataChangeCallback -= OnFastDataChange;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to unsubscribe FastDataChangeCallback for subscription {Id}", subscription.Id);
+            }
+
+            try
+            {
                 subscription.Delete(true);
             }
-            catch { /* ignore cleanup exceptions */ }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete subscription {Id}", subscription.Id);
+            }
         }
     }
 

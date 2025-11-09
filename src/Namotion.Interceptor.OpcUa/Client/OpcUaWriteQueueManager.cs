@@ -14,15 +14,11 @@ internal sealed class OpcUaWriteQueueManager
 
     private readonly int _maxQueueSize;
     private readonly ILogger _logger;
-    private readonly Lock _lock = new();
-    private int _droppedWriteCount;
+    private int _droppedWriteCount; // Thread-safe via Interlocked
 
     public int PendingWriteCount => _pendingWrites.Count;
 
-    public int DroppedWriteCount
-    {
-        get { lock (_lock) return _droppedWriteCount; }
-    }
+    public int DroppedWriteCount => Interlocked.CompareExchange(ref _droppedWriteCount, 0, 0);
 
     public bool IsEmpty => _pendingWrites.IsEmpty;
 
@@ -52,8 +48,7 @@ internal sealed class OpcUaWriteQueueManager
             Enqueue(change);
         }
 
-        int dropped;
-        lock (_lock) dropped = _droppedWriteCount;
+        var dropped = Interlocked.CompareExchange(ref _droppedWriteCount, 0, 0);
 
         if (dropped > 0)
         {
@@ -67,6 +62,7 @@ internal sealed class OpcUaWriteQueueManager
     /// <summary>
     /// Enqueues a single write operation. If the queue is at capacity,
     /// the oldest write is dropped (ring buffer semantics).
+    /// Uses a more robust pattern to handle concurrent enqueue/dequeue.
     /// </summary>
     private void Enqueue(SubjectPropertyChange change)
     {
@@ -76,20 +72,21 @@ internal sealed class OpcUaWriteQueueManager
             return;
         }
 
-        // Fix TOCTOU race - dequeue FIRST to maintain strict bound
-        while (_pendingWrites.Count >= _maxQueueSize)
+        // Enqueue first, then enforce size limit - more robust for concurrent access
+        _pendingWrites.Enqueue(change);
+
+        // Enforce size limit by removing oldest items if needed
+        while (_pendingWrites.Count > _maxQueueSize)
         {
             if (_pendingWrites.TryDequeue(out _))
             {
-                lock (_lock) _droppedWriteCount++;
+                Interlocked.Increment(ref _droppedWriteCount);
             }
             else
             {
                 break; // Queue emptied by another thread (e.g., flush)
             }
         }
-
-        _pendingWrites.Enqueue(change);
     }
 
     /// <summary>
@@ -107,7 +104,7 @@ internal sealed class OpcUaWriteQueueManager
         if (pendingWrites.Count > 0)
         {
             // Reset dropped counter after successful flush
-            lock (_lock) _droppedWriteCount = 0;
+            Interlocked.Exchange(ref _droppedWriteCount, 0);
         }
 
         return pendingWrites;

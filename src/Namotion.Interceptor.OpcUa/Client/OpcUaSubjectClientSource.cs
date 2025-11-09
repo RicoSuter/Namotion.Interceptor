@@ -13,19 +13,20 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 {
     private const int DefaultChunkSize = 512;
 
-    private readonly Lock _writeFlushLock = new();
+    private readonly SemaphoreSlim _writeFlushSemaphore = new(1, 1);
 
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
     private readonly List<PropertyReference> _propertiesWithOpcData = [];
-    
+
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly OpcUaSubscriptionManager _subscriptionManager;
     private readonly OpcUaSessionManager _sessionManager;
     private readonly OpcUaWriteQueueManager _writeQueueManager;
-    
-    private bool _disposed;
+
+    private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
+    private CancellationToken _stoppingToken;
 
     internal string OpcVariableKey { get; } = "OpcVariable:" + Guid.NewGuid();
     
@@ -89,6 +90,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _stoppingToken = stoppingToken; // Store for event handlers
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -166,7 +169,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private void OnSessionChanged(object? sender, SessionChangedEventArgs e)
     {
-        if (_disposed)
+        if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
         {
             return;
         }
@@ -183,19 +186,33 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     }
 
     /// <summary>
-    /// Handles reconnection completion. Flushes pending writes synchronously within lock.
-    /// This is acceptable as async void event handler since all work is synchronous.
+    /// Handles reconnection completion. Flushes pending writes with proper cancellation support.
+    /// Uses semaphore to coordinate with concurrent writes.
     /// </summary>
     private void OnReconnectionCompleted(object? sender, EventArgs e)
     {
-        if (_disposed)
+        if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
         {
             return;
         }
 
+        // Queue async work with continuation to handle exceptions
+        FlushPendingWritesAsync().ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+            {
+                _logger.LogError(t.Exception, "Failed to flush pending OPC UA writes after reconnection");
+            }
+        }, TaskScheduler.Default);
+    }
+
+    private async Task FlushPendingWritesAsync()
+    {
         try
         {
-            lock (_writeFlushLock)
+            // Wait for semaphore with cancellation support
+            await _writeFlushSemaphore.WaitAsync(_stoppingToken);
+            try
             {
                 if (_writeQueueManager.IsEmpty)
                 {
@@ -211,14 +228,18 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 var pendingWrites = _writeQueueManager.DequeueAll();
                 if (pendingWrites.Count > 0)
                 {
-                    WriteToSourceSync(pendingWrites, session);
+                    await WriteToSourceAsync(pendingWrites, session, _stoppingToken);
                     _logger.LogInformation("Successfully flushed {Count} pending OPC UA writes after reconnection.", pendingWrites.Count);
                 }
             }
+            finally
+            {
+                _writeFlushSemaphore.Release();
+            }
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (_stoppingToken.IsCancellationRequested)
         {
-            _logger.LogError(ex, "Failed to flush pending OPC UA writes after reconnection.");
+            _logger.LogInformation("Write flush cancelled during shutdown");
         }
     }
 
@@ -316,28 +337,44 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
         }
 
-        // COLD PATH: No session or write failed - queue the changes
-        lock (_writeFlushLock)
+        // COLD PATH: No session or write failed - acquire semaphore and retry or queue
+        try
         {
-            // Re-check session after acquiring lock (may have reconnected)
-            session = _sessionManager.CurrentSession;
-            if (session is not null)
+            // Use blocking wait (not async) to maintain ValueTask pattern
+            // This is acceptable as it only blocks when session is unavailable (rare)
+            _writeFlushSemaphore.Wait(cancellationToken);
+            try
             {
-                // Session available - flush queue first (FIFO), then write new changes
-                if (!_writeQueueManager.IsEmpty)
+                // Re-check session after acquiring semaphore (may have reconnected)
+                session = _sessionManager.CurrentSession;
+                if (session is not null)
                 {
-                    var pendingWrites = _writeQueueManager.DequeueAll();
-                    WriteToSourceSync(pendingWrites, session);
-                }
+                    // Session available - flush queue first (FIFO), then write new changes
+                    if (!_writeQueueManager.IsEmpty)
+                    {
+                        var pendingWrites = _writeQueueManager.DequeueAll();
+                        await WriteToSourceAsync(pendingWrites, session, cancellationToken);
+                    }
 
-                WriteToSourceSync(changes, session);
+                    await WriteToSourceAsync(changes, session, cancellationToken);
+                }
+                else
+                {
+                    // Still no session - queue the changes
+                    _writeQueueManager.EnqueueBatch(changes);
+                    _logger.LogDebug("Queued {Count} writes (session unavailable)", changes.Count);
+                }
             }
-            else
+            finally
             {
-                // Still no session - queue the changes
-                _writeQueueManager.EnqueueBatch(changes);
-                _logger.LogDebug("Queued {Count} writes (session unavailable)", changes.Count);
+                _writeFlushSemaphore.Release();
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Queue writes if cancelled
+            _writeQueueManager.EnqueueBatch(changes);
+            _logger.LogDebug("Queued {Count} writes (operation cancelled)", changes.Count);
         }
     }
 
@@ -371,37 +408,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
     }
 
-    private void WriteToSourceSync(IReadOnlyList<SubjectPropertyChange> changes, Session session)
-    {
-        var count = changes.Count;
-        if (count is 0)
-        {
-            return;
-        }
-
-        var chunkSize = (int)(session.OperationLimits?.MaxNodesPerWrite ?? DefaultChunkSize);
-        chunkSize = chunkSize is 0 ? int.MaxValue : chunkSize;
-
-        for (var offset = 0; offset < count; offset += chunkSize)
-        {
-            var take = Math.Min(chunkSize, count - offset);
-          
-            var writeValues = BuildWriteValues(changes, offset, take);
-            if (writeValues.Count is 0)
-            {
-                continue;
-            }
-
-            // Synchronous write for cold path (flush/queue retry)
-            _ = session.Write(
-                requestHeader: null,
-                writeValues,
-                out var results,
-                out _);
-
-            LogWriteFailures(changes, writeValues, results, offset);
-        }
-    }
 
     private WriteValueCollection BuildWriteValues(IReadOnlyList<SubjectPropertyChange> changes, int offset, int take)
     {
@@ -498,10 +504,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     public override void Dispose()
     {
-        if (_disposed)
-            return;
+        // Set disposed flag first to prevent new operations (thread-safe)
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return; // Already disposed
+        }
 
-        _disposed = true;
+        // Unsubscribe from events before disposing resources
         _sessionManager.SessionChanged -= OnSessionChanged;
         _sessionManager.ReconnectionCompleted -= OnReconnectionCompleted;
 
@@ -513,6 +522,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             _sessionManager.Dispose();
             _subscriptionManager.Dispose();
+            _writeFlushSemaphore.Dispose();
         }
     }
 }
