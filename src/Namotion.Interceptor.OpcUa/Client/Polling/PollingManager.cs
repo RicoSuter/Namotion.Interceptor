@@ -311,12 +311,11 @@ internal sealed class PollingManager : IDisposable
     {
         // Clear cached values on session change to force re-notification
         // Take snapshot to avoid TOCTOU issues with concurrent modifications
-        // Note: There is a benign race condition where items removed between ToArray() and assignment
-        // could be briefly re-added, but this is acceptable as they will be removed again on next cleanup.
-        // This pattern avoids more complex locking and the race has no practical negative impact.
+        // Use TryUpdate to handle concurrent removal safely (matching pattern in ProcessValueChange)
         foreach (var (key, item) in _pollingItems.ToArray())
         {
-            _pollingItems[key] = item with { LastValue = null };
+            _pollingItems.TryUpdate(key, item with { LastValue = null }, item);
+            // If TryUpdate fails, item was removed or modified concurrently - skip silently
         }
     }
 
