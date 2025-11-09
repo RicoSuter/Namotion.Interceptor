@@ -139,7 +139,7 @@ internal sealed class PollingManager : IDisposable
 
         lock (_startLock)
         {
-            if (_pollingTask != null)
+            if (Volatile.Read(ref _pollingTask) != null)
             {
                 _logger.LogDebug("Polling manager already started, ignoring duplicate start request");
                 return;
@@ -365,9 +365,7 @@ internal sealed class PollingManager : IDisposable
                 nodesToRead,
                 cancellationToken);
 
-            _metrics.RecordRead();
-
-            // Process results
+            // Process results - count metrics per item for accurate monitoring
             for (var i = 0; i < response.Results.Count && i < batch.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -377,6 +375,7 @@ internal sealed class PollingManager : IDisposable
 
                 if (StatusCode.IsGood(dataValue.StatusCode))
                 {
+                    _metrics.RecordRead();
                     ProcessValueChange(pollingItem, dataValue, DateTimeOffset.UtcNow);
                 }
                 else if (StatusCode.IsBad(dataValue.StatusCode))
@@ -389,7 +388,11 @@ internal sealed class PollingManager : IDisposable
         }
         catch (Exception ex)
         {
-            _metrics.RecordFailedRead();
+            // Batch-level failure - count all items in batch as failed
+            for (var i = 0; i < batch.Count; i++)
+            {
+                _metrics.RecordFailedRead();
+            }
             _logger.LogError(ex, "Failed to read batch of {Count} polled items", batch.Count);
         }
     }

@@ -39,6 +39,7 @@ internal sealed class PollingCircuitBreaker
     /// <summary>
     /// Attempts to execute an operation through the circuit breaker.
     /// Returns true if the circuit is closed or cooldown has elapsed, false if circuit is open.
+    /// When cooldown elapses, returns true but keeps circuit open - RecordSuccess() will close it atomically.
     /// </summary>
     public bool ShouldAttempt()
     {
@@ -51,15 +52,11 @@ internal sealed class PollingCircuitBreaker
         // Volatile read ensures we see the latest value atomically
         var openedAtTicks = Volatile.Read(ref _circuitOpenedAtTicks);
         var timeSinceOpened = DateTimeOffset.UtcNow - new DateTimeOffset(openedAtTicks, TimeSpan.Zero);
-        if (timeSinceOpened >= _cooldownPeriod)
-        {
-            // Cooldown elapsed, attempt to close the circuit
-            Volatile.Write(ref _circuitOpen, 0);
-            Interlocked.Exchange(ref _consecutiveFailures, 0);
-            return true;
-        }
 
-        return false; // Circuit still open
+        // After cooldown, allow retry attempt but keep circuit open
+        // RecordSuccess() will close it if the attempt succeeds
+        // This prevents race conditions where multiple threads try to close simultaneously
+        return timeSinceOpened >= _cooldownPeriod;
     }
 
     /// <summary>
@@ -81,10 +78,13 @@ internal sealed class PollingCircuitBreaker
     }
 
     /// <summary>
-    /// Records a successful operation, resetting the failure count.
+    /// Records a successful operation, closing the circuit and resetting the failure count atomically.
     /// </summary>
     public void RecordSuccess()
     {
+        // Close circuit and reset failures atomically
+        // Order matters: close circuit first to prevent new failures from reopening it
+        Volatile.Write(ref _circuitOpen, 0);
         Interlocked.Exchange(ref _consecutiveFailures, 0);
     }
 
