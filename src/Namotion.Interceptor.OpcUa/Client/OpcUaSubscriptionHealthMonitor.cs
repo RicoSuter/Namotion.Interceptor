@@ -35,10 +35,9 @@ internal sealed class OpcUaSubscriptionHealthMonitor
 
                 if (unhealthyCount == 0)
                 {
-                    continue; // Fast path - no allocation
+                    continue;
                 }
 
-                // Allocate list only when needed
                 var unhealthyItems = new List<MonitoredItem>(unhealthyCount);
                 foreach (var mi in subscription.MonitoredItems)
                 {
@@ -48,10 +47,6 @@ internal sealed class OpcUaSubscriptionHealthMonitor
                     }
                 }
 
-                _logger.LogWarning(
-                    "Found {Count} unhealthy retryable items in OPC UA subscription {Id}. Attempting to heal...",
-                    unhealthyItems.Count, subscription.Id);
-
                 try
                 {
                     await subscription.ApplyChangesAsync(cancellationToken);
@@ -60,13 +55,13 @@ internal sealed class OpcUaSubscriptionHealthMonitor
                     if (stillUnhealthy == 0)
                     {
                         _logger.LogInformation(
-                            "OPC UA subscription {Id} healed successfully - all {Count} items now healthy.",
+                            "OPC UA subscription {Id} healed successfully: All {Count} items now healthy.",
                             subscription.Id, unhealthyItems.Count);
                     }
                     else
                     {
                         _logger.LogWarning(
-                            "OPC UA subscription {Id} partial healing - {Healthy}/{Total} items recovered. Will retry.",
+                            "OPC UA subscription {Id} healed partially: {Healthy}/{Total} items recovered.",
                             subscription.Id, unhealthyItems.Count - stillUnhealthy, unhealthyItems.Count);
                     }
                 }
