@@ -32,14 +32,10 @@ internal class OpcUaSubscriptionManager
 
     public int TotalMonitoredItemCount => _monitoredItems.Count;
 
-    public OpcUaSubscriptionManager(
-        OpcUaClientConfiguration configuration,
-        ILogger logger,
-        OpcUaPollingManager? pollingManager = null)
+    public OpcUaSubscriptionManager(OpcUaClientConfiguration configuration, ILogger logger)
     {
         _configuration = configuration;
         _logger = logger;
-        _pollingManager = pollingManager;
 
         _healthMonitor = new OpcUaSubscriptionHealthMonitor(configuration, this, logger);
     }

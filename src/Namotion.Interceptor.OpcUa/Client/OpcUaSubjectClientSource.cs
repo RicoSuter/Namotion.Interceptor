@@ -80,7 +80,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _subjectLoader = new OpcUaSubjectLoader(configuration, _propertiesWithOpcData, this, logger);
         _sessionManager = new OpcUaSessionManager(logger);
         _writeQueueManager = new OpcUaWriteQueueManager(_configuration.WriteQueueSize, logger);
-        _subscriptionManager = new OpcUaSubscriptionManager(configuration, logger, null);
+        _subscriptionManager = new OpcUaSubscriptionManager(configuration, logger);
 
         _sessionManager.SessionChanged += OnSessionChanged;
         _sessionManager.ReconnectionCompleted += OnReconnectionCompleted;
@@ -101,7 +101,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 sessionManager: _sessionManager,
                 updater: updater,
                 pollingInterval: _configuration.PollingInterval,
-                batchSize: _configuration.PollingBatchSize
+                batchSize: _configuration.PollingBatchSize,
+                disposalTimeout: _configuration.PollingDisposalTimeout
             );
             _subscriptionManager.SetPollingManager(_pollingManager);
             _pollingManager.Start();
