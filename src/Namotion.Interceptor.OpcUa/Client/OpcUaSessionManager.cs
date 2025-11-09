@@ -16,8 +16,8 @@ internal sealed class OpcUaSessionManager : IDisposable
     private Session? _session;
     private readonly SessionReconnectHandler _reconnectHandler;
     private readonly ILogger _logger;
-    private bool _isReconnecting;
-    private bool _disposed;
+    private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
+    private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
     /// <summary>
     /// Gets the current session, or null if not connected.
@@ -32,11 +32,9 @@ internal sealed class OpcUaSessionManager : IDisposable
 
     /// <summary>
     /// Gets whether a reconnection is in progress.
+    /// Thread-safe via Interlocked operations.
     /// </summary>
-    public bool IsReconnecting
-    {
-        get { lock (_lock) return _isReconnecting; }
-    }
+    public bool IsReconnecting => Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1;
 
     /// <summary>
     /// Occurs when the session changes (new session, reconnected, or disconnected).
@@ -86,7 +84,7 @@ internal sealed class OpcUaSessionManager : IDisposable
             oldSession = _session;
 
             _session = newSession;
-            _isReconnecting = false;
+            Interlocked.Exchange(ref _isReconnecting, 0);
 
             newSession.KeepAlive += OnKeepAlive;
         }
@@ -127,7 +125,8 @@ internal sealed class OpcUaSessionManager : IDisposable
 
         try
         {
-            if (_disposed || _isReconnecting)
+            if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1 ||
+                Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1)
             {
                 return;
             }
@@ -148,7 +147,7 @@ internal sealed class OpcUaSessionManager : IDisposable
             var newState = _reconnectHandler.BeginReconnect(session, 5000, OnReconnectComplete);
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
             {
-                _isReconnecting = true;
+                Interlocked.Exchange(ref _isReconnecting, 1);
                 e.CancelKeepAlive = true;
                 _logger.LogInformation("Reconnect handler initiated successfully");
             }
@@ -165,11 +164,17 @@ internal sealed class OpcUaSessionManager : IDisposable
 
     /// <summary>
     /// Callback invoked by SessionReconnectHandler when reconnection completes.
-    /// Queues async work since this is a synchronous callback.
+    /// Uses synchronous continuation to avoid fire-and-forget anti-pattern.
     /// </summary>
     private void OnReconnectComplete(object? sender, EventArgs e)
     {
-        _ = HandleReconnectCompleteAsync();
+        HandleReconnectCompleteAsync().ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+            {
+                _logger.LogError(t.Exception, "Unhandled exception in reconnect completion handler");
+            }
+        }, TaskScheduler.Default);
     }
 
     private async Task HandleReconnectCompleteAsync()
@@ -180,7 +185,7 @@ internal sealed class OpcUaSessionManager : IDisposable
 
         lock (_lock)
         {
-            if (_disposed)
+            if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
             {
                 return;
             }
@@ -189,7 +194,7 @@ internal sealed class OpcUaSessionManager : IDisposable
             if (reconnectedSession is null)
             {
                 _logger.LogError("Reconnect completed but received null OPC UA session. Connection lost permanently.");
-                _isReconnecting = false;
+                Interlocked.Exchange(ref _isReconnecting, 0);
 
                 SessionChanged?.Invoke(this, new SessionChangedEventArgs(null, isNewSession: false));
                 return;
@@ -214,7 +219,7 @@ internal sealed class OpcUaSessionManager : IDisposable
                 _logger.LogInformation("Reconnect preserved existing OPC UA session. Subscriptions maintained.");
             }
 
-            _isReconnecting = false;
+            Interlocked.Exchange(ref _isReconnecting, 0);
         }
 
         // Dispose old session outside lock
@@ -246,7 +251,7 @@ internal sealed class OpcUaSessionManager : IDisposable
             {
                 sessionToClose.KeepAlive -= OnKeepAlive;
                 _session = null;
-                _isReconnecting = false;
+                Interlocked.Exchange(ref _isReconnecting, 0);
             }
         }
 
@@ -274,16 +279,15 @@ internal sealed class OpcUaSessionManager : IDisposable
 
     public void Dispose()
     {
+        // Set disposed flag first to prevent new operations (thread-safe)
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return; // Already disposed
+        }
+
         Session? sessionToDispose;
         lock (_lock)
         {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-
             sessionToDispose = _session;
             if (sessionToDispose is not null)
             {
