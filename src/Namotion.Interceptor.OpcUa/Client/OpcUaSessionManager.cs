@@ -21,14 +21,15 @@ internal sealed class OpcUaSessionManager : IDisposable
 
     /// <summary>
     /// Gets the current session, or null if not connected.
-    /// Thread-safe for reading without lock (session assignment is atomic).
+    /// Thread-safe for reading without lock using volatile semantics for memory visibility.
     /// </summary>
-    public Session? CurrentSession => _session;
+    public Session? CurrentSession => Volatile.Read(ref _session);
 
     /// <summary>
     /// Gets whether a session is currently connected.
+    /// Thread-safe using volatile semantics for memory visibility.
     /// </summary>
-    public bool IsConnected => _session is not null;
+    public bool IsConnected => Volatile.Read(ref _session) is not null;
 
     /// <summary>
     /// Gets whether a reconnection is in progress.
@@ -83,7 +84,7 @@ internal sealed class OpcUaSessionManager : IDisposable
         {
             oldSession = _session;
 
-            _session = newSession;
+            Volatile.Write(ref _session, newSession);
             Interlocked.Exchange(ref _isReconnecting, 0);
 
             newSession.KeepAlive += OnKeepAlive;
@@ -115,9 +116,10 @@ internal sealed class OpcUaSessionManager : IDisposable
         }
 
         // Use Monitor.TryEnter to avoid blocking OPC UA stack thread
-        if (!Monitor.TryEnter(_lock, TimeSpan.FromMilliseconds(100)))
+        // 5 second timeout allows legitimate operations (CreateSessionAsync) to complete
+        if (!Monitor.TryEnter(_lock, TimeSpan.FromSeconds(5)))
         {
-            _logger.LogWarning("Could not acquire lock for OPC UA reconnect. Will retry on next KeepAlive.");
+            _logger.LogWarning("Could not acquire lock for OPC UA reconnect after 5s timeout. Will retry on next KeepAlive.");
             return;
         }
 
@@ -204,7 +206,7 @@ internal sealed class OpcUaSessionManager : IDisposable
                 _logger.LogInformation("Reconnect created new OPC UA session. Subscriptions transferred by OPC UA stack.");
                 oldSession = _session;
                 newSession = reconnectedSession as Session;
-                _session = newSession;
+                Volatile.Write(ref _session, newSession);
 
                 if (newSession is not null)
                 {
@@ -248,7 +250,7 @@ internal sealed class OpcUaSessionManager : IDisposable
             if (sessionToClose is not null)
             {
                 sessionToClose.KeepAlive -= OnKeepAlive;
-                _session = null;
+                Volatile.Write(ref _session, null);
                 Interlocked.Exchange(ref _isReconnecting, 0);
             }
         }
@@ -290,7 +292,7 @@ internal sealed class OpcUaSessionManager : IDisposable
             if (sessionToDispose is not null)
             {
                 sessionToDispose.KeepAlive -= OnKeepAlive;
-                _session = null;
+                Volatile.Write(ref _session, null);
             }
         }
 
