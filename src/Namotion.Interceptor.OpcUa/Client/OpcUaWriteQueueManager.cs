@@ -49,7 +49,6 @@ internal sealed class OpcUaWriteQueueManager
         }
 
         var dropped = Interlocked.CompareExchange(ref _droppedWriteCount, 0, 0);
-
         if (dropped > 0)
         {
             _logger.LogWarning(

@@ -9,75 +9,18 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// Monitors OPC UA subscription health and automatically retries failed monitored items.
 /// Periodically checks for unhealthy items and attempts to heal them by calling ApplyChanges.
 /// </summary>
-internal sealed class OpcUaSubscriptionHealthMonitor : IDisposable
+internal sealed class OpcUaSubscriptionHealthMonitor
 {
     private readonly ILogger _logger;
-    private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubscriptionManager _subscriptionManager;
-    private readonly ManualResetEventSlim _healthCheckInProgress = new(true); // true = not in progress
-    private IDisposable? _healthCheckTimer;
 
-    public OpcUaSubscriptionHealthMonitor(
-        OpcUaClientConfiguration configuration,
-        OpcUaSubscriptionManager subscriptionManager,
-        ILogger logger)
+    public OpcUaSubscriptionHealthMonitor(OpcUaSubscriptionManager subscriptionManager, ILogger logger)
     {
-        _configuration = configuration;
         _subscriptionManager = subscriptionManager;
         _logger = logger;
     }
 
-    /// <summary>
-    /// Starts the periodic health monitoring timer.
-    /// </summary>
-    public void Start()
-    {
-        if (!_configuration.EnableAutoHealing)
-        {
-            _logger.LogInformation("Auto-healing of failed monitored items is disabled");
-            return;
-        }
-
-        _logger.LogInformation(
-            "Starting subscription health monitoring (interval: {Interval})",
-            _configuration.SubscriptionHealthCheckInterval);
-
-        _healthCheckTimer = Observable
-            .Timer(TimeSpan.FromSeconds(5), _configuration.SubscriptionHealthCheckInterval)
-            .Subscribe(_ =>
-            {
-                _healthCheckInProgress.Reset(); // Signal: callback started
-                try
-                {
-                    CheckAndHealSubscriptions();
-                }
-                finally
-                {
-                    _healthCheckInProgress.Set(); // Signal: callback complete
-                }
-            });
-    }
-
-    /// <summary>
-    /// Stops the health monitoring timer and waits for in-flight checks to complete.
-    /// </summary>
-    public void Stop()
-    {
-        var timer = _healthCheckTimer;
-        if (timer != null)
-        {
-            timer.Dispose(); // Stop new callbacks
-            _healthCheckTimer = null;
-
-            // Wait for in-flight callback with timeout
-            if (!_healthCheckInProgress.Wait(TimeSpan.FromSeconds(5)))
-            {
-                _logger.LogWarning("Health check did not complete within timeout during shutdown");
-            }
-        }
-    }
-
-    private void CheckAndHealSubscriptions()
+    public async Task CheckAndHealSubscriptionsAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -86,9 +29,9 @@ internal sealed class OpcUaSubscriptionHealthMonitor : IDisposable
             {
                 // Count unhealthy items first to avoid allocation in common case (all healthy)
                 var unhealthyCount = 0;
-                foreach (var mi in subscription.MonitoredItems)
+                foreach (var monitoredItem in subscription.MonitoredItems)
                 {
-                    if (IsUnhealthy(mi) && IsRetryable(mi))
+                    if (IsUnhealthy(monitoredItem) && IsRetryable(monitoredItem))
                     {
                         unhealthyCount++;
                     }
@@ -115,9 +58,8 @@ internal sealed class OpcUaSubscriptionHealthMonitor : IDisposable
 
                 try
                 {
-                    subscription.ApplyChanges(); // Triggers re-creation
+                    await subscription.ApplyChangesAsync(cancellationToken);
 
-                    // Check if healing succeeded
                     var stillUnhealthy = unhealthyItems.Count(IsUnhealthy);
                     if (stillUnhealthy == 0)
                     {
@@ -137,6 +79,10 @@ internal sealed class OpcUaSubscriptionHealthMonitor : IDisposable
                     _logger.LogError(ex, "Failed to heal OPC UA subscription {Id}.", subscription.Id);
                 }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -172,11 +118,5 @@ internal sealed class OpcUaSubscriptionHealthMonitor : IDisposable
         // Retryable transient errors (e.g., BadTooManyMonitoredItems, BadOutOfService)
         // Retry any bad status that's not a permanent design-time error
         return StatusCode.IsBad(statusCode);
-    }
-
-    public void Dispose()
-    {
-        Stop();
-        _healthCheckInProgress.Dispose();
     }
 }
