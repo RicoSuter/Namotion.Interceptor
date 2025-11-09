@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Client.Polling;
@@ -63,7 +64,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     public bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
         _configuration.SourcePathProvider.IsPropertyIncluded(property);
 
-    public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
+    public async Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
     {
         SubscriptionManager.SetUpdater(updater);
 
@@ -84,8 +85,98 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             SubscriptionManager.SetPollingManager(pollingManager);
             PollingManager = pollingManager;
         }
+        
+        _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
+        await SessionManager.CloseSessionAsync();
+        CleanUpPropertyVariableData();
+        SubscriptionManager.Cleanup();
+        
+        var application = _configuration.CreateApplicationInstance();
+        var session = await SessionManager.CreateSessionAsync(application, _configuration, cancellationToken);
+
+        SubscriptionManager.Clear();
+        _propertiesWithOpcData.Clear();
+        
+        var rootNode = await TryGetRootNodeAsync(session, cancellationToken);
+        if (rootNode is not null)
+        {
+            var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken);
+            if (monitoredItems.Count > 0)
+            {
+                await SubscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken);
+            }
+
+            _logger.LogInformation("OPC UA client initialization complete. Monitoring {Count} items (subscriptions: {Subscribed}, polling: {Polled}).",
+                monitoredItems.Count,
+                SubscriptionManager.MonitoredItems.Count,
+                PollingManager?.PollingItemCount ?? 0);
+        }
+
+        _logger.LogInformation("Connected to OPC UA server successfully.");
         return Task.FromResult<IDisposable?>(null);
+    }
+    
+    public async Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
+    {
+        var session = SessionManager.CurrentSession;
+        if (session is null)
+        {
+            throw new InvalidOperationException("No active OPC UA session available.");
+        }
+        
+        var monitoredItems = SubscriptionManager.MonitoredItems.Values.ToArray();
+        var itemCount = monitoredItems.Length;
+            
+        var chunkSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
+        chunkSize = chunkSize is 0 ? int.MaxValue : chunkSize;
+
+        var result = new Dictionary<RegisteredSubjectProperty, DataValue>();
+        for (var offset = 0; offset < itemCount; offset += chunkSize)
+        {
+            var take = Math.Min(chunkSize, itemCount - offset);
+            var readValues = new ReadValueIdCollection(take);
+
+            for (var i = 0; i < take; i++)
+            {
+                readValues.Add(new ReadValueId
+                {
+                    NodeId = monitoredItems[offset + i].monitoredItem.StartNodeId,
+                    AttributeId = Opc.Ua.Attributes.Value
+                });
+            }
+
+            var readResponse = await session.ReadAsync(
+                requestHeader: null,
+                maxAge: 0,
+                timestampsToReturn: TimestampsToReturn.Source,
+                readValues,
+                cancellationToken);
+
+            var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
+            for (var i = 0; i < resultCount; i++)
+            {
+                if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
+                {
+                    var dataValue = readResponse.Results[i];
+                    if (monitoredItems[offset + i].monitoredItem.Handle is RegisteredSubjectProperty property)
+                    {
+                        result[property] = dataValue;
+                    }
+                }
+            }
+        }
+            
+        _logger.LogInformation("Successfully read initial values of {Count} nodes", itemCount);
+
+        return () =>
+        {
+            foreach (var (property, dataValue) in result)
+            {
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
+                property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
+            }
+        };
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -96,65 +187,19 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             try
             {
-                _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
-
-                var application = _configuration.CreateApplicationInstance();
-                var newSession = await SessionManager.CreateSessionAsync(application, _configuration, stoppingToken);
-
-                SubscriptionManager.Clear();
-                _propertiesWithOpcData.Clear();
-
-                _logger.LogInformation("Connected to OPC UA server successfully.");
-
-                // Load nodes, read initial values and create subscriptions
-                var rootNode = await TryGetRootNodeAsync(newSession, stoppingToken);
-                if (rootNode is not null)
-                {
-                    var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, newSession, stoppingToken);
-                    if (monitoredItems.Count > 0)
-                    {
-                        await ReadAndApplyInitialValuesAsync(monitoredItems, newSession, stoppingToken);
-                        await SubscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, newSession, stoppingToken);
-                    }
-
-                    _logger.LogInformation("OPC UA client initialization complete. Monitoring {Count} items (subscriptions: {Subscribed}, polling: {Polled}).",
-                        monitoredItems.Count,
-                        SubscriptionManager.TotalMonitoredItemCount,
-                        PollingManager?.PollingItemCount ?? 0);
-                }
-
-                // Start subscription health monitoring loop
-                while (!stoppingToken.IsCancellationRequested)
-                {
-                    await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(SubscriptionManager.Subscriptions, stoppingToken);
-                    await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken);
-                }
+                await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(SubscriptionManager.Subscriptions, stoppingToken);
+                await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 // Normal shutdown
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to connect to OPC UA server: {Message}.", ex.Message);
-
-                await SessionManager.CloseSessionAsync();
-                CleanUpPropertyVariableData();
-
-                if (!stoppingToken.IsCancellationRequested)
-                {
-                    _logger.LogInformation("Waiting {Delay} before retrying OPC UA connection.", _configuration.ReconnectDelay);
-                    await Task.Delay(_configuration.ReconnectDelay, stoppingToken);
-                }
-            }
-
-            SubscriptionManager.Cleanup();
         }
 
-        SubscriptionManager.Cleanup();
-        CleanUpPropertyVariableData();
         await SessionManager.CloseSessionAsync();
-
+        CleanUpPropertyVariableData();
+        SubscriptionManager.Cleanup();
+        
         _logger.LogInformation("OPC UA client has stopped.");
     }
 
@@ -182,8 +227,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         if (e is { IsNewSession: true, Session: not null })
         {
-            SubscriptionManager.UpdateTransferredSubscriptions(e.Session.Subscriptions);
-            _logger.LogInformation("New session established. Subscriptions transferred by OPC UA stack. Subscriptions preserved with all monitored items intact.");
+            var transferredSubscriptions = e.Session.Subscriptions.ToImmutableArray();
+            if (transferredSubscriptions.Length > 0)
+            {
+                SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
+                _logger.LogInformation("OPC UA session reconnected. Transferred {Count} subscriptions by OPC UA stack.", transferredSubscriptions.Length);
+            }
         }
         else if (e.Session is null)
         {
@@ -244,75 +293,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             _logger.LogInformation("Write flush cancelled during shutdown");
         }
     }
-
-    private async Task ReadAndApplyInitialValuesAsync(IReadOnlyList<MonitoredItem> monitoredItems, Session session, CancellationToken cancellationToken)
-    {
-        var itemCount = monitoredItems.Count;
-        if (itemCount is 0)
-        {
-            return;
-        }
-
-        try
-        {
-            var result = new Dictionary<RegisteredSubjectProperty, DataValue>();
-            var chunkSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
-            chunkSize = chunkSize is 0 ? int.MaxValue : chunkSize;
-
-            for (var offset = 0; offset < itemCount; offset += chunkSize)
-            {
-                var take = Math.Min(chunkSize, itemCount - offset);
-                var readValues = new ReadValueIdCollection(take);
-
-                for (var i = 0; i < take; i++)
-                {
-                    readValues.Add(new ReadValueId
-                    {
-                        NodeId = monitoredItems[offset + i].StartNodeId,
-                        AttributeId = Opc.Ua.Attributes.Value
-                    });
-                }
-
-                var readResponse = await session.ReadAsync(
-                    requestHeader: null,
-                    maxAge: 0,
-                    timestampsToReturn: TimestampsToReturn.Source,
-                    readValues,
-                    cancellationToken);
-
-                var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
-                for (var i = 0; i < resultCount; i++)
-                {
-                    if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
-                    {
-                        var dataValue = readResponse.Results[i];
-                        if (monitoredItems[offset + i].Handle is RegisteredSubjectProperty property)
-                        {
-                            result[property] = dataValue;
-                        }
-                    }
-                }
-            }
-
-            foreach (var (property, dataValue) in result)
-            {
-                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
-                property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
-            }
-
-            _logger.LogInformation("Successfully read initial values of {Count} nodes", itemCount);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to read initial values for monitored items. Values will be populated by subscriptions instead.");
-            // Don't throw - allow subscriptions to populate values instead
-            // Throwing here would crash the background service
-        }
-    }
-
-    public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken) =>
-        Task.FromResult<Action?>(null);
-
+    
     /// <summary>
     /// Writes property changes to the OPC UA server. If disconnected, changes are queued using ring buffer semantics.
     /// HOT PATH - optimized for the common case of direct write to connected session.
