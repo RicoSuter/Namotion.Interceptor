@@ -1,4 +1,3 @@
-using System.Reactive.Linq;
 using Microsoft.Extensions.Logging;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -12,19 +11,16 @@ namespace Namotion.Interceptor.OpcUa.Client;
 internal sealed class OpcUaSubscriptionHealthMonitor
 {
     private readonly ILogger _logger;
-    private readonly OpcUaSubscriptionManager _subscriptionManager;
 
-    public OpcUaSubscriptionHealthMonitor(OpcUaSubscriptionManager subscriptionManager, ILogger logger)
+    public OpcUaSubscriptionHealthMonitor(ILogger logger)
     {
-        _subscriptionManager = subscriptionManager;
         _logger = logger;
     }
 
-    public async Task CheckAndHealSubscriptionsAsync(CancellationToken cancellationToken)
+    public async Task CheckAndHealSubscriptionsAsync(IReadOnlyList<Subscription> subscriptions, CancellationToken cancellationToken)
     {
         try
         {
-            var subscriptions = _subscriptionManager.Subscriptions;
             foreach (var subscription in subscriptions)
             {
                 // Count unhealthy items first to avoid allocation in common case (all healthy)

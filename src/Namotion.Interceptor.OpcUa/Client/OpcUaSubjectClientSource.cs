@@ -49,11 +49,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _logger = logger;
         _configuration = configuration;
 
-        _subjectLoader = new OpcUaSubjectLoader(configuration, _propertiesWithOpcData, this, logger);
         SessionManager = new OpcUaSessionManager(logger, configuration);
         WriteQueueManager = new OpcUaWriteQueueManager(_configuration.WriteQueueSize, logger);
         SubscriptionManager = new OpcUaSubscriptionManager(configuration, logger);
-        _subscriptionHealthMonitor = new OpcUaSubscriptionHealthMonitor(SubscriptionManager, logger);
+   
+        _subjectLoader = new OpcUaSubjectLoader(configuration, _propertiesWithOpcData, this, logger);
+        _subscriptionHealthMonitor = new OpcUaSubscriptionHealthMonitor(logger);
 
         SessionManager.SessionChanged += OnSessionChanged;
         SessionManager.ReconnectionCompleted += OnReconnectionCompleted;
@@ -125,7 +126,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 // Start subscription health monitoring loop
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(stoppingToken);
+                    await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(SubscriptionManager.Subscriptions, stoppingToken);
                     await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken);
                 }
             }
