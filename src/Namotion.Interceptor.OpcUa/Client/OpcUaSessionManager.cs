@@ -21,7 +21,11 @@ internal sealed class OpcUaSessionManager : IDisposable
 
     /// <summary>
     /// Gets the current session, or null if not connected.
-    /// Thread-safe for reading without lock using volatile semantics for memory visibility.
+    /// <para>
+    /// <strong>Thread-Safety:</strong> Thread-safe for reading without lock using volatile semantics for memory visibility.
+    /// WARNING: The session reference can change at any time due to reconnection. Do not cache this value.
+    /// Always read CurrentSession immediately before use, and handle null gracefully.
+    /// </para>
     /// </summary>
     public Session? CurrentSession => Volatile.Read(ref _session);
 
@@ -39,11 +43,21 @@ internal sealed class OpcUaSessionManager : IDisposable
 
     /// <summary>
     /// Occurs when the session changes (new session, reconnected, or disconnected).
+    /// <para>
+    /// <strong>Thread-Safety:</strong> This event is invoked on a background thread (reconnection handler thread or session creation thread).
+    /// Event handlers MUST be thread-safe and should not perform blocking operations.
+    /// The session object may change concurrently - handlers should not cache session references without proper synchronization.
+    /// </para>
     /// </summary>
     public event EventHandler<SessionChangedEventArgs>? SessionChanged;
 
     /// <summary>
     /// Occurs when a reconnection attempt completes (successfully or not).
+    /// <para>
+    /// <strong>Thread-Safety:</strong> This event is invoked on a background thread (reconnection handler thread).
+    /// Event handlers MUST be thread-safe and should not perform blocking operations.
+    /// Handlers should use proper synchronization when accessing shared state.
+    /// </para>
     /// </summary>
     public event EventHandler? ReconnectionCompleted;
 
@@ -115,11 +129,11 @@ internal sealed class OpcUaSessionManager : IDisposable
             return;
         }
 
-        // Use Monitor.TryEnter to avoid blocking OPC UA stack thread
-        // 5 second timeout allows legitimate operations (CreateSessionAsync) to complete
-        if (!Monitor.TryEnter(_lock, TimeSpan.FromSeconds(5)))
+        // Use non-blocking lock acquisition to avoid cascading KeepAlive thread pool exhaustion
+        // If lock is held (e.g., CreateSessionAsync or concurrent reconnect), skip this event - the next KeepAlive will retry
+        if (!Monitor.TryEnter(_lock, 0))
         {
-            _logger.LogWarning("Could not acquire lock for OPC UA reconnect after 5s timeout. Will retry on next KeepAlive.");
+            _logger.LogDebug("Reconnect already in progress, skipping duplicate KeepAlive event");
             return;
         }
 
