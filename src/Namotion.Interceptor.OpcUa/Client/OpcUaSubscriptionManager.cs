@@ -1,10 +1,10 @@
 ﻿using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Sources;
 
@@ -12,15 +12,26 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal class OpcUaSubscriptionManager
 {
-    private static readonly ObjectPool<List<OpcUaPropertyUpdate>> ChangesPool 
+    private static readonly ObjectPool<List<OpcUaPropertyUpdate>> ChangesPool
         = new(() => new List<OpcUaPropertyUpdate>(16));
 
     private readonly ILogger _logger;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
-    private readonly List<Subscription> _activeSubscriptions = [];
+
+    private ImmutableArray<Subscription> _subscriptions = ImmutableArray<Subscription>.Empty;
+
+    private readonly OpcUaSubscriptionHealthMonitor _healthMonitor;
 
     private ISubjectUpdater? _updater;
+
+    /// <summary>
+    /// Gets the current list of subscriptions. Lock-free and allocation-free when accessed.
+    /// Returns the immutable array directly - no copying or locking required.
+    /// </summary>
+    public IReadOnlyList<Subscription> Subscriptions => _subscriptions;
+
+    public int TotalMonitoredItemCount => _monitoredItems.Count;
 
     public OpcUaSubscriptionManager(
         OpcUaClientConfiguration configuration,
@@ -28,6 +39,7 @@ internal class OpcUaSubscriptionManager
     {
         _configuration = configuration;
         _logger = logger;
+        _healthMonitor = new OpcUaSubscriptionHealthMonitor(configuration, this, logger);
     }
 
     public void SetUpdater(ISubjectUpdater updater)
@@ -38,7 +50,7 @@ internal class OpcUaSubscriptionManager
     public void Clear()
     {
         _monitoredItems.Clear();
-        _activeSubscriptions.Clear();
+        _subscriptions = ImmutableArray<Subscription>.Empty;
     }
 
     public async Task CreateBatchedSubscriptionsAsync(
@@ -48,7 +60,11 @@ internal class OpcUaSubscriptionManager
     {
         var itemCount = monitoredItems.Count;
         var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
-        
+
+        // Calculate expected subscription count for builder capacity
+        var expectedSubscriptionCount = (itemCount + maximumItemsPerSubscription - 1) / maximumItemsPerSubscription;
+        var builder = ImmutableArray.CreateBuilder<Subscription>(expectedSubscriptionCount);
+
         for (var i = 0; i < itemCount; i += maximumItemsPerSubscription)
         {
             var subscription = new Subscription(session.DefaultSubscription)
@@ -70,7 +86,8 @@ internal class OpcUaSubscriptionManager
 
             await subscription.CreateAsync(cancellationToken);
             subscription.FastDataChangeCallback += OnFastDataChange;
-            _activeSubscriptions.Add(subscription);
+
+            builder.Add(subscription);
 
             var batchEnd = Math.Min(i + maximumItemsPerSubscription, itemCount);
             for (var j = i; j < batchEnd; j++)
@@ -99,65 +116,54 @@ internal class OpcUaSubscriptionManager
                 // TODO: Switch to polling when monitoring failed
                 _logger.LogWarning("Removed {Removed} monitored items that failed to create in OPC UA subscription {SubscriptionId}.", removed, subscription.Id);
             }
-            
+
             _logger.LogInformation("Created OPC UA subscription {SubscriptionId} with {Count} monitored items.", subscription.Id, subscription.MonitoredItems.Count());
         }
+
+        // Atomically replace the subscriptions array with memory barriers to ensure visibility
+        var newSubscriptions = builder.ToImmutable();
+        Interlocked.MemoryBarrier();
+        _subscriptions = newSubscriptions;
+        Interlocked.MemoryBarrier();
     }
 
-    public void Cleanup()
+    public void StartHealthMonitoring()
     {
-        foreach (var subscription in _activeSubscriptions)
-        {
-            try
-            {
-                subscription.FastDataChangeCallback -= OnFastDataChange;
-                subscription.Delete(true);
-            }
-            catch { /* ignore cleanup exceptions */ }
-        }
-        _activeSubscriptions.Clear();
+        _healthMonitor.Start();
     }
 
-    private async Task<int> FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
+    /// <summary>
+    /// Updates the subscription list to reference subscriptions transferred by SessionReconnectHandler.
+    /// Called after successful session transfer to embrace OPC Foundation's subscription preservation.
+    /// </summary>
+    public void UpdateTransferredSubscriptions(IEnumerable<Subscription> transferredSubscriptions)
     {
-        List<MonitoredItem>? itemsToRemove = null;
-        
-        foreach (var monitoredItem in subscription.MonitoredItems)
+        var subscriptionList = transferredSubscriptions.ToList();
+        if (subscriptionList.Count == 0)
         {
-            var statusCode = monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good;
-            var hasFailed = !monitoredItem.Created || StatusCode.IsBad(statusCode);
-            if (hasFailed)
-            {
-                itemsToRemove ??= [];
-                itemsToRemove.Add(monitoredItem);
-
-                _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
-
-                _logger.LogError("OPC UA monitored item creation failed for {DisplayName} (Handle={Handle}): {Status}", 
-                    monitoredItem.DisplayName, monitoredItem.ClientHandle, statusCode);
-            }
+            _logger.LogWarning("UpdateTransferredSubscriptions called with empty collection");
+            return;
         }
 
-        if (itemsToRemove?.Count > 0)
+        var builder = ImmutableArray.CreateBuilder<Subscription>(subscriptionList.Count);
+
+        foreach (var subscription in subscriptionList)
         {
-            foreach (var monitoredItem in itemsToRemove)
-            {
-                subscription.RemoveItem(monitoredItem);
-            }
+            builder.Add(subscription);
 
-            try
-            {
-                await subscription.ApplyChangesAsync(cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "ApplyChanges after removing failed items still failed. Continuing with remaining OPC UA monitored items.");
-            }
-
-            return itemsToRemove.Count;
+            // Re-attach our FastDataChangeCallback if not already attached
+            // The callback may have been lost during transfer
+            subscription.FastDataChangeCallback -= OnFastDataChange;  // Remove if exists
+            subscription.FastDataChangeCallback += OnFastDataChange;  // Add
         }
 
-        return 0;
+        // Atomically update subscription reference with memory barrier
+        var newSubscriptions = builder.ToImmutable();
+        Interlocked.MemoryBarrier();
+        _subscriptions = newSubscriptions;
+        Interlocked.MemoryBarrier();
+
+        _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions", subscriptionList.Count);
     }
     
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
@@ -225,9 +231,76 @@ internal class OpcUaSubscriptionManager
     private struct OpcUaPropertyUpdate
     {
         public PropertyReference Property { get; init; }
-        
+
         public DateTimeOffset Timestamp { get; init; }
-        
+
         public object? Value { get; init; }
+    }
+    
+    private async Task<int> FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
+    {
+        List<MonitoredItem>? itemsToRemove = null;
+
+        foreach (var monitoredItem in subscription.MonitoredItems)
+        {
+            if (OpcUaSubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
+            {
+                itemsToRemove ??= [];
+                itemsToRemove.Add(monitoredItem);
+
+                _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
+
+                var statusCode = monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good;
+                _logger.LogError("OPC UA monitored item creation failed for {DisplayName} (Handle={Handle}): {Status}",
+                    monitoredItem.DisplayName, monitoredItem.ClientHandle, statusCode);
+            }
+        }
+
+        if (itemsToRemove?.Count > 0)
+        {
+            foreach (var monitoredItem in itemsToRemove)
+            {
+                subscription.RemoveItem(monitoredItem);
+            }
+
+            try
+            {
+                await subscription.ApplyChangesAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "ApplyChanges after removing failed items still failed. Continuing with remaining OPC UA monitored items.");
+            }
+
+            return itemsToRemove.Count;
+        }
+
+        return 0;
+    }
+
+    public void Cleanup()
+    {
+        _healthMonitor.Stop();
+
+        // Capture current subscriptions and atomically clear (lock-free)
+        var subscriptions = _subscriptions;
+        _subscriptions = ImmutableArray<Subscription>.Empty;
+
+        // Clean up captured subscriptions
+        foreach (var subscription in subscriptions)
+        {
+            try
+            {
+                subscription.FastDataChangeCallback -= OnFastDataChange;
+                subscription.Delete(true);
+            }
+            catch { /* ignore cleanup exceptions */ }
+        }
+    }
+
+    public void Dispose()
+    {
+        _healthMonitor.Dispose();
+        Cleanup();
     }
 }
