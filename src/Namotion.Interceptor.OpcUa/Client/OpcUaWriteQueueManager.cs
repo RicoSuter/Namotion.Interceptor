@@ -13,30 +13,22 @@ internal sealed class OpcUaWriteQueueManager
     private readonly ConcurrentQueue<SubjectPropertyChange> _pendingWrites = new();
     private readonly int _maxQueueSize;
     private readonly ILogger _logger;
-    private int _droppedWriteCount = 0; // Access via Interlocked operations only
+    private readonly object _lock = new();
+    private int _droppedWriteCount;
 
-    /// <summary>
-    /// Gets the number of write operations currently queued.
-    /// </summary>
     public int PendingWriteCount => _pendingWrites.Count;
 
-    /// <summary>
-    /// Gets the number of writes that were dropped due to ring buffer overflow.
-    /// This counter is reset when the queue is successfully flushed.
-    /// </summary>
-    public int DroppedWriteCount => Interlocked.CompareExchange(ref _droppedWriteCount, 0, 0);
+    public int DroppedWriteCount
+    {
+        get { lock (_lock) return _droppedWriteCount; }
+    }
 
-    /// <summary>
-    /// Gets whether the queue is empty.
-    /// </summary>
     public bool IsEmpty => _pendingWrites.IsEmpty;
 
     public OpcUaWriteQueueManager(int maxQueueSize, ILogger logger)
     {
-        if (maxQueueSize < 0)
-        {
-            throw new ArgumentException("Max queue size must be non-negative", nameof(maxQueueSize));
-        }
+        ArgumentOutOfRangeException.ThrowIfNegative(maxQueueSize);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _maxQueueSize = maxQueueSize;
         _logger = logger;
@@ -48,10 +40,9 @@ internal sealed class OpcUaWriteQueueManager
     /// </summary>
     public void Enqueue(SubjectPropertyChange change)
     {
-        if (_maxQueueSize == 0)
+        if (_maxQueueSize is 0)
         {
-            _logger.LogWarning("Write buffering is disabled. Dropping write for {PropertyName}.",
-                change.Property.Name);
+            _logger.LogWarning("Write buffering is disabled. Dropping write for {PropertyName}", change.Property.Name);
             return;
         }
 
@@ -60,12 +51,11 @@ internal sealed class OpcUaWriteQueueManager
         {
             if (_pendingWrites.TryDequeue(out _))
             {
-                Interlocked.Increment(ref _droppedWriteCount);
+                lock (_lock) _droppedWriteCount++;
             }
             else
             {
-                // Queue was emptied by another thread (e.g., flush)
-                break;
+                break; // Queue emptied by another thread (e.g., flush)
             }
         }
 
@@ -78,9 +68,9 @@ internal sealed class OpcUaWriteQueueManager
     /// </summary>
     public void EnqueueBatch(IReadOnlyList<SubjectPropertyChange> changes)
     {
-        if (_maxQueueSize == 0)
+        if (_maxQueueSize is 0)
         {
-            _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", changes.Count);
+            _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes", changes.Count);
             return;
         }
 
@@ -89,12 +79,15 @@ internal sealed class OpcUaWriteQueueManager
             Enqueue(change);
         }
 
-        var dropped = Interlocked.CompareExchange(ref _droppedWriteCount, 0, 0);
+        int dropped;
+        lock (_lock) dropped = _droppedWriteCount;
+
         if (dropped > 0)
         {
             _logger.LogWarning(
-                "Write queue at capacity, dropped {Count} oldest writes (queue size: {QueueSize}).",
-                dropped, _maxQueueSize);
+                "Write queue at capacity, dropped {Count} oldest writes (queue size: {QueueSize})",
+                dropped,
+                _maxQueueSize);
         }
     }
 
@@ -114,18 +107,9 @@ internal sealed class OpcUaWriteQueueManager
         if (pendingWrites.Count > 0)
         {
             // Reset dropped counter after successful flush
-            Interlocked.Exchange(ref _droppedWriteCount, 0);
+            lock (_lock) _droppedWriteCount = 0;
         }
 
         return pendingWrites;
-    }
-
-    /// <summary>
-    /// Clears all pending writes without returning them.
-    /// </summary>
-    public void Clear()
-    {
-        _pendingWrites.Clear();
-        Interlocked.Exchange(ref _droppedWriteCount, 0);
     }
 }
