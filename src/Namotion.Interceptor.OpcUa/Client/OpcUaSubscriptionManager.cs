@@ -20,7 +20,7 @@ internal class OpcUaSubscriptionManager
 
     private readonly ILogger _logger;
     private readonly OpcUaClientConfiguration _configuration;
-    private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
+    private readonly ConcurrentDictionary<uint, (MonitoredItem monitoredItem, RegisteredSubjectProperty property)> _monitoredItems = new();
     private readonly SemaphoreSlim _applyChangesLock = new(1, 1); // Coordinates concurrent ApplyChanges calls
 
     private volatile PollingManager? _pollingManager;
@@ -43,7 +43,7 @@ internal class OpcUaSubscriptionManager
         }
     }
 
-    public int TotalMonitoredItemCount => _monitoredItems.Count;
+    public ConcurrentDictionary<uint, (MonitoredItem monitoredItem, RegisteredSubjectProperty property)> MonitoredItems => _monitoredItems;
 
     public OpcUaSubscriptionManager(OpcUaClientConfiguration configuration, ILogger logger)
     {
@@ -75,6 +75,8 @@ internal class OpcUaSubscriptionManager
         Session session,
         CancellationToken cancellationToken)
     {
+        _shuttingDown = false;
+        
         var itemCount = monitoredItems.Count;
         var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
 
@@ -114,7 +116,7 @@ internal class OpcUaSubscriptionManager
 
                 if (item.Handle is RegisteredSubjectProperty p)
                 {
-                    _monitoredItems[item.ClientHandle] = p;
+                    _monitoredItems[item.ClientHandle] = (item, p);
                 }
             }
 
@@ -167,33 +169,20 @@ internal class OpcUaSubscriptionManager
     /// Updates the subscription list to reference subscriptions transferred by SessionReconnectHandler.
     /// Called after successful session transfer to embrace OPC Foundation's subscription preservation.
     /// </summary>
-    public void UpdateTransferredSubscriptions(IEnumerable<Subscription> transferredSubscriptions)
+    public void UpdateTransferredSubscriptions(ImmutableArray<Subscription> transferredSubscriptions)
     {
-        var subscriptionList = transferredSubscriptions.ToList();
-        if (subscriptionList.Count == 0)
+        foreach (var subscription in transferredSubscriptions)
         {
-            _logger.LogWarning("UpdateTransferredSubscriptions called with empty collection");
-            return;
-        }
-
-        var builder = ImmutableArray.CreateBuilder<Subscription>(subscriptionList.Count);
-        foreach (var subscription in subscriptionList)
-        {
-            builder.Add(subscription);
-            
             subscription.FastDataChangeCallback -= OnFastDataChange;
             subscription.FastDataChangeCallback += OnFastDataChange;
         }
 
-        // Update subscription reference with lock to ensure atomic assignment
-        // ImmutableArray is a struct - assignment not atomic on all platforms
-        var newSubscriptions = builder.ToImmutable();
         lock (_subscriptionsLock)
         {
-            _subscriptions = newSubscriptions;
+            _subscriptions = transferredSubscriptions;
         }
 
-        _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions", subscriptionList.Count);
+        _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions", transferredSubscriptions.Length);
     }
     
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
@@ -220,12 +209,12 @@ internal class OpcUaSubscriptionManager
         for (var i = 0; i < monitoredItemsCount; i++)
         {
             var item = notification.MonitoredItems[i];
-            if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
+            if (_monitoredItems.TryGetValue(item.ClientHandle, out var tuple))
             {
                 changes.Add(new OpcUaPropertyUpdate
                 {
-                    Property = property,
-                    Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
+                    Property = tuple.property,
+                    Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, tuple.property),
                     Timestamp = item.Value.SourceTimestamp
                 });
             }

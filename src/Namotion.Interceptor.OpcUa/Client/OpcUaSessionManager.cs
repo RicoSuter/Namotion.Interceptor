@@ -160,22 +160,21 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
 
             if (_reconnectHandler.State is not SessionReconnectHandler.ReconnectState.Ready)
             {
-                _logger.LogWarning("SessionReconnectHandler not ready. State: {State}", _reconnectHandler.State);
+                _logger.LogWarning("OPC UA SessionReconnectHandler not ready. State: {State}", _reconnectHandler.State);
                 return;
             }
 
-            _logger.LogInformation("Server connection lost. Beginning reconnect with exponential backoff");
+            _logger.LogInformation("OPC UA server connection lost. Beginning reconnect with exponential backoff...");
 
             var newState = _reconnectHandler.BeginReconnect(session, _configuration.ReconnectInterval, OnReconnectComplete);
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
             {
                 Interlocked.Exchange(ref _isReconnecting, 1);
                 e.CancelKeepAlive = true;
-                _logger.LogInformation("Reconnect handler initiated successfully");
             }
             else
             {
-                _logger.LogError("Failed to begin reconnect. Handler state: {State}", newState);
+                _logger.LogError("Failed to begin OPC UA reconnect. Handler state: {State}", newState);
             }
         }
         finally
