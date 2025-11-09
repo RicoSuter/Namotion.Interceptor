@@ -7,30 +7,35 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 /// <summary>
 /// Manages OPC UA session lifecycle, reconnection handling, and thread-safe session access.
+/// Optimized for fast session reads (hot path) with simple lock-based writes (cold path).
 /// </summary>
 internal sealed class OpcUaSessionManager : IDisposable
 {
+    private readonly object _lock = new();
     private Session? _session;
     private readonly SessionReconnectHandler _reconnectHandler;
-    private readonly SemaphoreSlim _sessionSemaphore = new(1, 1);
     private readonly ILogger _logger;
-    private int _isReconnecting = 0; // 0 = false, 1 = true (use Interlocked)
-    private int _disposed = 0; // 0 = not disposed, 1 = disposed
+    private bool _isReconnecting;
+    private bool _disposed;
 
     /// <summary>
     /// Gets the current session, or null if not connected.
+    /// Thread-safe for reading without lock (session assignment is atomic).
     /// </summary>
     public Session? CurrentSession => _session;
 
     /// <summary>
     /// Gets whether a session is currently connected.
     /// </summary>
-    public bool IsConnected => _session != null;
+    public bool IsConnected => _session is not null;
 
     /// <summary>
     /// Gets whether a reconnection is in progress.
     /// </summary>
-    public bool IsReconnecting => Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1;
+    public bool IsReconnecting
+    {
+        get { lock (_lock) return _isReconnecting; }
+    }
 
     /// <summary>
     /// Occurs when the session changes (new session, reconnected, or disconnected).
@@ -45,10 +50,6 @@ internal sealed class OpcUaSessionManager : IDisposable
     public OpcUaSessionManager(ILogger logger)
     {
         _logger = logger;
-
-        // Initialize SessionReconnectHandler with exponential backoff (max 60s)
-        // First parameter: false = preserve session when possible (don't always close)
-        // Second parameter: 60000ms = max reconnect period for exponential backoff
         _reconnectHandler = new SessionReconnectHandler(false, 60000);
     }
 
@@ -64,48 +65,38 @@ internal sealed class OpcUaSessionManager : IDisposable
         var endpointDescription = CoreClientUtils.SelectEndpoint(
             application.ApplicationConfiguration,
             configuration.ServerUrl,
-            false);
+            useSecurity: false);
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
 
-        await _sessionSemaphore.WaitAsync(cancellationToken);
-        try
-        {
-            var newSession = await Session.Create(
-                application.ApplicationConfiguration,
-                endpoint,
-                false,
-                application.ApplicationName,
-                60000,
-                new UserIdentity(),
-                null,
-                cancellationToken);
+        var newSession = await Session.Create(
+            application.ApplicationConfiguration,
+            endpoint,
+            updateBeforeConnect: false,
+            application.ApplicationName,
+            sessionTimeout: 60000,
+            new UserIdentity(),
+            preferredLocales: null,
+            cancellationToken);
 
-            var oldSession = _session;
+        Session? oldSession;
+        lock (_lock)
+        {
+            oldSession = _session;
             _session = newSession;
-            Interlocked.Exchange(ref _isReconnecting, 0);
+            _isReconnecting = false;
 
-            // Setup KeepAlive event handler for automatic reconnection
             newSession.KeepAlive += OnKeepAlive;
-
-            // Clean up old session if exists
-            if (oldSession != null)
-            {
-                oldSession.KeepAlive -= OnKeepAlive;
-
-                // Dispose old session asynchronously - use short timeout to avoid blocking
-                using var disposeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                disposeCts.CancelAfter(TimeSpan.FromSeconds(2));
-                await DisposeSessionSafelyAsync(oldSession, disposeCts.Token);
-            }
-
-            SessionChanged?.Invoke(this, new SessionChangedEventArgs(newSession, true));
-
-            return newSession;
         }
-        finally
+
+        // Dispose old session outside lock
+        if (oldSession is not null)
         {
-            _sessionSemaphore.Release();
+            oldSession.KeepAlive -= OnKeepAlive;
+            await DisposeSessionSafelyAsync(oldSession);
         }
+
+        SessionChanged?.Invoke(this, new SessionChangedEventArgs(newSession, isNewSession: true));
+        return newSession;
     }
 
     /// <summary>
@@ -113,186 +104,122 @@ internal sealed class OpcUaSessionManager : IDisposable
     /// </summary>
     private void OnKeepAlive(ISession sender, KeepAliveEventArgs e)
     {
-        // Only handle bad status - good status means connection is healthy
         if (ServiceResult.IsGood(e.Status))
+            return;
+
+        _logger.LogWarning("KeepAlive failed with status: {Status}. Connection may be lost", e.Status);
+
+        if (e.CurrentState is not (ServerState.Unknown or ServerState.Failed))
+            return;
+
+        // Use Monitor.TryEnter to avoid blocking OPC UA stack thread
+        if (!Monitor.TryEnter(_lock, TimeSpan.FromMilliseconds(100)))
         {
+            _logger.LogWarning("Could not acquire lock for reconnect. Will retry on next KeepAlive");
             return;
         }
 
-        _logger.LogWarning("KeepAlive failed with status: {Status}. Connection may be lost.", e.Status);
-
-        // Critical connection states that require reconnection
-        if (e.CurrentState == ServerState.Unknown || e.CurrentState == ServerState.Failed)
+        try
         {
-            // Use timeout to prevent blocking OPC UA stack thread
-            if (!_sessionSemaphore.Wait(TimeSpan.FromMilliseconds(100)))
+            if (_disposed || _isReconnecting)
+                return;
+
+            if (_session is not { } session || !ReferenceEquals(sender, session))
+                return;
+
+            if (_reconnectHandler.State is not SessionReconnectHandler.ReconnectState.Ready)
             {
-                _logger.LogWarning("Could not acquire semaphore for reconnect within timeout. Will retry on next KeepAlive.");
+                _logger.LogWarning("SessionReconnectHandler not ready. State: {State}", _reconnectHandler.State);
                 return;
             }
 
-            try
+            _logger.LogInformation("Server connection lost. Beginning reconnect with exponential backoff");
+
+            var newState = _reconnectHandler.BeginReconnect(session, 5000, OnReconnectComplete);
+
+            if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
             {
-                // Prevent duplicate reconnect attempts
-                if (Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1)
-                {
-                    return;
-                }
-
-                var session = _session;
-                if (session == null || !ReferenceEquals(sender, session))
-                {
-                    return;
-                }
-
-                // Check if SessionReconnectHandler is ready to begin reconnect
-                if (_reconnectHandler.State != SessionReconnectHandler.ReconnectState.Ready)
-                {
-                    _logger.LogWarning("SessionReconnectHandler not ready. Current state: {State}", _reconnectHandler.State);
-                    return;
-                }
-
-                _logger.LogInformation("Server connection lost. Beginning reconnect with exponential backoff...");
-
-                // BeginReconnect returns the new state and triggers automatic reconnection
-                // with exponential backoff (5s, 10s, 20s, 40s, 60s max)
-                var newState = _reconnectHandler.BeginReconnect(
-                    session,
-                    5000, // Initial reconnect period
-                    OnReconnectComplete);
-
-                if (newState == SessionReconnectHandler.ReconnectState.Triggered ||
-                    newState == SessionReconnectHandler.ReconnectState.Reconnecting)
-                {
-                    Interlocked.Exchange(ref _isReconnecting, 1);
-                    e.CancelKeepAlive = true; // Stop keep-alive during reconnect
-
-                    _logger.LogInformation("Reconnect handler initiated successfully.");
-                }
-                else
-                {
-                    _logger.LogError("Failed to begin reconnect. Handler state: {State}", newState);
-                }
+                _isReconnecting = true;
+                e.CancelKeepAlive = true;
+                _logger.LogInformation("Reconnect handler initiated successfully");
             }
-            finally
+            else
             {
-                _sessionSemaphore.Release();
+                _logger.LogError("Failed to begin reconnect. Handler state: {State}", newState);
             }
+        }
+        finally
+        {
+            Monitor.Exit(_lock);
         }
     }
 
     /// <summary>
     /// Callback invoked by SessionReconnectHandler when reconnection completes.
-    /// This is a synchronous callback from OPC UA library, so we queue async work.
+    /// Queues async work since this is a synchronous callback.
     /// </summary>
     private void OnReconnectComplete(object? sender, EventArgs e)
     {
-        // Queue the async work with full exception handling
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await HandleReconnectCompleteAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unhandled exception in reconnect completion handler");
-            }
-        });
+        _ = HandleReconnectCompleteAsync();
     }
 
     private async Task HandleReconnectCompleteAsync()
     {
-        // Check if disposed
-        if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
-        {
-            return;
-        }
+        Session? oldSession = null;
+        Session? newSession = null;
+        bool isNewSession;
 
-        await _sessionSemaphore.WaitAsync();
-        try
+        lock (_lock)
         {
+            if (_disposed)
+                return;
+
             var reconnectedSession = _reconnectHandler.Session;
-
-            if (reconnectedSession == null)
+            if (reconnectedSession is null)
             {
-                _logger.LogError("Reconnect completed but received null session. Connection lost permanently.");
-                Interlocked.Exchange(ref _isReconnecting, 0);
-                SessionChanged?.Invoke(this, new SessionChangedEventArgs(null, false));
+                _logger.LogError("Reconnect completed but received null session. Connection lost permanently");
+                _isReconnecting = false;
+                SessionChanged?.Invoke(this, new SessionChangedEventArgs(null, isNewSession: false));
                 return;
             }
 
-            var isNewSession = !ReferenceEquals(_session, reconnectedSession);
+            isNewSession = !ReferenceEquals(_session, reconnectedSession);
 
             if (isNewSession)
             {
-                _logger.LogInformation("Reconnect created new session. Subscriptions have been transferred by OPC UA stack.");
+                _logger.LogInformation("Reconnect created new session. Subscriptions transferred by OPC UA stack");
+                oldSession = _session;
+                newSession = reconnectedSession as Session;
+                _session = newSession;
 
-                var oldSession = _session;
-                _session = reconnectedSession as Session;
-
-                // Clean up old session properly
-                if (oldSession != null && !ReferenceEquals(oldSession, _session))
+                if (newSession is not null)
                 {
-                    oldSession.KeepAlive -= OnKeepAlive;
-
-                    // Dispose old session asynchronously with timeout
-                    using var disposeCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    await DisposeSessionSafelyAsync(oldSession, disposeCts.Token);
+                    newSession.KeepAlive -= OnKeepAlive; // Defensive
+                    newSession.KeepAlive += OnKeepAlive;
                 }
-
-                // Setup KeepAlive for new session (only if it's a Session, not just ISession)
-                if (_session != null)
-                {
-                    // Defensive - prevent duplicate registration
-                    _session.KeepAlive -= OnKeepAlive;
-                    _session.KeepAlive += OnKeepAlive;
-                }
-
-                SessionChanged?.Invoke(this, new SessionChangedEventArgs(_session, isNewSession));
             }
             else
             {
-                _logger.LogInformation("Reconnect preserved existing session. Subscriptions maintained without transfer.");
+                _logger.LogInformation("Reconnect preserved existing session. Subscriptions maintained");
             }
 
-            Interlocked.Exchange(ref _isReconnecting, 0);
-            _logger.LogInformation("Session reconnect completed successfully. New session: {IsNew}", isNewSession);
+            _isReconnecting = false;
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error handling reconnect completion");
-            Interlocked.Exchange(ref _isReconnecting, 0);
-        }
-        finally
-        {
-            _sessionSemaphore.Release();
-            ReconnectionCompleted?.Invoke(this, EventArgs.Empty);
-        }
-    }
 
-    /// <summary>
-    /// Executes an action with the current session in a thread-safe manner.
-    /// </summary>
-    public async Task<T?> ExecuteWithSessionAsync<T>(
-        Func<Session, Task<T>> action,
-        CancellationToken cancellationToken = default)
-    {
-        await _sessionSemaphore.WaitAsync(cancellationToken);
-        try
+        // Dispose old session outside lock
+        if (oldSession is not null && !ReferenceEquals(oldSession, newSession))
         {
-            var session = _session;
-            if (session == null)
-            {
-                return default;
-            }
+            oldSession.KeepAlive -= OnKeepAlive;
+            await DisposeSessionSafelyAsync(oldSession);
+        }
 
-            return await action(session);
-        }
-        finally
+        if (isNewSession)
         {
-            _sessionSemaphore.Release();
+            SessionChanged?.Invoke(this, new SessionChangedEventArgs(newSession, isNewSession: true));
         }
+
+        ReconnectionCompleted?.Invoke(this, EventArgs.Empty);
+        _logger.LogInformation("Session reconnect completed. New session: {IsNew}", isNewSession);
     }
 
     /// <summary>
@@ -300,95 +227,81 @@ internal sealed class OpcUaSessionManager : IDisposable
     /// </summary>
     public async Task CloseSessionAsync()
     {
-        await _sessionSemaphore.WaitAsync();
-        try
+        Session? sessionToClose;
+        lock (_lock)
         {
-            var session = _session;
-            if (session == null)
+            sessionToClose = _session;
+            if (sessionToClose is not null)
             {
-                return;
-            }
-
-            // Remove KeepAlive event handler before closing
-            session.KeepAlive -= OnKeepAlive;
-
-            try
-            {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                await session.CloseAsync(cts.Token);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error while closing session.");
-            }
-            finally
-            {
-                session.Dispose();
+                sessionToClose.KeepAlive -= OnKeepAlive;
                 _session = null;
-                Interlocked.Exchange(ref _isReconnecting, 0);
+                _isReconnecting = false;
             }
         }
-        finally
+
+        if (sessionToClose is not null)
         {
-            _sessionSemaphore.Release();
+            await DisposeSessionSafelyAsync(sessionToClose);
         }
     }
 
-    private async Task DisposeSessionSafelyAsync(Session session, CancellationToken cancellationToken)
+    private async Task DisposeSessionSafelyAsync(Session session)
     {
         try
         {
-            await session.CloseAsync(cancellationToken);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await session.CloseAsync(cts.Token);
             session.Dispose();
-            _logger.LogDebug("Old session disposed after reconnect");
+            _logger.LogDebug("Session disposed successfully");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error disposing old session");
+            _logger.LogWarning(ex, "Error disposing session");
+            try { session.Dispose(); } catch { /* Best effort */ }
         }
     }
 
     public void Dispose()
     {
-        // Set disposed flag first to prevent new operations
-        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        Session? sessionToDispose;
+        lock (_lock)
         {
-            return; // Already disposed
-        }
+            if (_disposed)
+                return;
+            _disposed = true;
 
-        // Acquire semaphore to ensure no operations are in progress
-        _sessionSemaphore.Wait();
-        try
-        {
-            var session = _session;
-            if (session != null)
+            sessionToDispose = _session;
+            if (sessionToDispose is not null)
             {
-                session.KeepAlive -= OnKeepAlive;
-                session.Dispose();
+                sessionToDispose.KeepAlive -= OnKeepAlive;
                 _session = null;
             }
         }
-        finally
+
+        if (sessionToDispose is not null)
         {
-            _sessionSemaphore.Release();
+            // Synchronous disposal in Dispose() - acceptable
+            try
+            {
+                sessionToDispose.Close(2000);
+                sessionToDispose.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error disposing session in Dispose");
+                try { sessionToDispose.Dispose(); } catch { /* Best effort */ }
+            }
         }
 
         _reconnectHandler?.Dispose();
-        _sessionSemaphore?.Dispose();
     }
 }
 
 /// <summary>
 /// Event args for session change events.
 /// </summary>
-internal class SessionChangedEventArgs : EventArgs
+internal sealed class SessionChangedEventArgs(Session? session, bool isNewSession) : EventArgs
 {
-    public Session? Session { get; }
-    public bool IsNewSession { get; }
-
-    public SessionChangedEventArgs(Session? session, bool isNewSession)
-    {
-        Session = session;
-        IsNewSession = isNewSession;
-    }
+    public Session? Session { get; } = session;
+    public bool IsNewSession { get; } = isNewSession;
 }
