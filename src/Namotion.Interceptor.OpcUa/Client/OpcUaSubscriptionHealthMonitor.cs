@@ -1,7 +1,7 @@
+using System.Reactive.Linq;
 using Microsoft.Extensions.Logging;
 using Opc.Ua;
 using Opc.Ua.Client;
-using System.Reactive.Linq;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
@@ -82,7 +82,6 @@ internal sealed class OpcUaSubscriptionHealthMonitor : IDisposable
         try
         {
             var subscriptions = _subscriptionManager.Subscriptions;
-
             foreach (var subscription in subscriptions)
             {
                 // Count unhealthy items first to avoid allocation in common case (all healthy)
@@ -111,7 +110,7 @@ internal sealed class OpcUaSubscriptionHealthMonitor : IDisposable
                 }
 
                 _logger.LogWarning(
-                    "Found {Count} unhealthy retryable items in subscription {Id}. Attempting to heal...",
+                    "Found {Count} unhealthy retryable items in OPC UA subscription {Id}. Attempting to heal...",
                     unhealthyItems.Count, subscription.Id);
 
                 try
@@ -123,25 +122,25 @@ internal sealed class OpcUaSubscriptionHealthMonitor : IDisposable
                     if (stillUnhealthy == 0)
                     {
                         _logger.LogInformation(
-                            "Subscription {Id} healed successfully - all {Count} items now healthy",
+                            "OPC UA subscription {Id} healed successfully - all {Count} items now healthy.",
                             subscription.Id, unhealthyItems.Count);
                     }
                     else
                     {
                         _logger.LogWarning(
-                            "Subscription {Id} partial healing - {Healthy}/{Total} items recovered. Will retry.",
+                            "OPC UA subscription {Id} partial healing - {Healthy}/{Total} items recovered. Will retry.",
                             subscription.Id, unhealthyItems.Count - stillUnhealthy, unhealthyItems.Count);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to heal subscription {Id}", subscription.Id);
+                    _logger.LogError(ex, "Failed to heal OPC UA subscription {Id}.", subscription.Id);
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Subscription health check failed");
+            _logger.LogError(ex, "OPC UA subscription health check failed.");
         }
     }
 

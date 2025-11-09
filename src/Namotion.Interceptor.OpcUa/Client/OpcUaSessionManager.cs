@@ -12,6 +12,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 internal sealed class OpcUaSessionManager : IDisposable
 {
     private readonly object _lock = new();
+
     private Session? _session;
     private readonly SessionReconnectHandler _reconnectHandler;
     private readonly ILogger _logger;
@@ -54,10 +55,10 @@ internal sealed class OpcUaSessionManager : IDisposable
     }
 
     /// <summary>
-    /// Creates a new OPC UA session with the specified configuration.
+    /// Create a new OPC UA session with the specified configuration.
     /// </summary>
     public async Task<Session> CreateSessionAsync(
-        ApplicationInstance application,
+        ApplicationInstance application, 
         OpcUaClientConfiguration configuration,
         CancellationToken cancellationToken)
     {
@@ -66,6 +67,7 @@ internal sealed class OpcUaSessionManager : IDisposable
             application.ApplicationConfiguration,
             configuration.ServerUrl,
             useSecurity: false);
+        
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
 
         var newSession = await Session.Create(
@@ -82,13 +84,13 @@ internal sealed class OpcUaSessionManager : IDisposable
         lock (_lock)
         {
             oldSession = _session;
+
             _session = newSession;
             _isReconnecting = false;
 
             newSession.KeepAlive += OnKeepAlive;
         }
 
-        // Dispose old session outside lock
         if (oldSession is not null)
         {
             oldSession.KeepAlive -= OnKeepAlive;
@@ -105,27 +107,35 @@ internal sealed class OpcUaSessionManager : IDisposable
     private void OnKeepAlive(ISession sender, KeepAliveEventArgs e)
     {
         if (ServiceResult.IsGood(e.Status))
+        {
             return;
+        }
 
-        _logger.LogWarning("KeepAlive failed with status: {Status}. Connection may be lost", e.Status);
+        _logger.LogWarning("OPC UA KeepAlive failed with status: {Status}. Connection may be lost", e.Status);
 
         if (e.CurrentState is not (ServerState.Unknown or ServerState.Failed))
+        {
             return;
+        }
 
         // Use Monitor.TryEnter to avoid blocking OPC UA stack thread
         if (!Monitor.TryEnter(_lock, TimeSpan.FromMilliseconds(100)))
         {
-            _logger.LogWarning("Could not acquire lock for reconnect. Will retry on next KeepAlive");
+            _logger.LogWarning("Could not acquire lock for OPC UA reconnect. Will retry on next KeepAlive.");
             return;
         }
 
         try
         {
             if (_disposed || _isReconnecting)
+            {
                 return;
+            }
 
             if (_session is not { } session || !ReferenceEquals(sender, session))
+            {
                 return;
+            }
 
             if (_reconnectHandler.State is not SessionReconnectHandler.ReconnectState.Ready)
             {
@@ -136,7 +146,6 @@ internal sealed class OpcUaSessionManager : IDisposable
             _logger.LogInformation("Server connection lost. Beginning reconnect with exponential backoff");
 
             var newState = _reconnectHandler.BeginReconnect(session, 5000, OnReconnectComplete);
-
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
             {
                 _isReconnecting = true;
@@ -172,22 +181,24 @@ internal sealed class OpcUaSessionManager : IDisposable
         lock (_lock)
         {
             if (_disposed)
+            {
                 return;
+            }
 
             var reconnectedSession = _reconnectHandler.Session;
             if (reconnectedSession is null)
             {
-                _logger.LogError("Reconnect completed but received null session. Connection lost permanently");
+                _logger.LogError("Reconnect completed but received null OPC UA session. Connection lost permanently.");
                 _isReconnecting = false;
+
                 SessionChanged?.Invoke(this, new SessionChangedEventArgs(null, isNewSession: false));
                 return;
             }
 
             isNewSession = !ReferenceEquals(_session, reconnectedSession);
-
             if (isNewSession)
             {
-                _logger.LogInformation("Reconnect created new session. Subscriptions transferred by OPC UA stack");
+                _logger.LogInformation("Reconnect created new OPC UA session. Subscriptions transferred by OPC UA stack.");
                 oldSession = _session;
                 newSession = reconnectedSession as Session;
                 _session = newSession;
@@ -200,7 +211,7 @@ internal sealed class OpcUaSessionManager : IDisposable
             }
             else
             {
-                _logger.LogInformation("Reconnect preserved existing session. Subscriptions maintained");
+                _logger.LogInformation("Reconnect preserved existing OPC UA session. Subscriptions maintained.");
             }
 
             _isReconnecting = false;
@@ -219,7 +230,7 @@ internal sealed class OpcUaSessionManager : IDisposable
         }
 
         ReconnectionCompleted?.Invoke(this, EventArgs.Empty);
-        _logger.LogInformation("Session reconnect completed. New session: {IsNew}", isNewSession);
+        _logger.LogInformation("OPC UA session reconnect completed. New session: {IsNew}", isNewSession);
     }
 
     /// <summary>
@@ -267,7 +278,10 @@ internal sealed class OpcUaSessionManager : IDisposable
         lock (_lock)
         {
             if (_disposed)
+            {
                 return;
+            }
+
             _disposed = true;
 
             sessionToDispose = _session;
@@ -280,17 +294,8 @@ internal sealed class OpcUaSessionManager : IDisposable
 
         if (sessionToDispose is not null)
         {
-            // Synchronous disposal in Dispose() - acceptable
-            try
-            {
-                sessionToDispose.Close(2000);
-                sessionToDispose.Dispose();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error disposing session in Dispose");
-                try { sessionToDispose.Dispose(); } catch { /* Best effort */ }
-            }
+            sessionToDispose.Close();
+            sessionToDispose.Dispose();
         }
 
         _reconnectHandler?.Dispose();
@@ -303,5 +308,6 @@ internal sealed class OpcUaSessionManager : IDisposable
 internal sealed class SessionChangedEventArgs(Session? session, bool isNewSession) : EventArgs
 {
     public Session? Session { get; } = session;
+
     public bool IsNewSession { get; } = isNewSession;
 }
