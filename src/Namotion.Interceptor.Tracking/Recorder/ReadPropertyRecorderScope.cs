@@ -1,52 +1,40 @@
-﻿namespace Namotion.Interceptor.Tracking.Recorder;
+﻿using System.Collections.Concurrent;
+
+namespace Namotion.Interceptor.Tracking.Recorder;
 
 public class ReadPropertyRecorderScope : IDisposable
 {
-    private readonly ReadPropertyRecorder _recorder;
-    private readonly HashSet<PropertyReference> _properties;
-
-    public ReadPropertyRecorderScope(ReadPropertyRecorder recorder, HashSet<PropertyReference> properties)
+    private readonly ConcurrentDictionary<PropertyReference, bool> _properties;
+    private volatile int _disposed;
+    
+    internal ReadPropertyRecorderScope(ConcurrentDictionary<PropertyReference, bool>? properties)
     {
-        _recorder = recorder;
-        _properties = properties;
+        _properties = properties ?? [];
+        _properties.Clear();
     }
 
-    public PropertyReference[] Properties
+    internal void AddProperty(PropertyReference property)
     {
-        get
+        if (_disposed == 0)
         {
-            lock (typeof(ReadPropertyRecorder))
-            {
-                return _properties.ToArray();
-            }
+            _properties.TryAdd(property, false);
         }
     }
 
-    public PropertyReference[] GetPropertiesAndReset()
+    /// <summary>
+    /// Gets the recorded properties and disposes the scope.
+    /// </summary>
+    public ICollection<PropertyReference> GetPropertiesAndDispose()
     {
-        lock (typeof(ReadPropertyRecorder))
-        {
-            var properties = _properties.ToArray();
-            _properties.Clear();
-            return properties;
-        }
-    }
-
-    public PropertyReference[] GetPropertiesAndDispose()
-    {
-        lock (typeof(ReadPropertyRecorder))
-        {
-            var properties = _properties.ToArray();
-            Dispose();
-            return properties;
-        }
+        Dispose();
+        return _properties.Keys;
     }
 
     public void Dispose()
     {
-        lock (typeof(ReadPropertyRecorder))
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            ReadPropertyRecorder.Scopes.Value?[_recorder]?.Remove(_properties);
+            ReadPropertyRecorder.Scopes.Value?.TryRemove(this, out _);
         }
     }
 }

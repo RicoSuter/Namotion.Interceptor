@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
@@ -108,7 +109,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
             }
 
-            var count = subject.Data .AddOrUpdate((null, ReferenceCountKey), 0, 
+            var count = subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, 
                 (_, count) => (int)count! - 1) as int?;
             
             var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
@@ -124,13 +125,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
-    public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         var currentValue = context.CurrentValue;
         next(ref context);
-        var newValue = context.GetCurrentValue();
+        var newValue = context.GetFinalValue();
 
-        context.Property.SetWriteTimestamp(SubjectMutationContext.GetCurrentTimestamp());
+        context.Property.SetWriteTimestamp(SubjectChangeContext.Current.ChangedTimestamp);
 
         if (typeof(TProperty).IsValueType || typeof(TProperty) == typeof(string))
         {
@@ -189,14 +190,16 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         foreach (var property in subject.Properties)
         {
-            if (property.Value.IsDerived || 
-                property.Value.Type.IsValueType || 
-                property.Value.Type == typeof(string))
+            var metadata = property.Value;
+            if (metadata.IsDerived || 
+                metadata.IsIntercepted == false ||
+                metadata.Type.IsValueType || 
+                metadata.Type == typeof(string))
             {
                 continue;
             }
 
-            var propertyValue = property.Value.GetValue?.Invoke(subject);
+            var propertyValue = metadata.GetValue?.Invoke(subject);
             if (propertyValue is not null)
             {
                 FindSubjectsInProperty(new PropertyReference(subject, property.Key), propertyValue, null, collectedSubjects, touchedSubjects);
@@ -228,6 +231,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
                 break;
 
+            // TODO: Support more enumerations with high performance here (immutable arrays, lists, ...)
+            // case string collection: break;
+            // case IEnumerable collection:
+
             case ICollection collection:
                 var i = 0;
                 foreach (var item in collection)
@@ -243,6 +250,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
+    #region  Performance
+    
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static List<(IInterceptorSubject subject, PropertyReference property, object? index)> GetList()
     {
@@ -270,4 +279,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         hashSet.Clear();
         _hashSetPool!.Push(hashSet);
     }
+
+    #endregion
 }

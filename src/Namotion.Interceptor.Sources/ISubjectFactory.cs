@@ -8,18 +8,18 @@ namespace Namotion.Interceptor.Sources;
 public interface ISubjectFactory
 {
     /// <summary>
-    /// Creates a subject for the specified property and index.
+    /// Creates a subject for the specified type using an optional service provider.
     /// </summary>
-    /// <param name="property">The property.</param>
-    /// <param name="index">The optional index.</param>
+    /// <param name="type">The subject type.</param>
+    /// <param name="serviceProvider">The service provider.</param>
     /// <returns>The created subject.</returns>
-    IInterceptorSubject CreateSubject(RegisteredSubjectProperty property, object? index);
+    IInterceptorSubject CreateSubject(Type type, IServiceProvider? serviceProvider);
 
     /// <summary>
     /// Creates a subject collection for the specified property and children.
     /// </summary>
-    /// <param name="property">The property.</param>
+    /// <param name="propertyType">The property type.</param>
     /// <param name="children">The initial list of child subjects.</param>
     /// <returns>The created subject collection.</returns>
-    IEnumerable<IInterceptorSubject?> CreateSubjectCollection(RegisteredSubjectProperty property, params IEnumerable<IInterceptorSubject?> children);
+    IEnumerable<IInterceptorSubject?> CreateSubjectCollection(Type propertyType, params IEnumerable<IInterceptorSubject?> children);
 }

@@ -21,6 +21,8 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class SubjectAspNetCoreServiceCollection
 {
+    private static ISubjectUpdateProcessor[] DefaultProcessors { get; } = [JsonCamelCasePathProcessor.Instance];
+    
     public static IEndpointRouteBuilder MapSubjectWebApis<TSubject>(this IEndpointRouteBuilder builder, string path)
         where TSubject : class, IInterceptorSubject
     {
@@ -62,8 +64,7 @@ public static class SubjectAspNetCoreServiceCollection
                 {
                     var subject = subjectSelector(context.RequestServices);
                     return TypedResults.Ok(SubjectUpdate
-                        .CreateCompleteUpdate(subject)
-                        .ConvertToJsonCamelCasePath());
+                        .CreateCompleteUpdate(subject, DefaultProcessors));
                 })
             .Produces<SubjectUpdate>()
             .WithTags(typeof(TSubject).Name);
@@ -72,7 +73,7 @@ public static class SubjectAspNetCoreServiceCollection
     }
     
     private static IResult UpdatePropertyValues<TSubject>(
-        TSubject subject,
+        TSubject root,
         [FromBody] Dictionary<string, JsonElement> updates,
         [FromServices] IEnumerable<IPropertyValidator> propertyValidators)
         where TSubject : class, IInterceptorSubject
@@ -82,12 +83,12 @@ public static class SubjectAspNetCoreServiceCollection
             var resolvedUpdates = updates
                 .Select(t =>
                 {
-                    var (subject2, property) = subject.FindPropertyFromJsonPath(t.Key);
+                    var (subject, property) = root.FindPropertyFromJsonPath(t.Key);
                     return new
                     {
                         t.Key,
-                        t.Value,
-                        Subject = subject2,
+                        Value = subject is not null ? t.Value.Deserialize(property.Type) : null,
+                        Subject = subject,
                         Property = property
                     };
                 })
@@ -128,7 +129,8 @@ public static class SubjectAspNetCoreServiceCollection
             {
                 var updateErrors = propertyValidatorsArray
                     .SelectMany(v => v.Validate(
-                        new PropertyReference(update.Subject!, update.Property.Name), update.Value))
+                        new PropertyReference(update.Subject!, update.Property.Name),
+                        update.Value))
                     .ToArray();
 
                 if (updateErrors.Any())
@@ -152,7 +154,7 @@ public static class SubjectAspNetCoreServiceCollection
             // write updates
             foreach (var update in resolvedUpdates)
             {
-                update.Property.SetValue?.Invoke(update.Subject!, update.Value.Deserialize(update.Property.Type));
+                update.Property.SetValue?.Invoke(update.Subject!, update.Value);
             }
 
             return TypedResults.Ok();

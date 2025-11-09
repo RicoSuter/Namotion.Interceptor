@@ -1,5 +1,6 @@
 using Moq;
 using Namotion.Interceptor.Generator.Tests.Models;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Generator.Tests;
 
@@ -22,12 +23,12 @@ public class InterceptorSubjectTests
 
     public class TestMethodInterceptor : IMethodInterceptor
     {
-        public List<MethodInvocationInterception> Contexts { get; } = new();
+        public List<MethodInvocationContext> Contexts { get; } = [];
         
-        public object? InvokeMethod(MethodInvocationInterception context, Func<MethodInvocationInterception, object?> next)
+        public object? InvokeMethod(MethodInvocationContext context, InvokeMethodInterceptionDelegate next)
         {
             Contexts.Add(context);
-            return next(context);
+            return next(ref context);
         }
     }
     

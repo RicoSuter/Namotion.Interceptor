@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using Castle.DynamicProxy;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Dynamic;
 
@@ -8,6 +9,8 @@ public class DynamicSubjectFactory
 {
     private static readonly ProxyGenerator ProxyGenerator = new();
     private static readonly ConcurrentDictionary<string, SubjectPropertyMetadata[]> PropertyCache = new();
+
+    // TODO: Remove context in all methods?
 
     public static DynamicSubject CreateDynamicSubject(IInterceptorSubjectContext? context, params Type[] interfaces)
     {
@@ -95,7 +98,8 @@ public class DynamicSubjectFactory
             else
             {
                 invocation.ReturnValue = context.InvokeMethod(
-                    invocation.Method.Name, invocation.Arguments, parameters =>
+                    // TODO: Should we really throw away subject here?
+                    invocation.Method.Name, invocation.Arguments, (_, parameters) =>
                     {
                         parameters.CopyTo(invocation.Arguments, 0);
                         invocation.Proceed();

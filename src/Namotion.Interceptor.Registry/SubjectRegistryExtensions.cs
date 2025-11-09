@@ -78,6 +78,7 @@ public static class SubjectRegistryExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RegisteredSubject? TryGetRegisteredSubject(this IInterceptorSubject subject)
     {
+        // TODO(perf): Replace calls of TryGetRegisteredSubject with registry.TryGetRegisteredSubject to avoid multiple registry resolves
         var registry = subject.Context.TryGetService<ISubjectRegistry>();
         return registry?.TryGetRegisteredSubject(subject);
     }
