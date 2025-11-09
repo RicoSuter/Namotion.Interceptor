@@ -211,8 +211,6 @@ internal sealed class PollingManager : IDisposable
         {
             _logger.LogError(ex, "Fatal error in polling loop");
         }
-
-        _logger.LogInformation("OPC UA polling manager stopped");
     }
 
     private async Task PollItemsAsync(CancellationToken cancellationToken)

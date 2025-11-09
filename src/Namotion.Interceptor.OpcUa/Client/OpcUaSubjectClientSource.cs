@@ -132,8 +132,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                _logger.LogInformation("OPC UA client is stopping...");
-                break;
+                // Normal shutdown
             }
             catch (Exception ex)
             {
