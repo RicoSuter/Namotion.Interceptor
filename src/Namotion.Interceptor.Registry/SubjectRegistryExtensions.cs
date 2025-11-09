@@ -27,7 +27,7 @@ public static class SubjectRegistryExtensions
             }
 
             // TODO(perf): Implement directly on subject to avoid accessing Properties property
-            foreach (var property in innerSubject.Properties)
+            foreach (var property in innerSubject.PropertiesAndAttributes)
             {
                 yield return property;
 
