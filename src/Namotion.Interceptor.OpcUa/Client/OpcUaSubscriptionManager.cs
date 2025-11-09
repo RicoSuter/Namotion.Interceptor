@@ -1,12 +1,12 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using System.Collections.Concurrent;
+using System.Collections.Immutable;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Performance;
+using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
-using System.Collections.Concurrent;
-using System.Collections.Immutable;
-using Namotion.Interceptor.Registry.Performance;
-using Namotion.Interceptor.Sources;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
@@ -18,11 +18,9 @@ internal class OpcUaSubscriptionManager
     private readonly ILogger _logger;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
-
-    private ImmutableArray<Subscription> _subscriptions = ImmutableArray<Subscription>.Empty;
-
     private readonly OpcUaSubscriptionHealthMonitor _healthMonitor;
 
+    private ImmutableArray<Subscription> _subscriptions = ImmutableArray<Subscription>.Empty;
     private ISubjectUpdater? _updater;
 
     /// <summary>
@@ -39,6 +37,7 @@ internal class OpcUaSubscriptionManager
     {
         _configuration = configuration;
         _logger = logger;
+
         _healthMonitor = new OpcUaSubscriptionHealthMonitor(configuration, this, logger);
     }
 
@@ -146,15 +145,12 @@ internal class OpcUaSubscriptionManager
         }
 
         var builder = ImmutableArray.CreateBuilder<Subscription>(subscriptionList.Count);
-
         foreach (var subscription in subscriptionList)
         {
             builder.Add(subscription);
-
-            // Re-attach our FastDataChangeCallback if not already attached
-            // The callback may have been lost during transfer
-            subscription.FastDataChangeCallback -= OnFastDataChange;  // Remove if exists
-            subscription.FastDataChangeCallback += OnFastDataChange;  // Add
+            
+            subscription.FastDataChangeCallback -= OnFastDataChange;
+            subscription.FastDataChangeCallback += OnFastDataChange;
         }
 
         // Atomically update subscription reference with memory barrier
@@ -227,15 +223,6 @@ internal class OpcUaSubscriptionManager
             ChangesPool.Return(changes);
         }
     }
-
-    private struct OpcUaPropertyUpdate
-    {
-        public PropertyReference Property { get; init; }
-
-        public DateTimeOffset Timestamp { get; init; }
-
-        public object? Value { get; init; }
-    }
     
     private async Task<int> FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
     {
@@ -302,5 +289,14 @@ internal class OpcUaSubscriptionManager
     {
         _healthMonitor.Dispose();
         Cleanup();
+    }
+
+    private struct OpcUaPropertyUpdate
+    {
+        public PropertyReference Property { get; init; }
+
+        public DateTimeOffset Timestamp { get; init; }
+
+        public object? Value { get; init; }
     }
 }

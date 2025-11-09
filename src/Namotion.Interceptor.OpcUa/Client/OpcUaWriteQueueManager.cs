@@ -1,6 +1,6 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking.Change;
-using System.Collections.Concurrent;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
@@ -11,9 +11,10 @@ namespace Namotion.Interceptor.OpcUa.Client;
 internal sealed class OpcUaWriteQueueManager
 {
     private readonly ConcurrentQueue<SubjectPropertyChange> _pendingWrites = new();
+
     private readonly int _maxQueueSize;
     private readonly ILogger _logger;
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     private int _droppedWriteCount;
 
     public int PendingWriteCount => _pendingWrites.Count;
@@ -32,34 +33,6 @@ internal sealed class OpcUaWriteQueueManager
 
         _maxQueueSize = maxQueueSize;
         _logger = logger;
-    }
-
-    /// <summary>
-    /// Enqueues a single write operation. If the queue is at capacity,
-    /// the oldest write is dropped (ring buffer semantics).
-    /// </summary>
-    public void Enqueue(SubjectPropertyChange change)
-    {
-        if (_maxQueueSize is 0)
-        {
-            _logger.LogWarning("Write buffering is disabled. Dropping write for {PropertyName}", change.Property.Name);
-            return;
-        }
-
-        // Fix TOCTOU race - dequeue FIRST to maintain strict bound
-        while (_pendingWrites.Count >= _maxQueueSize)
-        {
-            if (_pendingWrites.TryDequeue(out _))
-            {
-                lock (_lock) _droppedWriteCount++;
-            }
-            else
-            {
-                break; // Queue emptied by another thread (e.g., flush)
-            }
-        }
-
-        _pendingWrites.Enqueue(change);
     }
 
     /// <summary>
@@ -92,13 +65,40 @@ internal sealed class OpcUaWriteQueueManager
     }
 
     /// <summary>
+    /// Enqueues a single write operation. If the queue is at capacity,
+    /// the oldest write is dropped (ring buffer semantics).
+    /// </summary>
+    private void Enqueue(SubjectPropertyChange change)
+    {
+        if (_maxQueueSize is 0)
+        {
+            _logger.LogWarning("Write buffering is disabled. Dropping write for {PropertyName}", change.Property.Name);
+            return;
+        }
+
+        // Fix TOCTOU race - dequeue FIRST to maintain strict bound
+        while (_pendingWrites.Count >= _maxQueueSize)
+        {
+            if (_pendingWrites.TryDequeue(out _))
+            {
+                lock (_lock) _droppedWriteCount++;
+            }
+            else
+            {
+                break; // Queue emptied by another thread (e.g., flush)
+            }
+        }
+
+        _pendingWrites.Enqueue(change);
+    }
+
+    /// <summary>
     /// Dequeues all pending writes and returns them as a list.
     /// Resets the dropped write counter.
     /// </summary>
     public List<SubjectPropertyChange> DequeueAll()
     {
         var pendingWrites = new List<SubjectPropertyChange>();
-
         while (_pendingWrites.TryDequeue(out var change))
         {
             pendingWrites.Add(change);
