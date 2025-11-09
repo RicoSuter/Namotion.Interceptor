@@ -24,7 +24,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly OpcUaSubscriptionManager _subscriptionManager;
     private readonly OpcUaSessionManager _sessionManager;
     private readonly OpcUaWriteQueueManager _writeQueueManager;
-    private readonly OpcUaPollingManager? _pollingManager;
+    private OpcUaPollingManager? _pollingManager;
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private CancellationToken _stoppingToken;
@@ -80,19 +80,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _subjectLoader = new OpcUaSubjectLoader(configuration, _propertiesWithOpcData, this, logger);
         _sessionManager = new OpcUaSessionManager(logger);
         _writeQueueManager = new OpcUaWriteQueueManager(_configuration.WriteQueueSize, logger);
-
-        // Create polling manager if enabled
-        if (configuration.EnablePollingFallback)
-        {
-            _pollingManager = new OpcUaPollingManager(
-                logger: logger,
-                sessionManager: _sessionManager,
-                pollingInterval: configuration.PollingInterval,
-                batchSize: configuration.PollingBatchSize
-            );
-        }
-
-        _subscriptionManager = new OpcUaSubscriptionManager(configuration, logger, _pollingManager);
+        _subscriptionManager = new OpcUaSubscriptionManager(configuration, logger, null);
 
         _sessionManager.SessionChanged += OnSessionChanged;
         _sessionManager.ReconnectionCompleted += OnReconnectionCompleted;
@@ -104,7 +92,21 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
     {
         _subscriptionManager.SetUpdater(updater);
-        _pollingManager?.SetUpdater(updater);
+
+        // Create and start polling manager if enabled
+        if (_configuration.EnablePollingFallback && _pollingManager == null)
+        {
+            _pollingManager = new OpcUaPollingManager(
+                logger: _logger,
+                sessionManager: _sessionManager,
+                updater: updater,
+                pollingInterval: _configuration.PollingInterval,
+                batchSize: _configuration.PollingBatchSize
+            );
+            _subscriptionManager.SetPollingManager(_pollingManager);
+            _pollingManager.Start();
+        }
+
         return Task.FromResult<IDisposable?>(null);
     }
 

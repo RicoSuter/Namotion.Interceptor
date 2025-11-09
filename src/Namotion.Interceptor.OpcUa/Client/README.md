@@ -1,6 +1,6 @@
 # OPC UA Client - Production Readiness Assessment
 
-**Document Version:** 5.0
+**Document Version:** 6.0
 **Date:** 2025-01-09
 **Status:** ✅ PRODUCTION READY - ALL CRITICAL ISSUES FIXED AND VERIFIED
 
@@ -254,6 +254,15 @@ foreach (var subscription in subscriptions)
 - Tracks pending and dropped write counts (Interlocked counters)
 - Automatic flush after reconnection
 
+**OpcUaPollingManager** - Polling fallback for legacy servers
+- Automatic fallback when subscription creation fails
+- Thread-safe with constructor injection (prevents initialization races)
+- Session change detection via reference tracking
+- Array-aware value comparison (prevents false positives)
+- O(n) batch processing with ArraySegment (efficient for large item counts)
+- Metrics tracking (TotalReads, FailedReads, ValueChanges)
+- Enabled by default (configurable via EnablePollingFallback)
+
 **OpcUaSubjectLoader** - Node hierarchy loading
 - Recursive browse with cycle detection
 - Maps OPC UA nodes to interceptor properties
@@ -339,6 +348,11 @@ services.AddOpcUaSubjectClient<MySubject>(
         // Auto-healing
         options.EnableAutoHealing = true;
         options.SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10);
+
+        // Polling fallback (for servers without subscription support)
+        options.EnablePollingFallback = true; // Default: true
+        options.PollingInterval = TimeSpan.FromSeconds(1);
+        options.PollingBatchSize = 100;
     }
 );
 ```
@@ -356,6 +370,7 @@ services.AddOpcUaSubjectClient<MySubject>(
 - `DroppedWriteCount` - Overflow events
 - `IsConnected` - Connection state
 - `TotalMonitoredItemCount` - Active monitoring
+- `PollingItemCount` - Items using polling fallback
 - Connection uptime percentage
 
 ---
@@ -412,12 +427,13 @@ The Namotion.Interceptor.OpcUa client is **production-ready** for long-running i
 6. ✅ Memory barrier usage (correct pattern for ImmutableArray)
 7. ✅ Write queue TOCTOU (enqueue-first pattern)
 8. ✅ FastDataChange callback cleanup (separate try/catch blocks)
+9. ✅ Polling fallback added (thread-safe, session-aware, array-aware value comparison)
 
 **Code Quality:**
-- ✅ Superior features (write queue, auto-healing, subscription transfer)
+- ✅ Superior features (write queue, auto-healing, subscription transfer, polling fallback)
 - ✅ Modern C# patterns (Interlocked, async/await, ContinueWith)
 - ✅ Excellent architecture and separation of concerns
-- ✅ High performance (lock-free reads, object pooling)
+- ✅ High performance (lock-free reads, object pooling, O(n) batch processing)
 - ✅ Thread-safe and resilient
 - ✅ All 153 tests passing (38 OPC UA specific)
 - ✅ 0 build warnings, 0 errors

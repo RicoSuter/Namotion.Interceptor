@@ -19,7 +19,7 @@ internal class OpcUaSubscriptionManager
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
     private readonly OpcUaSubscriptionHealthMonitor _healthMonitor;
-    private readonly OpcUaPollingManager? _pollingManager;
+    private OpcUaPollingManager? _pollingManager;
 
     private ImmutableArray<Subscription> _subscriptions = ImmutableArray<Subscription>.Empty;
     private ISubjectUpdater? _updater;
@@ -47,6 +47,11 @@ internal class OpcUaSubscriptionManager
     public void SetUpdater(ISubjectUpdater updater)
     {
         _updater = updater;
+    }
+
+    public void SetPollingManager(OpcUaPollingManager pollingManager)
+    {
+        _pollingManager = pollingManager;
     }
 
     public void Clear()
