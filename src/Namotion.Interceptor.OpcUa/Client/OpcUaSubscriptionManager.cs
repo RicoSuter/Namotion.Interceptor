@@ -152,8 +152,6 @@ internal class OpcUaSubscriptionManager
                         removed, subscription.Id);
                 }
             }
-
-            _logger.LogInformation("Created OPC UA subscription {SubscriptionId} with {Count} monitored items.", subscription.Id, subscription.MonitoredItems.Count());
         }
 
         // Replace subscriptions array with lock to ensure atomic assignment
