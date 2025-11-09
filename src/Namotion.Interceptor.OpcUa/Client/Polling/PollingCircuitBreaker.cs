@@ -11,7 +11,7 @@ internal sealed class PollingCircuitBreaker
 
     private int _consecutiveFailures;
     private int _circuitOpen; // 0 = closed, 1 = open
-    private DateTimeOffset _circuitOpenedAt;
+    private long _circuitOpenedAtTicks; // Using long (ticks) for atomic operations instead of DateTimeOffset struct
     private long _tripCount;
 
     public PollingCircuitBreaker(int failureThreshold, TimeSpan cooldownPeriod)
@@ -48,9 +48,9 @@ internal sealed class PollingCircuitBreaker
         }
 
         // Circuit open, check if cooldown has elapsed
-        // Memory barrier ensures we see the latest value
-        Interlocked.MemoryBarrier();
-        var timeSinceOpened = DateTimeOffset.UtcNow - _circuitOpenedAt;
+        // Volatile read ensures we see the latest value atomically
+        var openedAtTicks = Volatile.Read(ref _circuitOpenedAtTicks);
+        var timeSinceOpened = DateTimeOffset.UtcNow - new DateTimeOffset(openedAtTicks, TimeSpan.Zero);
         if (timeSinceOpened >= _cooldownPeriod)
         {
             // Cooldown elapsed, attempt to close the circuit
@@ -73,9 +73,9 @@ internal sealed class PollingCircuitBreaker
             return TimeSpan.Zero;
         }
 
-        // Memory barrier ensures we see the latest value
-        Interlocked.MemoryBarrier();
-        var timeSinceOpened = DateTimeOffset.UtcNow - _circuitOpenedAt;
+        // Volatile read ensures we see the latest value atomically
+        var openedAtTicks = Volatile.Read(ref _circuitOpenedAtTicks);
+        var timeSinceOpened = DateTimeOffset.UtcNow - new DateTimeOffset(openedAtTicks, TimeSpan.Zero);
         var remaining = _cooldownPeriod - timeSinceOpened;
         return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
     }
@@ -100,8 +100,8 @@ internal sealed class PollingCircuitBreaker
             // Try to open the circuit (CAS ensures only one thread succeeds)
             if (Interlocked.CompareExchange(ref _circuitOpen, 1, 0) == 0)
             {
-                _circuitOpenedAt = DateTimeOffset.UtcNow;
-                Interlocked.MemoryBarrier(); // Ensure write is visible to all threads
+                // Volatile write ensures atomic timestamp update visible to all threads
+                Volatile.Write(ref _circuitOpenedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
                 Interlocked.Increment(ref _tripCount);
                 return true;
             }
