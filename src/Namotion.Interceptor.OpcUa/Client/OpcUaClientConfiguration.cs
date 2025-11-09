@@ -37,6 +37,29 @@ public class OpcUaClientConfiguration
     /// Gets the delay before attempting to reconnect after a disconnect. Default is 5 seconds.
     /// </summary>
     public TimeSpan ReconnectDelay { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Gets the maximum number of write operations to buffer when disconnected. Default is 1000.
+    /// When the session is disconnected, write operations are queued up to this limit.
+    /// Once reconnected, queued writes are flushed to the server in order (FIFO).
+    /// Set to 0 to disable write buffering (writes will be dropped when disconnected).
+    /// </summary>
+    public int WriteQueueSize { get; init; } = 1000;
+
+    /// <summary>
+    /// Gets a value indicating whether to enable automatic healing of failed monitored items. Default is true.
+    /// When enabled, the subscription manager periodically retries creation of failed items
+    /// that may succeed later (e.g., BadTooManyMonitoredItems when resources free up).
+    /// Items with permanent errors (BadNodeIdUnknown) are not retried.
+    /// </summary>
+    public bool EnableAutoHealing { get; init; } = true;
+
+    /// <summary>
+    /// Gets the interval for subscription health checks and auto-healing attempts. Default is 10 seconds.
+    /// Failed monitored items (excluding design-time errors like BadNodeIdUnknown) are retried at this interval.
+    /// Only used when EnableAutoHealing is true.
+    /// </summary>
+    public TimeSpan SubscriptionHealthCheckInterval { get; init; } = TimeSpan.FromSeconds(10);
     
     /// <summary>
     /// Gets or sets an async predicate that is called when an unknown (not statically typed) OPC UA node or variable is found during browsing.
@@ -188,5 +211,51 @@ public class OpcUaClientConfiguration
 
         application.ApplicationConfiguration = config;
         return application;
+    }
+
+    /// <summary>
+    /// Validates configuration values and throws ArgumentException if invalid.
+    /// Call this method during initialization to fail fast with clear error messages.
+    /// </summary>
+    public void Validate()
+    {
+        ArgumentNullException.ThrowIfNull(ServerUrl);
+        ArgumentNullException.ThrowIfNull(SourcePathProvider);
+        ArgumentNullException.ThrowIfNull(TypeResolver);
+        ArgumentNullException.ThrowIfNull(ValueConverter);
+        ArgumentNullException.ThrowIfNull(SubjectFactory);
+
+        if (WriteQueueSize < 0)
+        {
+            throw new ArgumentException(
+                $"WriteQueueSize must be non-negative, got: {WriteQueueSize}",
+                nameof(WriteQueueSize));
+        }
+
+        const int MaxWriteQueueSize = 10000;
+        if (WriteQueueSize > MaxWriteQueueSize)
+        {
+            throw new ArgumentException(
+                $"WriteQueueSize must not exceed {MaxWriteQueueSize} (got: {WriteQueueSize})",
+                nameof(WriteQueueSize));
+        }
+
+        if (EnableAutoHealing)
+        {
+            var minInterval = TimeSpan.FromSeconds(5);
+            if (SubscriptionHealthCheckInterval < minInterval)
+            {
+                throw new ArgumentException(
+                    $"SubscriptionHealthCheckInterval must be at least {minInterval.TotalSeconds}s when EnableAutoHealing is true (got: {SubscriptionHealthCheckInterval.TotalSeconds}s)",
+                    nameof(SubscriptionHealthCheckInterval));
+            }
+        }
+
+        if (MaximumItemsPerSubscription <= 0)
+        {
+            throw new ArgumentException(
+                $"MaximumItemsPerSubscription must be positive, got: {MaximumItemsPerSubscription}",
+                nameof(MaximumItemsPerSubscription));
+        }
     }
 }

@@ -47,8 +47,6 @@ Bind subjects to MQTT topics for IoT scenarios:
 
 ```csharp
 builder.Services.AddMqttSubjectServer<Sensor>("mqtt");
-// or
-builder.Services.AddMqttSubjectClient("mqtt://localhost:1883", "mqtt");
 ```
 
 Properties with `[SourcePath("mqtt", "topic")]` are automatically synchronized with MQTT messages.
@@ -83,28 +81,41 @@ Properties become queryable and subscribable through GraphQL, with automatic cha
 Implement `ISubjectSource` to create custom data source integrations:
 
 ```csharp
-public class DatabaseSource : ISubjectSource
+public class SampleSource : ISubjectSource
 {
+    public SampleSource(IInterceptorSubject root)
+    {
+        _root = root;
+    }
+    
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
         return property.ReflectionAttributes
             .OfType<SourcePathAttribute>()
-            .Any(a => a.SourceName == "database");
+            .Any(a => a.SourceName == "sample");
     }
 
     public async Task<IDisposable?> StartListeningAsync(
-        ISubjectMutationDispatcher dispatcher, 
+        ISubjectUpdater updater,
         CancellationToken cancellationToken)
     {
-        // Set up database change notifications
+        // Set up source change notifications
         return subscription;
     }
 
-    public async Task<Action<IInterceptorSubject>> LoadInitialStateAsync(
+    public async Task<Action?> LoadCompleteSourceStateAsync(
         CancellationToken cancellationToken)
     {
-        // Load initial values from database
-        return subject => { /* apply loaded state */ };
+        // Load initial values from source
+        var sourceState = ...;
+        return () => { /* Apply sourceState to _root */ };
+    }
+
+    public async ValueTask WriteToSourceAsync(
+        IReadOnlyCollection<SubjectPropertyChange> changes,
+        CancellationToken cancellationToken)
+    {
+        // Write changes back to source
     }
 }
 ```

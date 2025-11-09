@@ -37,6 +37,8 @@ public interface ISubjectSource
 
     /// <summary>
     /// Applies a set of property changes to the source.
+    /// IMPORTANT: This method is designed to be called sequentially (not concurrently) by the SubjectSourceBackgroundService.
+    /// Concurrent calls are not supported and will result in undefined behavior.
     /// </summary>
     /// <param name="changes">The collection of subject property changes.</param>
     /// <param name="cancellationToken">The cancellation token.</param>

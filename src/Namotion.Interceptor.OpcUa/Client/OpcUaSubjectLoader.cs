@@ -180,7 +180,7 @@ internal class OpcUaSubjectLoader
         var collection = DefaultSubjectFactory.Instance
             .CreateSubjectCollection(property.Type, children.Select(c => c.Subject));
 
-        property.SetValue(collection);
+        property.SetValueFromSource(_source, null, collection);
 
         foreach (var child in children)
         {
