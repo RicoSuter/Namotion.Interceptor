@@ -245,7 +245,7 @@ foreach (var subscription in subscriptions)
 **OpcUaSubscriptionManager** - Subscription health monitoring
 - Creates and manages OPC UA subscriptions
 - Auto-healing for failed monitored items
-- 10-second health check intervals (3x faster than reference)
+- 10-second health check intervals for fast failure detection
 - Smart classification of permanent vs transient errors
 
 **OpcUaWriteQueueManager** - Ring buffer for writes
@@ -312,23 +312,6 @@ if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
 // Multiple subscriptions can invoke callbacks concurrently, but each subscription manages
 // distinct monitored items (no overlap), so concurrent callbacks won't interfere.
 ```
-
----
-
-## Comparison to Communication.OpcUa
-
-| Feature | Communication.OpcUa | Namotion.Interceptor.OpcUa | Winner |
-|---------|---------------------|----------------------------|--------|
-| **Reconnection** | SessionReconnecter wrapper | SessionReconnectHandler direct | ✅ **TIE** |
-| **Thread Safety** | SemaphoreSlim locks | Interlocked + lock-free reads | ✅ **Namotion** |
-| **Health Monitoring** | 30s interval | 10s interval + smart retry | ✅ **Namotion** |
-| **Write Queue** | ❌ None | ✅ Ring buffer | ✅ **Namotion** |
-| **Subscription Transfer** | Clears on reconnect | Preserves transfers | ✅ **Namotion** |
-| **Memory Safety** | Good | Excellent (Interlocked, disposal guards) | ✅ **Namotion** |
-| **Code Quality** | Good | Excellent (modern patterns) | ✅ **Namotion** |
-| **Test Coverage** | Unknown | ✅ 153 tests | ✅ **Namotion** |
-
-**Result:** Namotion.Interceptor.OpcUa has superior core functionality with better thread-safety, performance, and resilience.
 
 ---
 
@@ -434,7 +417,7 @@ The Namotion.Interceptor.OpcUa client is **production-ready** for long-running i
 - ✅ Superior features (write queue, auto-healing, subscription transfer)
 - ✅ Modern C# patterns (Interlocked, async/await, ContinueWith)
 - ✅ Excellent architecture and separation of concerns
-- ✅ Better performance than reference implementation
+- ✅ High performance (lock-free reads, object pooling)
 - ✅ Thread-safe and resilient
 - ✅ All 153 tests passing (38 OPC UA specific)
 - ✅ 0 build warnings, 0 errors
