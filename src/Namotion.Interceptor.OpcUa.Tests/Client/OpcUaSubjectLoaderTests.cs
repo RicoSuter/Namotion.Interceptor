@@ -16,14 +16,14 @@ namespace Namotion.Interceptor.OpcUa.Tests.Client;
 public class OpcUaSubjectLoaderTests
 {
     private readonly Mock<ILogger> _mockLogger;
-    private readonly Mock<ISubjectSource> _mockSource;
+    private readonly Mock<OpcUaSubjectClientSource> _mockSource;
     private readonly List<PropertyReference> _propertiesWithOpcData;
     private readonly OpcUaClientConfiguration _baseConfiguration;
 
     public OpcUaSubjectLoaderTests()
     {
         _mockLogger = new Mock<ILogger>();
-        _mockSource = new Mock<ISubjectSource>();
+        _mockSource = new Mock<OpcUaSubjectClientSource>();
         _propertiesWithOpcData = [];
 
         _baseConfiguration = new OpcUaClientConfiguration

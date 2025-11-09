@@ -11,7 +11,6 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 {
-    private const string OpcVariableKey = "OpcVariable";
     private const int DefaultChunkSize = 512;
 
     private readonly IInterceptorSubject _subject;
@@ -24,6 +23,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly OpcUaWriteQueueManager _writeQueueManager;
     private readonly object _writeFlushLock = new();
     private bool _disposed;
+
+    internal string OpcVariableKey { get; } = "OpcVariable:" + Guid.NewGuid();
 
     public int PendingWriteCount => _writeQueueManager.PendingWriteCount;
     public int DroppedWriteCount => _writeQueueManager.DroppedWriteCount;
