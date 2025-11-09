@@ -14,6 +14,11 @@ namespace Namotion.Interceptor.OpcUa.Client;
 ///
 /// Thread-Safety: This class is thread-safe for concurrent access to all public methods.
 /// The polling loop runs on a background thread and uses concurrent collections for item management.
+///
+/// Behavior During Disconnection: When the OPC UA session is disconnected, polling is suspended
+/// and cached values become stale. Upon reconnection, cached values are reset and polling resumes,
+/// causing all polled properties to receive fresh values on the next polling cycle. This is acceptable
+/// for polling-based monitoring where some data loss during disconnection is expected and tolerable.
 /// </summary>
 internal sealed class OpcUaPollingManager : IDisposable
 {
@@ -22,11 +27,13 @@ internal sealed class OpcUaPollingManager : IDisposable
     private readonly ISubjectUpdater _updater;
     private readonly TimeSpan _pollingInterval;
     private readonly int _batchSize;
+    private readonly TimeSpan _disposalTimeout;
 
     private readonly ConcurrentDictionary<string, PollingItem> _pollingItems = new();
     private readonly PeriodicTimer _timer;
     private readonly CancellationTokenSource _cts = new();
-    private readonly object _startLock = new();
+    private readonly Lock _startLock = new();
+
     private Task? _pollingTask;
     private ISession? _lastKnownSession;
     private int _disposed = 0;
@@ -41,7 +48,8 @@ internal sealed class OpcUaPollingManager : IDisposable
         OpcUaSessionManager sessionManager,
         ISubjectUpdater updater,
         TimeSpan pollingInterval,
-        int batchSize)
+        int batchSize,
+        TimeSpan disposalTimeout)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(sessionManager);
@@ -56,11 +64,15 @@ internal sealed class OpcUaPollingManager : IDisposable
         if (batchSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(batchSize), "Batch size must be greater than zero");
 
+        if (disposalTimeout <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(disposalTimeout), "Disposal timeout must be greater than zero");
+
         _logger = logger;
         _sessionManager = sessionManager;
         _updater = updater;
         _pollingInterval = pollingInterval;
         _batchSize = batchSize;
+        _disposalTimeout = disposalTimeout;
         _timer = new PeriodicTimer(pollingInterval);
     }
 
@@ -178,8 +190,15 @@ internal sealed class OpcUaPollingManager : IDisposable
 
     private async Task PollItemsAsync(CancellationToken cancellationToken)
     {
-        if (_pollingItems.IsEmpty)
+        if (Volatile.Read(ref _disposed) == 1)
+        {
             return;
+        }
+
+        if (_pollingItems.IsEmpty)
+        {
+            return;
+        }
 
         var session = _sessionManager.CurrentSession;
         if (session == null)
@@ -228,6 +247,9 @@ internal sealed class OpcUaPollingManager : IDisposable
     {
         // Clear cached values on session change to force re-notification
         // Take snapshot to avoid TOCTOU issues with concurrent modifications
+        // Note: There is a benign race condition where items removed between ToArray() and assignment
+        // could be briefly re-added, but this is acceptable as they will be removed again on next cleanup.
+        // This pattern avoids more complex locking and the race has no practical negative impact.
         foreach (var (key, item) in _pollingItems.ToArray())
         {
             _pollingItems[key] = item with { LastValue = null };
@@ -282,8 +304,10 @@ internal sealed class OpcUaPollingManager : IDisposable
             Interlocked.Increment(ref _totalReads);
 
             // Process results
-            for (int i = 0; i < response.Results.Count && i < batch.Count; i++)
+            for (var i = 0; i < response.Results.Count && i < batch.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var dataValue = response.Results[i];
                 var pollingItem = batch[i];
 
@@ -365,9 +389,9 @@ internal sealed class OpcUaPollingManager : IDisposable
         // Wait for polling task to complete (with timeout)
         try
         {
-            if (_pollingTask != null && !_pollingTask.Wait(TimeSpan.FromSeconds(5)))
+            if (_pollingTask != null && !_pollingTask.Wait(_disposalTimeout))
             {
-                _logger.LogWarning("Polling task did not complete within 5 second timeout");
+                _logger.LogWarning("Polling task did not complete within {Timeout} timeout", _disposalTimeout);
             }
         }
         catch (OperationCanceledException)

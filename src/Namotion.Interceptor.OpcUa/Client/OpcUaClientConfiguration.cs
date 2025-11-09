@@ -168,6 +168,13 @@ public class OpcUaClientConfiguration
     /// </summary>
     public int PollingBatchSize { get; set; } = 100;
 
+    /// <summary>
+    /// Gets or sets the timeout to wait for the polling manager to complete during disposal.
+    /// If the polling task does not complete within this timeout, it will be abandoned.
+    /// Default is 10 seconds.
+    /// </summary>
+    public TimeSpan PollingDisposalTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
     public virtual ApplicationInstance CreateApplicationInstance()
     {
         var application = new ApplicationInstance
