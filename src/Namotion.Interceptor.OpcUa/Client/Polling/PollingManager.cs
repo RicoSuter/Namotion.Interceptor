@@ -125,7 +125,7 @@ internal sealed class PollingManager : IDisposable
     /// <summary>
     /// Gets whether the polling manager is currently running.
     /// </summary>
-    public bool IsRunning => _pollingTask != null && Volatile.Read(ref _disposed) == 0;
+    public bool IsRunning => Volatile.Read(ref _pollingTask) != null && Volatile.Read(ref _disposed) == 0;
 
     /// <summary>
     /// Starts the polling loop in the background.
@@ -145,7 +145,8 @@ internal sealed class PollingManager : IDisposable
                 return;
             }
 
-            _pollingTask = Task.Run(async () => await PollLoopAsync(_cts.Token));
+            var task = Task.Run(async () => await PollLoopAsync(_cts.Token));
+            Volatile.Write(ref _pollingTask, task); // Ensure task assignment is visible to all threads
         }
 
         _logger.LogInformation("OPC UA polling manager started with interval {Interval}ms", _pollingInterval.TotalMilliseconds);
