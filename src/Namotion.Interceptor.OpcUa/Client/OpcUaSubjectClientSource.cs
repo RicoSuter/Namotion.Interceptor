@@ -24,6 +24,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly OpcUaSubscriptionManager _subscriptionManager;
     private readonly OpcUaSessionManager _sessionManager;
     private readonly OpcUaWriteQueueManager _writeQueueManager;
+    private readonly OpcUaPollingManager? _pollingManager;
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private CancellationToken _stoppingToken;
@@ -55,6 +56,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// </summary>
     public int DroppedWriteCount => _writeQueueManager.DroppedWriteCount;
 
+    /// <summary>
+    /// Gets the number of items currently being polled (fallback for items that don't support subscriptions).
+    /// Returns 0 if polling fallback is disabled.
+    /// </summary>
+    public int PollingItemCount => _pollingManager?.PollingItemCount ?? 0;
+
     public OpcUaSubjectClientSource(
         IInterceptorSubject subject,
         OpcUaClientConfiguration configuration,
@@ -71,9 +78,21 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _configuration = configuration;
 
         _subjectLoader = new OpcUaSubjectLoader(configuration, _propertiesWithOpcData, this, logger);
-        _subscriptionManager = new OpcUaSubscriptionManager(configuration, logger);
         _sessionManager = new OpcUaSessionManager(logger);
         _writeQueueManager = new OpcUaWriteQueueManager(_configuration.WriteQueueSize, logger);
+
+        // Create polling manager if enabled
+        if (configuration.EnablePollingFallback)
+        {
+            _pollingManager = new OpcUaPollingManager(
+                logger: logger,
+                sessionManager: _sessionManager,
+                pollingInterval: configuration.PollingInterval,
+                batchSize: configuration.PollingBatchSize
+            );
+        }
+
+        _subscriptionManager = new OpcUaSubscriptionManager(configuration, logger, _pollingManager);
 
         _sessionManager.SessionChanged += OnSessionChanged;
         _sessionManager.ReconnectionCompleted += OnReconnectionCompleted;
@@ -85,6 +104,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
     {
         _subscriptionManager.SetUpdater(updater);
+        _pollingManager?.SetUpdater(updater);
         return Task.FromResult<IDisposable?>(null);
     }
 
@@ -115,9 +135,15 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                         await ReadAndApplyInitialValuesAsync(monitoredItems, newSession, stoppingToken);
                         await _subscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, newSession, stoppingToken);
                         _subscriptionManager.StartHealthMonitoring();
+
+                        // Start polling manager if enabled
+                        _pollingManager?.Start();
                     }
 
-                    _logger.LogInformation("OPC UA client initialization complete. Monitoring {Count} items.", monitoredItems.Count);
+                    _logger.LogInformation("OPC UA client initialization complete. Monitoring {Count} items (subscriptions: {Subscribed}, polling: {Polled}).",
+                        monitoredItems.Count,
+                        _subscriptionManager.TotalMonitoredItemCount,
+                        PollingItemCount);
                 }
 
                 await Task.Delay(Timeout.Infinite, stoppingToken);
@@ -522,6 +548,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             _sessionManager.Dispose();
             _subscriptionManager.Dispose();
+            _pollingManager?.Dispose();
             _writeFlushSemaphore.Dispose();
         }
     }
