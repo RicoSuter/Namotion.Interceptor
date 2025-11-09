@@ -79,7 +79,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _configuration = configuration;
 
         _subjectLoader = new OpcUaSubjectLoader(configuration, _propertiesWithOpcData, this, logger);
-        _sessionManager = new OpcUaSessionManager(logger);
+        _sessionManager = new OpcUaSessionManager(logger, configuration);
         _writeQueueManager = new OpcUaWriteQueueManager(_configuration.WriteQueueSize, logger);
         _subscriptionManager = new OpcUaSubscriptionManager(configuration, logger);
 
@@ -332,8 +332,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to read initial values for monitored items");
-            throw;
+            _logger.LogError(ex, "Failed to read initial values for monitored items. Values will be populated by subscriptions instead.");
+            // Don't throw - allow subscriptions to populate values instead
+            // Throwing here would crash the background service
         }
     }
 

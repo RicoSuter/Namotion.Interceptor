@@ -191,6 +191,32 @@ public class OpcUaClientConfiguration
     /// </summary>
     public TimeSpan PollingCircuitBreakerCooldown { get; set; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Gets or sets the OPC UA session timeout in milliseconds.
+    /// This determines how long the server will maintain the session after losing communication.
+    /// Default is 60 seconds.
+    /// </summary>
+    public uint SessionTimeout { get; set; } = 60000;
+
+    /// <summary>
+    /// Gets or sets the maximum time the reconnect handler will attempt to reconnect before giving up.
+    /// Default is 60 seconds.
+    /// </summary>
+    public uint ReconnectHandlerTimeout { get; set; } = 60000;
+
+    /// <summary>
+    /// Gets or sets the interval between reconnection attempts when connection is lost.
+    /// Default is 5 seconds.
+    /// </summary>
+    public int ReconnectInterval { get; set; } = 5000;
+
+    /// <summary>
+    /// Gets or sets the timeout to wait for graceful session disposal.
+    /// If session close does not complete within this timeout, it will be forcefully disposed.
+    /// Default is 5 seconds.
+    /// </summary>
+    public TimeSpan SessionDisposalTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
     public virtual ApplicationInstance CreateApplicationInstance()
     {
         var application = new ApplicationInstance
@@ -333,6 +359,35 @@ public class OpcUaClientConfiguration
                     $"PollingCircuitBreakerCooldown must be at least {minCooldown.TotalSeconds}s when EnablePollingFallback is true (got: {PollingCircuitBreakerCooldown.TotalSeconds}s)",
                     nameof(PollingCircuitBreakerCooldown));
             }
+        }
+
+        if (SessionTimeout < 1000)
+        {
+            throw new ArgumentException(
+                $"SessionTimeout must be at least 1000ms, got: {SessionTimeout}",
+                nameof(SessionTimeout));
+        }
+
+        if (ReconnectHandlerTimeout < 1000)
+        {
+            throw new ArgumentException(
+                $"ReconnectHandlerTimeout must be at least 1000ms, got: {ReconnectHandlerTimeout}",
+                nameof(ReconnectHandlerTimeout));
+        }
+
+        if (ReconnectInterval < 100)
+        {
+            throw new ArgumentException(
+                $"ReconnectInterval must be at least 100ms, got: {ReconnectInterval}",
+                nameof(ReconnectInterval));
+        }
+
+        var minDisposalTimeout = TimeSpan.FromMilliseconds(100);
+        if (SessionDisposalTimeout < minDisposalTimeout)
+        {
+            throw new ArgumentException(
+                $"SessionDisposalTimeout must be at least {minDisposalTimeout.TotalMilliseconds}ms, got: {SessionDisposalTimeout.TotalMilliseconds}ms",
+                nameof(SessionDisposalTimeout));
         }
     }
 }

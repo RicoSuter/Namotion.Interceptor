@@ -9,13 +9,14 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// Manages OPC UA session lifecycle, reconnection handling, and thread-safe session access.
 /// Optimized for fast session reads (hot path) with simple lock-based writes (cold path).
 /// </summary>
-internal sealed class OpcUaSessionManager : IDisposable
+internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
 {
     private readonly object _lock = new();
 
     private Session? _session;
     private readonly SessionReconnectHandler _reconnectHandler;
     private readonly ILogger _logger;
+    private readonly OpcUaClientConfiguration _configuration;
     private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
@@ -61,17 +62,18 @@ internal sealed class OpcUaSessionManager : IDisposable
     /// </summary>
     public event EventHandler? ReconnectionCompleted;
 
-    public OpcUaSessionManager(ILogger logger)
+    public OpcUaSessionManager(ILogger logger, OpcUaClientConfiguration configuration)
     {
         _logger = logger;
-        _reconnectHandler = new SessionReconnectHandler(false, 60000);
+        _configuration = configuration;
+        _reconnectHandler = new SessionReconnectHandler(false, (int)configuration.ReconnectHandlerTimeout);
     }
 
     /// <summary>
     /// Create a new OPC UA session with the specified configuration.
     /// </summary>
     public async Task<Session> CreateSessionAsync(
-        ApplicationInstance application, 
+        ApplicationInstance application,
         OpcUaClientConfiguration configuration,
         CancellationToken cancellationToken)
     {
@@ -80,7 +82,7 @@ internal sealed class OpcUaSessionManager : IDisposable
             application.ApplicationConfiguration,
             configuration.ServerUrl,
             useSecurity: false);
-        
+
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
 
         var newSession = await Session.Create(
@@ -88,7 +90,7 @@ internal sealed class OpcUaSessionManager : IDisposable
             endpoint,
             updateBeforeConnect: false,
             application.ApplicationName,
-            sessionTimeout: 60000,
+            sessionTimeout: configuration.SessionTimeout,
             new UserIdentity(),
             preferredLocales: null,
             cancellationToken);
@@ -98,15 +100,21 @@ internal sealed class OpcUaSessionManager : IDisposable
         {
             oldSession = _session;
 
+            // Unregister old session handler inside lock to prevent race condition
+            if (oldSession is not null)
+            {
+                oldSession.KeepAlive -= OnKeepAlive;
+            }
+
             Volatile.Write(ref _session, newSession);
             Interlocked.Exchange(ref _isReconnecting, 0);
 
             newSession.KeepAlive += OnKeepAlive;
         }
 
+        // Dispose old session outside lock
         if (oldSession is not null)
         {
-            oldSession.KeepAlive -= OnKeepAlive;
             await DisposeSessionSafelyAsync(oldSession);
         }
 
@@ -158,7 +166,7 @@ internal sealed class OpcUaSessionManager : IDisposable
 
             _logger.LogInformation("Server connection lost. Beginning reconnect with exponential backoff");
 
-            var newState = _reconnectHandler.BeginReconnect(session, 5000, OnReconnectComplete);
+            var newState = _reconnectHandler.BeginReconnect(session, _configuration.ReconnectInterval, OnReconnectComplete);
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
             {
                 Interlocked.Exchange(ref _isReconnecting, 1);
@@ -279,7 +287,7 @@ internal sealed class OpcUaSessionManager : IDisposable
     {
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            using var cts = new CancellationTokenSource(_configuration.SessionDisposalTimeout);
             await session.CloseAsync(cts.Token);
             session.Dispose();
             _logger.LogDebug("Session disposed successfully");
@@ -291,7 +299,7 @@ internal sealed class OpcUaSessionManager : IDisposable
         }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         // Set disposed flag first to prevent new operations (thread-safe)
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
@@ -312,11 +320,35 @@ internal sealed class OpcUaSessionManager : IDisposable
 
         if (sessionToDispose is not null)
         {
-            sessionToDispose.Close();
-            sessionToDispose.Dispose();
+            await DisposeSessionSafelyAsync(sessionToDispose);
         }
 
-        _reconnectHandler?.Dispose();
+        try
+        {
+            _reconnectHandler?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error disposing reconnect handler");
+        }
+    }
+
+    public void Dispose()
+    {
+        // Synchronous dispose uses async-over-sync with timeout to prevent hanging
+        // This is acceptable for disposal as it's typically called during shutdown
+        try
+        {
+            DisposeAsync().AsTask().Wait(_configuration.SessionDisposalTimeout);
+        }
+        catch (AggregateException ex) when (ex.InnerException is TimeoutException)
+        {
+            _logger.LogWarning("Session disposal timed out after {Timeout}. Forcing disposal.", _configuration.SessionDisposalTimeout);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error during synchronous disposal");
+        }
     }
 }
 
