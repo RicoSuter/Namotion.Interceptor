@@ -108,7 +108,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             {
                 await SubscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken);
                 
-                _logger.LogInformation("Created {SubscriptionCount} subscriptions monitoring {Subscribed} via subscriptions ({Polled} via polling).",
+                _logger.LogInformation("Created {SubscriptionCount} subscriptions monitoring {Subscribed} items ({Polled} via polling).",
                     SubscriptionManager.Subscriptions.Count,
                     SubscriptionManager.MonitoredItems.Count,
                     PollingManager?.PollingItemCount ?? 0);
