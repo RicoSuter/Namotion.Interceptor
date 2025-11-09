@@ -19,6 +19,7 @@ internal class OpcUaSubscriptionManager
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
     private readonly OpcUaSubscriptionHealthMonitor _healthMonitor;
+    private readonly OpcUaPollingManager? _pollingManager;
 
     private ImmutableArray<Subscription> _subscriptions = ImmutableArray<Subscription>.Empty;
     private ISubjectUpdater? _updater;
@@ -33,10 +34,12 @@ internal class OpcUaSubscriptionManager
 
     public OpcUaSubscriptionManager(
         OpcUaClientConfiguration configuration,
-        ILogger logger)
+        ILogger logger,
+        OpcUaPollingManager? pollingManager = null)
     {
         _configuration = configuration;
         _logger = logger;
+        _pollingManager = pollingManager;
 
         _healthMonitor = new OpcUaSubscriptionHealthMonitor(configuration, this, logger);
     }
@@ -110,11 +113,19 @@ internal class OpcUaSubscriptionManager
                 _logger.LogWarning(sre, "ApplyChanges failed for a batch; attempting to keep valid OPC UA monitored items by removing failed ones.");
             }
 
-            var removed = await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken);
+            var (removed, polled) = await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken);
             if (removed > 0)
             {
-                // TODO: Switch to polling when monitoring failed
-                _logger.LogWarning("Removed {Removed} monitored items that failed to create in OPC UA subscription {SubscriptionId}.", removed, subscription.Id);
+                if (polled > 0)
+                {
+                    _logger.LogWarning("Removed {Removed} failed monitored items from subscription {SubscriptionId}. {Polled} items switched to polling fallback.",
+                        removed, subscription.Id, polled);
+                }
+                else
+                {
+                    _logger.LogWarning("Removed {Removed} failed monitored items from subscription {SubscriptionId}.",
+                        removed, subscription.Id);
+                }
             }
 
             _logger.LogInformation("Created OPC UA subscription {SubscriptionId} with {Count} monitored items.", subscription.Id, subscription.MonitoredItems.Count());
@@ -226,9 +237,10 @@ internal class OpcUaSubscriptionManager
         }
     }
     
-    private async Task<int> FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
+    private async Task<(int removed, int polled)> FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
     {
         List<MonitoredItem>? itemsToRemove = null;
+        List<MonitoredItem>? itemsToPolled = null;
 
         foreach (var monitoredItem in subscription.MonitoredItems)
         {
@@ -240,13 +252,28 @@ internal class OpcUaSubscriptionManager
                 _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
 
                 var statusCode = monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good;
-                _logger.LogError("OPC UA monitored item creation failed for {DisplayName} (Handle={Handle}): {Status}",
-                    monitoredItem.DisplayName, monitoredItem.ClientHandle, statusCode);
+
+                // Check if we should fall back to polling for this item
+                if (_configuration.EnablePollingFallback &&
+                    _pollingManager != null &&
+                    IsSubscriptionUnsupported(statusCode))
+                {
+                    itemsToPolled ??= [];
+                    itemsToPolled.Add(monitoredItem);
+                    _logger.LogWarning("Monitored item {DisplayName} does not support subscriptions ({Status}), falling back to polling",
+                        monitoredItem.DisplayName, statusCode);
+                }
+                else
+                {
+                    _logger.LogError("OPC UA monitored item creation failed for {DisplayName} (Handle={Handle}): {Status}",
+                        monitoredItem.DisplayName, monitoredItem.ClientHandle, statusCode);
+                }
             }
         }
 
         if (itemsToRemove?.Count > 0)
         {
+            // Remove failed items from subscription
             foreach (var monitoredItem in itemsToRemove)
             {
                 subscription.RemoveItem(monitoredItem);
@@ -261,10 +288,33 @@ internal class OpcUaSubscriptionManager
                 _logger.LogWarning(ex, "ApplyChanges after removing failed items still failed. Continuing with remaining OPC UA monitored items.");
             }
 
-            return itemsToRemove.Count;
+            // Add items that support polling to polling manager
+            if (itemsToPolled?.Count > 0 && _pollingManager != null)
+            {
+                foreach (var item in itemsToPolled)
+                {
+                    _pollingManager.AddItem(item);
+                }
+            }
+
+            return (itemsToRemove.Count, itemsToPolled?.Count ?? 0);
         }
 
-        return 0;
+        return (0, 0);
+    }
+
+    /// <summary>
+    /// Checks if a status code indicates that subscriptions are not supported for this node.
+    /// These items should fall back to polling if enabled.
+    /// </summary>
+    private static bool IsSubscriptionUnsupported(StatusCode statusCode)
+    {
+        // BadNotSupported - Server doesn't support subscriptions for this node
+        // BadMonitoredItemFilterUnsupported - Filter not supported (data change filter)
+        // BadAttributeIdInvalid - Attribute doesn't exist or can't be subscribed to
+        return statusCode == StatusCodes.BadNotSupported ||
+               statusCode == StatusCodes.BadMonitoredItemFilterUnsupported ||
+               statusCode == StatusCodes.BadAttributeIdInvalid;
     }
 
     public void Cleanup()
@@ -303,14 +353,5 @@ internal class OpcUaSubscriptionManager
     {
         _healthMonitor.Dispose();
         Cleanup();
-    }
-
-    private struct OpcUaPropertyUpdate
-    {
-        public PropertyReference Property { get; init; }
-
-        public DateTimeOffset Timestamp { get; init; }
-
-        public object? Value { get; init; }
     }
 }

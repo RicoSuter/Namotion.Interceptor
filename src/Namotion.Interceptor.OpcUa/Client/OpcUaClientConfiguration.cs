@@ -147,6 +147,27 @@ public class OpcUaClientConfiguration
     /// </summary>
     public uint MaximumReferencesPerNode { get; set; } = 0;
 
+    /// <summary>
+    /// Gets or sets whether to enable automatic polling fallback when subscriptions are not supported.
+    /// When enabled, items that fail subscription creation automatically fall back to periodic polling.
+    /// Default is true.
+    /// </summary>
+    public bool EnablePollingFallback { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the polling interval for items that don't support subscriptions.
+    /// Only used when EnablePollingFallback is true.
+    /// Default is 1000ms (1 second).
+    /// </summary>
+    public TimeSpan PollingInterval { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Gets or sets the maximum batch size for polling read operations.
+    /// Larger batches reduce network calls but increase latency.
+    /// Default is 100 items per batch.
+    /// </summary>
+    public int PollingBatchSize { get; set; } = 100;
+
     public virtual ApplicationInstance CreateApplicationInstance()
     {
         var application = new ApplicationInstance
@@ -256,6 +277,24 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"MaximumItemsPerSubscription must be positive, got: {MaximumItemsPerSubscription}",
                 nameof(MaximumItemsPerSubscription));
+        }
+
+        if (EnablePollingFallback)
+        {
+            var minPollingInterval = TimeSpan.FromMilliseconds(100);
+            if (PollingInterval < minPollingInterval)
+            {
+                throw new ArgumentException(
+                    $"PollingInterval must be at least {minPollingInterval.TotalMilliseconds}ms when EnablePollingFallback is true (got: {PollingInterval.TotalMilliseconds}ms)",
+                    nameof(PollingInterval));
+            }
+
+            if (PollingBatchSize <= 0)
+            {
+                throw new ArgumentException(
+                    $"PollingBatchSize must be positive, got: {PollingBatchSize}",
+                    nameof(PollingBatchSize));
+            }
         }
     }
 }

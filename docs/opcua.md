@@ -340,7 +340,29 @@ machine.Speed = 100; // Queued if disconnected, written immediately if connected
 - Ring buffer semantics: drops oldest when full, keeps latest values
 - Batched flush: processes 100 items per batch to avoid memory spikes
 
-### Auto-Healing of failed Monitored Items
+### Polling Fallback for Unsupported Nodes
+
+The library automatically falls back to periodic polling when OPC UA nodes don't support subscriptions. This ensures all properties remain synchronized even with legacy servers or special node types.
+
+```csharp
+builder.Services.AddOpcUaSubjectClient<Machine>(
+    serverUrl: "opc.tcp://plc.factory.com:4840",
+    sourceName: "opc",
+    configure: options =>
+    {
+        options.EnablePollingFallback = true; // Default
+        options.PollingInterval = TimeSpan.FromSeconds(1); // Default: 1 second
+        options.PollingBatchSize = 100; // Default: 100 items per batch
+    });
+```
+
+**Automatic behavior:**
+- Nodes automatically switch to polling when subscriptions fail
+- Batched reads for efficiency (reduces network overhead)
+- Same value change detection as subscriptions (only updates on actual changes)
+- No configuration required - works out of the box
+
+### Auto-Healing of Failed Monitored Items
 
 The library automatically retries failed subscription items that may succeed later, such as when server resources become available.
 
@@ -357,27 +379,32 @@ builder.Services.AddOpcUaSubjectClient<Machine>(
 
 **Smart retry logic:**
 - Retries transient errors: `BadTooManyMonitoredItems`, `BadOutOfService`, `BadMonitoringModeUnsupported`
-- Skips permanent errors: `BadNodeIdUnknown`, `BadAttributeIdInvalid`, `BadIndexRangeInvalid`
+- Skips permanent errors: `BadNodeIdUnknown`
 - Health checks run at configurable intervals (minimum: 5 seconds)
+- Items that permanently don't support subscriptions automatically fall back to polling
 
 **Configuration validation:**
 - `WriteQueueSize` limited to 10,000 items maximum
 - `SubscriptionHealthCheckInterval` minimum of 5 seconds enforced
+- `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
 ### Observability
 
-Monitor connection health and queue status through exposed properties:
+Monitor connection health, queue status, and polling metrics through exposed properties:
 
 ```csharp
+// Connection status
+var isConnected = clientSource.IsConnected;
+
 // Write queue metrics
 var pendingWrites = clientSource.PendingWriteCount;
 var droppedWrites = clientSource.DroppedWriteCount;
-var isConnected = clientSource.IsConnected;
 
-// Subscription health metrics
+// Subscription and polling metrics
 var activeSubscriptions = subscriptionManager.ActiveSubscriptionCount;
 var totalItems = subscriptionManager.TotalMonitoredItemCount;
+var pollingItems = clientSource.PollingItemCount; // Items using polling fallback
 ```
 
 ## Thread Safety

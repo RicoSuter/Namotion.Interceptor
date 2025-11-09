@@ -109,8 +109,6 @@ internal sealed class OpcUaSessionManager : IDisposable
             return;
         }
 
-        _logger.LogWarning("OPC UA KeepAlive failed with status: {Status}. Connection may be lost", e.Status);
-
         if (e.CurrentState is not (ServerState.Unknown or ServerState.Failed))
         {
             return;
