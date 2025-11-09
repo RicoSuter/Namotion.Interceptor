@@ -34,7 +34,7 @@ var context = InterceptorSubjectContext
     .WithFullPropertyTracking();
 
 context
-    .GetPropertyChangedObservable()
+    .GetPropertyChangeObservable()
     .Subscribe(change =>
     {
         Console.WriteLine(
@@ -138,6 +138,12 @@ Core library for property and method interception with source generation support
 
 - **`SubjectPropertyMetadata`** - Property descriptor containing type information, access methods, and interception flags that tells the system how to work with each property.
 
+Thread-safety and correctness:
+
+- Property field reads and writes are synchronized via the subject's `SyncRoot` lock when interceptors are present, ensuring the interception pipeline executes safely across threads.
+- Without interceptors, properties behave like standard C# POCOs (no locking).
+- **Warning**: External use of `SyncRoot` for custom locking should be done with care, as it may lead to performance degradation or deadlocks if not coordinated properly with the interception system.
+
 ### Namotion.Interceptor.Generator
 
 Source generator that creates the interception logic for classes marked with `[InterceptorSubject]`. Automatically included when you install the main `Namotion.Interceptor` package.
@@ -234,7 +240,7 @@ var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking();
 
-context.GetPropertyChangedObservable().Subscribe(change => {
+context.GetPropertyChangeObservable().Subscribe(change => {
     Console.WriteLine($"{change.Property.Name}: {change.OldValue} → {change.NewValue}");
 });
 ```
@@ -242,8 +248,8 @@ context.GetPropertyChangedObservable().Subscribe(change => {
 **Methods:**
 
 - `WithLifecycle()` - Subject attach and detach callbacks
-- `WithFullPropertyTracking()` → `WithEqualityCheck()`, `WithContextInheritance()`, `WithDerivedPropertyChangeDetection()`, `WithPropertyChangedObservable()`
-- `WithPropertyChangedObservable()` - Observable property change notifications
+- `WithFullPropertyTracking()` → `WithEqualityCheck()`, `WithContextInheritance()`, `WithDerivedPropertyChangeDetection()`, `WithPropertyChangeObservable()`
+- `WithPropertyChangeObservable()` - Observable property change notifications
 - `WithDerivedPropertyChangeDetection()` → `WithLifecycle()` - Automatic derived property updates
 - `WithContextInheritance()` → `WithLifecycle()` - Child subjects inherit parent context
 - `WithEqualityCheck()` - Only trigger changes when values actually change

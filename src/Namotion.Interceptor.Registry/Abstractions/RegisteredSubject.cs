@@ -1,20 +1,21 @@
 ﻿using System.Collections.Frozen;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
-public record RegisteredSubject
+public class RegisteredSubject
 {
     private readonly Lock _lock = new();
 
     private FrozenDictionary<string, RegisteredSubjectProperty> _properties;
     private readonly HashSet<SubjectPropertyParent> _parents = []; // TODO(perf): Use a FrozenSet?
-
-    [JsonIgnore]
-    public IInterceptorSubject Subject { get; }
+    
+    [JsonIgnore] public IInterceptorSubject Subject { get; }
 
     public ICollection<SubjectPropertyParent> Parents
     {
@@ -34,14 +35,7 @@ public record RegisteredSubject
         }
     }
     
-    public IEnumerable<RegisteredSubjectProperty> PropertiesAndAttributes
-    {
-        get
-        {
-            lock (_lock)
-                return _properties.Values;
-        }
-    }
+    public IEnumerable<RegisteredSubjectProperty> PropertiesAndAttributes => _properties.Values;
 
     /// <summary>
     /// Gets all attributes which are attached to this property.
@@ -71,7 +65,7 @@ public record RegisteredSubject
                                      attribute.AttributeMetadata.PropertyName == propertyName && 
                                      attribute.AttributeMetadata.AttributeName == attributeName);
         }
-    } 
+    }
 
     /// <summary>
     /// Gets the property with the given name.
@@ -108,35 +102,41 @@ public record RegisteredSubject
     }
 
     /// <summary>
-    /// Adds a dynamic property with backing data to the subject.
+    /// Adds a dynamic derived property to the subject with tracking of dependencies.
     /// </summary>
     /// <param name="name">The name of the property.</param>
-    /// <param name="type">The property type.</param>
     /// <param name="getValue">The get method.</param>
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddProperty(string name, Type type, 
-        Func<IInterceptorSubject, object?>? getValue, 
-        Action<IInterceptorSubject, object?>? setValue, 
+    public RegisteredSubjectProperty AddDerivedProperty<TProperty>(string name, 
+        Func<IInterceptorSubject, TProperty?>? getValue,
+        Action<IInterceptorSubject, TProperty?>? setValue = null,
         params Attribute[] attributes)
     {
-        Subject.AddProperties(new SubjectPropertyMetadata(
-            name,
-            type,
-            attributes,
-            getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null, 
-            setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue, setValue) : null, 
-            isIntercepted: true,
-            isDynamic: true));
+        return AddProperty(name, typeof(TProperty), 
+            getValue is not null ? x => (TProperty)getValue(x)! : null, 
+            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null, 
+            attributes.Concat([new DerivedAttribute()]).ToArray());
+    }
 
-        var property = AddProperty(name, type, attributes);
-        
-        // trigger change event
-        property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null, 
-            o => getValue?.Invoke(o), delegate {});
-        
-        return property;
+    /// <summary>
+    /// Adds a dynamic derived property to the subject with tracking of dependencies.
+    /// </summary>
+    /// <param name="name">The name of the property.</param>
+    /// <param name="getValue">The get method.</param>
+    /// <param name="setValue">The set method.</param>
+    /// <param name="attributes">The custom attributes.</param>
+    /// <returns>The property.</returns>
+    public RegisteredSubjectProperty AddProperty<TProperty>(string name, 
+        Func<IInterceptorSubject, TProperty?>? getValue,
+        Action<IInterceptorSubject, TProperty?>? setValue = null,
+        params Attribute[] attributes)
+    {
+        return AddProperty(name, typeof(TProperty), 
+            getValue is not null ? x => (TProperty)getValue(x)! : null, 
+            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null, 
+            attributes);
     }
 
     /// <summary>
@@ -148,15 +148,51 @@ public record RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddDerivedProperty(string name, Type type, 
-        Func<IInterceptorSubject, object?>? getValue, 
-        Action<IInterceptorSubject, object?>? setValue, 
+    public RegisteredSubjectProperty AddDerivedProperty(string name, 
+        Type type,
+        Func<IInterceptorSubject, object?>? getValue,
+        Action<IInterceptorSubject, object?>? setValue = null,
         params Attribute[] attributes)
     {
-        return AddProperty(name, type, getValue, setValue, attributes.Concat([new DerivedAttribute()]).ToArray());
+        return AddProperty(name, type, getValue, setValue, attributes
+            .Concat([new DerivedAttribute()]).ToArray());
     }
 
-    private RegisteredSubjectProperty AddProperty(string name, Type type, Attribute[] attributes)
+    /// <summary>
+    /// Adds a dynamic property with backing data to the subject.
+    /// </summary>
+    /// <param name="name">The name of the property.</param>
+    /// <param name="type">The property type.</param>
+    /// <param name="getValue">The get method.</param>
+    /// <param name="setValue">The set method.</param>
+    /// <param name="attributes">The custom attributes.</param>
+    /// <returns>The property.</returns>
+    public RegisteredSubjectProperty AddProperty(
+        string name, 
+        Type type,
+        Func<IInterceptorSubject, object?>? getValue,
+        Action<IInterceptorSubject, object?>? setValue,
+        params Attribute[] attributes)
+    {
+        Subject.AddProperties(new SubjectPropertyMetadata(
+            name,
+            type,
+            attributes,
+            getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null,
+            setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue, setValue) : null,
+            isIntercepted: true,
+            isDynamic: true));
+
+        var property = AddPropertyInternal(name, type, attributes);
+
+        // trigger change event
+        property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
+            o => getValue?.Invoke(o), delegate { });
+
+        return property;
+    }
+
+    private RegisteredSubjectProperty AddPropertyInternal(string name, Type type, Attribute[] attributes)
     {
         var subjectProperty = RegisteredSubjectProperty.Create(this, name, type, attributes);
         
@@ -165,6 +201,11 @@ public record RegisteredSubject
             _properties = _properties
                 .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
                 .ToFrozenDictionary(p => p.Key, p => p.Value);
+
+            foreach (var property in _properties.Values)
+            {
+                property.AttributesCache = null;
+            }
         }
 
         Subject.AttachSubjectProperty(subjectProperty.Reference);

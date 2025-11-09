@@ -1,10 +1,8 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Configuration;
@@ -17,34 +15,29 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
-    private readonly string? _rootName;
+    private readonly OpcUaServerConfiguration _configuration;
 
     private OpcUaSubjectServer? _server;
-    private ISubjectMutationDispatcher? _dispatcher;
-
-    internal ISourcePathProvider SourcePathProvider { get; }
-
+    private ISubjectUpdater? _updater;
+    
     public OpcUaSubjectServerSource(
         IInterceptorSubject subject,
-        ISourcePathProvider sourcePathProvider,
-        ILogger<OpcUaSubjectServerSource> logger,
-        string? rootName)
+        OpcUaServerConfiguration configuration,
+        ILogger<OpcUaSubjectServerSource> logger)
     {
         _subject = subject;
         _logger = logger;
-        _rootName = rootName;
-
-        SourcePathProvider = sourcePathProvider;
+        _configuration = configuration;
     }
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return SourcePathProvider.IsPropertyIncluded(property);
+        return _configuration.SourcePathProvider.IsPropertyIncluded(property);
     }
 
-    public Task<IDisposable?> StartListeningAsync(ISubjectMutationDispatcher dispatcher, CancellationToken cancellationToken)
+    public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
     {
-        _dispatcher = dispatcher;
+        _updater = updater;
         return Task.FromResult<IDisposable?>(null);
     }
 
@@ -53,26 +46,26 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         return Task.FromResult<Action?>(null);
     }
 
-    public Task WriteToSourceAsync(IEnumerable<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        foreach (var change in changes)
+        var count = changes.Count;
+        for (var i = 0; i < count; i++)
         {
-            if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) && 
+            var change = changes[i];
+            if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
                 data is BaseDataVariableState node)
             {
-                var actualValue = change.NewValue;
-                if (actualValue is decimal)
-                {
-                    actualValue = Convert.ToDouble(actualValue);
-                }
+                var value = change.GetNewValue<object?>();
+                var convertedValue = _configuration.ValueConverter
+                    .ConvertToNodeValue(value, change.Property.GetRegisteredProperty());
 
-                node.Value = actualValue;
-                node.Timestamp = change.Timestamp.UtcDateTime;
+                node.Value = convertedValue;
+                node.Timestamp = change.ChangedTimestamp.UtcDateTime;
                 node.ClearChangeMasks(_server?.CurrentInstance.DefaultSystemContext, false);
             }
         }
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -81,21 +74,15 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            using var stream = typeof(OpcUaSubjectServerExtensions).Assembly
-                .GetManifestResourceStream("Namotion.Interceptor.OpcUa.MyOpcUaServer.Config.xml")
-                ?? throw new InvalidOperationException("Config.xml not found.");
-
-            var application = new ApplicationInstance
+            var application = _configuration.CreateApplicationInstance();
+            if (_configuration.CleanCertificateStore)
             {
-                ApplicationName = "MyOpcUaServer",
-                ApplicationType = ApplicationType.Server,
-                ApplicationConfiguration = await ApplicationConfiguration.Load(
-                    stream, ApplicationType.Server, typeof(ApplicationConfiguration), false)
-            };
-
+                CleanCertificateStore(application);
+                _logger.LogInformation("Cleaning up old certificates...");
+            }
             try
             {
-                _server = new OpcUaSubjectServer(_subject, this, _rootName);
+                _server = new OpcUaSubjectServer(_subject, this, _configuration);
 
                 await application.CheckApplicationInstanceCertificates(true);
                 await application.Start(_server);
@@ -118,15 +105,31 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             }
         }
     }
-
-    internal void UpdateProperty(PropertyReference property, DateTimeOffset timestamp, object? value)
+    
+    private static void CleanCertificateStore(ApplicationInstance application)
     {
-        // TODO: Implement actual correct conversion based on the property type
-        var convertedValue = Convert.ChangeType(value, property.Metadata.Type);
+        var path = application
+            .ApplicationConfiguration
+            .SecurityConfiguration
+            .ApplicationCertificate
+            .StorePath;
         
-        _dispatcher?.EnqueueSubjectUpdate(() =>
+        if (Directory.Exists(path))
         {
-            property.SetValueFromSource(this, timestamp, convertedValue);
-        });
+            Directory.Delete(path, true);
+        }
+    }
+
+    internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
+    {
+        var receivedTimestamp = DateTimeOffset.Now;
+
+        var registeredProperty = property.GetRegisteredProperty();
+        var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, registeredProperty);
+
+        var state = (source: this, property, changedTimestamp, receivedTimestamp, value: convertedValue);
+        _updater?.EnqueueOrApplyUpdate(state,
+            static s => s.property.SetValueFromSource(
+                s.source, s.changedTimestamp, s.receivedTimestamp, s.value));
     }
 }

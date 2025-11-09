@@ -1,4 +1,7 @@
-﻿using Microsoft.AspNetCore.Components;
+﻿using System.Collections.Concurrent;
+using System.Reflection;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Rendering;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Recorder;
 
@@ -8,10 +11,9 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
     where TSubject : IInterceptorSubject
 {
     private IDisposable? _subscription;
-    private ReadPropertyRecorderScope? _recorderScope;
-        
-    private PropertyReference[]? _properties;
-    private ReadPropertyRecorder? _recorder;
+
+    private ConcurrentDictionary<PropertyReference, bool> _scopeProperties = [];
+    private ConcurrentDictionary<PropertyReference, bool> _properties = [];
 
     [Inject]
     public TSubject? Subject { get; set; }
@@ -20,39 +22,31 @@ public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
     {
         _subscription = Subject?
             .Context
-            .GetPropertyChangedObservable()
+            .GetPropertyChangeObservable()
             .Subscribe(change =>
             {
-                if (_properties?.Contains(change.Property) == true)
+                if (_properties.TryGetValue(change.Property, out _))
                 {
                     InvokeAsync(StateHasChanged);
                 }
             });
         
-        _recorder = Subject?
-            .Context
-            .GetService<ReadPropertyRecorder>();
-    }
-
-    protected override bool ShouldRender()
-    {
-        var result = base.ShouldRender();
-        if (result)
+        var field = typeof(ComponentBase).GetField("_renderFragment", BindingFlags.NonPublic | BindingFlags.Instance);
+        if (field?.GetValue(this) is RenderFragment renderFragment)
         {
-            _recorderScope = _recorder?.StartPropertyAccessRecording();
+            void WrappedRenderFragment(RenderTreeBuilder builder)
+            {
+                using var recorderScope = ReadPropertyRecorder.Start(_scopeProperties);
+                renderFragment(builder);
+                (_properties, _scopeProperties) = (_scopeProperties, _properties);
+            }
+
+            field.SetValue(this, (RenderFragment)WrappedRenderFragment);
         }
-
-        return result;
-    }
-
-    protected override void OnAfterRender(bool firstRender)
-    {
-        _properties = _recorderScope?.GetPropertiesAndDispose();
     }
 
     public virtual void Dispose()
     {
         _subscription?.Dispose();
-        _recorderScope?.Dispose();
     }
 }

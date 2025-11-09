@@ -101,8 +101,11 @@ public static class SubjectUpdateExtensions
         switch (propertyUpdate.Kind)
         {
             case SubjectPropertyUpdateKind.Value:
-                SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () =>
-                    applyValuePropertyUpdate.Invoke(registeredProperty, propertyUpdate));
+                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+                {
+                    applyValuePropertyUpdate.Invoke(registeredProperty, propertyUpdate);
+                }
+
                 break;
 
             case SubjectPropertyUpdateKind.Item:
@@ -116,7 +119,7 @@ public static class SubjectUpdateExtensions
                     else
                     {
                         // create new item
-                        var item = subjectFactory?.CreateSubject(registeredProperty, null);
+                        var item = subjectFactory?.CreateSubject(registeredProperty);
                         if (item != null)
                         {
                             item.Context.AddFallbackContext(subject.Context);
@@ -124,16 +127,20 @@ public static class SubjectUpdateExtensions
                             var parentRegistry = subject.Context.GetService<ISubjectRegistry>();
                             item.ApplySubjectPropertyUpdate(propertyUpdate.Item, applyValuePropertyUpdate, subjectFactory, parentRegistry);
 
-                            SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () =>
-                                registeredProperty.SetValue(item));
+                            using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+                            {
+                                registeredProperty.SetValue(item);
+                            }
                         }
                     }
                 }
                 else
                 {
                     // set item to null
-                    SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () =>
-                        registeredProperty.SetValue(null));
+                    using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+                    {
+                        registeredProperty.SetValue(null);
+                    }
                 }
                 break;
 
@@ -171,7 +178,7 @@ public static class SubjectUpdateExtensions
                             else if (value is IList list)
                             {
                                 // Missing item at index, create and add new collection item
-                                var newItem = subjectFactory?.CreateSubject(registeredProperty, index);
+                                var newItem = subjectFactory?.CreateCollectionSubject(registeredProperty, index);
                                 if (newItem is not null)
                                 {
                                     newItem.Context.AddFallbackContext(subject.Context);
@@ -196,7 +203,7 @@ public static class SubjectUpdateExtensions
                             .Collection?
                             .Select(i =>
                             {
-                                var item = subjectFactory?.CreateSubject(registeredProperty, i.Index);
+                                var item = subjectFactory?.CreateCollectionSubject(registeredProperty, i.Index);
                                 if (item is not null)
                                 {
                                     // TODO: Is setting fallback context needed here or even too early?
@@ -209,8 +216,11 @@ public static class SubjectUpdateExtensions
                                 return item;
                             }) ?? [];
 
-                        var collection = subjectFactory.CreateSubjectCollection(registeredProperty, items);
-                        SubjectMutationContext.ApplyChangesWithTimestamp(propertyUpdate.Timestamp, () => registeredProperty.SetValue(collection));
+                        var collection = subjectFactory.CreateSubjectCollection(registeredProperty.Type, items);
+                        using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+                        {
+                            registeredProperty.SetValue(collection);
+                        }
                     }
                 }
                 else

@@ -5,6 +5,11 @@ namespace Namotion.Interceptor;
 public interface IInterceptorSubject
 {
     /// <summary>
+    /// Gets the sync root used to synchronize read/writes of property fields.
+    /// </summary>
+    object SyncRoot { get; }
+    
+    /// <summary>
     /// Gets the interceptor collection.
     /// </summary>
     IInterceptorSubjectContext Context { get; }

@@ -3,6 +3,7 @@
 // </auto-generated>
 
 using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
 
 using System;
 using System.Collections.Concurrent;
@@ -32,6 +33,9 @@ namespace YourDefaultNamespace
         [JsonIgnore]
         IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
 
+        [JsonIgnore]
+        object IInterceptorSubject.SyncRoot { get; } = new object();
+
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {
             _properties = (_properties ?? DefaultProperties)
@@ -45,9 +49,7 @@ namespace YourDefaultNamespace
                 {
                     "FirstName",       
                     new SubjectPropertyMetadata(
-                        nameof(FirstName), 
-                        typeof(Person).GetProperty(nameof(FirstName)).PropertyType!, 
-                        typeof(Person).GetProperty(nameof(FirstName)).GetCustomAttributes().ToArray()!, 
+                        typeof(Person).GetProperty(nameof(FirstName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
                         (o) => ((Person)o).FirstName, 
                         (o, v) => ((Person)o).FirstName = (string)v, 
                         isIntercepted: true,
@@ -56,9 +58,7 @@ namespace YourDefaultNamespace
                 {
                     "LastName",       
                     new SubjectPropertyMetadata(
-                        nameof(LastName), 
-                        typeof(Person).GetProperty(nameof(LastName)).PropertyType!, 
-                        typeof(Person).GetProperty(nameof(LastName)).GetCustomAttributes().ToArray()!, 
+                        typeof(Person).GetProperty(nameof(LastName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
                         (o) => ((Person)o).LastName, 
                         (o, v) => ((Person)o).LastName = (string)v, 
                         isIntercepted: true,
@@ -81,16 +81,16 @@ namespace YourDefaultNamespace
 
         public partial string FirstName
         {
-             get => GetPropertyValue<string>(nameof(FirstName), (o) => ((Person)o)._FirstName);
-             set => SetPropertyValue(nameof(FirstName), value, (o) => ((Person)o)._FirstName, (o, v) => ((Person)o)._FirstName = v);
+             get => GetPropertyValue<string>(nameof(FirstName), static (o) => ((Person)o)._FirstName);
+             set => SetPropertyValue(nameof(FirstName), value, static (o) => ((Person)o)._FirstName, static (o, v) => ((Person)o)._FirstName = v);
         }
 
         private string _LastName;
 
         public partial string LastName
         {
-             get => GetPropertyValue<string>(nameof(LastName), (o) => ((Person)o)._LastName);
-             set => SetPropertyValue(nameof(LastName), value, (o) => ((Person)o)._LastName, (o, v) => ((Person)o)._LastName = v);
+             get => GetPropertyValue<string>(nameof(LastName), static (o) => ((Person)o)._LastName);
+             set => SetPropertyValue(nameof(LastName), value, static (o) => ((Person)o)._LastName, static (o, v) => ((Person)o)._LastName = v);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -113,9 +113,9 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
+        private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
         {
-            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(parameters);
+            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }
     }
 }
@@ -126,6 +126,7 @@ namespace YourDefaultNamespace
 // </auto-generated>
 
 using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
 
 using System;
 using System.Collections.Concurrent;
@@ -155,6 +156,9 @@ namespace YourDefaultNamespace
         [JsonIgnore]
         IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
 
+        [JsonIgnore]
+        object IInterceptorSubject.SyncRoot { get; } = new object();
+
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {
             _properties = (_properties ?? DefaultProperties)
@@ -168,9 +172,7 @@ namespace YourDefaultNamespace
                 {
                     "MainCourse",       
                     new SubjectPropertyMetadata(
-                        nameof(MainCourse), 
-                        typeof(Teacher).GetProperty(nameof(MainCourse)).PropertyType!, 
-                        typeof(Teacher).GetProperty(nameof(MainCourse)).GetCustomAttributes().ToArray()!, 
+                        typeof(Teacher).GetProperty(nameof(MainCourse), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
                         (o) => ((Teacher)o).MainCourse, 
                         (o, v) => ((Teacher)o).MainCourse = (string)v, 
                         isIntercepted: true,
@@ -193,8 +195,8 @@ namespace YourDefaultNamespace
 
         public partial string MainCourse
         {
-             get => GetPropertyValue<string>(nameof(MainCourse), (o) => ((Teacher)o)._MainCourse);
-             set => SetPropertyValue(nameof(MainCourse), value, (o) => ((Teacher)o)._MainCourse, (o, v) => ((Teacher)o)._MainCourse = v);
+             get => GetPropertyValue<string>(nameof(MainCourse), static (o) => ((Teacher)o)._MainCourse);
+             set => SetPropertyValue(nameof(MainCourse), value, static (o) => ((Teacher)o)._MainCourse, static (o, v) => ((Teacher)o)._MainCourse = v);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -217,9 +219,9 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private object? InvokeMethod(string methodName, Func<object?[], object?> invokeMethod, params object?[] parameters)
+        private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
         {
-            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(parameters);
+            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }
     }
 }

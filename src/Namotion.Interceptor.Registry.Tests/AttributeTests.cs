@@ -35,10 +35,10 @@ public class AttributeTests
         var registeredProperty = person.TryGetRegisteredProperty(p => p!.FirstName)!;
 
         var attributePropertyName = registeredProperty.AddAttribute("MyAttribute",
-            typeof(int), _ => attributeValue, (_, v) => attributeValue = (int)v!);
+            _ => attributeValue, (_, v) => attributeValue = v!);
 
         attributePropertyName.AddAttribute("MyAttribute2",
-            typeof(int), _ => attributeValue, (_, v) => attributeValue = (int)v!);
+            _ => attributeValue, (_, v) => attributeValue = v!);
 
         var attribute = registeredProperty.TryGetAttribute("MyAttribute");
         var attribute2 = attribute?.TryGetAttribute("MyAttribute2");
@@ -58,7 +58,7 @@ public class AttributeTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
             .WithDerivedPropertyChangeDetection()
             .WithRegistry();
 
@@ -72,17 +72,17 @@ public class AttributeTests
         // Act
         var dynamicDerivedProperty = person
             .TryGetRegisteredSubject()!
-            .AddDerivedProperty("DynamicDerivedProperty", typeof(string), _ => "Mr. " + person.FirstName, null);
+            .AddDerivedProperty<string>("DynamicDerivedProperty", _ => "Mr. " + person.FirstName);
 
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property == dynamicDerivedProperty)
             .Subscribe(a => changes.Add(a));
 
         person.FirstName = "Rico";
 
         // Assert
-        Assert.Contains(changes, x => x.NewValue!.Equals("Mr. Rico"));
+        Assert.Contains(changes, x => x.GetNewValue<string>().Equals("Mr. Rico"));
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class AttributeTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
             .WithDerivedPropertyChangeDetection()
             .WithRegistry();
 
@@ -109,14 +109,14 @@ public class AttributeTests
             .AddDerivedAttribute("DynamicDerivedAttribute", typeof(string), _ => "Mr. " + person.FirstName, null);
 
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property == dynamicDerivedAttribute)
             .Subscribe(a => changes.Add(a));
 
         person.FirstName = "Rico";
 
         // Assert
-        Assert.Contains(changes, x => x.NewValue!.Equals("Mr. Rico"));
+        Assert.Contains(changes, x => x.GetNewValue<string>().Equals("Mr. Rico"));
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public class AttributeTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
             .WithDerivedPropertyChangeDetection()
             .WithRegistry();
 
@@ -144,14 +144,14 @@ public class AttributeTests
             .AddProperty("DynamicProperty", typeof(string), _ => value, (_, v) => value = (string)v!);
 
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property == dynamicProperty)
             .Subscribe(a => changes.Add(a));
 
         dynamicProperty.SetValue("Abc");
 
         // Assert
-        Assert.Contains(changes, x => x.NewValue!.Equals("Abc"));
+        Assert.Contains(changes, x => x.GetNewValue<string>().Equals("Abc"));
     }
 
     [Fact]
@@ -160,7 +160,7 @@ public class AttributeTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangedObservable()
+            .WithPropertyChangeObservable()
             .WithDerivedPropertyChangeDetection()
             .WithRegistry();
 
@@ -179,13 +179,13 @@ public class AttributeTests
             .AddAttribute("DynamicAttribute", typeof(string), _ => value, (_, v) => value = (string)v!);
 
         context
-            .GetPropertyChangedObservable(ImmediateScheduler.Instance)
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(c => c.Property == dynamicAttribute)
             .Subscribe(a => changes.Add(a));
 
         dynamicAttribute.SetValue("Abc");
 
         // Assert
-        Assert.Contains(changes, x => x.NewValue!.Equals("Abc"));
+        Assert.Contains(changes, x => x.GetNewValue<string>().Equals("Abc"));
     }
 }

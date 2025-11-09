@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Interceptors;
+
 namespace Namotion.Interceptor.Tests;
 
 public class InterceptorTests
@@ -33,7 +35,7 @@ public class InterceptorTests
             _logs = logs;
         }
 
-        public TProperty ReadProperty<TProperty>(ref ReadPropertyInterception context, ReadInterceptionFunc<TProperty> next)
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
         {
             _logs.Add($"{_name}: Before read {context.Property.Name}");
             var result = next(ref context);
@@ -74,7 +76,7 @@ public class InterceptorTests
             _logs = logs;
         }
 
-        public void WriteProperty<TProperty>(ref WritePropertyInterception<TProperty> context, WriteInterceptionAction<TProperty> next)
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
             _logs.Add($"{_name}: Before write {context.Property.Name}");
             context.NewValue = (TProperty)(object)((int)((object)context.NewValue!) + 1);
@@ -122,5 +124,25 @@ public class InterceptorTests
         {
             _logs.Add($"{_name}: Detached");
         }
+    }
+    
+    [Fact]
+    public Task WhenReadingMetadata_ThenItShouldBeCorrect()
+    {
+        // Arrange
+        var logs = new List<string>();
+        
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithService(() => new TestReadInterceptor("a", logs), _ => false)
+            .WithService(() => new TestReadInterceptor("b", logs), _ => false);
+        
+        var car = new Car(context) as IInterceptorSubject;
+
+        // Act
+        var properties = car.Properties;
+
+        // Assert
+        return Verify(properties);
     }
 }
