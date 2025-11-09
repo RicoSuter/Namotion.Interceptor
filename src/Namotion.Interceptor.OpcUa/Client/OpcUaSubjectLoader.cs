@@ -10,18 +10,17 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal class OpcUaSubjectLoader
 {
-    private const string OpcVariableKey = "OpcVariable";
     private const uint NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
 
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly List<PropertyReference> _propertiesWithOpcData;
-    private readonly ISubjectSource _source;
+    private readonly OpcUaSubjectClientSource _source;
 
     public OpcUaSubjectLoader(
         OpcUaClientConfiguration configuration,
         List<PropertyReference> propertiesWithOpcData,
-        ISubjectSource source,
+        OpcUaSubjectClientSource source,
         ILogger logger)
     {
         _configuration = configuration;
@@ -239,7 +238,7 @@ internal class OpcUaSubjectLoader
             Handle = property
         };
 
-        property.Reference.SetPropertyData(OpcVariableKey, nodeId);
+        property.Reference.SetPropertyData(_source.OpcVariableKey, nodeId);
         _propertiesWithOpcData.Add(property.Reference);
         monitoredItems.Add(monitoredItem);
     }
