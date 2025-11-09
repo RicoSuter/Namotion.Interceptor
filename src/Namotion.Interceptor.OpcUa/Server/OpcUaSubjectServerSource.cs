@@ -82,7 +82,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             }
             try
             {
-                _server = new OpcUaSubjectServer(_subject, this, _configuration);
+                _server = new OpcUaSubjectServer(_subject, this, _configuration, _logger);
 
                 await application.CheckApplicationInstanceCertificates(true);
                 await application.Start(_server);
