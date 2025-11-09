@@ -97,7 +97,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         SubscriptionManager.Clear();
         _propertiesWithOpcData.Clear();
-        
+
+        _logger.LogInformation("Connected to OPC UA server successfully.");
+
         var rootNode = await TryGetRootNodeAsync(session, cancellationToken);
         if (rootNode is not null)
         {
@@ -105,15 +107,22 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             if (monitoredItems.Count > 0)
             {
                 await SubscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken);
+                
+                _logger.LogInformation("Created {SubscriptionCount} subscriptions monitoring {Subscribed} via subscriptions ({Polled} via polling).",
+                    SubscriptionManager.Subscriptions.Count,
+                    SubscriptionManager.MonitoredItems.Count,
+                    PollingManager?.PollingItemCount ?? 0);
             }
-
-            _logger.LogInformation("OPC UA client initialization complete. Monitoring {Count} items (subscriptions: {Subscribed}, polling: {Polled}).",
-                monitoredItems.Count,
-                SubscriptionManager.MonitoredItems.Count,
-                PollingManager?.PollingItemCount ?? 0);
+            else
+            {
+                _logger.LogWarning("No monitored items found, using polling {Polled} items.", PollingManager?.PollingItemCount ?? 0);
+            }
+        }
+        else
+        {
+            _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
         }
 
-        _logger.LogInformation("Connected to OPC UA server successfully.");
         return Task.FromResult<IDisposable?>(null);
     }
     
@@ -167,8 +176,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
         }
             
-        _logger.LogInformation("Read values of {Count} OPC UA nodes.", itemCount);
-
+        _logger.LogInformation("Read values of {Count} OPC UA nodes from server.", itemCount);
         return () =>
         {
             foreach (var (property, dataValue) in result)
@@ -177,7 +185,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
             }
 
-            _logger.LogInformation("Applied {Count} OPC UA node values to local properties.", itemCount);
+            _logger.LogInformation("Updated properties with {Count} OPC UA node values.", itemCount);
         };
     }
 
