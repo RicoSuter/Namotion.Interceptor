@@ -36,7 +36,7 @@ public class WriteQueueTests
         await source.WriteToSourceAsync([change], CancellationToken.None);
 
         // Assert - Verify write was queued (check queue count via observability property)
-        Assert.Equal(1, source.PendingWriteCount);
+        Assert.Equal(1, source.WriteQueueManager.PendingWriteCount);
     }
 
     [Fact]
@@ -53,10 +53,10 @@ public class WriteQueueTests
         await source.WriteToSourceAsync([SubjectPropertyChange.Create(property, null, DateTimeOffset.UtcNow, null, null, "Value3")], CancellationToken.None); // Value1 dropped, Value3 kept
 
         // Assert - Queue still has 2 items (ring buffer semantics)
-        Assert.Equal(2, source.PendingWriteCount);
+        Assert.Equal(2, source.WriteQueueManager.PendingWriteCount);
 
         // Assert - Dropped write count increased
-        Assert.Equal(1, source.DroppedWriteCount);
+        Assert.Equal(1, source.WriteQueueManager.DroppedWriteCount);
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public class WriteQueueTests
         await source.WriteToSourceAsync([change], CancellationToken.None);
 
         // Assert - Nothing should be queued since buffering is disabled
-        Assert.Equal(0, source.PendingWriteCount);
+        Assert.Equal(0, source.WriteQueueManager.PendingWriteCount);
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public class WriteQueueTests
         await source.WriteToSourceAsync(changes, CancellationToken.None);
 
         // Assert - Both writes should be queued
-        Assert.Equal(2, source.PendingWriteCount);
+        Assert.Equal(2, source.WriteQueueManager.PendingWriteCount);
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class WriteQueueTests
         await source.WriteToSourceAsync([], CancellationToken.None);
 
         // Assert - Queue should remain empty
-        Assert.Equal(0, source.PendingWriteCount);
+        Assert.Equal(0, source.WriteQueueManager.PendingWriteCount);
     }
 
     private OpcUaClientConfiguration CreateConfiguration(int writeQueueSize)
