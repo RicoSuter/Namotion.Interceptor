@@ -15,10 +15,21 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// Thread-Safety: This class is thread-safe for concurrent access to all public methods.
 /// The polling loop runs on a background thread and uses concurrent collections for item management.
 ///
+/// Initialization Order:
+/// 1. Construct the OpcUaPollingManager instance
+/// 2. Call Start() to begin the background polling loop (idempotent - safe to call multiple times)
+/// 3. Add items via AddItem() as subscription failures are detected
+/// Note: Start() can be called before or after items are added - the polling loop will process
+/// items whenever the collection is non-empty.
+///
 /// Behavior During Disconnection: When the OPC UA session is disconnected, polling is suspended
 /// and cached values become stale. Upon reconnection, cached values are reset and polling resumes,
 /// causing all polled properties to receive fresh values on the next polling cycle. This is acceptable
 /// for polling-based monitoring where some data loss during disconnection is expected and tolerable.
+///
+/// Circuit Breaker: After 5 consecutive polling failures, the circuit breaker opens and suspends
+/// polling for 30 seconds. This prevents resource exhaustion when the server is persistently unavailable.
+/// The circuit automatically attempts to close after the cooldown period.
 /// </summary>
 internal sealed class OpcUaPollingManager : IDisposable
 {
@@ -36,12 +47,21 @@ internal sealed class OpcUaPollingManager : IDisposable
 
     private Task? _pollingTask;
     private ISession? _lastKnownSession;
-    private int _disposed = 0;
+    private int _disposed;
+
+    // Circuit breaker state
+    private const int CircuitBreakerFailureThreshold = 5;
+    private const int CircuitBreakerCooldownSeconds = 30;
+    private int _consecutiveFailures;
+    private int _circuitOpen; // 0 = closed, 1 = open
+    private DateTimeOffset _circuitOpenedAt;
 
     // Metrics
-    private long _totalReads = 0;
-    private long _failedReads = 0;
-    private long _valueChanges = 0;
+    private long _totalReads;
+    private long _failedReads;
+    private long _valueChanges;
+    private long _slowPolls;
+    private long _circuitBreakerTrips;
 
     public OpcUaPollingManager(
         ILogger logger,
@@ -97,6 +117,21 @@ internal sealed class OpcUaPollingManager : IDisposable
     public long ValueChanges => Interlocked.Read(ref _valueChanges);
 
     /// <summary>
+    /// Gets the total number of slow polls (poll duration exceeded polling interval).
+    /// </summary>
+    public long SlowPolls => Interlocked.Read(ref _slowPolls);
+
+    /// <summary>
+    /// Gets the total number of times the circuit breaker has tripped due to persistent failures.
+    /// </summary>
+    public long CircuitBreakerTrips => Interlocked.Read(ref _circuitBreakerTrips);
+
+    /// <summary>
+    /// Gets whether the circuit breaker is currently open (polling suspended due to persistent failures).
+    /// </summary>
+    public bool IsCircuitOpen => Volatile.Read(ref _circuitOpen) == 1;
+
+    /// <summary>
     /// Gets whether the polling manager is currently running.
     /// </summary>
     public bool IsRunning => _pollingTask != null && Volatile.Read(ref _disposed) == 0;
@@ -137,14 +172,14 @@ internal sealed class OpcUaPollingManager : IDisposable
         var key = monitoredItem.StartNodeId.ToString();
 
         // Extract RegisteredSubjectProperty from handle
-        if (monitoredItem.Handle is not Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property)
+        if (monitoredItem.Handle is not RegisteredSubjectProperty property)
         {
             _logger.LogWarning("Cannot add item {NodeId} to polling - invalid handle", key);
             return;
         }
 
         var pollingItem = new PollingItem(
-            NodeId: (NodeId)monitoredItem.StartNodeId,
+            monitoredItem.StartNodeId,
             Property: property,
             LastValue: null
         );
@@ -200,6 +235,24 @@ internal sealed class OpcUaPollingManager : IDisposable
             return;
         }
 
+        // Circuit breaker: check if we should attempt to close the circuit after cooldown
+        if (Volatile.Read(ref _circuitOpen) == 1)
+        {
+            var timeSinceOpened = DateTimeOffset.UtcNow - _circuitOpenedAt;
+            if (timeSinceOpened.TotalSeconds >= CircuitBreakerCooldownSeconds)
+            {
+                _logger.LogInformation("Circuit breaker cooldown period elapsed, attempting to resume polling");
+                Volatile.Write(ref _circuitOpen, 0);
+                Interlocked.Exchange(ref _consecutiveFailures, 0);
+            }
+            else
+            {
+                _logger.LogDebug("Circuit breaker is open, skipping poll (cooldown: {Remaining}s remaining)",
+                    (int)(CircuitBreakerCooldownSeconds - timeSinceOpened.TotalSeconds));
+                return;
+            }
+        }
+
         var session = _sessionManager.CurrentSession;
         if (session == null)
         {
@@ -212,8 +265,11 @@ internal sealed class OpcUaPollingManager : IDisposable
         var lastSession = Volatile.Read(ref _lastKnownSession);
         if (lastSession != null && !ReferenceEquals(lastSession, session))
         {
-            _logger.LogInformation("Session change detected, resetting polled item values");
+            _logger.LogInformation("Session change detected, resetting polled item values and circuit breaker");
             ResetPolledValues();
+            // Reset circuit breaker on session change (fresh start)
+            Volatile.Write(ref _circuitOpen, 0);
+            Interlocked.Exchange(ref _consecutiveFailures, 0);
         }
         Volatile.Write(ref _lastKnownSession, session);
 
@@ -223,6 +279,9 @@ internal sealed class OpcUaPollingManager : IDisposable
             _logger.LogDebug("Session not connected, skipping poll");
             return;
         }
+
+        var startTime = DateTimeOffset.UtcNow;
+        var pollSucceeded = false;
 
         try
         {
@@ -236,10 +295,46 @@ internal sealed class OpcUaPollingManager : IDisposable
                 var batch = new ArraySegment<PollingItem>(itemsToRead, i, batchSize);
                 await ReadBatchAsync(session, batch, cancellationToken);
             }
+
+            pollSucceeded = true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error polling items");
+            pollSucceeded = false;
+        }
+        finally
+        {
+            // Circuit breaker: track success/failure
+            if (pollSucceeded)
+            {
+                // Reset consecutive failures on success
+                Interlocked.Exchange(ref _consecutiveFailures, 0);
+            }
+            else
+            {
+                // Increment failures and check threshold
+                var failures = Interlocked.Increment(ref _consecutiveFailures);
+                if (failures >= CircuitBreakerFailureThreshold)
+                {
+                    if (Interlocked.CompareExchange(ref _circuitOpen, 1, 0) == 0)
+                    {
+                        _circuitOpenedAt = DateTimeOffset.UtcNow;
+                        Interlocked.Increment(ref _circuitBreakerTrips);
+                        _logger.LogError("Circuit breaker opened after {Failures} consecutive failures. Polling suspended for {Cooldown}s",
+                            failures, CircuitBreakerCooldownSeconds);
+                    }
+                }
+            }
+
+            // Detect slow polls that exceed the polling interval
+            var duration = DateTimeOffset.UtcNow - startTime;
+            if (duration > _pollingInterval)
+            {
+                Interlocked.Increment(ref _slowPolls);
+                _logger.LogWarning("Slow poll detected: polling took {Duration}ms, which exceeds interval of {Interval}ms. Consider increasing polling interval or batch size.",
+                    duration.TotalMilliseconds, _pollingInterval.TotalMilliseconds);
+            }
         }
     }
 
@@ -338,12 +433,17 @@ internal sealed class OpcUaPollingManager : IDisposable
         // Only notify on actual change (same as subscription behavior)
         if (!ValuesAreEqual(newValue, oldValue))
         {
-            // Update cached value atomically - this is thread-safe for concurrent reads/writes
+            // Update cached value atomically - only if item still exists and hasn't changed
+            // This prevents resurrection of items removed between snapshot and processing
             var key = pollingItem.NodeId.ToString();
-            _pollingItems.AddOrUpdate(
-                key,
-                pollingItem with { LastValue = newValue },
-                (_, current) => current with { LastValue = newValue });
+            var updatedItem = pollingItem with { LastValue = newValue };
+
+            if (!_pollingItems.TryUpdate(key, updatedItem, pollingItem))
+            {
+                // Item was removed or modified concurrently - skip notification
+                _logger.LogTrace("Skipping update for concurrently modified/removed item {NodeId}", pollingItem.NodeId);
+                return;
+            }
 
             // Create update record (same pattern as subscription manager)
             var update = new OpcUaPropertyUpdate
@@ -379,8 +479,8 @@ internal sealed class OpcUaPollingManager : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
             return;
 
-        _logger.LogDebug("Disposing OPC UA polling manager (Total reads: {TotalReads}, Failed: {FailedReads}, Value changes: {ValueChanges})",
-            _totalReads, _failedReads, _valueChanges);
+        _logger.LogDebug("Disposing OPC UA polling manager (Total reads: {TotalReads}, Failed: {FailedReads}, Value changes: {ValueChanges}, Slow polls: {SlowPolls}, Circuit breaker trips: {Trips})",
+            _totalReads, _failedReads, _valueChanges, _slowPolls, _circuitBreakerTrips);
 
         // Stop timer and cancel work
         _timer.Dispose();
@@ -403,7 +503,7 @@ internal sealed class OpcUaPollingManager : IDisposable
         _pollingItems.Clear();
     }
 
-    private record PollingItem(
+    private record struct PollingItem(
         NodeId NodeId,
         RegisteredSubjectProperty Property,
         object? LastValue
