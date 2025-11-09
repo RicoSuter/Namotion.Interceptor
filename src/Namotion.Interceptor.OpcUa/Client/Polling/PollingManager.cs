@@ -6,7 +6,7 @@ using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
 
-namespace Namotion.Interceptor.OpcUa.Client;
+namespace Namotion.Interceptor.OpcUa.Client.Polling;
 
 /// <summary>
 /// Manages polling-based reading for OPC UA nodes that don't support subscriptions.
@@ -27,11 +27,11 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// causing all polled properties to receive fresh values on the next polling cycle. This is acceptable
 /// for polling-based monitoring where some data loss during disconnection is expected and tolerable.
 ///
-/// Circuit Breaker: After 5 consecutive polling failures, the circuit breaker opens and suspends
-/// polling for 30 seconds. This prevents resource exhaustion when the server is persistently unavailable.
-/// The circuit automatically attempts to close after the cooldown period.
+/// Circuit Breaker: After consecutive polling failures reach the configured threshold, the circuit breaker
+/// opens and suspends polling for the configured cooldown period. This prevents resource exhaustion when
+/// the server is persistently unavailable. The circuit automatically attempts to close after the cooldown.
 /// </summary>
-internal sealed class OpcUaPollingManager : IDisposable
+internal sealed class PollingManager : IDisposable
 {
     private readonly ILogger _logger;
     private readonly OpcUaSessionManager _sessionManager;
@@ -39,6 +39,8 @@ internal sealed class OpcUaPollingManager : IDisposable
     private readonly TimeSpan _pollingInterval;
     private readonly int _batchSize;
     private readonly TimeSpan _disposalTimeout;
+    private readonly PollingCircuitBreaker _circuitBreaker;
+    private readonly PollingMetrics _metrics = new();
 
     private readonly ConcurrentDictionary<string, PollingItem> _pollingItems = new();
     private readonly PeriodicTimer _timer;
@@ -49,27 +51,15 @@ internal sealed class OpcUaPollingManager : IDisposable
     private ISession? _lastKnownSession;
     private int _disposed;
 
-    // Circuit breaker state
-    private const int CircuitBreakerFailureThreshold = 5;
-    private const int CircuitBreakerCooldownSeconds = 30;
-    private int _consecutiveFailures;
-    private int _circuitOpen; // 0 = closed, 1 = open
-    private DateTimeOffset _circuitOpenedAt;
-
-    // Metrics
-    private long _totalReads;
-    private long _failedReads;
-    private long _valueChanges;
-    private long _slowPolls;
-    private long _circuitBreakerTrips;
-
-    public OpcUaPollingManager(
+    public PollingManager(
         ILogger logger,
         OpcUaSessionManager sessionManager,
         ISubjectUpdater updater,
         TimeSpan pollingInterval,
         int batchSize,
-        TimeSpan disposalTimeout)
+        TimeSpan disposalTimeout,
+        int circuitBreakerThreshold,
+        TimeSpan circuitBreakerCooldown)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(sessionManager);
@@ -93,6 +83,7 @@ internal sealed class OpcUaPollingManager : IDisposable
         _pollingInterval = pollingInterval;
         _batchSize = batchSize;
         _disposalTimeout = disposalTimeout;
+        _circuitBreaker = new PollingCircuitBreaker(circuitBreakerThreshold, circuitBreakerCooldown);
         _timer = new PeriodicTimer(pollingInterval);
     }
 
@@ -104,32 +95,32 @@ internal sealed class OpcUaPollingManager : IDisposable
     /// <summary>
     /// Gets the total number of successful read operations performed.
     /// </summary>
-    public long TotalReads => Interlocked.Read(ref _totalReads);
+    public long TotalReads => _metrics.TotalReads;
 
     /// <summary>
     /// Gets the total number of failed read operations.
     /// </summary>
-    public long FailedReads => Interlocked.Read(ref _failedReads);
+    public long FailedReads => _metrics.FailedReads;
 
     /// <summary>
     /// Gets the total number of value changes detected and processed.
     /// </summary>
-    public long ValueChanges => Interlocked.Read(ref _valueChanges);
+    public long ValueChanges => _metrics.ValueChanges;
 
     /// <summary>
     /// Gets the total number of slow polls (poll duration exceeded polling interval).
     /// </summary>
-    public long SlowPolls => Interlocked.Read(ref _slowPolls);
+    public long SlowPolls => _metrics.SlowPolls;
 
     /// <summary>
     /// Gets the total number of times the circuit breaker has tripped due to persistent failures.
     /// </summary>
-    public long CircuitBreakerTrips => Interlocked.Read(ref _circuitBreakerTrips);
+    public long CircuitBreakerTrips => _circuitBreaker.TripCount;
 
     /// <summary>
     /// Gets whether the circuit breaker is currently open (polling suspended due to persistent failures).
     /// </summary>
-    public bool IsCircuitOpen => Volatile.Read(ref _circuitOpen) == 1;
+    public bool IsCircuitOpen => _circuitBreaker.IsOpen;
 
     /// <summary>
     /// Gets whether the polling manager is currently running.
@@ -144,7 +135,7 @@ internal sealed class OpcUaPollingManager : IDisposable
     public void Start()
     {
         if (Volatile.Read(ref _disposed) == 1)
-            throw new ObjectDisposedException(nameof(OpcUaPollingManager));
+            throw new ObjectDisposedException(nameof(PollingManager));
 
         lock (_startLock)
         {
@@ -235,22 +226,13 @@ internal sealed class OpcUaPollingManager : IDisposable
             return;
         }
 
-        // Circuit breaker: check if we should attempt to close the circuit after cooldown
-        if (Volatile.Read(ref _circuitOpen) == 1)
+        // Check circuit breaker
+        if (!_circuitBreaker.ShouldAttempt())
         {
-            var timeSinceOpened = DateTimeOffset.UtcNow - _circuitOpenedAt;
-            if (timeSinceOpened.TotalSeconds >= CircuitBreakerCooldownSeconds)
-            {
-                _logger.LogInformation("Circuit breaker cooldown period elapsed, attempting to resume polling");
-                Volatile.Write(ref _circuitOpen, 0);
-                Interlocked.Exchange(ref _consecutiveFailures, 0);
-            }
-            else
-            {
-                _logger.LogDebug("Circuit breaker is open, skipping poll (cooldown: {Remaining}s remaining)",
-                    (int)(CircuitBreakerCooldownSeconds - timeSinceOpened.TotalSeconds));
-                return;
-            }
+            var remaining = _circuitBreaker.GetCooldownRemaining();
+            _logger.LogDebug("Circuit breaker is open, skipping poll (cooldown: {Remaining}s remaining)",
+                (int)remaining.TotalSeconds);
+            return;
         }
 
         var session = _sessionManager.CurrentSession;
@@ -267,9 +249,7 @@ internal sealed class OpcUaPollingManager : IDisposable
         {
             _logger.LogInformation("Session change detected, resetting polled item values and circuit breaker");
             ResetPolledValues();
-            // Reset circuit breaker on session change (fresh start)
-            Volatile.Write(ref _circuitOpen, 0);
-            Interlocked.Exchange(ref _consecutiveFailures, 0);
+            _circuitBreaker.Reset();
         }
         Volatile.Write(ref _lastKnownSession, session);
 
@@ -305,33 +285,21 @@ internal sealed class OpcUaPollingManager : IDisposable
         }
         finally
         {
-            // Circuit breaker: track success/failure
+            // Update circuit breaker
             if (pollSucceeded)
             {
-                // Reset consecutive failures on success
-                Interlocked.Exchange(ref _consecutiveFailures, 0);
+                _circuitBreaker.RecordSuccess();
             }
-            else
+            else if (_circuitBreaker.RecordFailure())
             {
-                // Increment failures and check threshold
-                var failures = Interlocked.Increment(ref _consecutiveFailures);
-                if (failures >= CircuitBreakerFailureThreshold)
-                {
-                    if (Interlocked.CompareExchange(ref _circuitOpen, 1, 0) == 0)
-                    {
-                        _circuitOpenedAt = DateTimeOffset.UtcNow;
-                        Interlocked.Increment(ref _circuitBreakerTrips);
-                        _logger.LogError("Circuit breaker opened after {Failures} consecutive failures. Polling suspended for {Cooldown}s",
-                            failures, CircuitBreakerCooldownSeconds);
-                    }
-                }
+                _logger.LogError("Circuit breaker opened after consecutive failures. Polling suspended temporarily.");
             }
 
             // Detect slow polls that exceed the polling interval
             var duration = DateTimeOffset.UtcNow - startTime;
             if (duration > _pollingInterval)
             {
-                Interlocked.Increment(ref _slowPolls);
+                _metrics.RecordSlowPoll();
                 _logger.LogWarning("Slow poll detected: polling took {Duration}ms, which exceeds interval of {Interval}ms. Consider increasing polling interval or batch size.",
                     duration.TotalMilliseconds, _pollingInterval.TotalMilliseconds);
             }
@@ -396,7 +364,7 @@ internal sealed class OpcUaPollingManager : IDisposable
                 nodesToRead,
                 cancellationToken);
 
-            Interlocked.Increment(ref _totalReads);
+            _metrics.RecordRead();
 
             // Process results
             for (var i = 0; i < response.Results.Count && i < batch.Count; i++)
@@ -412,7 +380,7 @@ internal sealed class OpcUaPollingManager : IDisposable
                 }
                 else if (StatusCode.IsBad(dataValue.StatusCode))
                 {
-                    Interlocked.Increment(ref _failedReads);
+                    _metrics.RecordFailedRead();
                     _logger.LogWarning("Polling read failed for {NodeId}: {Status}",
                         pollingItem.NodeId, dataValue.StatusCode);
                 }
@@ -420,7 +388,7 @@ internal sealed class OpcUaPollingManager : IDisposable
         }
         catch (Exception ex)
         {
-            Interlocked.Increment(ref _failedReads);
+            _metrics.RecordFailedRead();
             _logger.LogError(ex, "Failed to read batch of {Count} polled items", batch.Count);
         }
     }
@@ -467,7 +435,7 @@ internal sealed class OpcUaPollingManager : IDisposable
                 }
             });
 
-            Interlocked.Increment(ref _valueChanges);
+            _metrics.RecordValueChange();
 
             _logger.LogTrace("Polled value changed for {NodeId}: {OldValue} -> {NewValue}",
                 pollingItem.NodeId, oldValue, newValue);
@@ -480,7 +448,7 @@ internal sealed class OpcUaPollingManager : IDisposable
             return;
 
         _logger.LogDebug("Disposing OPC UA polling manager (Total reads: {TotalReads}, Failed: {FailedReads}, Value changes: {ValueChanges}, Slow polls: {SlowPolls}, Circuit breaker trips: {Trips})",
-            _totalReads, _failedReads, _valueChanges, _slowPolls, _circuitBreakerTrips);
+            _metrics.TotalReads, _metrics.FailedReads, _metrics.ValueChanges, _metrics.SlowPolls, _circuitBreaker.TripCount);
 
         // Stop timer and cancel work
         _timer.Dispose();

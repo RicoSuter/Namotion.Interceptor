@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
@@ -24,7 +25,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly OpcUaSubscriptionManager _subscriptionManager;
     private readonly OpcUaSessionManager _sessionManager;
     private readonly OpcUaWriteQueueManager _writeQueueManager;
-    private OpcUaPollingManager? _pollingManager;
+    private PollingManager? _pollingManager;
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private CancellationToken _stoppingToken;
@@ -96,13 +97,15 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         // Create and start polling manager if enabled
         if (_configuration.EnablePollingFallback && _pollingManager == null)
         {
-            _pollingManager = new OpcUaPollingManager(
+            _pollingManager = new PollingManager(
                 logger: _logger,
                 sessionManager: _sessionManager,
                 updater: updater,
                 pollingInterval: _configuration.PollingInterval,
                 batchSize: _configuration.PollingBatchSize,
-                disposalTimeout: _configuration.PollingDisposalTimeout
+                disposalTimeout: _configuration.PollingDisposalTimeout,
+                circuitBreakerThreshold: _configuration.PollingCircuitBreakerThreshold,
+                circuitBreakerCooldown: _configuration.PollingCircuitBreakerCooldown
             );
             _subscriptionManager.SetPollingManager(_pollingManager);
             _pollingManager.Start();
@@ -138,9 +141,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                         await ReadAndApplyInitialValuesAsync(monitoredItems, newSession, stoppingToken);
                         await _subscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, newSession, stoppingToken);
                         _subscriptionManager.StartHealthMonitoring();
-
-                        // Start polling manager if enabled
-                        _pollingManager?.Start();
                     }
 
                     _logger.LogInformation("OPC UA client initialization complete. Monitoring {Count} items (subscriptions: {Subscribed}, polling: {Polled}).",

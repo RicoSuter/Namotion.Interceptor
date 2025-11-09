@@ -175,6 +175,22 @@ public class OpcUaClientConfiguration
     /// </summary>
     public TimeSpan PollingDisposalTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
+    /// <summary>
+    /// Gets or sets the number of consecutive polling failures before the circuit breaker opens.
+    /// When the circuit breaker opens, polling is suspended temporarily to prevent resource exhaustion.
+    /// Only used when EnablePollingFallback is true.
+    /// Default is 5 failures.
+    /// </summary>
+    public int PollingCircuitBreakerThreshold { get; set; } = 5;
+
+    /// <summary>
+    /// Gets or sets the cooldown period after the circuit breaker opens before attempting to resume polling.
+    /// After this period, polling automatically resumes and the circuit breaker resets.
+    /// Only used when EnablePollingFallback is true.
+    /// Default is 30 seconds.
+    /// </summary>
+    public TimeSpan PollingCircuitBreakerCooldown { get; set; } = TimeSpan.FromSeconds(30);
+
     public virtual ApplicationInstance CreateApplicationInstance()
     {
         var application = new ApplicationInstance
@@ -301,6 +317,21 @@ public class OpcUaClientConfiguration
                 throw new ArgumentException(
                     $"PollingBatchSize must be positive, got: {PollingBatchSize}",
                     nameof(PollingBatchSize));
+            }
+
+            if (PollingCircuitBreakerThreshold <= 0)
+            {
+                throw new ArgumentException(
+                    $"PollingCircuitBreakerThreshold must be positive, got: {PollingCircuitBreakerThreshold}",
+                    nameof(PollingCircuitBreakerThreshold));
+            }
+
+            var minCooldown = TimeSpan.FromSeconds(1);
+            if (PollingCircuitBreakerCooldown < minCooldown)
+            {
+                throw new ArgumentException(
+                    $"PollingCircuitBreakerCooldown must be at least {minCooldown.TotalSeconds}s when EnablePollingFallback is true (got: {PollingCircuitBreakerCooldown.TotalSeconds}s)",
+                    nameof(PollingCircuitBreakerCooldown));
             }
         }
     }

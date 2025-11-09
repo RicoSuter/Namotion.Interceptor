@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Sources;
@@ -19,7 +20,7 @@ internal class OpcUaSubscriptionManager
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
     private readonly OpcUaSubscriptionHealthMonitor _healthMonitor;
-    private OpcUaPollingManager? _pollingManager;
+    private PollingManager? _pollingManager;
 
     private ImmutableArray<Subscription> _subscriptions = ImmutableArray<Subscription>.Empty;
     private ISubjectUpdater? _updater;
@@ -45,7 +46,7 @@ internal class OpcUaSubscriptionManager
         _updater = updater;
     }
 
-    public void SetPollingManager(OpcUaPollingManager pollingManager)
+    public void SetPollingManager(PollingManager pollingManager)
     {
         _pollingManager = pollingManager;
     }
