@@ -16,20 +16,32 @@ internal class OpcUaSubscriptionManager
     private static readonly ObjectPool<List<OpcUaPropertyUpdate>> ChangesPool
         = new(() => new List<OpcUaPropertyUpdate>(16));
 
+    private readonly Lock _subscriptionsLock = new(); // Protects ImmutableArray assignment (struct not atomic)
+
     private readonly ILogger _logger;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
-    private readonly OpcUaSubscriptionHealthMonitor _healthMonitor;
-    private PollingManager? _pollingManager;
+    private readonly SemaphoreSlim _applyChangesLock = new(1, 1); // Coordinates concurrent ApplyChanges calls
 
+    private volatile PollingManager? _pollingManager;
     private ImmutableArray<Subscription> _subscriptions = ImmutableArray<Subscription>.Empty;
-    private ISubjectUpdater? _updater;
+    private volatile ISubjectUpdater? _updater;
+    private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
 
     /// <summary>
-    /// Gets the current list of subscriptions. Lock-free and allocation-free when accessed.
-    /// Returns the immutable array directly - no copying or locking required.
+    /// Gets the current list of subscriptions.
+    /// Thread-safe using lock to prevent torn reads of ImmutableArray struct.
     /// </summary>
-    public IReadOnlyList<Subscription> Subscriptions => _subscriptions;
+    public IReadOnlyList<Subscription> Subscriptions
+    {
+        get
+        {
+            lock (_subscriptionsLock)
+            {
+                return _subscriptions;
+            }
+        }
+    }
 
     public int TotalMonitoredItemCount => _monitoredItems.Count;
 
@@ -37,8 +49,6 @@ internal class OpcUaSubscriptionManager
     {
         _configuration = configuration;
         _logger = logger;
-
-        _healthMonitor = new OpcUaSubscriptionHealthMonitor(configuration, this, logger);
     }
 
     public void SetUpdater(ISubjectUpdater updater)
@@ -54,8 +64,10 @@ internal class OpcUaSubscriptionManager
     public void Clear()
     {
         _monitoredItems.Clear();
-        _subscriptions = ImmutableArray<Subscription>.Empty;
-        Interlocked.MemoryBarrier(); // Ensure write is visible to all threads
+        lock (_subscriptionsLock)
+        {
+            _subscriptions = ImmutableArray<Subscription>.Empty;
+        }
     }
 
     public async Task CreateBatchedSubscriptionsAsync(
@@ -108,7 +120,16 @@ internal class OpcUaSubscriptionManager
 
             try
             {
-                await subscription.ApplyChangesAsync(cancellationToken);
+                // Coordinate with health monitor to prevent concurrent ApplyChanges
+                await _applyChangesLock.WaitAsync(cancellationToken);
+                try
+                {
+                    await subscription.ApplyChangesAsync(cancellationToken);
+                }
+                finally
+                {
+                    _applyChangesLock.Release();
+                }
             }
             catch (ServiceResultException sre)
             {
@@ -133,16 +154,13 @@ internal class OpcUaSubscriptionManager
             _logger.LogInformation("Created OPC UA subscription {SubscriptionId} with {Count} monitored items.", subscription.Id, subscription.MonitoredItems.Count());
         }
 
-        // Replace subscriptions array with memory barrier to ensure visibility across threads
-        // ImmutableArray is a struct, so we use memory barrier instead of Volatile.Write
+        // Replace subscriptions array with lock to ensure atomic assignment
+        // ImmutableArray is a struct - assignment not atomic on all platforms
         var newSubscriptions = builder.ToImmutable();
-        _subscriptions = newSubscriptions;
-        Interlocked.MemoryBarrier(); // Ensure write is visible to all threads
-    }
-
-    public void StartHealthMonitoring()
-    {
-        _healthMonitor.Start();
+        lock (_subscriptionsLock)
+        {
+            _subscriptions = newSubscriptions;
+        }
     }
 
     /// <summary>
@@ -167,11 +185,13 @@ internal class OpcUaSubscriptionManager
             subscription.FastDataChangeCallback += OnFastDataChange;
         }
 
-        // Update subscription reference with memory barrier to ensure visibility across threads
-        // ImmutableArray is a struct, so we use memory barrier instead of Volatile.Write
+        // Update subscription reference with lock to ensure atomic assignment
+        // ImmutableArray is a struct - assignment not atomic on all platforms
         var newSubscriptions = builder.ToImmutable();
-        _subscriptions = newSubscriptions;
-        Interlocked.MemoryBarrier(); // Ensure write is visible to all threads
+        lock (_subscriptionsLock)
+        {
+            _subscriptions = newSubscriptions;
+        }
 
         _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions", subscriptionList.Count);
     }
@@ -182,12 +202,12 @@ internal class OpcUaSubscriptionManager
         // Multiple subscriptions can invoke callbacks concurrently, but each subscription manages
         // distinct monitored items (no overlap), so concurrent callbacks won't interfere.
         // The EnqueueOrApplyUpdate ensures changes are applied/enqueued in order.
-        
-        if (_updater is null)
+
+        if (_shuttingDown || _updater is null)
         {
             return;
         }
-        
+
         var monitoredItemsCount = notification.MonitoredItems.Count;
         if (monitoredItemsCount == 0)
         {
@@ -196,7 +216,7 @@ internal class OpcUaSubscriptionManager
 
         var receivedTimestamp = DateTimeOffset.Now;
         var changes = ChangesPool.Rent();
-        
+
         for (var i = 0; i < monitoredItemsCount; i++)
         {
             var item = notification.MonitoredItems[i];
@@ -210,7 +230,7 @@ internal class OpcUaSubscriptionManager
                 });
             }
         }
-        
+
         if (changes.Count > 0)
         {
             var state = (source: this, subscription, receivedTimestamp, changes);
@@ -283,7 +303,16 @@ internal class OpcUaSubscriptionManager
 
             try
             {
-                await subscription.ApplyChangesAsync(cancellationToken);
+                // Coordinate with health monitor to prevent concurrent ApplyChanges
+                await _applyChangesLock.WaitAsync(cancellationToken);
+                try
+                {
+                    await subscription.ApplyChangesAsync(cancellationToken);
+                }
+                finally
+                {
+                    _applyChangesLock.Release();
+                }
             }
             catch (Exception ex)
             {
@@ -313,47 +342,32 @@ internal class OpcUaSubscriptionManager
     {
         // BadNotSupported - Server doesn't support subscriptions for this node
         // BadMonitoredItemFilterUnsupported - Filter not supported (data change filter)
-        // BadAttributeIdInvalid - Attribute doesn't exist or can't be subscribed to
+        // Note: BadAttributeIdInvalid is a permanent error - polling won't work either, so excluded
         return statusCode == StatusCodes.BadNotSupported ||
-               statusCode == StatusCodes.BadMonitoredItemFilterUnsupported ||
-               statusCode == StatusCodes.BadAttributeIdInvalid;
+               statusCode == StatusCodes.BadMonitoredItemFilterUnsupported;
     }
 
     public void Cleanup()
     {
-        _healthMonitor.Stop();
+        _shuttingDown = true;
 
-        // Capture current subscriptions and clear with memory barrier (lock-free)
-        var subscriptions = _subscriptions;
-        _subscriptions = ImmutableArray<Subscription>.Empty;
-        Interlocked.MemoryBarrier(); // Ensure write is visible to all threads
+        ImmutableArray<Subscription> subscriptions;
+        lock (_subscriptionsLock)
+        {
+            subscriptions = _subscriptions;
+            _subscriptions = ImmutableArray<Subscription>.Empty;
+        }
 
-        // Clean up captured subscriptions - unsubscribe before delete to prevent callbacks on disposed objects
         foreach (var subscription in subscriptions)
         {
-            try
-            {
-                subscription.FastDataChangeCallback -= OnFastDataChange;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to unsubscribe FastDataChangeCallback for subscription {Id}", subscription.Id);
-            }
-
-            try
-            {
-                subscription.Delete(true);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to delete subscription {Id}", subscription.Id);
-            }
+            subscription.FastDataChangeCallback -= OnFastDataChange;
+            subscription.Delete(true);
         }
     }
 
     public void Dispose()
     {
-        _healthMonitor.Dispose();
+        _applyChangesLock.Dispose();
         Cleanup();
     }
 }
