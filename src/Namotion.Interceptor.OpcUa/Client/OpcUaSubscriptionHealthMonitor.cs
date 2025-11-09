@@ -23,46 +23,28 @@ internal sealed class OpcUaSubscriptionHealthMonitor
         {
             foreach (var subscription in subscriptions)
             {
-                // Count unhealthy items first to avoid allocation in common case (all healthy)
-                var unhealthyCount = 0;
-                foreach (var monitoredItem in subscription.MonitoredItems)
-                {
-                    if (IsUnhealthy(monitoredItem) && IsRetryable(monitoredItem))
-                    {
-                        unhealthyCount++;
-                    }
-                }
-
+                var unhealthyCount = GetUnhealthyCount(subscription);
                 if (unhealthyCount == 0)
                 {
                     continue;
-                }
-
-                var unhealthyItems = new List<MonitoredItem>(unhealthyCount);
-                foreach (var mi in subscription.MonitoredItems)
-                {
-                    if (IsUnhealthy(mi) && IsRetryable(mi))
-                    {
-                        unhealthyItems.Add(mi);
-                    }
                 }
 
                 try
                 {
                     await subscription.ApplyChangesAsync(cancellationToken);
 
-                    var stillUnhealthy = unhealthyItems.Count(IsUnhealthy);
-                    if (stillUnhealthy == 0)
+                    var stillUnhealthyCount = GetUnhealthyCount(subscription);
+                    if (stillUnhealthyCount == 0)
                     {
                         _logger.LogInformation(
                             "OPC UA subscription {Id} healed successfully: All {Count} items now healthy.",
-                            subscription.Id, unhealthyItems.Count);
+                            subscription.Id, unhealthyCount);
                     }
                     else
                     {
                         _logger.LogWarning(
                             "OPC UA subscription {Id} healed partially: {Healthy}/{Total} items recovered.",
-                            subscription.Id, unhealthyItems.Count - stillUnhealthy, unhealthyItems.Count);
+                            subscription.Id, unhealthyCount - stillUnhealthyCount, unhealthyCount);
                     }
                 }
                 catch (Exception ex)
@@ -79,6 +61,13 @@ internal sealed class OpcUaSubscriptionHealthMonitor
         {
             _logger.LogError(ex, "OPC UA subscription health check failed.");
         }
+    }
+
+    private static int GetUnhealthyCount(Subscription subscription)
+    {
+        return subscription
+            .MonitoredItems
+            .Count(monitoredItem => IsUnhealthy(monitoredItem) && IsRetryable(monitoredItem));
     }
 
     /// <summary>

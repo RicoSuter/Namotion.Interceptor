@@ -325,7 +325,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
 
         try
         {
-            _reconnectHandler?.Dispose();
+            _reconnectHandler.Dispose();
         }
         catch (Exception ex)
         {

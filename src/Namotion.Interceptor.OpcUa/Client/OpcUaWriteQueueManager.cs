@@ -12,15 +12,25 @@ internal sealed class OpcUaWriteQueueManager
 {
     private readonly ConcurrentQueue<SubjectPropertyChange> _pendingWrites = new();
 
-    private readonly int _maxQueueSize;
     private readonly ILogger _logger;
+    private readonly int _maxQueueSize;
+
     private int _droppedWriteCount; // Thread-safe via Interlocked
 
+    /// <summary>
+    /// Gets a value indicating whether the write queue is empty.
+    /// </summary>
+    public bool IsEmpty => _pendingWrites.IsEmpty;
+
+    /// <summary>
+    /// Gets the number of pending writes in the queue.
+    /// </summary>
     public int PendingWriteCount => _pendingWrites.Count;
 
+    /// <summary>
+    /// Gets the number of dropped writes due to queue capacity limits.
+    /// </summary>
     public int DroppedWriteCount => Interlocked.CompareExchange(ref _droppedWriteCount, 0, 0);
-
-    public bool IsEmpty => _pendingWrites.IsEmpty;
 
     public OpcUaWriteQueueManager(int maxQueueSize, ILogger logger)
     {
@@ -45,35 +55,9 @@ internal sealed class OpcUaWriteQueueManager
 
         foreach (var change in changes)
         {
-            Enqueue(change);
+            _pendingWrites.Enqueue(change);
         }
-
-        var dropped = Interlocked.CompareExchange(ref _droppedWriteCount, 0, 0);
-        if (dropped > 0)
-        {
-            _logger.LogWarning(
-                "Write queue at capacity, dropped {Count} oldest writes (queue size: {QueueSize})",
-                dropped,
-                _maxQueueSize);
-        }
-    }
-
-    /// <summary>
-    /// Enqueues a single write operation. If the queue is at capacity,
-    /// the oldest write is dropped (ring buffer semantics).
-    /// Uses a more robust pattern to handle concurrent enqueue/dequeue.
-    /// </summary>
-    private void Enqueue(SubjectPropertyChange change)
-    {
-        if (_maxQueueSize is 0)
-        {
-            _logger.LogWarning("Write buffering is disabled. Dropping write for {PropertyName}", change.Property.Name);
-            return;
-        }
-
-        // Enqueue first, then enforce size limit - more robust for concurrent access
-        _pendingWrites.Enqueue(change);
-
+        
         // Enforce size limit by removing oldest items if needed
         while (_pendingWrites.Count > _maxQueueSize)
         {
@@ -85,6 +69,15 @@ internal sealed class OpcUaWriteQueueManager
             {
                 break; // Queue emptied by another thread (e.g., flush)
             }
+        }
+
+        var dropped = Interlocked.CompareExchange(ref _droppedWriteCount, 0, 0);
+        if (dropped > 0)
+        {
+            _logger.LogWarning(
+                "Write queue at capacity, dropped {Count} oldest writes (queue size: {QueueSize})",
+                dropped,
+                _maxQueueSize);
         }
     }
 
