@@ -167,7 +167,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
         }
             
-        _logger.LogInformation("Successfully read initial values of {Count} nodes", itemCount);
+        _logger.LogInformation("Read values of {Count} OPC UA nodes.", itemCount);
 
         return () =>
         {
@@ -176,6 +176,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
                 property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
             }
+
+            _logger.LogInformation("Applied {Count} OPC UA node values to local properties.", itemCount);
         };
     }
 
