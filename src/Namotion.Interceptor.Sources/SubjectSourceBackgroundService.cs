@@ -160,8 +160,15 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
 
             while (subscription.TryDequeue(out var item, linkedTokenSource.Token))
             {
-                if (item.Source == _source || !_source.IsPropertyIncluded(item.Property.GetRegisteredProperty()))
+                if (item.Source == _source)
                 {
+                    continue; // Ignore changes originating from this source (avoid update loops)
+                }
+                
+                var registeredProperty = item.Property.TryGetRegisteredProperty();
+                if (registeredProperty is null || !_source.IsPropertyIncluded(registeredProperty))
+                {
+                    // Property is null when subject has already been attached (ignore change)
                     continue;
                 }
 
@@ -227,7 +234,6 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
             _flushChanges.Clear();
             while (_changes.TryDequeue(out var change))
             {
-                System.Diagnostics.Debug.Assert(change.Property.Subject is not null);
                 _flushChanges.Add(change);
             }
 
