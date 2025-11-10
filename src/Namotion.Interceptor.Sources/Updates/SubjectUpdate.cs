@@ -142,7 +142,7 @@ public class SubjectUpdate
                 var change = propertyChanges[index];
                 
                 var subjectUpdate = GetOrCreateSubjectUpdate(change.Property.Subject, knownSubjectUpdates);
-                var registeredProperty = change.Property.Subject.TryGetRegisteredProperty(change.Property.Name);
+                var registeredProperty = change.Property.TryGetRegisteredProperty();
                 if (registeredProperty is null)
                 {
                     continue; // property not registered because subject has been detached since update is detected (change not valid anymore)

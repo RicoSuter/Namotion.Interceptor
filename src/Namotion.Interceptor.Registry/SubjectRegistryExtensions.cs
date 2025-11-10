@@ -49,6 +49,7 @@ public static class SubjectRegistryExtensions
     /// <param name="propertyName">The property name to find.</param>
     /// <param name="registry">The optional registry, otherwise the registry is resolved dynamically.</param>
     /// <returns>The registered property.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName, ISubjectRegistry? registry = null)
     {
         registry ??= subject.Context.GetService<ISubjectRegistry>();
@@ -62,6 +63,20 @@ public static class SubjectRegistryExtensions
     /// </summary>
     /// <param name="propertyReference">The property to find.</param>
     /// <returns>The registered property.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static RegisteredSubjectProperty? TryGetRegisteredProperty(this PropertyReference propertyReference)
+    {
+        return propertyReference.Subject
+            .TryGetRegisteredSubject()?
+            .TryGetProperty(propertyReference.Name);
+    }
+    
+    /// <summary>
+    /// Gets a registered property by name.
+    /// </summary>
+    /// <param name="propertyReference">The property to find.</param>
+    /// <returns>The registered property.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RegisteredSubjectProperty GetRegisteredProperty(this PropertyReference propertyReference)
     {
         return propertyReference.Subject
