@@ -12,6 +12,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
 {
     private const string OpcVariableKey = "OpcVariable";
+    private const int DefaultChunkSize = 512;
 
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
@@ -214,22 +215,25 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         try
         {
             var result = new Dictionary<RegisteredSubjectProperty, DataValue>();
-            var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerRead ?? 500);
+
+            var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
+            chunkSize = chunkSize == 0 ? int.MaxValue : chunkSize;
+
             for (var offset = 0; offset < itemCount; offset += chunkSize)
             {
                 var take = Math.Min(chunkSize, itemCount - offset);
-                var readValues = new ReadValueId[take];
+                var readValues = new ReadValueIdCollection(take);
                 for (var i = 0; i < take; i++)
                 {
-                    readValues[i] = new ReadValueId
+                    readValues.Add(new ReadValueId
                     {
                         NodeId = monitoredItems[offset + i].StartNodeId,
                         AttributeId = Opc.Ua.Attributes.Value
-                    };
+                    });
                 }
 
                 var readResponse = await _session.ReadAsync(null, 0, TimestampsToReturn.Source, readValues, cancellationToken);
-                var resultCount = Math.Min(readResponse.Results.Count, take);
+                var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
                 for (var i = 0; i < resultCount; i++)
                 {
                     if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
@@ -264,7 +268,7 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
         return Task.FromResult<Action?>(null);
     }
 
-    public async ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public async ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (_session is null || changes.Count == 0)
         {
@@ -272,19 +276,21 @@ internal class OpcUaSubjectClientSource : BackgroundService, ISubjectSource
             return;
         }
 
-        var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerWrite ?? 500);
-        var changeList = changes as IList<SubjectPropertyChange> ?? changes.ToList();
-        for (var offset = 0; offset < changeList.Count; offset += chunkSize)
+        var chunkSize = (int)(_session.OperationLimits?.MaxNodesPerWrite ?? DefaultChunkSize);
+        chunkSize = chunkSize == 0 ? int.MaxValue : chunkSize;
+
+        var count = changes.Count; 
+        for (var offset = 0; offset < count; offset += chunkSize)
         {
-            var take = Math.Min(chunkSize, changeList.Count - offset);
+            var take = Math.Min(chunkSize, count - offset);
             var writeValues = new WriteValueCollection(take);
             for (var i = 0; i < take; i++)
             {
-                var change = changeList[offset + i];
+                var change = changes[offset + i];
                 if (change.Property.TryGetPropertyData(OpcVariableKey, out var v) && v is NodeId nodeId)
                 {
-                    var registeredProperty = change.Property.GetRegisteredProperty();
-                    if (registeredProperty.HasSetter)
+                    var registeredProperty = change.Property.TryGetRegisteredProperty();
+                    if (registeredProperty?.HasSetter == true)
                     {
                         var value = _configuration.ValueConverter.ConvertToNodeValue(change.GetNewValue<object?>(), registeredProperty);
                         writeValues.Add(new WriteValue

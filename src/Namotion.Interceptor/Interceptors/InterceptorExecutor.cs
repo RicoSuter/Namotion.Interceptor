@@ -1,4 +1,6 @@
-﻿namespace Namotion.Interceptor.Interceptors;
+﻿using System.Runtime.CompilerServices;
+
+namespace Namotion.Interceptor.Interceptors;
 
 public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecutor
 {
@@ -9,12 +11,14 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         _subject = subject;
     }
     
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
         var context = new PropertyReadContext(new PropertyReference(_subject, propertyName));
-        return _subject.Context.ExecuteInterceptedRead(ref context, readValue);
+        return ExecuteInterceptedRead(ref context, readValue);
     }
     
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty>? readValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
         // TODO(perf): Reading current value (invoke getter) here might be a performance problem. 
@@ -24,13 +28,14 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
             readValue is not null ? readValue(_subject) : default!, 
             newValue); 
 
-        _subject.Context.ExecuteInterceptedWrite(ref context, writeValue);
+        ExecuteInterceptedWrite(ref context, writeValue);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public object? InvokeMethod(string methodName, object?[] parameters, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {
         var context = new MethodInvocationContext(_subject, methodName, parameters);
-        return _subject.Context.ExecuteInterceptedInvoke(ref context, invokeMethod);
+        return ExecuteInterceptedInvoke(ref context, invokeMethod);
     }
 
     public override bool AddFallbackContext(IInterceptorSubjectContext context)

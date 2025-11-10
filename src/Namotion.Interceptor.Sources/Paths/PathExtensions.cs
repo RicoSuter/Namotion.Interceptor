@@ -151,10 +151,14 @@ public static class PathExtensions
     {
         foreach (var change in changes)
         {
-            var path = TryGetSourcePath(change.Property.GetRegisteredProperty(), sourcePathProvider, rootSubject);
-            if (path is not null)
+            var registeredProperty = change.Property.TryGetRegisteredProperty();
+            if (registeredProperty is not null)
             {
-                yield return (path, change);
+                var path = TryGetSourcePath(registeredProperty, sourcePathProvider, rootSubject);
+                if (path is not null)
+                {
+                    yield return (path, change);
+                }
             }
         }
     }

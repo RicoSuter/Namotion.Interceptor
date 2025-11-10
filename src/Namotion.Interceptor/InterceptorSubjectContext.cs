@@ -139,6 +139,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         };
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> readValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
@@ -152,6 +153,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return func(ref context, readValue);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
@@ -166,6 +168,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         action(ref context, writeValue);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public object? ExecuteInterceptedInvoke(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
