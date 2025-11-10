@@ -144,7 +144,7 @@ public class SubjectSourceBenchmark
             return Task.FromResult<Action?>(null);
         }
 
-        public ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
             _count += changes.Count;
 

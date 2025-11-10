@@ -34,13 +34,11 @@ public interface ISubjectSource
     /// A delegate that applies the loaded state to the subject. Returns <c>null</c> if there is no state to apply.
     /// </returns>
     Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken);
-    
+
     /// <summary>
     /// Applies a set of property changes to the source.
     /// </summary>
     /// <param name="changes">The collection of subject property changes.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken);
-    
-    // TODO(perf): Use readonly span here for WriteToSourceAsync changes
+    ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken);
 }

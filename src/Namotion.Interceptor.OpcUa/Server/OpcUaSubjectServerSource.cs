@@ -46,16 +46,19 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         return Task.FromResult<Action?>(null);
     }
 
-    public ValueTask WriteToSourceAsync(IReadOnlyCollection<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        foreach (var change in changes)
+        var count = changes.Count;
+        for (var i = 0; i < count; i++)
         {
-            if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) && 
-                data is BaseDataVariableState node)
+            var change = changes[i];
+            if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
+                data is BaseDataVariableState node &&
+                change.Property.TryGetRegisteredProperty() is { } registeredProperty)
             {
                 var value = change.GetNewValue<object?>();
                 var convertedValue = _configuration.ValueConverter
-                    .ConvertToNodeValue(value, change.Property.GetRegisteredProperty());
+                    .ConvertToNodeValue(value, registeredProperty);
 
                 node.Value = convertedValue;
                 node.Timestamp = change.ChangedTimestamp.UtcDateTime;
@@ -122,12 +125,15 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
     {
         var receivedTimestamp = DateTimeOffset.Now;
 
-        var registeredProperty = property.GetRegisteredProperty();
-        var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, registeredProperty);
+        var registeredProperty = property.TryGetRegisteredProperty();
+        if (registeredProperty is not null)
+        {
+            var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, registeredProperty);
 
-        var state = (source: this, property, changedTimestamp, receivedTimestamp, value: convertedValue);
-        _updater?.EnqueueOrApplyUpdate(state,
-            static s => s.property.SetValueFromSource(
-                s.source, s.changedTimestamp, s.receivedTimestamp, s.value));
+            var state = (source: this, property, changedTimestamp, receivedTimestamp, value: convertedValue);
+            _updater?.EnqueueOrApplyUpdate(state,
+                static s => s.property.SetValueFromSource(
+                    s.source, s.changedTimestamp, s.receivedTimestamp, s.value));
+        }
     }
 }
