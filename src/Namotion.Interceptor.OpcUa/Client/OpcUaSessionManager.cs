@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Client.Polling;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -13,7 +12,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// Manages OPC UA session lifecycle, reconnection handling, and thread-safe session access.
 /// Optimized for fast session reads (hot path) with simple lock-based writes (cold path).
 /// </summary>
-internal sealed class OpcUaSessionManager : IAsyncDisposable
+internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
 {
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
@@ -297,5 +296,10 @@ internal sealed class OpcUaSessionManager : IAsyncDisposable
         _pollingManager?.Dispose();
         _subscriptionManager.Dispose();
         _reconnectHandler.Dispose();
+    }
+
+    public void Dispose()
+    {
+        DisposeAsync().GetAwaiter().GetResult();
     }
 }
