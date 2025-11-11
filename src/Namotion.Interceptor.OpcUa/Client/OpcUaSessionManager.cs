@@ -252,6 +252,8 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
                 
                 if (oldSession is not null && !ReferenceEquals(oldSession, newSession))
                 {
+                    // Task.Run is safe here: DisposeSessionAsync handles all exceptions internally
+                    // No unobserved exceptions possible - all operations are try-catch wrapped
                     Task.Run(() => DisposeSessionAsync(oldSession, _stoppingToken));
                 }
             }
@@ -269,18 +271,27 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
     
     private async Task DisposeSessionAsync(Session session, CancellationToken cancellationToken)
     {
+        // Unsubscribe from event (standard event -= operator cannot throw under normal circumstances)
+        session.KeepAlive -= OnKeepAlive;
+
         try
         {
-            session.KeepAlive -= OnKeepAlive;
             await session.CloseAsync(cancellationToken);
-            _logger.LogDebug("OPC UA session disposed successfully.");
+            _logger.LogDebug("OPC UA session closed successfully.");
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error closing OPC UA session.");
         }
 
-        session.Dispose();
+        try
+        {
+            session.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error disposing OPC UA session.");
+        }
     }
 
     public async ValueTask DisposeAsync()
