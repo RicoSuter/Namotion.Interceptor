@@ -17,7 +17,7 @@ internal sealed class SubscriptionHealthMonitor
         _logger = logger;
     }
 
-    public async Task CheckAndHealSubscriptionsAsync(IReadOnlyList<Subscription> subscriptions, CancellationToken cancellationToken)
+    public async Task CheckAndHealSubscriptionsAsync(IReadOnlyCollection<Subscription> subscriptions, CancellationToken cancellationToken)
     {
         try
         {
