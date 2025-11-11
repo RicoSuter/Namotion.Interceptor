@@ -65,18 +65,18 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _sessionManager.ReconnectionCompleted += OnReconnectionCompleted;
         
         var application = _configuration.CreateApplicationInstance();
-        var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken);
+        var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Connected to OPC UA server successfully.");
 
-        var rootNode = await TryGetRootNodeAsync(session, cancellationToken);
+        var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
         if (rootNode is not null)
         {
-            var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken);
+            var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken).ConfigureAwait(false);
             if (monitoredItems.Count > 0)
             {
                 _initialMonitoredItems = monitoredItems;
-                await _sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken);
+                await _sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -130,7 +130,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 maxAge: 0,
                 timestampsToReturn: TimestampsToReturn.Source,
                 readValues,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
             for (var i = 0; i < resultCount; i++)
@@ -172,10 +172,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     // Health monitor only operates on subscriptions already in the collection
                     // Thread-safety: Temporal separation ensures subscriptions are fully initialized
                     // before being added to _sessionManager.Subscriptions (see OpcUaSubscriptionManager.cs:121)
-                    await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(_sessionManager.Subscriptions, stoppingToken);
+                    await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(_sessionManager.Subscriptions, stoppingToken).ConfigureAwait(false);
                 }
 
-                await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken);
+                await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -190,7 +190,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     {
         if (_configuration.RootName is not null)
         {
-            var references = await BrowseNodeAsync(session, ObjectIds.ObjectsFolder, cancellationToken);
+            var references = await BrowseNodeAsync(session, ObjectIds.ObjectsFolder, cancellationToken).ConfigureAwait(false);
             return references.FirstOrDefault(reference => reference.BrowseName.Name == _configuration.RootName);
         }
 
@@ -217,8 +217,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             try
             {
-                await FlushQueuedWritesAsync(session, cancellationToken);
-                await WriteToSourceAsync(changes, session, cancellationToken);
+                await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
+                await WriteToSourceAsync(changes, session, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -254,7 +254,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             {
                 try
                 {
-                    await FlushQueuedWritesAsync(session, _stoppingToken);
+                    await FlushQueuedWritesAsync(session, _stoppingToken).ConfigureAwait(false);
                 }
                 catch (Exception exception)
                 {
@@ -269,7 +269,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         try
         {
             // Wait for semaphore with cancellation support
-            await _writeFlushSemaphore.WaitAsync(cancellationToken);
+            await _writeFlushSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 if (_writeFailureQueue.IsEmpty)
@@ -282,7 +282,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 {
                     try
                     {
-                        await WriteToSourceAsync(pendingWrites, session, cancellationToken);
+                        await WriteToSourceAsync(pendingWrites, session, cancellationToken).ConfigureAwait(false);
 
                         _logger.LogInformation("Successfully flushed {Count} pending OPC UA writes after reconnection.", pendingWrites.Count);
                     }
@@ -328,7 +328,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             var writeResponse = await session.WriteAsync(
                 requestHeader: null,
                 writeValues,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             LogWriteFailures(changes, writeValues, writeResponse.Results, offset);
         }
@@ -408,7 +408,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             ReferenceTypeIds.HierarchicalReferences,
             includeSubtypes: true,
             nodeClassMask,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         return nodeProperties[0];
     }
@@ -446,7 +446,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         if (sessionManager is not null)
         {
             sessionManager.ReconnectionCompleted -= OnReconnectionCompleted;
-            await sessionManager.DisposeAsync();
+            await sessionManager.DisposeAsync().ConfigureAwait(false);
         }
         
         Dispose();

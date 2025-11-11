@@ -118,13 +118,13 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
             sessionTimeout: configuration.SessionTimeout,
             new UserIdentity(),
             preferredLocales: null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         _session.KeepAlive += OnKeepAlive;
 
         if (oldSession is not null)
         {
-            await DisposeSessionAsync(oldSession, cancellationToken);
+            await DisposeSessionAsync(oldSession, cancellationToken).ConfigureAwait(false);
         }
 
         return _session;
@@ -138,7 +138,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
 
         _stoppingToken = cancellationToken;
 
-        await _subscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken);
+        await _subscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Created {SubscriptionCount} subscriptions with {Subscribed} " +
@@ -276,7 +276,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
 
         try
         {
-            await session.CloseAsync(cancellationToken);
+            await session.CloseAsync(cancellationToken).ConfigureAwait(false);
             _logger.LogDebug("OPC UA session closed successfully.");
         }
         catch (Exception ex)
@@ -304,7 +304,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
         var sessionToDispose = _session;
         if (sessionToDispose is not null)
         {
-            await DisposeSessionAsync(sessionToDispose, CancellationToken.None);
+            await DisposeSessionAsync(sessionToDispose, CancellationToken.None).ConfigureAwait(false);
             _session = null;
         }
 
