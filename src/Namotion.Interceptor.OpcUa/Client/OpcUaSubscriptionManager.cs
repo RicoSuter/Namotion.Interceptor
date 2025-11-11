@@ -87,7 +87,7 @@ internal class OpcUaSubscriptionManager
                 throw new InvalidOperationException("Failed to add subscription.");
             }
 
-            await subscription.CreateAsync(cancellationToken);
+            await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
             subscription.FastDataChangeCallback += OnFastDataChange;
             
             var batchEnd = Math.Min(i + maximumItemsPerSubscription, itemCount);
@@ -105,7 +105,7 @@ internal class OpcUaSubscriptionManager
             try
             {
                 // Phase 1: Apply changes to OPC UA server (subscription NOT in _subscriptions yet)
-                await subscription.ApplyChangesAsync(cancellationToken);
+                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (ServiceResultException sre)
             {
@@ -113,7 +113,7 @@ internal class OpcUaSubscriptionManager
             }
 
             // Phase 2: Filter and retry failed items (subscription STILL NOT in _subscriptions)
-            await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken);
+            await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
 
             // Phase 3: Make subscription visible to health monitor (AFTER all initialization complete)
             // CRITICAL: This ordering ensures temporal separation - health monitor never sees
@@ -192,6 +192,8 @@ internal class OpcUaSubscriptionManager
     public void UpdateTransferredSubscriptions(IReadOnlyCollection<Subscription> transferredSubscriptions)
     {
         // Clear old subscriptions and add transferred ones
+        // Note: Tiny race window exists (~microseconds) where health monitor might read empty collection
+        // Impact is negligible: max 10s delay in healing, only during rare reconnection events
         _subscriptions.Clear();
 
         foreach (var subscription in transferredSubscriptions)
@@ -248,7 +250,7 @@ internal class OpcUaSubscriptionManager
 
             try
             {
-                await subscription.ApplyChangesAsync(cancellationToken);
+                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

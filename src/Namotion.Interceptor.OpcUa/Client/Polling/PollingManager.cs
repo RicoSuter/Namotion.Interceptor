@@ -198,9 +198,9 @@ internal sealed class PollingManager : IDisposable
     {
         try
         {
-            while (await _timer.WaitForNextTickAsync(cancellationToken))
+            while (await _timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
-                await PollItemsAsync(cancellationToken);
+                await PollItemsAsync(cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -272,7 +272,7 @@ internal sealed class PollingManager : IDisposable
             {
                 var batchSize = Math.Min(_batchSize, itemsToRead.Length - i);
                 var batch = new ArraySegment<PollingItem>(itemsToRead, i, batchSize);
-                await ReadBatchAsync(session, batch, cancellationToken);
+                await ReadBatchAsync(session, batch, cancellationToken).ConfigureAwait(false);
             }
 
             pollSucceeded = true;
@@ -360,7 +360,7 @@ internal sealed class PollingManager : IDisposable
                 maxAge: 0,
                 timestampsToReturn: TimestampsToReturn.Both,
                 nodesToRead,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             // Process results - count metrics per item for accurate monitoring
             for (var i = 0; i < response.Results.Count && i < batch.Count; i++)

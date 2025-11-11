@@ -37,7 +37,7 @@ internal class OpcUaSubjectLoader
     {
         var monitoredItems = new List<MonitoredItem>();
         var loadedSubjects = new HashSet<IInterceptorSubject>();
-        await LoadSubjectAsync(subject, node, session, monitoredItems, loadedSubjects, cancellationToken);
+        await LoadSubjectAsync(subject, node, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
         return monitoredItems;
     }
 
@@ -60,7 +60,7 @@ internal class OpcUaSubjectLoader
         }
 
         var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
-        var nodeRefs = await BrowseNodeAsync(nodeId, session, cancellationToken);
+        var nodeRefs = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
         
         for (var index = 0; index < nodeRefs.Count; index++)
         {
@@ -76,7 +76,7 @@ internal class OpcUaSubjectLoader
                 }
 
                 var addAsDynamic = _configuration.ShouldAddDynamicProperty is not null &&
-                    await _configuration.ShouldAddDynamicProperty(nodeRef, cancellationToken);
+                    await _configuration.ShouldAddDynamicProperty(nodeRef, cancellationToken).ConfigureAwait(false);
 
                 if (!addAsDynamic)
                 {
@@ -84,7 +84,7 @@ internal class OpcUaSubjectLoader
                 }
 
                 // Infer CLR type from OPC UA variable metadata if possible
-                var inferredType = await _configuration.TypeResolver.TryGetTypeForNodeAsync(session, nodeRef, cancellationToken);
+                var inferredType = await _configuration.TypeResolver.TryGetTypeForNodeAsync(session, nodeRef, cancellationToken).ConfigureAwait(false);
                 if (inferredType is null)
                 {
                     _logger.LogWarning(
@@ -117,11 +117,11 @@ internal class OpcUaSubjectLoader
 
                 if (property.IsSubjectReference)
                 {
-                    await LoadSubjectReferenceAsync(property, node, nodeRef, subject, session, monitoredItems, loadedSubjects, cancellationToken);
+                    await LoadSubjectReferenceAsync(property, node, nodeRef, subject, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
                 }
                 else if (property.IsSubjectCollection)
                 {
-                    await LoadSubjectCollectionAsync(property, childNodeId, monitoredItems, session, cancellationToken, loadedSubjects);
+                    await LoadSubjectCollectionAsync(property, childNodeId, monitoredItems, session, cancellationToken, loadedSubjects).ConfigureAwait(false);
                 }
                 else if (property.IsSubjectDictionary)
                 {
@@ -147,14 +147,14 @@ internal class OpcUaSubjectLoader
         var existingSubject = property.Children.SingleOrDefault();
         if (existingSubject.Subject is not null)
         {
-            await LoadSubjectAsync(existingSubject.Subject, node, session, monitoredItems, loadedSubjects, cancellationToken);
+            await LoadSubjectAsync(existingSubject.Subject, node, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
         }
         else
         {
             // Create new subject instance
-            var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeRefeference, session, cancellationToken);
+            var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeRefeference, session, cancellationToken).ConfigureAwait(false);
             newSubject.Context.AddFallbackContext(subject.Context);
-            await LoadSubjectAsync(newSubject, nodeRefeference, session, monitoredItems, loadedSubjects, cancellationToken);
+            await LoadSubjectAsync(newSubject, nodeRefeference, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
             property.SetValueFromSource(_source, null, newSubject);
         }
     }
@@ -167,7 +167,7 @@ internal class OpcUaSubjectLoader
         CancellationToken cancellationToken,
         HashSet<IInterceptorSubject> loadedSubjects)
     {
-        var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken);
+        var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
         var childCount = childNodes.Count;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childCount);
         
@@ -190,7 +190,7 @@ internal class OpcUaSubjectLoader
 
         foreach (var child in children)
         {
-            await LoadSubjectAsync(child.Subject, child.Node, session, monitoredItems, loadedSubjects, cancellationToken);
+            await LoadSubjectAsync(child.Subject, child.Node, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -268,7 +268,7 @@ internal class OpcUaSubjectLoader
             null,
             _configuration.MaximumReferencesPerNode,
             browseDescriptions,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (response.Results.Count > 0)
         {
@@ -283,7 +283,7 @@ internal class OpcUaSubjectLoader
             var continuationPoint = response.Results[0].ContinuationPoint;
             while (continuationPoint is { Length: > 0 })
             {
-                var nextResponse = await session.BrowseNextAsync(null, false, new ByteStringCollection { continuationPoint }, cancellationToken);
+                var nextResponse = await session.BrowseNextAsync(null, false, new ByteStringCollection { continuationPoint }, cancellationToken).ConfigureAwait(false);
                 if (nextResponse.Results.Count > 0)
                 {
                     var r0 = nextResponse.Results[0];
