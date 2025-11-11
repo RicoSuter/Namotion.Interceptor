@@ -97,33 +97,47 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
                 }
 
                 // Start listening for changes from the source
-                using var disposable = await _source.StartListeningAsync(this, stoppingToken).ConfigureAwait(false);
-                var applyAction = await _source.LoadCompleteSourceStateAsync(stoppingToken).ConfigureAwait(false);
-
-                lock (_lock)
+                var disposable = await _source.StartListeningAsync(this, stoppingToken).ConfigureAwait(false);
+                try
                 {
-                    applyAction?.Invoke();
+                    var applyAction = await _source.LoadCompleteSourceStateAsync(stoppingToken).ConfigureAwait(false);
 
-                    // Replay previously buffered updates
-                    var beforeInitializationUpdates = _beforeInitializationUpdates;
-                    _beforeInitializationUpdates = null;
-
-                    foreach (var action in beforeInitializationUpdates!)
+                    lock (_lock)
                     {
-                        try
+                        applyAction?.Invoke();
+
+                        // Replay previously buffered updates
+                        var beforeInitializationUpdates = _beforeInitializationUpdates;
+                        _beforeInitializationUpdates = null;
+
+                        foreach (var action in beforeInitializationUpdates!)
                         {
-                            action();
-                        }
-                        catch (Exception e)
-                        {
-                            _logger.LogError(e, "Failed to apply subject update.");
+                            try
+                            {
+                                action();
+                            }
+                            catch (Exception e)
+                            {
+                                _logger.LogError(e, "Failed to apply subject update.");
+                            }
                         }
                     }
-                }
                 
-                // Subscribe to property changes and sync them to the source
-                using var subscription = _context.CreatePropertyChangeQueueSubscription();
-                await ProcessPropertyChangesAsync(subscription, stoppingToken).ConfigureAwait(false);
+                    // Subscribe to property changes and sync them to the source
+                    using var subscription = _context.CreatePropertyChangeQueueSubscription();
+                    await ProcessPropertyChangesAsync(subscription, stoppingToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    if (disposable is IAsyncDisposable asyncDisposable)
+                    {
+                        await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        disposable?.Dispose();
+                    }
+                }
             }
             catch (Exception ex)
             {
