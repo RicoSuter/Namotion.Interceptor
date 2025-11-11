@@ -295,21 +295,19 @@ public class OpcUaClientConfiguration
                 nameof(WriteQueueSize));
         }
 
-        const int MaxWriteQueueSize = 10000;
-        if (WriteQueueSize > MaxWriteQueueSize)
+        if (WriteQueueSize > 10000)
         {
             throw new ArgumentException(
-                $"WriteQueueSize must not exceed {MaxWriteQueueSize} (got: {WriteQueueSize})",
+                $"WriteQueueSize must not exceed {10000} (got: {WriteQueueSize})",
                 nameof(WriteQueueSize));
         }
 
         if (EnableAutoHealing)
         {
-            var minInterval = TimeSpan.FromSeconds(5);
-            if (SubscriptionHealthCheckInterval < minInterval)
+            if (SubscriptionHealthCheckInterval < TimeSpan.FromSeconds(5))
             {
                 throw new ArgumentException(
-                    $"SubscriptionHealthCheckInterval must be at least {minInterval.TotalSeconds}s when EnableAutoHealing is true (got: {SubscriptionHealthCheckInterval.TotalSeconds}s)",
+                    $"SubscriptionHealthCheckInterval must be at least {TimeSpan.FromSeconds(5).TotalSeconds}s when EnableAutoHealing is true (got: {SubscriptionHealthCheckInterval.TotalSeconds}s)",
                     nameof(SubscriptionHealthCheckInterval));
             }
         }
@@ -323,11 +321,10 @@ public class OpcUaClientConfiguration
 
         if (EnablePollingFallback)
         {
-            var minPollingInterval = TimeSpan.FromMilliseconds(100);
-            if (PollingInterval < minPollingInterval)
+            if (PollingInterval < TimeSpan.FromMilliseconds(100))
             {
                 throw new ArgumentException(
-                    $"PollingInterval must be at least {minPollingInterval.TotalMilliseconds}ms when EnablePollingFallback is true (got: {PollingInterval.TotalMilliseconds}ms)",
+                    $"PollingInterval must be at least {TimeSpan.FromMilliseconds(100).TotalMilliseconds}ms when EnablePollingFallback is true (got: {PollingInterval.TotalMilliseconds}ms)",
                     nameof(PollingInterval));
             }
 
@@ -345,11 +342,10 @@ public class OpcUaClientConfiguration
                     nameof(PollingCircuitBreakerThreshold));
             }
 
-            var minCooldown = TimeSpan.FromSeconds(1);
-            if (PollingCircuitBreakerCooldown < minCooldown)
+            if (PollingCircuitBreakerCooldown < TimeSpan.FromSeconds(1))
             {
                 throw new ArgumentException(
-                    $"PollingCircuitBreakerCooldown must be at least {minCooldown.TotalSeconds}s when EnablePollingFallback is true (got: {PollingCircuitBreakerCooldown.TotalSeconds}s)",
+                    $"PollingCircuitBreakerCooldown must be at least {TimeSpan.FromSeconds(1).TotalSeconds}s when EnablePollingFallback is true (got: {PollingCircuitBreakerCooldown.TotalSeconds}s)",
                     nameof(PollingCircuitBreakerCooldown));
             }
         }
