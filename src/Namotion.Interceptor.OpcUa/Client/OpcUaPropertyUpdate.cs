@@ -3,7 +3,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// <summary>
 /// Represents a property value update from an OPC UA source (subscription or polling).
 /// </summary>
-internal record OpcUaPropertyUpdate
+internal readonly record struct OpcUaPropertyUpdate
 {
     /// <summary>
     /// Gets the property reference to update.
