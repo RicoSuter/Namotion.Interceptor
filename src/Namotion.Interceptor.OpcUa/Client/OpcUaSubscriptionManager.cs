@@ -2,6 +2,7 @@
 using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Client.Polling;
+using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Sources;
@@ -23,7 +24,7 @@ internal class OpcUaSubscriptionManager
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
-    private readonly ConcurrentDictionary<uint, (MonitoredItem monitoredItem, RegisteredSubjectProperty property)> _monitoredItems = new();
+    private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
     private readonly SemaphoreSlim _applyChangesLock = new(1, 1); // Coordinates concurrent ApplyChanges calls
     private ImmutableArray<Subscription> _subscriptions = ImmutableArray<Subscription>.Empty;
 
@@ -44,7 +45,7 @@ internal class OpcUaSubscriptionManager
         }
     }
 
-    public ConcurrentDictionary<uint, (MonitoredItem monitoredItem, RegisteredSubjectProperty property)> MonitoredItems => _monitoredItems;
+    public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
     public OpcUaSubscriptionManager(ISubjectUpdater updater, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
     {
@@ -107,9 +108,9 @@ internal class OpcUaSubscriptionManager
                 var item = monitoredItems[j];
                 subscription.AddItem(item);
 
-                if (item.Handle is RegisteredSubjectProperty p)
+                if (item.Handle is RegisteredSubjectProperty property)
                 {
-                    _monitoredItems[item.ClientHandle] = (item, p);
+                    _monitoredItems[item.ClientHandle] = property;
                 }
             }
 
@@ -131,20 +132,7 @@ internal class OpcUaSubscriptionManager
                 _logger.LogWarning(sre, "ApplyChanges failed for a batch; attempting to keep valid OPC UA monitored items by removing failed ones.");
             }
 
-            var (removed, polled) = await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken);
-            if (removed > 0)
-            {
-                if (polled > 0)
-                {
-                    _logger.LogWarning("Removed {Removed} failed monitored items from subscription {SubscriptionId}. {Polled} items switched to polling fallback.",
-                        removed, subscription.Id, polled);
-                }
-                else
-                {
-                    _logger.LogWarning("Removed {Removed} failed monitored items from subscription {SubscriptionId}.",
-                        removed, subscription.Id);
-                }
-            }
+            await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken);
         }
 
         // Replace subscriptions array with lock to ensure atomic assignment
@@ -153,6 +141,69 @@ internal class OpcUaSubscriptionManager
         lock (_subscriptionsLock)
         {
             _subscriptions = newSubscriptions;
+        }
+    }
+    
+    private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
+    {
+        // Thread-safety: This callback is invoked sequentially per subscription (OPC UA stack guarantee).
+        // Multiple subscriptions can invoke callbacks concurrently, but each subscription manages
+        // distinct monitored items (no overlap), so concurrent callbacks won't interfere.
+        // The EnqueueOrApplyUpdate ensures changes are directly applied or enqueued in order.
+
+        if (_shuttingDown || _updater is null)
+        {
+            return;
+        }
+
+        var monitoredItemsCount = notification.MonitoredItems.Count;
+        if (monitoredItemsCount == 0)
+        {
+            return;
+        }
+
+        var receivedTimestamp = DateTimeOffset.Now;
+        var changes = ChangesPool.Rent();
+
+        for (var i = 0; i < monitoredItemsCount; i++)
+        {
+            var item = notification.MonitoredItems[i];
+            if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
+            {
+                changes.Add(new OpcUaPropertyUpdate
+                {
+                    Property = property,
+                    Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
+                    Timestamp = item.Value.SourceTimestamp
+                });
+            }
+        }
+
+        if (changes.Count > 0)
+        {
+            var state = (source: this, subscription, receivedTimestamp, changes);
+            _updater?.EnqueueOrApplyUpdate(state, static s =>
+            {
+                for (var i = 0; i < s.changes.Count; i++)
+                {
+                    var change = s.changes[i];
+                    try
+                    {
+                        change.Property.SetValueFromSource(s.source, change.Timestamp, s.receivedTimestamp, change.Value);
+                    }
+                    catch (Exception e)
+                    {
+                        s.source._logger.LogError(e, "Failed to apply change for property {PropertyName}.", change.Property.Name);
+                    }
+                }
+
+                s.changes.Clear();
+                ChangesPool.Return(s.changes);
+            });
+        }
+        else
+        {
+            ChangesPool.Return(changes);
         }
     }
 
@@ -176,77 +227,14 @@ internal class OpcUaSubscriptionManager
         _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions", transferredSubscriptions.Length);
     }
     
-    private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
-    {
-        // Thread-safety: This callback is invoked sequentially per subscription (OPC UA stack guarantee).
-        // Multiple subscriptions can invoke callbacks concurrently, but each subscription manages
-        // distinct monitored items (no overlap), so concurrent callbacks won't interfere.
-        // The EnqueueOrApplyUpdate ensures changes are applied/enqueued in order.
-
-        if (_shuttingDown || _updater is null)
-        {
-            return;
-        }
-
-        var monitoredItemsCount = notification.MonitoredItems.Count;
-        if (monitoredItemsCount == 0)
-        {
-            return;
-        }
-
-        var receivedTimestamp = DateTimeOffset.Now;
-        var changes = ChangesPool.Rent();
-
-        for (var i = 0; i < monitoredItemsCount; i++)
-        {
-            var item = notification.MonitoredItems[i];
-            if (_monitoredItems.TryGetValue(item.ClientHandle, out var tuple))
-            {
-                changes.Add(new OpcUaPropertyUpdate
-                {
-                    Property = tuple.property,
-                    Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, tuple.property),
-                    Timestamp = item.Value.SourceTimestamp
-                });
-            }
-        }
-
-        if (changes.Count > 0)
-        {
-            var state = (source: this, subscription, receivedTimestamp, changes);
-            _updater?.EnqueueOrApplyUpdate(state, static s =>
-            {
-                for (var i = 0; i < s.changes.Count; i++)
-                {
-                    var change = s.changes[i];
-                    try
-                    {
-                        change.Property.SetValueFromSource(s.source, change.Timestamp, s.receivedTimestamp, change.Value);
-                    }
-                    catch (Exception e)
-                    {
-                        s.source._logger.LogError(e, "Failed to apply change for OPC UA {Path}.", change.Property.Name);
-                    }
-                }
-
-                s.changes.Clear();
-                ChangesPool.Return(s.changes);
-            });
-        }
-        else
-        {
-            ChangesPool.Return(changes);
-        }
-    }
-    
-    private async Task<(int removed, int polled)> FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
+    private async Task FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
     {
         List<MonitoredItem>? itemsToRemove = null;
         List<MonitoredItem>? itemsToPolled = null;
 
         foreach (var monitoredItem in subscription.MonitoredItems)
         {
-            if (OpcUaSubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
+            if (SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
             {
                 itemsToRemove ??= [];
                 itemsToRemove.Add(monitoredItem);
@@ -308,10 +296,24 @@ internal class OpcUaSubscriptionManager
                 }
             }
 
-            return (itemsToRemove.Count, itemsToPolled?.Count ?? 0);
-        }
+            var removed = itemsToRemove.Count;
+            var polled = itemsToPolled?.Count;
 
-        return (0, 0);
+            if (polled > 0)
+            {
+                _logger.LogWarning(
+                    "Removed {Removed} failed monitored items from subscription " +
+                    "{SubscriptionId}. {Polled} items switched to polling fallback.",
+                    removed, subscription.Id, polled);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Removed {Removed} failed monitored items " +
+                    "from subscription {SubscriptionId}.",
+                    removed, subscription.Id);
+            }
+        }
     }
 
     /// <summary>

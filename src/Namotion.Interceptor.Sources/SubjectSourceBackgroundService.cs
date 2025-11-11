@@ -101,7 +101,6 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
                 try
                 {
                     var applyAction = await _source.LoadCompleteSourceStateAsync(stoppingToken).ConfigureAwait(false);
-
                     lock (_lock)
                     {
                         applyAction?.Invoke();

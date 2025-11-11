@@ -1,11 +1,10 @@
+using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.OpcUa.Client;
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Opc.Ua;
 using Opc.Ua.Client;
-using System.Reflection;
-using Namotion.Interceptor.Sources;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
@@ -184,25 +183,13 @@ public class AutoHealingTests
 
     private bool InvokeIsRetryable(MonitoredItem item)
     {
-        // IsRetryable is now in OpcUaSubscriptionHealthMonitor
-        return OpcUaSubscriptionHealthMonitor.IsRetryable(item);
+        // IsRetryable is now in SubscriptionHealthMonitor
+        return SubscriptionHealthMonitor.IsRetryable(item);
     }
 
     private bool InvokeIsUnhealthy(MonitoredItem item)
     {
-        // IsUnhealthy is now in OpcUaSubscriptionHealthMonitor
-        return OpcUaSubscriptionHealthMonitor.IsUnhealthy(item);
-    }
-
-    private OpcUaClientConfiguration CreateMinimalConfiguration()
-    {
-        return new OpcUaClientConfiguration
-        {
-            ServerUrl = "opc.tcp://localhost:4840",
-            SourcePathProvider = new DefaultSourcePathProvider(),
-            TypeResolver = new OpcUaTypeResolver(_typeResolverLogger),
-            ValueConverter = new OpcUaValueConverter(),
-            SubjectFactory = new OpcUaSubjectFactory(new DefaultSubjectFactory())
-        };
+        // IsUnhealthy is now in SubscriptionHealthMonitor
+        return SubscriptionHealthMonitor.IsUnhealthy(item);
     }
 }
