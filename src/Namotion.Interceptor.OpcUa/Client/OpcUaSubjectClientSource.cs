@@ -169,6 +169,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             {
                 if (_sessionManager?.CurrentSession is not null)
                 {
+                    // Health monitor only operates on subscriptions already in the collection
+                    // Thread-safety: Temporal separation ensures subscriptions are fully initialized
+                    // before being added to _sessionManager.Subscriptions (see OpcUaSubscriptionManager.cs:121)
                     await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(_sessionManager.Subscriptions, stoppingToken);
                 }
 

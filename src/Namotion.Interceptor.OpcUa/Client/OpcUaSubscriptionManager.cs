@@ -22,7 +22,6 @@ internal class OpcUaSubscriptionManager
     private readonly ILogger _logger;
 
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
-    private readonly SemaphoreSlim _applyChangesLock = new(1, 1); // Coordinates concurrent ApplyChanges calls
     private readonly ConcurrentBag<Subscription> _subscriptions = new();
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
@@ -56,6 +55,14 @@ internal class OpcUaSubscriptionManager
         Session session,
         CancellationToken cancellationToken)
     {
+        // Thread-safety design: Uses TEMPORAL SEPARATION to prevent race conditions
+        // - Subscriptions are fully initialized (including ApplyChanges) BEFORE being added to _subscriptions
+        // - Health monitor only operates on subscriptions already in _subscriptions collection
+        // - No overlap possible between initialization and health monitoring
+        // - No semaphore needed due to this temporal separation pattern
+        //
+        // This method is called only once during StartListeningAsync, never concurrently.
+
         _shuttingDown = false;
 
         var itemCount = monitoredItems.Count;
@@ -82,9 +89,7 @@ internal class OpcUaSubscriptionManager
 
             await subscription.CreateAsync(cancellationToken);
             subscription.FastDataChangeCallback += OnFastDataChange;
-
-            _subscriptions.Add(subscription);
-
+            
             var batchEnd = Math.Min(i + maximumItemsPerSubscription, itemCount);
             for (var j = i; j < batchEnd; j++)
             {
@@ -99,23 +104,21 @@ internal class OpcUaSubscriptionManager
 
             try
             {
-                // Coordinate with health monitor to prevent concurrent ApplyChanges
-                await _applyChangesLock.WaitAsync(cancellationToken);
-                try
-                {
-                    await subscription.ApplyChangesAsync(cancellationToken);
-                }
-                finally
-                {
-                    _applyChangesLock.Release();
-                }
+                // Phase 1: Apply changes to OPC UA server (subscription NOT in _subscriptions yet)
+                await subscription.ApplyChangesAsync(cancellationToken);
             }
             catch (ServiceResultException sre)
             {
                 _logger.LogWarning(sre, "ApplyChanges failed for a batch; attempting to keep valid OPC UA monitored items by removing failed ones.");
             }
 
+            // Phase 2: Filter and retry failed items (subscription STILL NOT in _subscriptions)
             await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken);
+
+            // Phase 3: Make subscription visible to health monitor (AFTER all initialization complete)
+            // CRITICAL: This ordering ensures temporal separation - health monitor never sees
+            // subscriptions during their initialization phase (lines 101-110)
+            _subscriptions.Add(subscription);
         }
     }
     
@@ -245,16 +248,7 @@ internal class OpcUaSubscriptionManager
 
             try
             {
-                // Coordinate with health monitor to prevent concurrent ApplyChanges
-                await _applyChangesLock.WaitAsync(cancellationToken);
-                try
-                {
-                    await subscription.ApplyChangesAsync(cancellationToken);
-                }
-                finally
-                {
-                    _applyChangesLock.Release();
-                }
+                await subscription.ApplyChangesAsync(cancellationToken);
             }
             catch (Exception ex)
             {
@@ -303,7 +297,7 @@ internal class OpcUaSubscriptionManager
                statusCode == StatusCodes.BadMonitoredItemFilterUnsupported;
     }
 
-    public void Cleanup()
+    public void Dispose()
     {
         _shuttingDown = true;
 
@@ -316,11 +310,5 @@ internal class OpcUaSubscriptionManager
             subscription.FastDataChangeCallback -= OnFastDataChange;
             subscription.Delete(true);
         }
-    }
-
-    public void Dispose()
-    {
-        _applyChangesLock.Dispose();
-        Cleanup();
     }
 }
