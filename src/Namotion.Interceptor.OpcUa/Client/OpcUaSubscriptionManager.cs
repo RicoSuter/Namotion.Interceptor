@@ -18,14 +18,15 @@ internal class OpcUaSubscriptionManager
 
     private readonly Lock _subscriptionsLock = new(); // Protects ImmutableArray assignment (struct not atomic)
 
-    private readonly ILogger _logger;
+    private readonly ISubjectUpdater? _updater;
+    private readonly PollingManager? _pollingManager;
     private readonly OpcUaClientConfiguration _configuration;
+    private readonly ILogger _logger;
+
     private readonly ConcurrentDictionary<uint, (MonitoredItem monitoredItem, RegisteredSubjectProperty property)> _monitoredItems = new();
     private readonly SemaphoreSlim _applyChangesLock = new(1, 1); // Coordinates concurrent ApplyChanges calls
-
-    private volatile PollingManager? _pollingManager;
     private ImmutableArray<Subscription> _subscriptions = ImmutableArray<Subscription>.Empty;
-    private volatile ISubjectUpdater? _updater;
+
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
 
     /// <summary>
@@ -45,20 +46,12 @@ internal class OpcUaSubscriptionManager
 
     public ConcurrentDictionary<uint, (MonitoredItem monitoredItem, RegisteredSubjectProperty property)> MonitoredItems => _monitoredItems;
 
-    public OpcUaSubscriptionManager(OpcUaClientConfiguration configuration, ILogger logger)
-    {
-        _configuration = configuration;
-        _logger = logger;
-    }
-
-    public void SetUpdater(ISubjectUpdater updater)
+    public OpcUaSubscriptionManager(ISubjectUpdater updater, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _updater = updater;
-    }
-
-    public void SetPollingManager(PollingManager pollingManager)
-    {
         _pollingManager = pollingManager;
+        _configuration = configuration;
+        _logger = logger;
     }
 
     public void Clear()

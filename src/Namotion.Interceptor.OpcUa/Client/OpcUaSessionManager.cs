@@ -1,4 +1,8 @@
+using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.OpcUa.Client.Polling;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Sources;
 using Opc.Ua;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;
@@ -9,15 +13,20 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// Manages OPC UA session lifecycle, reconnection handling, and thread-safe session access.
 /// Optimized for fast session reads (hot path) with simple lock-based writes (cold path).
 /// </summary>
-internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
+internal sealed class OpcUaSessionManager : IAsyncDisposable
 {
-    private readonly object _lock = new();
+    private readonly OpcUaClientConfiguration _configuration;
+    private readonly ILogger _logger;
+
+    private readonly OpcUaSubscriptionManager _subscriptionManager;
+    private readonly SessionReconnectHandler _reconnectHandler;
+    private readonly PollingManager? _pollingManager;
 
     private Session? _session;
-    private readonly SessionReconnectHandler _reconnectHandler;
-    private readonly ILogger _logger;
-    private readonly OpcUaClientConfiguration _configuration;
+
+    private readonly object _reconnectingLock = new();
     private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
+    
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
     /// <summary>
@@ -42,15 +51,10 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
     /// </summary>
     public bool IsReconnecting => Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1;
 
-    /// <summary>
-    /// Occurs when the session changes (new session, reconnected, or disconnected).
-    /// <para>
-    /// <strong>Thread-Safety:</strong> This event is invoked on a background thread (reconnection handler thread or session creation thread).
-    /// Event handlers MUST be thread-safe and should not perform blocking operations.
-    /// The session object may change concurrently - handlers should not cache session references without proper synchronization.
-    /// </para>
-    /// </summary>
-    public event EventHandler<SessionChangedEventArgs>? SessionChanged;
+    public IReadOnlyDictionary<uint, (MonitoredItem monitoredItem, RegisteredSubjectProperty property)> MonitoredItems
+        => _subscriptionManager.MonitoredItems;
+
+    public IReadOnlyList<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
 
     /// <summary>
     /// Occurs when a reconnection attempt completes (successfully or not).
@@ -62,11 +66,29 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
     /// </summary>
     public event EventHandler? ReconnectionCompleted;
 
-    public OpcUaSessionManager(ILogger logger, OpcUaClientConfiguration configuration)
+    public OpcUaSessionManager(ISubjectUpdater updater, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _logger = logger;
         _configuration = configuration;
         _reconnectHandler = new SessionReconnectHandler(false, (int)configuration.ReconnectHandlerTimeout);
+
+        if (_configuration.EnablePollingFallback)
+        {
+            _pollingManager = new PollingManager(
+                logger: _logger,
+                sessionManager: this,
+                updater: updater,
+                pollingInterval: _configuration.PollingInterval,
+                batchSize: _configuration.PollingBatchSize,
+                disposalTimeout: _configuration.PollingDisposalTimeout,
+                circuitBreakerThreshold: _configuration.PollingCircuitBreakerThreshold,
+                circuitBreakerCooldown: _configuration.PollingCircuitBreakerCooldown
+            );
+
+            _pollingManager.Start();
+        }
+
+        _subscriptionManager = new OpcUaSubscriptionManager(updater, _pollingManager, configuration, logger);
     }
 
     /// <summary>
@@ -77,6 +99,8 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
         OpcUaClientConfiguration configuration,
         CancellationToken cancellationToken)
     {
+        // This method will never be called concurrently, so no lock is needed here.
+        
         var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
         var endpointDescription = CoreClientUtils.SelectEndpoint(
             application.ApplicationConfiguration,
@@ -84,8 +108,9 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
             useSecurity: false);
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
-
-        var newSession = await Session.Create(
+        var oldSession = _session;
+        
+        _session = await Session.Create(
             application.ApplicationConfiguration,
             endpoint,
             updateBeforeConnect: false,
@@ -95,31 +120,30 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
             preferredLocales: null,
             cancellationToken);
 
-        Session? oldSession;
-        lock (_lock)
-        {
-            oldSession = _session;
+        _session.KeepAlive += OnKeepAlive;
 
-            // Unregister old session handler inside lock to prevent race condition
-            if (oldSession is not null)
-            {
-                oldSession.KeepAlive -= OnKeepAlive;
-            }
-
-            Volatile.Write(ref _session, newSession);
-            Interlocked.Exchange(ref _isReconnecting, 0);
-
-            newSession.KeepAlive += OnKeepAlive;
-        }
-
-        // Dispose old session outside lock
         if (oldSession is not null)
         {
-            await DisposeSessionSafelyAsync(oldSession);
+            await DisposeSessionAsync(oldSession, cancellationToken);
         }
 
-        SessionChanged?.Invoke(this, new SessionChangedEventArgs(newSession, isNewSession: true));
-        return newSession;
+        return _session;
+    }
+
+    public async Task CreateSubscriptionsAsync(
+        IReadOnlyList<MonitoredItem> monitoredItems,
+        Session session, CancellationToken cancellationToken)
+    {
+        // This method will never be called concurrently, so no lock is needed here.
+
+        await _subscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken);
+
+        _logger.LogInformation(
+            "Created {SubscriptionCount} subscriptions with {Subscribed} " +
+            "total monitored items ({Polled} via polling).",
+            _subscriptionManager.Subscriptions.Count,
+            _subscriptionManager.MonitoredItems.Count,
+            _pollingManager?.PollingItemCount ?? 0);
     }
 
     /// <summary>
@@ -137,11 +161,9 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
             return;
         }
 
-        // Use non-blocking lock acquisition to avoid cascading KeepAlive thread pool exhaustion
-        // If lock is held (e.g., CreateSessionAsync or concurrent reconnect), skip this event - the next KeepAlive will retry
-        if (!Monitor.TryEnter(_lock, 0))
+        if (!Monitor.TryEnter(_reconnectingLock, 0))
         {
-            _logger.LogDebug("Reconnect already in progress, skipping duplicate KeepAlive event");
+            _logger.LogDebug("OPC UA reconnect already in progress, skipping duplicate KeepAlive event.");
             return;
         }
 
@@ -164,7 +186,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
                 return;
             }
 
-            _logger.LogInformation("OPC UA server connection lost. Beginning reconnect with exponential backoff...");
+            _logger.LogInformation("OPC UA server connection lost. Beginning reconnect...");
 
             var newState = _reconnectHandler.BeginReconnect(session, _configuration.ReconnectInterval, OnReconnectComplete);
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
@@ -179,7 +201,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
         }
         finally
         {
-            Monitor.Exit(_lock);
+            Monitor.Exit(_reconnectingLock);
         }
     }
 
@@ -189,22 +211,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
     /// </summary>
     private void OnReconnectComplete(object? sender, EventArgs e)
     {
-        HandleReconnectCompleteAsync().ContinueWith(t =>
-        {
-            if (t.IsFaulted)
-            {
-                _logger.LogError(t.Exception, "Unhandled exception in reconnect completion handler");
-            }
-        }, TaskScheduler.Default);
-    }
-
-    private async Task HandleReconnectCompleteAsync()
-    {
-        Session? oldSession = null;
-        Session? newSession = null;
-        bool isNewSession;
-
-        lock (_lock)
+        lock (_reconnectingLock)
         {
             if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
             {
@@ -216,23 +223,35 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
             {
                 _logger.LogError("Reconnect completed but received null OPC UA session. Connection lost permanently.");
                 Interlocked.Exchange(ref _isReconnecting, 0);
-
-                SessionChanged?.Invoke(this, new SessionChangedEventArgs(null, isNewSession: false));
                 return;
             }
 
-            isNewSession = !ReferenceEquals(_session, reconnectedSession);
+            var currentSession = _session;
+            var isNewSession = !ReferenceEquals(_session, reconnectedSession);
             if (isNewSession)
             {
-                _logger.LogInformation("Reconnect created new OPC UA session. Subscriptions transferred by OPC UA stack.");
-                oldSession = _session;
-                newSession = reconnectedSession as Session;
+                _logger.LogInformation("Reconnect created new OPC UA session.");
+
+                var newSession = reconnectedSession as Session;
                 Volatile.Write(ref _session, newSession);
 
                 if (newSession is not null)
                 {
                     newSession.KeepAlive -= OnKeepAlive; // Defensive
                     newSession.KeepAlive += OnKeepAlive;
+                    
+                    var transferredSubscriptions = newSession.Subscriptions.ToImmutableArray();
+                    if (transferredSubscriptions.Length > 0)
+                    {
+                        _subscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
+                        _logger.LogInformation("OPC UA session reconnected: Transferred {Count} subscriptions.", transferredSubscriptions.Length);
+                    }
+                }
+                
+                if (currentSession is not null && !ReferenceEquals(currentSession, newSession))
+                {
+                    currentSession.KeepAlive -= OnKeepAlive;
+                    Task.Run(() => DisposeSessionAsync(currentSession, CancellationToken.None));
                 }
             }
             else
@@ -242,121 +261,42 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
 
             Interlocked.Exchange(ref _isReconnecting, 0);
         }
-
-        // Dispose old session outside lock
-        if (oldSession is not null && !ReferenceEquals(oldSession, newSession))
-        {
-            oldSession.KeepAlive -= OnKeepAlive;
-            await DisposeSessionSafelyAsync(oldSession);
-        }
-
-        if (isNewSession)
-        {
-            SessionChanged?.Invoke(this, new SessionChangedEventArgs(newSession, isNewSession: true));
-        }
-
+        
         ReconnectionCompleted?.Invoke(this, EventArgs.Empty);
-        _logger.LogInformation("OPC UA session reconnect completed. New session: {IsNew}", isNewSession);
+        _logger.LogInformation("OPC UA session reconnect completed.");
     }
-
-    /// <summary>
-    /// Closes the current session.
-    /// </summary>
-    public async Task CloseSessionAsync()
-    {
-        Session? sessionToClose;
-        lock (_lock)
-        {
-            sessionToClose = _session;
-            if (sessionToClose is not null)
-            {
-                sessionToClose.KeepAlive -= OnKeepAlive;
-                Volatile.Write(ref _session, null);
-                Interlocked.Exchange(ref _isReconnecting, 0);
-            }
-        }
-
-        if (sessionToClose is not null)
-        {
-            await DisposeSessionSafelyAsync(sessionToClose);
-        }
-    }
-
-    private async Task DisposeSessionSafelyAsync(Session session)
+    
+    private async Task DisposeSessionAsync(Session session, CancellationToken cancellationToken)
     {
         try
         {
-            using var cts = new CancellationTokenSource(_configuration.SessionDisposalTimeout);
-            await session.CloseAsync(cts.Token);
-            session.Dispose();
-            _logger.LogDebug("Session disposed successfully");
+            session.KeepAlive -= OnKeepAlive;
+            await session.CloseAsync(cancellationToken);
+            _logger.LogDebug("OPC UA session disposed successfully.");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error disposing session");
-            try { session.Dispose(); } catch { /* Best effort */ }
+            _logger.LogWarning(ex, "Error closing OPC UA session.");
         }
+
+        session.Dispose();
     }
 
     public async ValueTask DisposeAsync()
     {
-        // Set disposed flag first to prevent new operations (thread-safe)
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
-            return; // Already disposed
+            return;
         }
-
-        Session? sessionToDispose;
-        lock (_lock)
-        {
-            sessionToDispose = _session;
-            if (sessionToDispose is not null)
-            {
-                sessionToDispose.KeepAlive -= OnKeepAlive;
-                Volatile.Write(ref _session, null);
-            }
-        }
-
+        
+        var sessionToDispose = _session;
         if (sessionToDispose is not null)
         {
-            await DisposeSessionSafelyAsync(sessionToDispose);
+            await DisposeSessionAsync(sessionToDispose, CancellationToken.None);
         }
 
-        try
-        {
-            _reconnectHandler.Dispose();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error disposing reconnect handler");
-        }
+        _pollingManager?.Dispose();
+        _subscriptionManager.Dispose();
+        _reconnectHandler.Dispose();
     }
-
-    public void Dispose()
-    {
-        // Synchronous dispose uses async-over-sync with timeout to prevent hanging
-        // This is acceptable for disposal as it's typically called during shutdown
-        try
-        {
-            DisposeAsync().AsTask().Wait(_configuration.SessionDisposalTimeout);
-        }
-        catch (AggregateException ex) when (ex.InnerException is TimeoutException)
-        {
-            _logger.LogWarning("Session disposal timed out after {Timeout}. Forcing disposal.", _configuration.SessionDisposalTimeout);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error during synchronous disposal");
-        }
-    }
-}
-
-/// <summary>
-/// Event args for session change events.
-/// </summary>
-internal sealed class SessionChangedEventArgs(Session? session, bool isNewSession) : EventArgs
-{
-    public Session? Session { get; } = session;
-
-    public bool IsNewSession { get; } = isNewSession;
 }

@@ -210,13 +210,6 @@ public class OpcUaClientConfiguration
     /// </summary>
     public int ReconnectInterval { get; set; } = 5000;
 
-    /// <summary>
-    /// Gets or sets the timeout to wait for graceful session disposal.
-    /// If session close does not complete within this timeout, it will be forcefully disposed.
-    /// Default is 5 seconds.
-    /// </summary>
-    public TimeSpan SessionDisposalTimeout { get; set; } = TimeSpan.FromSeconds(5);
-
     public virtual ApplicationInstance CreateApplicationInstance()
     {
         var application = new ApplicationInstance
@@ -380,14 +373,6 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"ReconnectInterval must be at least 100ms, got: {ReconnectInterval}",
                 nameof(ReconnectInterval));
-        }
-
-        var minDisposalTimeout = TimeSpan.FromMilliseconds(100);
-        if (SessionDisposalTimeout < minDisposalTimeout)
-        {
-            throw new ArgumentException(
-                $"SessionDisposalTimeout must be at least {minDisposalTimeout.TotalMilliseconds}ms, got: {SessionDisposalTimeout.TotalMilliseconds}ms",
-                nameof(SessionDisposalTimeout));
         }
     }
 }
