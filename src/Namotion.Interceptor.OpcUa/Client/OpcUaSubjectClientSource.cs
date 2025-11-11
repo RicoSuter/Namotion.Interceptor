@@ -88,7 +88,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
         }
 
-        return Task.FromResult<IDisposable?>(null);
+        return _sessionManager;
     }
     
     public async Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
