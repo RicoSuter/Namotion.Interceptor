@@ -44,6 +44,8 @@ internal sealed class WriteFailureQueue
     /// <summary>
     /// Enqueues multiple write operations. If the queue reaches capacity,
     /// oldest writes are dropped to make room (ring buffer semantics).
+    /// Thread-safety: This method is called only from SubjectSourceBackgroundService which
+    /// serializes all WriteToSourceAsync calls via _flushGate. No concurrent access occurs.
     /// </summary>
     public void EnqueueBatch(IReadOnlyList<SubjectPropertyChange> changes)
     {
@@ -53,12 +55,14 @@ internal sealed class WriteFailureQueue
             return;
         }
 
+        // Add all new items first
         foreach (var change in changes)
         {
             _pendingWrites.Enqueue(change);
         }
-        
-        // Enforce size limit by removing oldest items if needed
+
+        // Enforce size limit by removing oldest items (ring buffer semantics)
+        // Note: SubjectSourceBackgroundService ensures single-threaded access, so Count is stable
         while (_pendingWrites.Count > _maxQueueSize)
         {
             if (_pendingWrites.TryDequeue(out _))
@@ -67,7 +71,7 @@ internal sealed class WriteFailureQueue
             }
             else
             {
-                break; // Queue emptied by another thread (e.g., flush)
+                break; // Queue empty (shouldn't happen, but defensive)
             }
         }
 
