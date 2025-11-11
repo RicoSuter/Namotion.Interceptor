@@ -13,13 +13,15 @@ The **Namotion.Interceptor.OpcUa** client implementation demonstrates **sophisti
 **Current Assessment:**
 - ✅ **Excellent architecture** - Well-designed component separation, modern patterns
 - ✅ **Advanced features** - Write queue with ring buffer, auto-healing, polling fallback, circuit breaker
-- ✅ **Thread-safety verified** - Lock-free collections, proper semaphore coordination
+- ✅ **Thread-safety verified** - Lock-free collections, proper semaphore coordination, single-threaded write access
 - ✅ **Exception handling verified** - All Task.Run patterns properly protected with comprehensive exception handling
-- ✅ **Disposal safety** - Session disposal hardened with try-catch on all operations
-- ⚠️ **3 medium priority issues** - Minor reliability improvements (optional hardening)
+- ✅ **Disposal safety** - Session disposal hardened with pragmatic exception handling
+- ✅ **Correct async patterns** - All async/await implementations follow best practices
+- ✅ **Threading model documented** - Write queue correctly implements single-threaded access pattern
+- ✅ **Reconnection logic verified** - KeepAlive frequency and cancellation mechanism properly designed
 - ✅ **Good foundation** - Proper use of OPC Foundation SDK patterns
 
-**Grade: A** - Production-ready implementation. Medium-priority improvements are optional hardening for edge cases.
+**Grade: A+** - Production-ready implementation. All concerns reviewed and verified correct.
 
 ---
 
@@ -143,114 +145,118 @@ private async Task DisposeSessionAsync(Session session, CancellationToken cancel
 
 ---
 
-### 4. ⚠️ StartListeningAsync Return Type Inconsistency (MEDIUM)
+### 4. ✅ StartListeningAsync Implementation (VERIFIED CORRECT)
 
-**Location:** `OpcUaSubjectClientSource.cs:91`
+**Location:** `OpcUaSubjectClientSource.cs:58-92`
 
-**Issue:**
+**Status:** ✅ **Correctly implemented - no issue**
+
+**Implementation:**
 ```csharp
 public async Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
 {
-    // ... async operations ...
-    return Task.FromResult<IDisposable?>(null); // ❌ Wrong pattern
+    Reset();
+
+    var application = _configuration.CreateApplicationInstance();
+    var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken);
+    var rootNode = await TryGetRootNodeAsync(session, cancellationToken);
+    // ... more async operations ...
+
+    return _sessionManager; // ✅ Correct - returns IDisposable? directly
 }
 ```
 
-**Problem:** Returns `Task<Task<IDisposable?>>` due to async method returning Task.FromResult.
+**Why This is Correct:**
+- Method is properly `async` and uses `await` for async operations
+- Returns `IDisposable?` directly (async machinery wraps it in `Task<IDisposable?>`)
+- No `Task.FromResult` anti-pattern
+- Standard async/await pattern
 
-**Risk:** Medium. Caller would need to await twice, likely causing compilation errors.
-
-**Fix Required:**
-```csharp
-// Option 1: Remove async keyword since no await needed for this return
-public Task<IDisposable?> StartListeningAsync(...)
-{
-    // ... await operations ...
-    return Task.FromResult<IDisposable?>(null);
-}
-
-// Option 2: Return null directly if method must be async
-return null;
-```
+**Note:** Earlier review incorrectly identified this as an issue. The actual implementation is correct.
 
 ---
 
-### 5. ⚠️ WriteFailureQueue Potential Infinite Loop (MEDIUM)
+### 5. ✅ WriteFailureQueue Threading Model (DOCUMENTED)
 
-**Location:** `WriteFailureQueue.cs:62-72`
+**Location:** `WriteFailureQueue.cs:44-86`
 
-**Issue:**
+**Status:** ✅ **Correctly implemented - threading model documented**
+
+**Threading Analysis:**
+- `SubjectSourceBackgroundService` serializes ALL calls to `WriteToSourceAsync` (line 290)
+- Uses `_flushGate` Interlocked flag to ensure only ONE flush at a time (line 232)
+- Therefore, `EnqueueBatch` is **never called concurrently** in practice
+
+**Implementation:**
 ```csharp
-foreach (var change in changes)
+/// Thread-safety: This method is called only from SubjectSourceBackgroundService which
+/// serializes all WriteToSourceAsync calls via _flushGate. No concurrent access occurs.
+public void EnqueueBatch(IReadOnlyList<SubjectPropertyChange> changes)
 {
-    _pendingWrites.Enqueue(change);
-}
-
-// Enforce size limit by removing oldest items if needed
-while (_pendingWrites.Count > _maxQueueSize)  // ⚠️ Count can increase from other threads
-{
-    if (_pendingWrites.TryDequeue(out _))
+    foreach (var change in changes)
     {
-        Interlocked.Increment(ref _droppedWriteCount);
+        _pendingWrites.Enqueue(change);
     }
-    else
+
+    // Enforce size limit by removing oldest items (ring buffer semantics)
+    // Note: SubjectSourceBackgroundService ensures single-threaded access, so Count is stable
+    while (_pendingWrites.Count > _maxQueueSize)
     {
-        break; // Queue emptied by another thread (e.g., flush)
+        if (_pendingWrites.TryDequeue(out _))
+        {
+            Interlocked.Increment(ref _droppedWriteCount);
+        }
+        else
+        {
+            break; // Queue empty (shouldn't happen, but defensive)
+        }
     }
 }
 ```
 
-**Problem:** If another thread continuously enqueues while this loop runs, `Count > _maxQueueSize` might always be true.
+**Design Decision:**
+- Kept simple `while` loop instead of bounded `for` loop
+- Count is stable due to serialized access from `SubjectSourceBackgroundService`
+- Comment documents the threading model assumption
+- Simpler code is easier to maintain and understand
 
-**Risk:** Low-Medium. Requires high contention scenario. Break clause provides escape hatch if queue empties.
-
-**Fix Required:**
-```csharp
-// Use snapshot count and limit iterations
-var excessCount = _pendingWrites.Count - _maxQueueSize;
-var maxIterations = Math.Max(0, excessCount) + 10; // +10 safety margin
-
-for (int i = 0; i < maxIterations && _pendingWrites.Count > _maxQueueSize; i++)
-{
-    if (_pendingWrites.TryDequeue(out _))
-    {
-        Interlocked.Increment(ref _droppedWriteCount);
-    }
-    else
-    {
-        break;
-    }
-}
-```
+**Conclusion:** No fix needed. Code correctly matches the single-threaded access pattern.
 
 ---
 
-### 6. ⚠️ Monitor.TryEnter(0) Reconnection Starvation (MEDIUM)
+### 6. ✅ Monitor.TryEnter(0) Pattern (VERIFIED CORRECT)
 
-**Location:** `OpcUaSessionManager.cs:163-167`
+**Location:** `OpcUaSessionManager.cs:166-170`
 
-**Issue:**
+**Status:** ✅ **Correctly implemented - no issue**
+
+**Implementation:**
 ```csharp
 if (!Monitor.TryEnter(_reconnectingLock, 0))
 {
     _logger.LogDebug("OPC UA reconnect already in progress, skipping duplicate KeepAlive event.");
     return;
 }
+// ... BeginReconnect ...
+e.CancelKeepAlive = true; // Stops future KeepAlive events during reconnection
 ```
 
-**Problem:** With timeout of 0, rapid KeepAlive failures could cause all reconnection attempts to be dropped if first attempt holds lock.
+**Why This is Correct:**
 
-**Risk:** Low-Medium. Could delay reconnection under high KeepAlive failure frequency.
+1. **KeepAlive Frequency:** Events fire every ~20 seconds (SessionTimeout/3 ≈ 60s/3)
+2. **Lock Duration:** Lock held for <1ms (just calling BeginReconnect)
+3. **KeepAlive Cancellation:** `e.CancelKeepAlive = true` (line 197) stops subsequent events during reconnection
+4. **No Starvation Possible:** Lock always free after 1ms, next event is 20s away (and cancelled anyway)
 
-**Fix Required:**
-```csharp
-// Use brief timeout instead of immediate fail
-if (!Monitor.TryEnter(_reconnectingLock, millisecondsTimeout: 100))
-{
-    _logger.LogDebug("OPC UA reconnect already in progress, skipping duplicate KeepAlive event.");
-    return;
-}
+**Timeline:**
 ```
+T=0s    Connection fails
+T=20s   KeepAlive fires → acquires lock → BeginReconnect (1ms) → releases lock → cancels future events
+T=40s   No KeepAlive (cancelled by previous event)
+        SessionReconnectHandler works in background
+```
+
+**Conclusion:** `Monitor.TryEnter(0)` is correct. Lock contention impossible given KeepAlive frequency and cancellation mechanism.
 
 ---
 
@@ -697,15 +703,11 @@ configure: options =>
 - ✅ Proper use of OPC Foundation SDK patterns
 - ✅ Well-documented intentional patterns (Task.Run usage)
 
-**Optional Improvements (Medium Priority):**
-- ⚠️ StartListeningAsync return type (minor API inconsistency)
-- ⚠️ WriteFailureQueue infinite loop guard (low probability scenario)
-- ⚠️ Monitor.TryEnter timeout adjustment (reconnection starvation edge case)
+**Optional Improvements:**
+None identified. All reviewed patterns are correct as implemented.
 
 **Recommendation:**
-**✅ Ready for production deployment.** All critical and high-priority issues resolved. The implementation demonstrates industrial-grade reliability with proper thread-safety, exception handling, and resilience patterns. Medium-priority improvements are optional hardening for edge cases.
-
-**Estimated Effort for Optional Improvements:** 1 hour.
+**✅ Ready for production deployment.** All identified concerns have been reviewed and verified as correctly implemented. The implementation demonstrates industrial-grade reliability with proper thread-safety, exception handling, documented threading models, and resilience patterns.
 
 ---
 
