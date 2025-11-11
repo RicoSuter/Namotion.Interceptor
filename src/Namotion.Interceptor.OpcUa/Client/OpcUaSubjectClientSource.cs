@@ -167,7 +167,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             try
             {
-                if (_sessionManager is not null)
+                if (_sessionManager?.CurrentSession is not null)
                 {
                     await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(_sessionManager.Subscriptions, stoppingToken);
                 }
