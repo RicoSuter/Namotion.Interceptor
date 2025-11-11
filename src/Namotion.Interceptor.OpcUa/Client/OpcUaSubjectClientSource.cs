@@ -242,6 +242,11 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var session = _sessionManager?.CurrentSession;
         if (session is not null)
         {
+            // Task.Run is intentional here (not a fire-and-forget anti-pattern):
+            // - We're in a synchronous event handler context (cannot await)
+            // - All exceptions are caught and logged (no unobserved exceptions)
+            // - Semaphore in FlushQueuedWritesAsync coordinates with concurrent WriteToSourceAsync calls
+            // - If concurrent write happens: it waits on semaphore, then its own flush is empty (early return)
             Task.Run(async () =>
             {
                 try
