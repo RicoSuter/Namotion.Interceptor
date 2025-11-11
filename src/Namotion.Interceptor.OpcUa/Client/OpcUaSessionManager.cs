@@ -51,7 +51,11 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
     /// </summary>
     public bool IsReconnecting => Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1;
 
-    public IReadOnlyList<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
+    /// <summary>
+    /// Gets the current list of subscriptions.
+    /// Thread-safe - returns a snapshot of subscriptions.
+    /// </summary>
+    public IReadOnlyCollection<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
 
     /// <summary>
     /// Occurs when a reconnection attempt completes (successfully or not).
@@ -237,12 +241,12 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
                 {
                     newSession.KeepAlive -= OnKeepAlive; // Defensive
                     newSession.KeepAlive += OnKeepAlive;
-                    
-                    var transferredSubscriptions = newSession.Subscriptions.ToImmutableArray();
-                    if (transferredSubscriptions.Length > 0)
+
+                    var transferredSubscriptions = newSession.Subscriptions.ToList();
+                    if (transferredSubscriptions.Count > 0)
                     {
                         _subscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
-                        _logger.LogInformation("OPC UA session reconnected: Transferred {Count} subscriptions.", transferredSubscriptions.Length);
+                        _logger.LogInformation("OPC UA session reconnected: Transferred {Count} subscriptions.", transferredSubscriptions.Count);
                     }
                 }
                 

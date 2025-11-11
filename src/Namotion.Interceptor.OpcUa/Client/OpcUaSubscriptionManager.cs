@@ -1,5 +1,4 @@
 ﻿using System.Collections.Concurrent;
-using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
@@ -17,8 +16,6 @@ internal class OpcUaSubscriptionManager
     private static readonly ObjectPool<List<OpcUaPropertyUpdate>> ChangesPool
         = new(() => new List<OpcUaPropertyUpdate>(16));
 
-    private readonly Lock _subscriptionsLock = new(); // Protects ImmutableArray assignment (struct not atomic)
-
     private readonly ISubjectUpdater? _updater;
     private readonly PollingManager? _pollingManager;
     private readonly OpcUaClientConfiguration _configuration;
@@ -26,25 +23,18 @@ internal class OpcUaSubscriptionManager
 
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
     private readonly SemaphoreSlim _applyChangesLock = new(1, 1); // Coordinates concurrent ApplyChanges calls
-    private ImmutableArray<Subscription> _subscriptions = ImmutableArray<Subscription>.Empty;
+    private readonly ConcurrentBag<Subscription> _subscriptions = new();
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
 
     /// <summary>
-    /// Gets the current list of subscriptions.
-    /// Thread-safe using lock to prevent torn reads of ImmutableArray struct.
+    /// Gets the current list of subscriptions (thread-safe collection).
     /// </summary>
-    public IReadOnlyList<Subscription> Subscriptions
-    {
-        get
-        {
-            lock (_subscriptionsLock)
-            {
-                return _subscriptions;
-            }
-        }
-    }
+    public IReadOnlyCollection<Subscription> Subscriptions => _subscriptions;
 
+    /// <summary>
+    /// Gets the current monitored items (thread-safe dictionary).
+    /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
     public OpcUaSubscriptionManager(ISubjectUpdater updater, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
@@ -58,10 +48,7 @@ internal class OpcUaSubscriptionManager
     public void Clear()
     {
         _monitoredItems.Clear();
-        lock (_subscriptionsLock)
-        {
-            _subscriptions = ImmutableArray<Subscription>.Empty;
-        }
+        _subscriptions.Clear();
     }
 
     public async Task CreateBatchedSubscriptionsAsync(
@@ -70,13 +57,9 @@ internal class OpcUaSubscriptionManager
         CancellationToken cancellationToken)
     {
         _shuttingDown = false;
-        
+
         var itemCount = monitoredItems.Count;
         var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
-
-        // Calculate expected subscription count for builder capacity
-        var expectedSubscriptionCount = (itemCount + maximumItemsPerSubscription - 1) / maximumItemsPerSubscription;
-        var builder = ImmutableArray.CreateBuilder<Subscription>(expectedSubscriptionCount);
 
         for (var i = 0; i < itemCount; i += maximumItemsPerSubscription)
         {
@@ -100,7 +83,7 @@ internal class OpcUaSubscriptionManager
             await subscription.CreateAsync(cancellationToken);
             subscription.FastDataChangeCallback += OnFastDataChange;
 
-            builder.Add(subscription);
+            _subscriptions.Add(subscription);
 
             var batchEnd = Math.Min(i + maximumItemsPerSubscription, itemCount);
             for (var j = i; j < batchEnd; j++)
@@ -133,14 +116,6 @@ internal class OpcUaSubscriptionManager
             }
 
             await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken);
-        }
-
-        // Replace subscriptions array with lock to ensure atomic assignment
-        // ImmutableArray is a struct - assignment not atomic on all platforms
-        var newSubscriptions = builder.ToImmutable();
-        lock (_subscriptionsLock)
-        {
-            _subscriptions = newSubscriptions;
         }
     }
     
@@ -211,20 +186,19 @@ internal class OpcUaSubscriptionManager
     /// Updates the subscription list to reference subscriptions transferred by SessionReconnectHandler.
     /// Called after successful session transfer to embrace OPC Foundation's subscription preservation.
     /// </summary>
-    public void UpdateTransferredSubscriptions(ImmutableArray<Subscription> transferredSubscriptions)
+    public void UpdateTransferredSubscriptions(IReadOnlyCollection<Subscription> transferredSubscriptions)
     {
+        // Clear old subscriptions and add transferred ones
+        _subscriptions.Clear();
+
         foreach (var subscription in transferredSubscriptions)
         {
             subscription.FastDataChangeCallback -= OnFastDataChange;
             subscription.FastDataChangeCallback += OnFastDataChange;
+            _subscriptions.Add(subscription);
         }
 
-        lock (_subscriptionsLock)
-        {
-            _subscriptions = transferredSubscriptions;
-        }
-
-        _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions", transferredSubscriptions.Length);
+        _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions", transferredSubscriptions.Count);
     }
     
     private async Task FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
@@ -333,12 +307,9 @@ internal class OpcUaSubscriptionManager
     {
         _shuttingDown = true;
 
-        ImmutableArray<Subscription> subscriptions;
-        lock (_subscriptionsLock)
-        {
-            subscriptions = _subscriptions;
-            _subscriptions = ImmutableArray<Subscription>.Empty;
-        }
+        // Take snapshot and clear
+        var subscriptions = _subscriptions.ToArray();
+        _subscriptions.Clear();
 
         foreach (var subscription in subscriptions)
         {
