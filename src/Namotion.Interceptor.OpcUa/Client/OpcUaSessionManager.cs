@@ -23,10 +23,11 @@ internal sealed class OpcUaSessionManager : IAsyncDisposable
     private readonly PollingManager? _pollingManager;
 
     private Session? _session;
+    private CancellationToken _stoppingToken;
 
     private readonly object _reconnectingLock = new();
+
     private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
-    
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
     /// <summary>
@@ -51,9 +52,6 @@ internal sealed class OpcUaSessionManager : IAsyncDisposable
     /// </summary>
     public bool IsReconnecting => Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1;
 
-    public IReadOnlyDictionary<uint, (MonitoredItem monitoredItem, RegisteredSubjectProperty property)> MonitoredItems
-        => _subscriptionManager.MonitoredItems;
-
     public IReadOnlyList<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
 
     /// <summary>
@@ -61,7 +59,6 @@ internal sealed class OpcUaSessionManager : IAsyncDisposable
     /// <para>
     /// <strong>Thread-Safety:</strong> This event is invoked on a background thread (reconnection handler thread).
     /// Event handlers MUST be thread-safe and should not perform blocking operations.
-    /// Handlers should use proper synchronization when accessing shared state.
     /// </para>
     /// </summary>
     public event EventHandler? ReconnectionCompleted;
@@ -135,6 +132,8 @@ internal sealed class OpcUaSessionManager : IAsyncDisposable
         Session session, CancellationToken cancellationToken)
     {
         // This method will never be called concurrently, so no lock is needed here.
+
+        _stoppingToken = cancellationToken;
 
         await _subscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken);
 
@@ -226,7 +225,7 @@ internal sealed class OpcUaSessionManager : IAsyncDisposable
                 return;
             }
 
-            var currentSession = _session;
+            var oldSession = _session;
             var isNewSession = !ReferenceEquals(_session, reconnectedSession);
             if (isNewSession)
             {
@@ -248,10 +247,9 @@ internal sealed class OpcUaSessionManager : IAsyncDisposable
                     }
                 }
                 
-                if (currentSession is not null && !ReferenceEquals(currentSession, newSession))
+                if (oldSession is not null && !ReferenceEquals(oldSession, newSession))
                 {
-                    currentSession.KeepAlive -= OnKeepAlive;
-                    Task.Run(() => DisposeSessionAsync(currentSession, CancellationToken.None));
+                    Task.Run(() => DisposeSessionAsync(oldSession, _stoppingToken));
                 }
             }
             else
@@ -293,6 +291,7 @@ internal sealed class OpcUaSessionManager : IAsyncDisposable
         if (sessionToDispose is not null)
         {
             await DisposeSessionAsync(sessionToDispose, CancellationToken.None);
+            _session = null;
         }
 
         _pollingManager?.Dispose();

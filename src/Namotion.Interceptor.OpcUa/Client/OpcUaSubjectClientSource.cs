@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
@@ -21,17 +22,18 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
-    private readonly OpcUaSubscriptionHealthMonitor _subscriptionHealthMonitor;
-
+    private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
+    private readonly WriteFailureQueue _writeFailureQueue;
+    
     private OpcUaSessionManager? _sessionManager;
     
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private CancellationToken _stoppingToken;
 
+    private IReadOnlyList<MonitoredItem>? _initialMonitoredItems;
+
     internal string OpcVariableKey { get; } = "OpcVariable:" + Guid.NewGuid();
     
-    public OpcUaWriteQueueManager WriteQueueManager { get; }
-
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger<OpcUaSubjectClientSource> logger)
     {
         ArgumentNullException.ThrowIfNull(subject);
@@ -44,10 +46,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _logger = logger;
         _configuration = configuration;
 
-        WriteQueueManager = new OpcUaWriteQueueManager(_configuration.WriteQueueSize, logger);
+        _writeFailureQueue = new WriteFailureQueue(_configuration.WriteQueueSize, logger);
    
         _subjectLoader = new OpcUaSubjectLoader(configuration, _propertiesWithOpcData, this, logger);
-        _subscriptionHealthMonitor = new OpcUaSubscriptionHealthMonitor(logger);
+        _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
     }
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
@@ -73,6 +75,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken);
             if (monitoredItems.Count > 0)
             {
+                _initialMonitoredItems = monitoredItems;
                 await _sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken);
             }
             else
@@ -90,14 +93,19 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     
     public async Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
     {
+        var initialMonitoredItems = _initialMonitoredItems;
+        if (initialMonitoredItems is null)
+        {
+            return null;
+        }
+
         var session = _sessionManager?.CurrentSession;
         if (session is null)
         {
             throw new InvalidOperationException("No active OPC UA session available.");
         }
         
-        var monitoredItems = _sessionManager!.MonitoredItems.Values.ToArray();
-        var itemCount = monitoredItems.Length;
+        var itemCount = initialMonitoredItems.Count;
             
         var chunkSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
         chunkSize = chunkSize is 0 ? int.MaxValue : chunkSize;
@@ -112,7 +120,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             {
                 readValues.Add(new ReadValueId
                 {
-                    NodeId = monitoredItems[offset + i].monitoredItem.StartNodeId,
+                    NodeId = initialMonitoredItems[offset + i].StartNodeId,
                     AttributeId = Opc.Ua.Attributes.Value
                 });
             }
@@ -130,7 +138,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
                 {
                     var dataValue = readResponse.Results[i];
-                    if (monitoredItems[offset + i].monitoredItem.Handle is RegisteredSubjectProperty property)
+                    if (initialMonitoredItems[offset + i].Handle is RegisteredSubjectProperty property)
                     {
                         result[property] = dataValue;
                     }
@@ -214,13 +222,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 _logger.LogWarning(ex, "OPC UA write failed, changes queued.");
 
                 // When flush or write failed, queue the changes to try to apply later
-                WriteQueueManager.EnqueueBatch(changes);
+                _writeFailureQueue.EnqueueBatch(changes);
             }
         }
         else
         {
             // When session is not available, queue the changes to try to apply later
-            WriteQueueManager.EnqueueBatch(changes);
+            _writeFailureQueue.EnqueueBatch(changes);
         }
     }
     
@@ -234,14 +242,17 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var session = _sessionManager?.CurrentSession;
         if (session is not null)
         {
-            // Queue async work with continuation to handle exceptions
-            FlushQueuedWritesAsync(session, _stoppingToken).ContinueWith(t =>
+            Task.Run(async () =>
             {
-                if (t.IsFaulted)
+                try
                 {
-                    _logger.LogError(t.Exception, "Failed to flush pending OPC UA writes after reconnection.");
+                    await FlushQueuedWritesAsync(session, _stoppingToken);
                 }
-            }, TaskScheduler.Default);
+                catch (Exception exception)
+                {
+                    _logger.LogError(exception, "Failed to flush pending OPC UA writes after reconnection.");
+                }
+            });
         }
     }
 
@@ -253,12 +264,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             await _writeFlushSemaphore.WaitAsync(cancellationToken);
             try
             {
-                if (WriteQueueManager.IsEmpty)
+                if (_writeFailureQueue.IsEmpty)
                 {
                     return;
                 }
                 
-                var pendingWrites = WriteQueueManager.DequeueAll();
+                var pendingWrites = _writeFailureQueue.DequeueAll();
                 if (pendingWrites.Count > 0)
                 {
                     try
@@ -270,7 +281,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "OPC UA queue flusing failed, putting back.");
-                        WriteQueueManager.EnqueueBatch(pendingWrites);
+                        _writeFailureQueue.EnqueueBatch(pendingWrites);
                     }
                 }
             }
@@ -396,6 +407,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private void Reset()
     {
+        _initialMonitoredItems = null;
+        
         if (_sessionManager is not null)
         {
             _sessionManager.ReconnectionCompleted -= OnReconnectionCompleted;
@@ -429,7 +442,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
         
         Dispose();
-
+        
         _writeFlushSemaphore.Dispose();
     }
 }

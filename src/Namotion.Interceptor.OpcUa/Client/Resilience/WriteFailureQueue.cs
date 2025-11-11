@@ -2,13 +2,13 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.OpcUa.Client;
+namespace Namotion.Interceptor.OpcUa.Client.Resilience;
 
 /// <summary>
 /// Manages a write queue with ring buffer semantics for buffering writes during disconnection.
 /// When the queue is full, oldest writes are dropped to make room for new ones.
 /// </summary>
-internal sealed class OpcUaWriteQueueManager
+internal sealed class WriteFailureQueue
 {
     private readonly ConcurrentQueue<SubjectPropertyChange> _pendingWrites = new();
 
@@ -32,7 +32,7 @@ internal sealed class OpcUaWriteQueueManager
     /// </summary>
     public int DroppedWriteCount => Interlocked.CompareExchange(ref _droppedWriteCount, 0, 0);
 
-    public OpcUaWriteQueueManager(int maxQueueSize, ILogger logger)
+    public WriteFailureQueue(int maxQueueSize, ILogger logger)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maxQueueSize);
         ArgumentNullException.ThrowIfNull(logger);

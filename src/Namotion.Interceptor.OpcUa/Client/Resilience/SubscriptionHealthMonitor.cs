@@ -2,17 +2,17 @@ using Microsoft.Extensions.Logging;
 using Opc.Ua;
 using Opc.Ua.Client;
 
-namespace Namotion.Interceptor.OpcUa.Client;
+namespace Namotion.Interceptor.OpcUa.Client.Resilience;
 
 /// <summary>
 /// Monitors OPC UA subscription health and automatically retries failed monitored items.
 /// Periodically checks for unhealthy items and attempts to heal them by calling ApplyChanges.
 /// </summary>
-internal sealed class OpcUaSubscriptionHealthMonitor
+internal sealed class SubscriptionHealthMonitor
 {
     private readonly ILogger _logger;
 
-    public OpcUaSubscriptionHealthMonitor(ILogger logger)
+    public SubscriptionHealthMonitor(ILogger logger)
     {
         _logger = logger;
     }
