@@ -171,7 +171,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 {
                     // Health monitor only operates on subscriptions already in the collection
                     // Thread-safety: Temporal separation ensures subscriptions are fully initialized
-                    // before being added to _sessionManager.Subscriptions (see OpcUaSubscriptionManager.cs:121)
+                    // before being added to _sessionManager.Subscriptions (see OpcUaSubscriptionManager.cs:115)
+                    //
+                    // Session validation: Not needed here - OPC Foundation SDK's SessionReconnectHandler
+                    // automatically transfers subscriptions to new sessions and updates subscription.Session
+                    // property. Each subscription references its own session internally, and ApplyChangesAsync
+                    // operates on that internal reference, not on any externally passed session.
                     await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(_sessionManager.Subscriptions, stoppingToken).ConfigureAwait(false);
                 }
 
