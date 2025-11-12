@@ -97,6 +97,9 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
                 }
 
                 // Start listening for changes from the source
+                // Important: The disposable returned here (e.g., OpcUaSessionManager) is guaranteed to be
+                // disposed in the finally block below BEFORE Reset() is called on retry. This ensures
+                // proper cleanup of resources (sessions, subscriptions, etc.) without memory leaks.
                 var disposable = await _source.StartListeningAsync(this, stoppingToken).ConfigureAwait(false);
                 try
                 {
@@ -128,6 +131,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
                 }
                 finally
                 {
+                    // Dispose the source's resources (e.g., OpcUaSessionManager with all its subscriptions)
+                    // This ensures proper cleanup before any retry attempt.
                     if (disposable is IAsyncDisposable asyncDisposable)
                     {
                         await asyncDisposable.DisposeAsync().ConfigureAwait(false);
@@ -146,6 +151,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
                 }
 
                 _logger.LogError(ex, "Failed to listen for changes in source.");
+                // ResetState is called AFTER disposal in the finally block above,
+                // so all resources from the previous attempt are already cleaned up.
                 ResetState();
 
                 await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
