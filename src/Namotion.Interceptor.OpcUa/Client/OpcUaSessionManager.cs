@@ -177,7 +177,9 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
                 return;
             }
 
-            if (_session is not { } session || !ReferenceEquals(sender, session))
+            // Use Volatile.Read for memory visibility consistency after Interlocked operations
+            var session = Volatile.Read(ref _session);
+            if (session is null || !ReferenceEquals(sender, session))
             {
                 return;
             }

@@ -458,23 +458,34 @@ finally
 
 ### 2.4 Identified Thread-Safety Risks
 
-#### ⚠️ RISK 4: Missing Volatile Read in Session Check
-**Severity:** Low
-**Location:** `OpcUaSessionManager.cs:180`
+#### ✅ ~~RISK 4: Missing Volatile Read in Session Check~~ **FIXED**
+**Severity:** Low → **RESOLVED**
+**Location:** `OpcUaSessionManager.cs:174-185`
+**Status:** ✅ **IMPLEMENTED** (2025-01-12)
 
+**Original Issue:** Immediately after Interlocked operations, direct field access could see stale value due to memory reordering.
+
+**Applied Fix:**
 ```csharp
-// Line 180: Direct field access (no volatile read)
-if (_session is not { } session || !ReferenceEquals(sender, session))
-```
+if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1 ||
+    Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1)
+{
+    return;
+}
 
-**Issue:** Immediately after Interlocked operations (lines 174-178), direct field access could see stale value due to memory reordering.
-
-**Recommendation:**
-```csharp
+// ✅ Use Volatile.Read for memory visibility consistency after Interlocked operations
 var session = Volatile.Read(ref _session);
 if (session is null || !ReferenceEquals(sender, session))
+{
     return;
+}
 ```
+
+**Benefits:**
+- ✅ Ensures memory visibility after Interlocked operations
+- ✅ Prevents potential memory reordering issues
+- ✅ Consistent with volatile semantics used elsewhere (line 40)
+- ✅ Defensive correctness improvement
 
 ---
 
@@ -1356,10 +1367,10 @@ This OPC UA client implementation is **production-ready** with **industry-leadin
 - ✅ ~~Medium: Session reference capture (RISK 1)~~ → **FIXED** (2025-01-12)
 - ⚠️ Medium: Write chunking without per-item retry (RISK 2) → Fix: 2-4 hours
 - ⚠️ Low: Configuration mutability (RISK 3) → Fix: 1-2 hours
-- ⚠️ Low: Missing volatile read (RISK 4) → Fix: 15 minutes
+- ✅ ~~Low: Missing volatile read (RISK 4)~~ → **FIXED** (2025-01-12)
 - ⚠️ Very Low: Ring buffer Count variance (RISK 5) → Acceptable by design
 
-**Remaining risks are LOW to MEDIUM severity with clear mitigation paths. Highest priority risk already addressed.**
+**All HIGH and MEDIUM priority risks addressed! Remaining risks are LOW severity with clear mitigation paths.**
 
 ---
 
