@@ -251,11 +251,30 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Forces the reconnecting flag to false. Only for stall recovery when OnReconnectComplete never fires.
+    /// Attempts to force-reset the reconnecting flag if reconnection is truly stalled.
+    /// Uses lock and double-check to prevent race with delayed OnReconnectComplete.
     /// </summary>
-    internal void ForceResetReconnectingFlag()
+    /// <returns>True if flag was reset (stall confirmed), false if reconnection completed while waiting.</returns>
+    internal bool TryForceResetIfStalled()
     {
-        Interlocked.Exchange(ref _isReconnecting, 0);
+        lock (_reconnectingLock)
+        {
+            // Double-check: still reconnecting AND session still null?
+            // If OnReconnectComplete fired while we were waiting for the lock, it would have:
+            // 1. Set session to non-null (line 216)
+            // 2. Set _isReconnecting = 0 (line 242)
+            if (Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1 &&
+                Volatile.Read(ref _session) is null)
+            {
+                // Truly stalled - OnReconnectComplete never fired or failed
+                // Safe to clear flag and allow manual recovery
+                Interlocked.Exchange(ref _isReconnecting, 0);
+                return true;
+            }
+
+            // Reconnection completed while we were waiting for lock - do nothing
+            return false;
+        }
     }
 
     private async Task DisposeSessionAsync(Session session, CancellationToken cancellationToken)

@@ -1,14 +1,14 @@
 # OPC UA Client - Design Documentation
 
 **Status:** ⚠️ **Critical Issues Found - Not Production Ready**
-**Last Review:** 2025-11-12 (Comprehensive Multi-Agent Analysis)
-**Review Scope:** Architecture, Performance, Threading, Data Flow
+**Last Review:** 2025-11-13 (Comprehensive Multi-Agent Analysis - Architecture, Performance, Threading)
+**Review Scope:** Complete system flow, data integrity, concurrency, error handling, performance
 
 ---
 
 ## ⚠️ CRITICAL ISSUES BLOCKING PRODUCTION
 
-A comprehensive multi-agent review identified **1 CRITICAL data integrity bug** that must be implemented before production deployment:
+A comprehensive multi-agent review identified **1 CRITICAL bug** that must be fixed before production deployment:
 
 ### Critical Issues Summary
 
@@ -18,9 +18,11 @@ A comprehensive multi-agent review identified **1 CRITICAL data integrity bug** 
 | 2 | ✅ **FALSE POSITIVE** | TOCTOU race in session replacement | Protected by !IsReconnecting flag coordination | SessionManager.cs:75-77 |
 | 3 | **CRITICAL** | Missing full read after reconnection | **NEEDS IMPLEMENTATION** - Queue-Read-Replay pattern | OpcUaSubjectClientSource.cs:221-271, 320-352 |
 | 4 | ✅ **FALSE POSITIVE** | Object pool leak on exception | EnqueueOrApplyUpdate never throws (wrapped in try-catch) | SubscriptionManager.cs:141-142 |
-| 5 | ✅ **FIXED** | IsReconnecting flag can stall forever | Fixed - added iteration-based stall detection | OpcUaSubjectClientSource.cs:180-196 |
+| 5 | ✅ **FIXED** | Stall detection race condition | Fixed - TryForceResetIfStalled with lock+double-check | SessionManager.cs:258-278, OpcUaSubjectClientSource.cs:194-208 |
+| 6 | **HIGH** | Disposal order incorrect | Managers disposed after session they reference | SessionManager.cs:296-302 |
 
-**Status:** ⚠️ **Issue #3 must be implemented** - Queue-Read-Replay pattern for reconnection data consistency.
+**Status:** ⚠️ **1 critical issue blocks production:**
+- Issue #3: Data integrity - missing full read after reconnection
 
 See [Critical Issues Details](#critical-issues-details) for fixes.
 
@@ -277,6 +279,538 @@ services.AddOpcUaSubjectClient<MySubject>(
 - Session reference can become stale during async operations (TOCTOU race)
 - Graceful handling: queue writes, skip operations, retry later
 - Prevents `ObjectDisposedException`, `ServiceResultException`
+
+---
+
+## Data Flow Analysis
+
+### Incoming Data Path (OPC UA → Properties)
+
+```
+OPC UA Server
+    ↓ Data Change Notification
+SubscriptionManager.OnFastDataChange (OPC Foundation callback thread)
+    ↓ Line 123: Rent pooled List<PropertyUpdate>
+    ↓ Line 130-135: Build change list from notification
+    ↓ Line 144: _updater.EnqueueOrApplyUpdate(state, callback)
+SubjectSourceBackgroundService.EnqueueOrApplyUpdate
+    ↓ If initializing: buffer update in list (line 54-66)
+    ↓ If running: execute callback immediately (line 69-76)
+Callback execution (SubscriptionManager.cs:144-161)
+    ↓ Line 151: property.SetValueFromSource(...) - updates property
+    ↓ Line 159: changes.Clear() - reuse list
+    ↓ Line 160: ChangesPool.Return(changes) - return to pool
+Property Change Notification
+    ↓ Triggers derived property updates
+    ↓ Fires property change events
+Application receives updated values
+```
+
+**Key Characteristics:**
+- **Zero allocations in hot path** (object pooling)
+- **Single-threaded execution** (EnqueueOrApplyUpdate serializes updates)
+- **Buffering during initialization** (ensures atomic state load)
+- **Exception isolation** (try-catch in callback, pool still returned)
+
+### Outgoing Data Path (Properties → OPC UA)
+
+```
+Property Change Event
+    ↓
+SubjectSourceBackgroundService.ProcessPropertyChangesAsync (line 163)
+    ↓ Line 181: subscription.TryDequeue(out var item)
+    ↓ Line 183-186: Filter out changes from this source (prevent loops)
+    ↓ Line 188-193: Check if property is included
+    ↓
+    ├─> Buffering Mode (line 195-213):
+    │   ↓ Line 205: _changes.Enqueue(item) - lock-free queue
+    │   ↓ Periodic timer flushes batches (line 223-241)
+    │   ↓ Line 274-288: Deduplication (last write wins)
+    │   ↓ Line 292: WriteToSourceAsync(_flushDedupedChanges)
+    │
+    └─> Immediate Mode (line 195-200):
+        ↓ Line 199: WriteToSourceAsync(item)
+            ↓
+OpcUaSubjectClientSource.WriteToSourceAsync (line 317)
+    ↓ Line 328: FlushQueuedWritesAsync() - retry old writes first
+    ↓ Line 331: TryWriteToSourceWithoutFlushAsync() - write new changes
+    ↓ Line 427: Check session.Connected
+    ↓ Line 441: BuildWriteValues() - convert to OPC UA format
+    ↓ Line 449-455: session.WriteAsync() - send to server in chunks
+    ↓
+    ├─> Success: Acknowledge (line 456)
+    │
+    └─> Failure:
+        ↓ Network exception (line 456-472): Queue remaining changes
+        ↓ Bad status code (line 516-534): Log error (NOT retried - Issue #7)
+        ↓ WriteFailureQueue (ring buffer, drops oldest on overflow)
+```
+
+**Key Characteristics:**
+- **Batching & Deduplication** (reduces network traffic)
+- **Ring buffer resilience** (survives disconnections)
+- **Chunking** (respects server limits via `OperationLimits.MaxNodesPerWrite`)
+- **Partial failure handling** (re-queues from failure point)
+
+---
+
+## Thread-Safety & Concurrency Design
+
+### Thread Model
+
+**Active Threads:**
+1. **OPC Foundation Callback Threads** - `OnFastDataChange`, `OnKeepAlive`, `OnReconnectComplete`
+2. **Health Check Loop** - `ExecuteAsync` (single-threaded BackgroundService)
+3. **Polling Timer Thread** - `PollingManager.PollLoopAsync`
+4. **Periodic Flush Timer** - `SubjectSourceBackgroundService._flushTimer` (if buffering enabled)
+5. **Event Handler Task.Run** - `OnReconnectionCompleted` spawns background task
+
+### Concurrency Patterns
+
+#### 1. **Temporal Separation** (SubscriptionManager)
+
+**Pattern:** Objects become visible only AFTER full initialization.
+
+```csharp
+// SubscriptionManager.cs:47-107
+var subscription = new Subscription(...);
+subscription.FastDataChangeCallback += OnFastDataChange;
+await subscription.CreateAsync(); // OPC UA protocol handshake
+// ... add MonitoredItems ...
+await subscription.ApplyChangesAsync(); // Activate monitoring
+
+// Only NOW is subscription added to collection:
+_subscriptions.TryAdd(subscription, 0); // Line 105
+```
+
+**Why:** Health monitor reads `_subscriptions.Keys` (line 31). If subscription added before initialization, health check could access partially-initialized state. Temporal separation eliminates this race WITHOUT locks.
+
+#### 2. **Lock-Free Session Reads** (SessionManager)
+
+**Pattern:** Volatile reads for hot path, Interlocked writes for state changes.
+
+```csharp
+// Hot path (called thousands of times/sec):
+public Session? CurrentSession => Volatile.Read(ref _session); // Line 34
+
+// Cold path (reconnection):
+Volatile.Write(ref _session, newSession); // Line 103
+```
+
+**Why:** Lock-free reads enable zero-contention access from multiple threads. Volatile ensures memory visibility across cores.
+
+#### 3. **IsReconnecting Coordination** (Manual vs Automatic Reconnection)
+
+**Pattern:** Atomic flag prevents concurrent reconnection attempts.
+
+```csharp
+// Automatic reconnection:
+OnKeepAlive → sets _isReconnecting = 1 → BeginReconnect → OnReconnectComplete → clears flag
+
+// Manual reconnection:
+ExecuteAsync → if (currentSession is null && !isReconnecting) → ReconnectSessionAsync
+```
+
+**Protection:** Manual path only proceeds when `!IsReconnecting`, blocking when automatic reconnection active. **⚠️ ISSUE #5: Stall detection breaks this coordination.**
+
+#### 4. **Object Pooling** (Zero-Allocation Hot Path)
+
+**Pattern:** Reuse List<PropertyUpdate> to eliminate allocations.
+
+```csharp
+// SubscriptionManager.cs:16-17
+private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool = ...;
+
+// OnFastDataChange (line 123-160):
+var changes = ChangesPool.Rent();      // Reuse existing List
+// ... populate changes ...
+ChangesPool.Return(changes);           // Return for next callback
+```
+
+**Thread-Safety:** `ConcurrentBag<T>` backing store is lock-free for high concurrency.
+
+#### 5. **Semaphore Coordination** (Write Flush)
+
+**Pattern:** Serialize flush operations across reconnection and regular writes.
+
+```csharp
+// OpcUaSubjectClientSource.cs:387
+await _writeFlushSemaphore.WaitAsync(cancellationToken);
+try
+{
+    // Flush write queue
+}
+finally
+{
+    _writeFlushSemaphore.Release();
+}
+```
+
+**Why:** Both `WriteToSourceAsync` and `OnReconnectionCompleted` call `FlushQueuedWritesAsync`. Semaphore ensures only one flush at a time. First waiter succeeds, second finds empty queue.
+
+### Shared Mutable State
+
+| State | Reads | Writes | Synchronization |
+|-------|-------|--------|-----------------|
+| `_session` (SessionManager) | `Volatile.Read` (hot path) | `Volatile.Write` (reconnection) | Memory barriers |
+| `_isReconnecting` (SessionManager) | `Interlocked.CompareExchange` | `Interlocked.Exchange` | Atomic operations |
+| `_disposed` (all classes) | `Interlocked.CompareExchange` | `Interlocked.Exchange` | Atomic operations |
+| `_monitoredItems` (SubscriptionManager) | `TryGetValue` (hot path) | `TryAdd/TryRemove` | `ConcurrentDictionary` |
+| `_subscriptions` (SubscriptionManager) | `.Keys` property | `TryAdd/TryRemove` | `ConcurrentDictionary` |
+| `_writeFailureQueue` | `DequeueAll` | `EnqueueBatch` | `ConcurrentQueue` |
+| `_pollingItems` (PollingManager) | `ToArray()` snapshot | `TryAdd/TryUpdate/TryRemove` | `ConcurrentDictionary` |
+
+**Key Insight:** ALL shared state uses either Volatile/Interlocked or concurrent collections. No locks in hot paths.
+
+### Race Conditions
+
+#### ✅ **SAFE: Session Read During Replacement**
+
+```csharp
+// Thread A (write operation):
+var session = _sessionManager?.CurrentSession; // Volatile.Read
+// >>> CONTEXT SWITCH <<<
+
+// Thread B (reconnection):
+Volatile.Write(ref _session, newSession); // Session replaced
+
+// Thread A continues:
+await session.WriteAsync(...); // Uses old session reference
+```
+
+**Why Safe:** Defensive `session.Connected` check (line 427) handles stale session. Write fails gracefully and queues for retry.
+
+#### ⚠️ **UNSAFE: Stall Detection Force-Clear** (Issue #5)
+
+```csharp
+// Thread A (health check):
+if (iterations > 10)
+{
+    sessionManager.ForceResetReconnectingFlag(); // Clears _isReconnecting = 0
+    // >>> CONTEXT SWITCH <<<
+}
+
+// Thread B (delayed OnReconnectComplete):
+lock (_reconnectingLock)
+{
+    // Still executing! Replaces session
+    Volatile.Write(ref _session, reconnectedSession);
+}
+
+// Thread A (next iteration):
+if (currentSession is null && !isReconnecting) // TRUE (we just cleared flag)
+{
+    await ReconnectSessionAsync(); // Starts MANUAL reconnection
+}
+```
+
+**Why Unsafe:** Force-clear happens WITHOUT checking if OnReconnectComplete is executing. Can cause concurrent manual and automatic reconnection.
+
+---
+
+## Error Handling & Resilience
+
+### Error Handling Strategy
+
+#### Session Creation Failures
+
+**Location:** `SessionManager.CreateSessionAsync:78-111`
+
+**Failure Modes:**
+1. Network unreachable → `ServiceResultException`
+2. Authentication failed → `ServiceResultException`
+3. Server not responding → Timeout exception
+
+**Handling:**
+```
+Exception propagates to caller:
+  ↓
+Startup path (SubjectSourceBackgroundService.cs:103)
+  ↓ Caught in ExecuteAsync (line 146-159)
+  ↓ Log error
+  ↓ Reset state
+  ↓ Retry after 10 seconds (infinite retry loop)
+
+Manual reconnect path (OpcUaSubjectClientSource.cs:262)
+  ↓ Caught in ReconnectSessionAsync (line 291-295)
+  ↓ Log error
+  ↓ Re-throw to trigger retry on next health check
+  ↓ Retry after 10 seconds (health check interval)
+```
+
+**Resilience:** Infinite retry with exponential back-off (10s default, configurable).
+
+#### Subscription Creation Failures
+
+**Location:** `SubscriptionManager.CreateBatchedSubscriptionsAsync:47-107`
+
+**Failure Modes:**
+1. `subscription.ApplyChangesAsync()` throws `ServiceResultException`
+2. Individual `MonitoredItem` creation fails (bad NodeId, unsupported attribute)
+3. Server doesn't support subscriptions for some nodes
+
+**Handling:**
+```
+ApplyChangesAsync fails (line 97-100)
+  ↓ Log warning
+  ↓ FilterOutFailedMonitoredItemsAsync (line 102)
+  ↓ Identify unhealthy items (line 201: IsUnhealthy())
+  ↓ Remove from subscription (line 231-234)
+  ↓ Retry ApplyChangesAsync with healthy items only (line 238)
+  ↓ If still fails OR BadNotSupported:
+  ↓   Add to PollingManager as fallback (line 211-218)
+```
+
+**Resilience:** Partial failure handling + polling fallback ensures SOME data gets through even if subscriptions fail.
+
+#### Write Failures
+
+**Network Exception Handling:**
+```csharp
+// OpcUaSubjectClientSource.cs:456-472
+try
+{
+    await session.WriteAsync(...);
+}
+catch (Exception ex)
+{
+    // Partial write failure - re-queue REMAINING changes only
+    var remainingChanges = new List<SubjectPropertyChange>(remainingCount);
+    for (var i = offset; i < count; i++)
+    {
+        remainingChanges.Add(changes[i]);
+    }
+
+    _writeFailureQueue.EnqueueBatch(remainingChanges);
+    _logger.LogError(ex, "Failed to write {Count} changes", remainingCount);
+    return false;
+}
+```
+
+**Status Code Error Handling:**
+```csharp
+// OpcUaSubjectClientSource.cs:516-534 (Issue #7: NOT retried)
+if (StatusCode.IsBad(results[i]))
+{
+    _logger.LogError("Failed to write {PropertyName} ...", ...);
+    // Logged but NOT queued for retry
+}
+```
+
+**⚠️ Issue #7:** Transient status code errors (e.g., `BadTooManyOperations`, `BadTimeout`) should be retried, not just logged.
+
+**Ring Buffer Semantics:**
+```csharp
+// WriteFailureQueue.cs:62-73
+while (_pendingWrites.Count > _maxQueueSize)
+{
+    if (_pendingWrites.TryDequeue(out _))
+    {
+        Interlocked.Increment(ref _droppedWriteCount);
+        // Drop oldest write to make room for new one
+    }
+}
+```
+
+**Resilience:** Writes buffered during disconnection, oldest dropped if queue full (configurable size, default 1000).
+
+### Reconnection Resilience
+
+#### Automatic Reconnection (< 60s outages)
+
+```
+Connection lost
+  ↓ OnKeepAlive detects failure
+  ↓ Sets _isReconnecting = 1
+  ↓ Calls SessionReconnectHandler.BeginReconnect()
+  ↓ SDK attempts reconnection every 5 seconds
+  ↓ Timeout after 60 seconds (ReconnectHandlerTimeout)
+  ↓
+  ├─> Success: OnReconnectComplete fires
+  │   ↓ Subscriptions transferred to new session
+  │   ↓ Clears _isReconnecting = 0
+  │   ↓ Fires ReconnectionCompleted event
+  │   ↓ Event handler flushes queued writes
+  │   ↓ ⚠️ Issue #3: Missing full read (data loss)
+  │
+  └─> Timeout: _isReconnecting stuck at 1
+      ↓ Health check detects after 10 iterations (~100s)
+      ↓ Issue #5: Force-clears flag (has race condition)
+      ↓ Manual reconnection takes over
+```
+
+#### Manual Reconnection (> 60s outages)
+
+```
+Health check loop (every 10 seconds)
+  ↓ if (currentSession is null && !isReconnecting)
+  ↓ SessionReconnectHandler timed out
+  ↓ Calls ReconnectSessionAsync
+  ↓ Creates NEW session
+  ↓ Recreates subscriptions from cached MonitoredItems
+  ↓ Flushes queued writes
+  ↓ ⚠️ Issue #3: Missing full read (data loss)
+```
+
+#### Stall Detection (Issue #5)
+
+```
+Health check sees _isReconnecting = true repeatedly
+  ↓ Increments _reconnectingIterations each check
+  ↓ After 10 iterations (~100 seconds):
+  ↓ Logs error "Reconnection stalled"
+  ↓ Calls ForceResetReconnectingFlag()
+  ↓ ⚠️ RACE: OnReconnectComplete might be executing
+  ↓ ⚠️ Can cause concurrent manual + automatic reconnection
+  ↓ ⚠️ Session thrashing, memory leaks, data loss
+```
+
+**Fix Required:** See Issue #5 details for `TryForceResetIfStalled()` implementation.
+
+### Polling Fallback Resilience
+
+**Circuit Breaker Pattern:**
+```csharp
+// PollingManager.cs:212-218, 271-278
+if (!_circuitBreaker.ShouldAttempt())
+{
+    // Circuit open - skip poll to prevent resource exhaustion
+    _logger.LogDebug("Circuit breaker is open, skipping poll");
+    return;
+}
+
+// After poll completes:
+if (pollSucceeded)
+{
+    _circuitBreaker.RecordSuccess(); // Reset consecutive failure count
+}
+else if (_circuitBreaker.RecordFailure())
+{
+    _logger.LogError("Circuit breaker opened after consecutive failures");
+    // Polling suspended for cooldown period
+}
+```
+
+**Parameters:**
+- Threshold: 5 consecutive failures (default)
+- Cooldown: 60 seconds (default)
+- Auto-reset: Successful poll resets counter
+
+**Why:** Prevents resource exhaustion during persistent server issues (e.g., mass NodeId deletion).
+
+### Health Monitoring
+
+**Subscription Health Check:**
+```csharp
+// SubscriptionHealthMonitor.cs:20-54
+foreach (var subscription in subscriptions)
+{
+    var unhealthyCount = GetUnhealthyCount(subscription);
+
+    if (unhealthyCount > 0)
+    {
+        _logger.LogWarning("{Count} unhealthy items in subscription", unhealthyCount);
+
+        // Auto-heal: Remove unhealthy, keep healthy
+        await FilterOutFailedMonitoredItemsAsync(subscription);
+
+        if (subscription.MonitoredItemCount == 0)
+        {
+            // All items failed - add to polling fallback
+        }
+    }
+}
+```
+
+**Healing Strategy:** Remove failed items, fall back to polling if all fail. Prevents cascading failures.
+
+---
+
+## Concurrency Sequence Diagrams
+
+### Startup Sequence (Happy Path)
+
+```
+BackgroundService         OpcUaSource              SessionManager           SubscriptionMgr
+      |                       |                            |                        |
+      |---StartListening----->|                            |                        |
+      |                       |---CreateSession---------->|                        |
+      |                       |<--Session------------------|                        |
+      |                       |---CreateSubscriptions-------------------->|        |
+      |                       |                                           |---Create OPC UA subscriptions
+      |                       |                                           |---ApplyChanges (activate)
+      |                       |<--------------------------------------------|        |
+      |<--Disposable----------|                            |                        |
+      |                       |                            |                        |
+      |---LoadCompleteState-->|                            |                        |
+      |                       |---ReadAllNodes------------>|                        |
+      |                       |<--DataValues---------------|                        |
+      |<--Action (deferred)---|                            |                        |
+      |                       |                            |                        |
+      |---Execute Action----->| (under lock)               |                        |
+      |   (applies values)    |                            |                        |
+      |                       |                            |                        |
+      | [Subscriptions now active, data changes flow]      |                        |
+```
+
+### Automatic Reconnection (Subscriptions Transferred)
+
+```
+OPC UA Server    KeepAlive Thread    SessionManager    ReconnectHandler    Health Check
+      |                 |                   |                   |                 |
+      X (disconnect)    |                   |                   |                 |
+      |                 |---OnKeepAlive---->|                   |                 |
+      |                 |                   |---BeginReconnect->|                 |
+      |                 |                   |<--State: Reconnecting              |
+      |                 |<------------------|                   |                 |
+      |                 |                   | [Attempts every 5s]                 |
+      |                 |                   |                   |                 |
+      | [10 seconds pass - health check runs]                                    |
+      |                 |                   |                   |                 |
+      |                 |                   |                   |   Check IsReconnecting = true
+      |                 |                   |                   |   (skip manual reconnect)
+      |                 |                   |                   |                 |
+      | [Reconnection succeeds]             |                   |                 |
+      O (reconnected)   |                   |                   |                 |
+      |                 |<--OnReconnectComplete-------------------|                 |
+      |                 |                   |  lock(_reconnectingLock)           |
+      |                 |                   |  _session = newSession             |
+      |                 |                   |  _isReconnecting = 0               |
+      |                 |                   |  Fire ReconnectionCompleted        |
+      |                 |                   |                   |                 |
+      |                 | [Event handler: Task.Run(FlushWrites)]                 |
+```
+
+### Stall Detection Race (Issue #5)
+
+```
+Health Check Thread     SessionManager      OnReconnectComplete Thread
+      |                       |                       |
+      | [Iteration 11]        |                       |
+      | iterations > 10       |                       |
+      | Log "Stalled"         |                       |
+      |---ForceResetFlag----->|                       |
+      |                       | ⚠️ Set _isReconnecting = 0
+      |                       |                       |
+      | [10s delay]           |                       |
+      |                       |           ⚠️ OnReconnectComplete FIRES (delayed)
+      |                       |<----------------------|
+      |                       |    lock(_reconnectingLock)
+      |                       |    _session = reconnectedSession
+      |                       |                       |
+      | [Next iteration]      |                       |
+      | currentSession = null |                       |
+      | !isReconnecting ✓     |                       |
+      | ⚠️ Start MANUAL reconnect                      |
+      |---ReconnectSession--->|                       |
+      |                       | ⚠️ Creates NEW session |
+      |                       |                       |
+      |                       |           ⚠️ Overwrites with automatic session!
+      |                       |<----------------------|
+      |                       | ⚠️ SESSION THRASHING  |
+```
+
+**Fix:** Use `TryForceResetIfStalled()` with lock and double-check (see Issue #5 details).
 
 ---
 
@@ -693,58 +1227,81 @@ Pool return pattern is safe as designed.
 
 ---
 
-### Issue #5: IsReconnecting Flag Stall ✅ FIXED
+### Issue #5: Stall Detection Race Condition ✅ FIXED
 
-**Location:** `OpcUaSubjectClientSource.cs:180-196`, `SessionManager.cs:256-259`
+**Location:** `OpcUaSubjectClientSource.cs:194-208`, `SessionManager.cs:258-278`
 
-**Status:** ✅ **RESOLVED** - Added iteration-based stall detection with automatic recovery.
+**Status:** ✅ **RESOLVED** - Fixed TOCTOU race with synchronized double-check pattern.
 
-**What Was Fixed:**
+**The Problem:**
 
-Added simple counter-based stall detection that tracks health check iterations while `isReconnecting = true`:
+Initial stall detection had a critical race condition between health check force-clearing the flag and delayed `OnReconnectComplete` firing:
+
+```
+Timeline of the Race:
+T0: Health check decides to force-clear after 10 iterations
+T1: Calls ForceResetReconnectingFlag() → sets _isReconnecting = 0
+T2: OnReconnectComplete fires (delayed) → replaces session inside lock
+T3: Next health check sees !isReconnecting && session == null
+T4: Starts manual reconnection
+T5: OnReconnectComplete completes → overwrites manual session
+Result: Session thrashing, data loss, memory leaks
+```
+
+**The Fix:**
+
+Replaced unsafe force-clear with `TryForceResetIfStalled()` that uses lock + double-check:
 
 ```csharp
-// Field added:
-private int _reconnectingIterations;
-
-// In ExecuteAsync health check (lines 180-196):
-if (isReconnecting)
+// SessionManager.cs (lines 258-278):
+internal bool TryForceResetIfStalled()
 {
-    var iterations = Interlocked.Increment(ref _reconnectingIterations);
-
-    // Timeout: 10 iterations × health check interval (~10s) = ~100s
-    if (iterations > 10)
+    lock (_reconnectingLock)  // ✅ Same lock as OnReconnectComplete
     {
-        _logger.LogError(
-            "OPC UA reconnection stalled for {Iterations} iterations (~{Seconds}s). " +
-            "OnReconnectComplete callback likely never fired. " +
-            "Forcing reconnecting flag reset to allow manual recovery.",
-            iterations, iterations * healthCheckInterval);
+        // Double-check: still reconnecting AND session still null?
+        // If OnReconnectComplete fired while waiting for lock, it would have:
+        // 1. Set session to non-null (line 216)
+        // 2. Set _isReconnecting = 0 (line 242)
+        if (Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1 &&
+            Volatile.Read(ref _session) is null)
+        {
+            // Truly stalled - safe to clear flag
+            Interlocked.Exchange(ref _isReconnecting, 0);
+            return true;
+        }
 
-        sessionManager.ForceResetReconnectingFlag();
+        // Reconnection completed while waiting - do nothing
+        return false;
+    }
+}
+
+// OpcUaSubjectClientSource.cs (lines 194-208):
+if (iterations > 10)
+{
+    // Use synchronized reset to prevent race with delayed OnReconnectComplete
+    if (sessionManager.TryForceResetIfStalled())
+    {
+        _logger.LogWarning("Stall confirmed: flag reset for manual recovery.");
+        Interlocked.Exchange(ref _reconnectingIterations, 0);
+    }
+    else
+    {
+        _logger.LogInformation("Stall recovery skipped: reconnection completed.");
         Interlocked.Exchange(ref _reconnectingIterations, 0);
     }
 }
-else
-{
-    Interlocked.Exchange(ref _reconnectingIterations, 0);
-}
-
-// Method added to SessionManager (lines 256-259):
-internal void ForceResetReconnectingFlag()
-{
-    Interlocked.Exchange(ref _isReconnecting, 0);
-}
 ```
 
-**How It Works:**
-1. Counter increments each health check loop while reconnecting
-2. After 10 iterations (~100 seconds with default 10s interval), declares stall
-3. Force-clears the stuck flag
-4. Manual reconnection path can now proceed
-5. System recovers automatically without restart
+**How It Prevents the Race:**
 
-**Total Changes:** 1 field + 1 method + ~20 lines of stall detection logic. Minimal, non-invasive solution.
+1. **Lock Coordination:** Uses same `_reconnectingLock` as `OnReconnectComplete`
+2. **Double-Check Pattern:** After acquiring lock, verifies:
+   - Flag still set (`_isReconnecting == 1`)
+   - Session still null (`_session is null`)
+3. **If OnReconnectComplete fired while waiting:** Lock acquisition blocks until it completes, then double-check sees session is now valid → returns false (no-op)
+4. **If truly stalled:** Both conditions true → safely clears flag → returns true
+
+**Total Changes:** 1 method replacement + improved call site logging. Race condition eliminated.
 
 ---
 
