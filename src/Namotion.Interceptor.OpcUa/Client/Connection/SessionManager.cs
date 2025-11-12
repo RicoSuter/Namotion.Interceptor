@@ -71,6 +71,9 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// Create a new OPC UA session with the specified configuration.
+    /// Thread-safety: Cannot race with OnReconnectComplete because callers coordinate via IsReconnecting flag.
+    /// Manual reconnection (ReconnectSessionAsync) only proceeds when !IsReconnecting, which blocks when
+    /// automatic reconnection (OnReconnectComplete) is active. Therefore, no lock needed here.
     /// </summary>
     public async Task<Session> CreateSessionAsync(
         ApplicationInstance application,
@@ -84,9 +87,9 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             useSecurity: false);
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
-        var oldSession = _session;
-        
-        _session = await Session.Create(
+        var oldSession = Volatile.Read(ref _session);
+
+        var newSession = await Session.Create(
             application.ApplicationConfiguration,
             endpoint,
             updateBeforeConnect: false,
@@ -96,14 +99,15 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             preferredLocales: null,
             cancellationToken).ConfigureAwait(false);
 
-        _session.KeepAlive += OnKeepAlive;
+        newSession.KeepAlive += OnKeepAlive;
+        Volatile.Write(ref _session, newSession);
 
         if (oldSession is not null)
         {
             await DisposeSessionAsync(oldSession, cancellationToken).ConfigureAwait(false);
         }
 
-        return _session;
+        return newSession;
     }
 
     public async Task CreateSubscriptionsAsync(
@@ -186,7 +190,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
 
     private void OnReconnectComplete(object? sender, EventArgs e)
     {
-        var reconnectionSucceeded = false;
+        bool reconnectionSucceeded;
         lock (_reconnectingLock)
         {
             if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
@@ -245,7 +249,15 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             _logger.LogInformation("OPC UA session reconnect completed.");
         }
     }
-    
+
+    /// <summary>
+    /// Forces the reconnecting flag to false. Only for stall recovery when OnReconnectComplete never fires.
+    /// </summary>
+    internal void ForceResetReconnectingFlag()
+    {
+        Interlocked.Exchange(ref _isReconnecting, 0);
+    }
+
     private async Task DisposeSessionAsync(Session session, CancellationToken cancellationToken)
     {
         // Unsubscribe from event (standard event -= operator cannot throw under normal circumstances)
