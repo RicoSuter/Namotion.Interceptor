@@ -128,7 +128,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
             .Collect()
             .SelectMany((items, _) => items
                 .GroupBy(x => x!.TypeName)
-                .Select(g => g.First()));
+                .Select(g => g.First())); // take only one per type name to avoid duplicates
 
         context.RegisterSourceOutput(classWithAttributeProvider, (spc, cls) =>
         {
