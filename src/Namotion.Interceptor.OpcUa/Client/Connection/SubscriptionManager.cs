@@ -138,6 +138,8 @@ internal class SubscriptionManager
 
         if (changes.Count > 0)
         {
+            // Pool item returned inside callback (line 158). Safe because EnqueueOrApplyUpdate never throws -
+            // it wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
             var state = (source: this, subscription, receivedTimestamp, changes);
             _updater?.EnqueueOrApplyUpdate(state, static s =>
             {

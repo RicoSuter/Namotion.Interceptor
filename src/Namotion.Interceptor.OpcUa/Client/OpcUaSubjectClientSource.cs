@@ -29,6 +29,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private SessionManager? _sessionManager;
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
+    private int _reconnectingIterations; // Tracks health check iterations while reconnecting (for stall detection)
     private CancellationToken _stoppingToken;
 
     private IReadOnlyList<MonitoredItem>? _initialMonitoredItems;
@@ -174,6 +175,30 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 {
                     var currentSession = sessionManager.CurrentSession;
                     var isReconnecting = sessionManager.IsReconnecting;
+
+                    // Stall detection: Track consecutive iterations where isReconnecting = true
+                    if (isReconnecting)
+                    {
+                        var iterations = Interlocked.Increment(ref _reconnectingIterations);
+
+                        // Timeout: 10 iterations × health check interval (default 10s) = ~100s
+                        if (iterations > 10)
+                        {
+                            _logger.LogError(
+                                "OPC UA reconnection stalled for {Iterations} health check iterations " +
+                                "(~{Seconds}s). OnReconnectComplete callback likely never fired. " +
+                                "Forcing reconnecting flag reset to allow manual recovery.",
+                                iterations,
+                                iterations * (_configuration.SubscriptionHealthCheckInterval.TotalSeconds));
+
+                            sessionManager.ForceResetReconnectingFlag();
+                            Interlocked.Exchange(ref _reconnectingIterations, 0);
+                        }
+                    }
+                    else
+                    {
+                        Interlocked.Exchange(ref _reconnectingIterations, 0); // Reset when not reconnecting
+                    }
 
                     if (currentSession is null && !isReconnecting)
                     {
