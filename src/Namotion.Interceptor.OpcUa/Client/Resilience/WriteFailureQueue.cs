@@ -95,7 +95,7 @@ internal sealed class WriteFailureQueue
     /// </summary>
     public List<SubjectPropertyChange> DequeueAll()
     {
-        var pendingWrites = new List<SubjectPropertyChange>();
+        var pendingWrites = new List<SubjectPropertyChange>(_pendingWrites.Count);
         while (_pendingWrites.TryDequeue(out var change))
         {
             pendingWrites.Add(change);

@@ -901,9 +901,9 @@ configure: options =>
    - **Issue:** Every polling operation converts NodeId to string, allocating ~8KB/sec for 100 items @ 1 Hz
    - **Fix:** Cache string representation in `PollingItem` struct
 
-5. **DateTimeOffset.Now vs UtcNow**
+5. **DateTimeOffset.UtcNow vs UtcNow**
    - **Location:** `OpcUaSubscriptionManager.cs:137`
-   - **Issue:** `DateTimeOffset.Now` performs timezone lookup (kernel call), ~100ns overhead per notification
+   - **Issue:** `DateTimeOffset.UtcNow` performs timezone lookup (kernel call), ~100ns overhead per notification
    - **Fix:** Use `DateTimeOffset.UtcNow` instead
 
 6. **WriteValueCollection Allocation**
