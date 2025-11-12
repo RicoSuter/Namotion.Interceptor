@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -322,18 +323,10 @@ internal sealed class PollingManager : IDisposable
         if (ReferenceEquals(a, b)) return true;
         if (a == null || b == null) return false;
 
-        // Handle arrays by comparing elements
+        // Handle arrays using StructuralComparisons (avoids boxing for primitive arrays)
         if (a is Array arrayA && b is Array arrayB)
         {
-            if (arrayA.Length != arrayB.Length)
-                return false;
-
-            for (int i = 0; i < arrayA.Length; i++)
-            {
-                if (!Equals(arrayA.GetValue(i), arrayB.GetValue(i)))
-                    return false;
-            }
-            return true;
+            return StructuralComparisons.StructuralEqualityComparer.Equals(arrayA, arrayB);
         }
 
         return Equals(a, b);
@@ -343,8 +336,8 @@ internal sealed class PollingManager : IDisposable
     {
         try
         {
-            // Build read request
-            var nodesToRead = new ReadValueIdCollection();
+            // Build read request - pre-size to avoid resizing
+            var nodesToRead = new ReadValueIdCollection(batch.Count);
             foreach (var item in batch)
             {
                 nodesToRead.Add(new ReadValueId

@@ -245,6 +245,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             return;
         }
 
+        // Capture cancellation token as local variable to avoid race condition where
+        // _stoppingToken field could be cancelled between event firing and Task.Run execution
+        var cancellationToken = _stoppingToken;
+
         // Task.Run is intentional here (not a fire-and-forget anti-pattern):
         // - We're in a synchronous event handler context (cannot await)
         // - All exceptions are caught and logged (no unobserved exceptions)
@@ -266,14 +270,14 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                         return;
                     }
 
-                    await FlushQueuedWritesAsync(session, _stoppingToken).ConfigureAwait(false);
+                    await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (Exception exception)
             {
                 _logger.LogError(exception, "Failed to flush pending OPC UA writes after reconnection.");
             }
-        }, _stoppingToken);
+        }, cancellationToken);
     }
 
     /// <summary>
@@ -358,9 +362,17 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             catch (Exception ex)
             {
                 // Partial write failure - re-queue only the remaining changes from this offset onwards
-                var remainingChanges = changes.Skip(offset).ToList();
-                _logger.LogWarning(ex, "OPC UA write failed at offset {Offset}, re-queuing {Count} remaining changes.",
-                    offset, remainingChanges.Count);
+                var remainingCount = count - offset;
+                var remainingChanges = new List<SubjectPropertyChange>(remainingCount);
+                for (var i = offset; i < count; i++)
+                {
+                    remainingChanges.Add(changes[i]);
+                }
+
+                _logger.LogWarning(ex, 
+                    "OPC UA write failed at offset {Offset}, re-queuing {Count} remaining changes.",
+                    offset, remainingCount);
+
                 _writeFailureQueue.EnqueueBatch(remainingChanges);
                 return false; // Indicate failure
             }
