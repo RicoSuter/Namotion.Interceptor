@@ -44,7 +44,7 @@ public class SubjectUpdateExtensionsTests
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var person = new Person(context);
 
-        var timestamp = DateTimeOffset.Now.AddDays(-200);
+        var timestamp = DateTimeOffset.UtcNow.AddDays(-200);
         
         // Act
         person.ApplySubjectUpdate(new SubjectUpdate
