@@ -6,23 +6,20 @@
 
 ---
 
-## ⚠️ CRITICAL ISSUES BLOCKING PRODUCTION
+## ⚠️ OUTSTANDING ISSUES
 
-A comprehensive multi-agent review identified **1 CRITICAL bug** that must be fixed before production deployment:
+A comprehensive multi-agent review identified **3 issues** that should be addressed:
 
-### Critical Issues Summary
+### Issues Summary
 
-| # | Severity | Issue | Status | File |
-|---|----------|-------|--------|------|
-| 1 | ✅ **FIXED** | Missing Volatile.Write in session creation | Fixed - added Volatile.Read/Write | SessionManager.cs:87-100 |
-| 2 | ✅ **FALSE POSITIVE** | TOCTOU race in session replacement | Protected by !IsReconnecting flag coordination | SessionManager.cs:75-77 |
-| 3 | **CRITICAL** | Missing full read after reconnection | **NEEDS IMPLEMENTATION** - Queue-Read-Replay pattern | OpcUaSubjectClientSource.cs:221-271, 320-352 |
-| 4 | ✅ **FALSE POSITIVE** | Object pool leak on exception | EnqueueOrApplyUpdate never throws (wrapped in try-catch) | SubscriptionManager.cs:141-142 |
-| 5 | ✅ **FIXED** | Stall detection race condition | Fixed - TryForceResetIfStalled with lock+double-check | SessionManager.cs:258-278, OpcUaSubjectClientSource.cs:194-208 |
-| 6 | **HIGH** | Disposal order incorrect | Managers disposed after session they reference | SessionManager.cs:296-302 |
+| # | Severity | Issue | Location |
+|---|----------|-------|----------|
+| 1 | **CRITICAL** | Missing full read after reconnection | OpcUaSubjectClientSource.cs:358-390 |
+| 2 | **HIGH** | Disposal order incorrect | SessionManager.cs:305-322 |
+| 3 | **MEDIUM** | Write transient errors not retried | OpcUaSubjectClientSource.cs:529-547 |
 
-**Status:** ⚠️ **1 critical issue blocks production:**
-- Issue #3: Data integrity - missing full read after reconnection
+**Status:** ⚠️ **1 critical issue should be fixed before production:**
+- Issue #1: Data integrity - missing full read after reconnection may cause stale data
 
 See [Critical Issues Details](#critical-issues-details) for fixes.
 
@@ -342,7 +339,7 @@ OpcUaSubjectClientSource.WriteToSourceAsync (line 317)
     │
     └─> Failure:
         ↓ Network exception (line 456-472): Queue remaining changes
-        ↓ Bad status code (line 516-534): Log error (NOT retried - Issue #7)
+        ↓ Bad status code (line 529-547): Log error (NOT retried - Issue #3)
         ↓ WriteFailureQueue (ring buffer, drops oldest on overflow)
 ```
 
@@ -480,32 +477,6 @@ await session.WriteAsync(...); // Uses old session reference
 
 **Why Safe:** Defensive `session.Connected` check (line 427) handles stale session. Write fails gracefully and queues for retry.
 
-#### ⚠️ **UNSAFE: Stall Detection Force-Clear** (Issue #5)
-
-```csharp
-// Thread A (health check):
-if (iterations > 10)
-{
-    sessionManager.ForceResetReconnectingFlag(); // Clears _isReconnecting = 0
-    // >>> CONTEXT SWITCH <<<
-}
-
-// Thread B (delayed OnReconnectComplete):
-lock (_reconnectingLock)
-{
-    // Still executing! Replaces session
-    Volatile.Write(ref _session, reconnectedSession);
-}
-
-// Thread A (next iteration):
-if (currentSession is null && !isReconnecting) // TRUE (we just cleared flag)
-{
-    await ReconnectSessionAsync(); // Starts MANUAL reconnection
-}
-```
-
-**Why Unsafe:** Force-clear happens WITHOUT checking if OnReconnectComplete is executing. Can cause concurrent manual and automatic reconnection.
-
 ---
 
 ## Error Handling & Resilience
@@ -589,7 +560,7 @@ catch (Exception ex)
 
 **Status Code Error Handling:**
 ```csharp
-// OpcUaSubjectClientSource.cs:516-534 (Issue #7: NOT retried)
+// OpcUaSubjectClientSource.cs:529-547 (Issue #3: NOT retried)
 if (StatusCode.IsBad(results[i]))
 {
     _logger.LogError("Failed to write {PropertyName} ...", ...);
@@ -597,7 +568,7 @@ if (StatusCode.IsBad(results[i]))
 }
 ```
 
-**⚠️ Issue #7:** Transient status code errors (e.g., `BadTooManyOperations`, `BadTimeout`) should be retried, not just logged.
+**⚠️ Issue #3:** Transient status code errors (e.g., `BadTooManyOperations`, `BadTimeout`) should be retried, not just logged.
 
 **Ring Buffer Semantics:**
 ```csharp
@@ -631,11 +602,12 @@ Connection lost
   │   ↓ Clears _isReconnecting = 0
   │   ↓ Fires ReconnectionCompleted event
   │   ↓ Event handler flushes queued writes
-  │   ↓ ⚠️ Issue #3: Missing full read (data loss)
+  │   ↓ ⚠️ Issue #1: Missing full read (data loss)
   │
   └─> Timeout: _isReconnecting stuck at 1
       ↓ Health check detects after 10 iterations (~100s)
-      ↓ Issue #5: Force-clears flag (has race condition)
+      ↓ Stall detection: Safely clears flag with lock + double-check
+      ↓ Manual reconnection proceeds
       ↓ Manual reconnection takes over
 ```
 
@@ -649,23 +621,21 @@ Health check loop (every 10 seconds)
   ↓ Creates NEW session
   ↓ Recreates subscriptions from cached MonitoredItems
   ↓ Flushes queued writes
-  ↓ ⚠️ Issue #3: Missing full read (data loss)
+  ↓ ⚠️ Issue #1: Missing full read (data loss)
 ```
 
-#### Stall Detection (Issue #5)
+#### Stall Detection
 
 ```
 Health check sees _isReconnecting = true repeatedly
   ↓ Increments _reconnectingIterations each check
   ↓ After 10 iterations (~100 seconds):
   ↓ Logs error "Reconnection stalled"
-  ↓ Calls ForceResetReconnectingFlag()
-  ↓ ⚠️ RACE: OnReconnectComplete might be executing
-  ↓ ⚠️ Can cause concurrent manual + automatic reconnection
-  ↓ ⚠️ Session thrashing, memory leaks, data loss
+  ↓ Calls TryForceResetIfStalled() with lock + double-check
+  ↓ ✅ SAFE: Lock coordination prevents race with OnReconnectComplete
+  ↓ If truly stalled → flag cleared, manual recovery proceeds
+  ↓ If OnReconnectComplete firing → detected via double-check, no-op
 ```
-
-**Fix Required:** See Issue #5 details for `TryForceResetIfStalled()` implementation.
 
 ### Polling Fallback Resilience
 
@@ -781,107 +751,11 @@ OPC UA Server    KeepAlive Thread    SessionManager    ReconnectHandler    Healt
       |                 | [Event handler: Task.Run(FlushWrites)]                 |
 ```
 
-### Stall Detection Race (Issue #5)
-
-```
-Health Check Thread     SessionManager      OnReconnectComplete Thread
-      |                       |                       |
-      | [Iteration 11]        |                       |
-      | iterations > 10       |                       |
-      | Log "Stalled"         |                       |
-      |---ForceResetFlag----->|                       |
-      |                       | ⚠️ Set _isReconnecting = 0
-      |                       |                       |
-      | [10s delay]           |                       |
-      |                       |           ⚠️ OnReconnectComplete FIRES (delayed)
-      |                       |<----------------------|
-      |                       |    lock(_reconnectingLock)
-      |                       |    _session = reconnectedSession
-      |                       |                       |
-      | [Next iteration]      |                       |
-      | currentSession = null |                       |
-      | !isReconnecting ✓     |                       |
-      | ⚠️ Start MANUAL reconnect                      |
-      |---ReconnectSession--->|                       |
-      |                       | ⚠️ Creates NEW session |
-      |                       |                       |
-      |                       |           ⚠️ Overwrites with automatic session!
-      |                       |<----------------------|
-      |                       | ⚠️ SESSION THRASHING  |
-```
-
-**Fix:** Use `TryForceResetIfStalled()` with lock and double-check (see Issue #5 details).
-
 ---
 
----
+## Outstanding Issues Details
 
-## Critical Issues Details
-
-### Issue #1: Missing Volatile.Write in Session Creation ✅ FIXED
-
-**Location:** `SessionManager.cs:87-100`
-
-**Status:** ✅ **RESOLVED** - Fixed by adding proper Volatile.Read/Write operations.
-
-**What Was Fixed:**
-```csharp
-// Before (WRONG):
-var oldSession = _session;  // Regular read
-_session = await Session.Create(...);  // Regular write
-
-// After (CORRECT):
-var oldSession = Volatile.Read(ref _session);  // ✅ Volatile.Read
-var newSession = await Session.Create(...);
-newSession.KeepAlive += OnKeepAlive;
-Volatile.Write(ref _session, newSession);  // ✅ Volatile.Write
-```
-
-Proper memory barriers now ensure all threads see the latest session reference.
-
----
-
-### Issue #2: TOCTOU Race in Session Replacement ✅ FALSE POSITIVE
-
-**Location:** `SessionManager.cs:75-77` (comment added)
-
-**Status:** ✅ **NOT AN ISSUE** - Protected by `IsReconnecting` flag coordination between manual and automatic reconnection paths.
-
-**Why This Is Safe:**
-
-The `CreateSessionAsync` method cannot race with `OnReconnectComplete` because they coordinate via the `IsReconnecting` flag:
-
-**Automatic reconnection path:**
-1. `OnKeepAlive` sets `_isReconnecting = 1` (SessionManager.cs:177)
-2. Calls `BeginReconnect` → eventually fires `OnReconnectComplete`
-3. `OnReconnectComplete` replaces session inside lock (line 190-239)
-4. Clears flag: `_isReconnecting = 0` (line 242)
-
-**Manual reconnection path:**
-1. Health check loop checks: `if (currentSession is null && !isReconnecting)` (OpcUaSubjectClientSource.cs:203)
-2. Only proceeds when `!isReconnecting` (i.e., automatic reconnection NOT active)
-3. Calls `ReconnectSessionAsync` → calls `CreateSessionAsync`
-
-**The protection:**
-- If `isReconnecting = true` (automatic reconnection active), manual path is **BLOCKED**
-- If `isReconnecting = false`, automatic reconnection is **NOT active**
-- They **cannot run concurrently**
-
-**Comment Added to Code:**
-```csharp
-/// <summary>
-/// Create a new OPC UA session with the specified configuration.
-/// Thread-safety: Cannot race with OnReconnectComplete because callers coordinate via IsReconnecting flag.
-/// Manual reconnection (ReconnectSessionAsync) only proceeds when !IsReconnecting, which blocks when
-/// automatic reconnection (OnReconnectComplete) is active. Therefore, no lock needed here.
-/// </summary>
-```
-
-This coordination pattern prevents the TOCTOU race - no additional locking required.
-
----
-
-### Issue #3: Missing Full Read After Reconnection ⚠️ CRITICAL
+### Issue #1: Missing Full Read After Reconnection ⚠️ CRITICAL
 
 **Location:** `OpcUaSubjectClientSource.cs:221-271` (ReconnectSessionAsync), `320-352` (OnReconnectionCompleted)
 
@@ -1188,169 +1062,70 @@ ALL robust industrial OPC UA clients use the queue-read-replay pattern after rec
 
 ---
 
-### Issue #4: Object Pool Leak on Exception ✅ FALSE POSITIVE
+### Issue #2: Disposal Order Incorrect ⚠️ HIGH
 
-**Location:** `SubscriptionManager.cs:141-142` (comment added)
+**Location:** `SessionManager.cs:305-322`
 
-**Status:** ✅ **NOT AN ISSUE** - `EnqueueOrApplyUpdate` never throws under normal operation.
+**Problem:** SubscriptionManager and PollingManager are disposed AFTER the Session they reference, which may cause exceptions or undefined behavior during cleanup.
 
-**Why This Is Safe:**
-
-The `EnqueueOrApplyUpdate` implementation (SubjectSourceBackgroundService.cs:52-77) wraps callback execution in try-catch:
-
+**Current Disposal Order (INCORRECT):**
 ```csharp
-public void EnqueueOrApplyUpdate<TState>(TState state, Action<TState> update)
+public async ValueTask DisposeAsync()
 {
-    // ... queue logic ...
+    // ... dispose flag check ...
 
-    try
+    // 1. Dispose session first
+    var sessionToDispose = _session;
+    if (sessionToDispose is not null)
     {
-        update(state);  // Callback execution
+        await DisposeSessionAsync(sessionToDispose, CancellationToken.None);
+        _session = null;
     }
-    catch (Exception e)
+
+    // 2. Then dispose managers (which reference the session!)
+    _pollingManager?.Dispose();           // May still reference disposed session
+    _subscriptionManager.Dispose();       // Tries to call subscription.Delete() on disposed session
+    _reconnectHandler.Dispose();
+}
+```
+
+**Why This Is Problematic:**
+- `SubscriptionManager.Dispose()` calls `subscription.Delete(true)` on each subscription
+- These subscriptions belong to the session
+- When session is disposed first, calling `Delete()` on subscriptions may throw or behave unexpectedly
+- Proper cleanup order: children before parent
+
+**Recommended Fix:**
+```csharp
+public async ValueTask DisposeAsync()
+{
+    if (Interlocked.Exchange(ref _disposed, 1) == 1)
     {
-        _logger.LogError(e, "Failed to apply subject update.");
-        // Does NOT rethrow - exception is caught and logged
+        return;
+    }
+
+    // 1. Dispose managers FIRST (children)
+    _subscriptionManager.Dispose();       // Clean up subscription references
+    _pollingManager?.Dispose();           // Stop polling
+    _reconnectHandler.Dispose();          // Stop reconnection attempts
+
+    // 2. Then dispose session LAST (parent)
+    var sessionToDispose = _session;
+    if (sessionToDispose is not null)
+    {
+        await DisposeSessionAsync(sessionToDispose, CancellationToken.None);
+        _session = null;
     }
 }
 ```
 
-Even if the callback throws, `EnqueueOrApplyUpdate` catches it without rethrowing. The method only throws in catastrophic scenarios (lock failure, memory corruption), at which point pool leaks are the least of the system's problems.
-
-**Comment Added to Code:**
-```csharp
-// Pool item returned inside callback (line 158). Safe because EnqueueOrApplyUpdate never throws -
-// it wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
-```
-
-Pool return pattern is safe as designed.
+**Impact:** HIGH - May cause exceptions during application shutdown, though not a runtime issue during normal operation.
 
 ---
 
-### Issue #5: Stall Detection Race Condition ✅ FIXED
+### Issue #3: Write Transient Errors Not Retried ⚠️ MEDIUM
 
-**Location:** `OpcUaSubjectClientSource.cs:194-208`, `SessionManager.cs:258-278`
-
-**Status:** ✅ **RESOLVED** - Fixed TOCTOU race with synchronized double-check pattern.
-
-**The Problem:**
-
-Initial stall detection had a critical race condition between health check force-clearing the flag and delayed `OnReconnectComplete` firing:
-
-```
-Timeline of the Race:
-T0: Health check decides to force-clear after 10 iterations
-T1: Calls ForceResetReconnectingFlag() → sets _isReconnecting = 0
-T2: OnReconnectComplete fires (delayed) → replaces session inside lock
-T3: Next health check sees !isReconnecting && session == null
-T4: Starts manual reconnection
-T5: OnReconnectComplete completes → overwrites manual session
-Result: Session thrashing, data loss, memory leaks
-```
-
-**The Fix:**
-
-Replaced unsafe force-clear with `TryForceResetIfStalled()` that uses lock + double-check:
-
-```csharp
-// SessionManager.cs (lines 258-278):
-internal bool TryForceResetIfStalled()
-{
-    lock (_reconnectingLock)  // ✅ Same lock as OnReconnectComplete
-    {
-        // Double-check: still reconnecting AND session still null?
-        // If OnReconnectComplete fired while waiting for lock, it would have:
-        // 1. Set session to non-null (line 216)
-        // 2. Set _isReconnecting = 0 (line 242)
-        if (Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1 &&
-            Volatile.Read(ref _session) is null)
-        {
-            // Truly stalled - safe to clear flag
-            Interlocked.Exchange(ref _isReconnecting, 0);
-            return true;
-        }
-
-        // Reconnection completed while waiting - do nothing
-        return false;
-    }
-}
-
-// OpcUaSubjectClientSource.cs (lines 194-208):
-if (iterations > 10)
-{
-    // Use synchronized reset to prevent race with delayed OnReconnectComplete
-    if (sessionManager.TryForceResetIfStalled())
-    {
-        _logger.LogWarning("Stall confirmed: flag reset for manual recovery.");
-        Interlocked.Exchange(ref _reconnectingIterations, 0);
-    }
-    else
-    {
-        _logger.LogInformation("Stall recovery skipped: reconnection completed.");
-        Interlocked.Exchange(ref _reconnectingIterations, 0);
-    }
-}
-```
-
-**How It Prevents the Race:**
-
-1. **Lock Coordination:** Uses same `_reconnectingLock` as `OnReconnectComplete`
-2. **Double-Check Pattern:** After acquiring lock, verifies:
-   - Flag still set (`_isReconnecting == 1`)
-   - Session still null (`_session is null`)
-3. **If OnReconnectComplete fired while waiting:** Lock acquisition blocks until it completes, then double-check sees session is now valid → returns false (no-op)
-4. **If truly stalled:** Both conditions true → safely clears flag → returns true
-
-**Total Changes:** 1 method replacement + improved call site logging. Race condition eliminated.
-
----
-
-## ✓ Verified False Positives
-
-**Important:** The following issues were initially identified but verified as FALSE POSITIVES. This section prevents future reviewers from re-reporting them.
-
-### PropertyUpdate Boxing in List<T> ❌ NOT AN ISSUE
-
-**Incorrectly Reported:** "Adding `PropertyUpdate` struct to `List<PropertyUpdate>` causes boxing on every data change notification."
-
-**Why It's False:**
-- `PropertyUpdate` is defined as `record struct` (SubscriptionManager.cs:6)
-- `List<PropertyUpdate>` is a generic collection storing the struct type
-- Adding a struct to `List<T>` where `T` is that struct does **NOT** cause boxing
-- The struct is stored directly in the list's internal array (no heap allocation for the struct itself)
-
-**Actual Code:**
-```csharp
-// PropertyUpdate.cs
-internal readonly record struct PropertyUpdate { ... }
-
-// SubscriptionManager.cs
-private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool = ...;
-var changes = ChangesPool.Rent();
-changes.Add(new PropertyUpdate { ... });  // NO BOXING - struct stored directly
-```
-
-**When Boxing DOES Occur:**
-- Casting struct to `object` or interface: `object obj = myStruct;`
-- Using non-generic collections: `ArrayList.Add(myStruct);`
-- Calling virtual methods from `System.Object` on struct
-
-**Verification Method:**
-1. Checked `PropertyUpdate` definition → confirmed `record struct`
-2. Checked `List<PropertyUpdate>` usage → generic collection with correct type parameter
-3. No casts to object/interface in hot path
-4. **Conclusion:** NO boxing occurs, current implementation is optimal
-
-**Performance Note:**
-The object pool pattern (`ObjectPool<List<PropertyUpdate>>`) is correctly implemented and prevents List allocations. This is already a high-performance design.
-
----
-
-## Additional High-Priority Issues
-
-### Write Status Code Error Handling
-
-**Location:** `OpcUaSubjectClientSource.cs:491-509`
+**Location:** `OpcUaSubjectClientSource.cs:529-547`
 
 **Problem:** Individual write failures (status codes like `BadSessionIdInvalid`) are logged but NOT retried. Only network exceptions trigger retry.
 
@@ -1397,55 +1172,7 @@ private void LogWriteFailures(...)
 }
 ```
 
-**Impact:** MEDIUM - Data loss on transient write errors.
-
----
-
-### Property Data Cleanup Timing
-
-**Location:** `OpcUaSubjectClientSource.cs:543, 570-578`
-
-**Problem:** `CleanupPropertyData()` removes NodeId during `Reset()`, but writes between retry cycles will silently fail (line 460 checks NodeId existence).
-
-**Fix:** Defer cleanup until `DisposeAsync`:
-```csharp
-private void Reset()
-{
-    // No disposal needed - SubjectSourceBackgroundService disposes session manager before calling Reset().
-    _initialMonitoredItems = null;
-
-    if (_sessionManager is not null)
-    {
-        _sessionManager.ReconnectionCompleted -= OnReconnectionCompleted;
-        _sessionManager = null;
-    }
-
-    // DON'T call CleanupPropertyData here - keep NodeIds for retry cycle
-}
-
-public async ValueTask DisposeAsync()
-{
-    if (Interlocked.Exchange(ref _disposed, 1) == 1)
-    {
-        return;
-    }
-
-    var sessionManager = _sessionManager;
-    if (sessionManager is not null)
-    {
-        sessionManager.ReconnectionCompleted -= OnReconnectionCompleted;
-        await sessionManager.DisposeAsync().ConfigureAwait(false);
-    }
-
-    // Clean up property data only on final disposal
-    CleanupPropertyData();
-    Dispose();
-
-    _writeFlushSemaphore.Dispose();
-}
-```
-
-**Impact:** MEDIUM - Silent write failures during reconnection window.
+**Impact:** MEDIUM - Transient write errors (server temporarily busy, timeouts) result in data loss instead of being retried automatically.
 
 ---
 
