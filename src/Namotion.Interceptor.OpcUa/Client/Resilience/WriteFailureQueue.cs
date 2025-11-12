@@ -44,8 +44,11 @@ internal sealed class WriteFailureQueue
     /// <summary>
     /// Enqueues multiple write operations. If the queue reaches capacity,
     /// oldest writes are dropped to make room (ring buffer semantics).
-    /// Thread-safety: This method is called only from SubjectSourceBackgroundService which
-    /// serializes all WriteToSourceAsync calls via _flushGate. No concurrent access occurs.
+    /// Thread-safety: EnqueueBatch can be called concurrently with DequeueAll. This is safe because:
+    /// - ConcurrentQueue itself is fully thread-safe for concurrent Enqueue/TryDequeue operations
+    /// - DequeueAll is always called inside _writeFlushSemaphore (OpcUaSubjectClientSource.cs:281)
+    /// - Ring buffer enforcement (lines 66-76) is best-effort; slight variance in queue size
+    ///   under concurrent access is acceptable and won't cause data corruption
     /// </summary>
     public void EnqueueBatch(IReadOnlyList<SubjectPropertyChange> changes)
     {
@@ -62,7 +65,8 @@ internal sealed class WriteFailureQueue
         }
 
         // Enforce size limit by removing oldest items (ring buffer semantics)
-        // Note: SubjectSourceBackgroundService ensures single-threaded access, so Count is stable
+        // Note: Count might be slightly stale if DequeueAll is running concurrently, but this is
+        // acceptable - the queue will converge to the correct size on the next EnqueueBatch call
         while (_pendingWrites.Count > _maxQueueSize)
         {
             if (_pendingWrites.TryDequeue(out _))
