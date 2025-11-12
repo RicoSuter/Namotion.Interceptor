@@ -220,16 +220,14 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var session = _sessionManager?.CurrentSession;
         if (session is not null)
         {
-            try
+            // Flush old pending writes first - if this fails, don't attempt new writes
+            var succeeded = await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
+            if (succeeded)
             {
-                await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
-                await WriteToSourceWithoutFlushAsync(changes, session, cancellationToken).ConfigureAwait(false);
+                await TryWriteToSourceWithoutFlushAsync(changes, session, cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogWarning(ex, "OPC UA write failed, changes queued.");
-
-                // When flush or write failed, queue the changes to try to apply later
                 _writeFailureQueue.EnqueueBatch(changes);
             }
         }
@@ -278,58 +276,61 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }, _stoppingToken);
     }
 
-    private async Task FlushQueuedWritesAsync(Session session, CancellationToken cancellationToken)
+    /// <summary>
+    /// Flushes pending writes from the queue.
+    /// Returns true if flush succeeded (or queue was empty), false if flush failed.
+    /// </summary>
+    private async Task<bool> FlushQueuedWritesAsync(Session session, CancellationToken cancellationToken)
     {
         try
         {
-            // Wait for semaphore with cancellation support
             await _writeFlushSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                if (_writeFailureQueue.IsEmpty)
-                {
-                    return;
-                }
-                
-                var pendingWrites = _writeFailureQueue.DequeueAll();
-                if (pendingWrites.Count > 0)
-                {
-                    try
-                    {
-                        await WriteToSourceWithoutFlushAsync(pendingWrites, session, cancellationToken).ConfigureAwait(false);
-
-                        _logger.LogInformation("Successfully flushed {Count} pending OPC UA writes after reconnection.", pendingWrites.Count);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "OPC UA queue flushing failed, re-queuing writes.");
-                        _writeFailureQueue.EnqueueBatch(pendingWrites);
-                    }
-                }
-            }
-            finally
-            {
-                _writeFlushSemaphore.Release();
-            }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch
         {
-            _logger.LogInformation("Write flush cancelled during shutdown");
+            return false;
+        }
+
+        try
+        {
+            if (_writeFailureQueue.IsEmpty)
+            {
+                return true;
+            }
+
+            var pendingWrites = _writeFailureQueue.DequeueAll();
+            if (pendingWrites.Count > 0)
+            {
+                return await TryWriteToSourceWithoutFlushAsync(pendingWrites, session, cancellationToken).ConfigureAwait(false);
+            }
+
+            return true;
+        }
+        finally
+        {
+            _writeFlushSemaphore.Release();
         }
     }
 
-    private async Task WriteToSourceWithoutFlushAsync(IReadOnlyList<SubjectPropertyChange> changes, Session session, CancellationToken cancellationToken)
+    /// <summary>
+    /// Attempts to write changes to the OPC UA server in chunks.
+    /// On partial failure, automatically re-queues only the failed portion.
+    /// Returns true if all writes succeeded, false if any write failed.
+    /// </summary>
+    private async Task<bool> TryWriteToSourceWithoutFlushAsync(IReadOnlyList<SubjectPropertyChange> changes, Session session, CancellationToken cancellationToken)
     {
         var count = changes.Count;
         if (count is 0)
         {
-            return;
+            return true; // Nothing to write = success
         }
 
         // Defensive check: verify session is still connected before expensive operation
         if (!session.Connected)
         {
-            throw new ServiceResultException(StatusCodes.BadSessionClosed, "Session is not connected");
+            _logger.LogWarning("Session not connected, queuing {Count} writes.", count);
+            _writeFailureQueue.EnqueueBatch(changes);
+            return false;
         }
 
         var chunkSize = (int)(session.OperationLimits?.MaxNodesPerWrite ?? DefaultChunkSize);
@@ -354,12 +355,18 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
                 LogWriteFailures(changes, writeValues, writeResponse.Results, offset);
             }
-            catch (ObjectDisposedException)
+            catch (Exception ex)
             {
-                // Session was disposed mid-operation - treat as disconnection
-                throw new ServiceResultException(StatusCodes.BadSessionClosed, "Session disposed during write operation");
+                // Partial write failure - re-queue only the remaining changes from this offset onwards
+                var remainingChanges = changes.Skip(offset).ToList();
+                _logger.LogWarning(ex, "OPC UA write failed at offset {Offset}, re-queuing {Count} remaining changes.",
+                    offset, remainingChanges.Count);
+                _writeFailureQueue.EnqueueBatch(remainingChanges);
+                return false; // Indicate failure
             }
         }
+
+        return true; // All writes succeeded
     }
     
     private WriteValueCollection BuildWriteValues(IReadOnlyList<SubjectPropertyChange> changes, int offset, int take)
