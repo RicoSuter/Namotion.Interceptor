@@ -81,9 +81,9 @@ internal class OpcUaSubscriptionManager
                 throw new InvalidOperationException("Failed to add subscription.");
             }
 
-            await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
             subscription.FastDataChangeCallback += OnFastDataChange;
-            
+            await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
+
             var batchEnd = Math.Min(i + maximumItemsPerSubscription, itemCount);
             for (var j = i; j < batchEnd; j++)
             {
