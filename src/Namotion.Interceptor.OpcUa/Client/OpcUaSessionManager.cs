@@ -213,6 +213,8 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
     /// </summary>
     private void OnReconnectComplete(object? sender, EventArgs e)
     {
+        bool reconnectionSucceeded = false;
+
         lock (_reconnectingLock)
         {
             if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
@@ -223,9 +225,9 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
             var reconnectedSession = _reconnectHandler.Session;
             if (reconnectedSession is null)
             {
-                _logger.LogError("Reconnect completed but received null OPC UA session. Connection lost permanently.");
+                _logger.LogError("Reconnect completed but received null OPC UA session. Will retry on next KeepAlive.");
                 Interlocked.Exchange(ref _isReconnecting, 0);
-                return;
+                return; // Don't fire event - reconnection failed
             }
 
             var oldSession = _session;
@@ -249,7 +251,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
                         _logger.LogInformation("OPC UA session reconnected: Transferred {Count} subscriptions.", transferredSubscriptions.Count);
                     }
                 }
-                
+
                 if (oldSession is not null && !ReferenceEquals(oldSession, newSession))
                 {
                     // Task.Run is safe here: DisposeSessionAsync handles all exceptions internally
@@ -262,11 +264,16 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
                 _logger.LogInformation("Reconnect preserved existing OPC UA session. Subscriptions maintained.");
             }
 
+            reconnectionSucceeded = true;
             Interlocked.Exchange(ref _isReconnecting, 0);
         }
-        
-        ReconnectionCompleted?.Invoke(this, EventArgs.Empty);
-        _logger.LogInformation("OPC UA session reconnect completed.");
+
+        // Only fire event if reconnection actually succeeded
+        if (reconnectionSucceeded)
+        {
+            ReconnectionCompleted?.Invoke(this, EventArgs.Empty);
+            _logger.LogInformation("OPC UA session reconnect completed.");
+        }
     }
     
     private async Task DisposeSessionAsync(Session session, CancellationToken cancellationToken)
