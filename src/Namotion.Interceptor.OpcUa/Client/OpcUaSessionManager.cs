@@ -182,6 +182,9 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
                 return;
             }
 
+            // Pre-check handler state to avoid unnecessary BeginReconnect calls (optimization only)
+            // Note: State could change between check and BeginReconnect call, but this is safe because
+            // we validate the return value from BeginReconnect and only set _isReconnecting on success.
             if (_reconnectHandler.State is not SessionReconnectHandler.ReconnectState.Ready)
             {
                 _logger.LogWarning("OPC UA SessionReconnectHandler not ready. State: {State}", _reconnectHandler.State);
@@ -190,6 +193,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
 
             _logger.LogInformation("OPC UA server connection lost. Beginning reconnect...");
 
+            // Return value is authoritative - only set _isReconnecting if BeginReconnect succeeds
             var newState = _reconnectHandler.BeginReconnect(session, _configuration.ReconnectInterval, OnReconnectComplete);
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
             {
@@ -198,6 +202,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
             }
             else
             {
+                // BeginReconnect failed - don't set _isReconnecting, allow retry on next KeepAlive
                 _logger.LogError("Failed to begin OPC UA reconnect. Handler state: {State}", newState);
             }
         }
