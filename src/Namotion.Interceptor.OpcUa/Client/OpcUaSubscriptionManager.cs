@@ -22,14 +22,14 @@ internal class OpcUaSubscriptionManager
     private readonly ILogger _logger;
 
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
-    private readonly ConcurrentBag<Subscription> _subscriptions = new();
+    private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
 
     /// <summary>
     /// Gets the current list of subscriptions (thread-safe collection).
     /// </summary>
-    public IReadOnlyCollection<Subscription> Subscriptions => _subscriptions;
+    public IReadOnlyCollection<Subscription> Subscriptions => (IReadOnlyCollection<Subscription>)_subscriptions.Keys;
 
     /// <summary>
     /// Gets the current monitored items (thread-safe dictionary).
@@ -42,12 +42,6 @@ internal class OpcUaSubscriptionManager
         _pollingManager = pollingManager;
         _configuration = configuration;
         _logger = logger;
-    }
-
-    public void Clear()
-    {
-        _monitoredItems.Clear();
-        _subscriptions.Clear();
     }
 
     public async Task CreateBatchedSubscriptionsAsync(
@@ -118,7 +112,7 @@ internal class OpcUaSubscriptionManager
             // Phase 3: Make subscription visible to health monitor (AFTER all initialization complete)
             // CRITICAL: This ordering ensures temporal separation - health monitor never sees
             // subscriptions during their initialization phase (lines 101-110)
-            _subscriptions.Add(subscription);
+            _subscriptions.TryAdd(subscription, 0);
         }
     }
     
@@ -191,19 +185,23 @@ internal class OpcUaSubscriptionManager
     /// </summary>
     public void UpdateTransferredSubscriptions(IReadOnlyCollection<Subscription> transferredSubscriptions)
     {
-        // Clear old subscriptions and add transferred ones
-        // Note: Tiny race window exists (~microseconds) where health monitor might read empty collection
-        // Impact is negligible: max 10s delay in healing, only during rare reconnection events
-        _subscriptions.Clear();
+        var oldSubscriptions = _subscriptions.Keys.ToArray();
 
         foreach (var subscription in transferredSubscriptions)
         {
             subscription.FastDataChangeCallback -= OnFastDataChange;
             subscription.FastDataChangeCallback += OnFastDataChange;
-            _subscriptions.Add(subscription);
+            _subscriptions.TryAdd(subscription, 0);
         }
 
-        _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions", transferredSubscriptions.Count);
+        foreach (var oldSubscription in oldSubscriptions)
+        {
+            _subscriptions.TryRemove(oldSubscription, out _);
+            oldSubscription.FastDataChangeCallback -= OnFastDataChange;
+        }
+
+        _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions (removed {OldCount} old)",
+            transferredSubscriptions.Count, oldSubscriptions.Length);
     }
     
     private async Task FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
@@ -303,8 +301,7 @@ internal class OpcUaSubscriptionManager
     {
         _shuttingDown = true;
 
-        // Take snapshot and clear
-        var subscriptions = _subscriptions.ToArray();
+        var subscriptions = _subscriptions.Keys.ToArray();
         _subscriptions.Clear();
 
         foreach (var subscription in subscriptions)
