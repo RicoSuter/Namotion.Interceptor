@@ -15,7 +15,7 @@ public class GeneratorTests
     }
     
     [Fact]
-    public void WhenHasBlocScopedkNamespace_ThenCodeIsGenerated()
+    public void WhenHasBlockScopedNamespace_ThenCodeIsGenerated()
     {
         // Arrange & Act
         var person = new PersonWithBlockScopedNamespace() as IInterceptorSubject;
@@ -25,7 +25,7 @@ public class GeneratorTests
     }
 
     [Fact]
-    public void WhenFunctionIsInterceptable_ThenInterctorMethodIsGenerator()
+    public void WhenFunctionIsInterceptable_ThenInterceptorMethodIsGenerator()
     {
         // Arrange
         var calculator = new Calculator();
@@ -38,7 +38,7 @@ public class GeneratorTests
     }
     
     [Fact]
-    public void WhenMethodIsInterceptable_ThenInterctorMethodIsGenerator()
+    public void WhenMethodIsInterceptable_ThenInterceptorMethodIsGenerator()
     {
         // Arrange
         var calculator = new Calculator();
@@ -51,7 +51,7 @@ public class GeneratorTests
     }
     
     [Fact]
-    public void WhenMethodWithParametersIsInterceptable_ThenInterctorMethodIsGenerator()
+    public void WhenMethodWithParametersIsInterceptable_ThenInterceptorMethodIsGenerator()
     {
         // Arrange
         var calculator = new Calculator();
@@ -61,5 +61,21 @@ public class GeneratorTests
         
         // Assert
         Assert.Equal(3, calculator.InternalResult);
+    }
+    
+    [Fact]
+    public void WhenPartialClassSpansMultipleFiles_ThenAllPropertiesAreMerged()
+    {
+        // Arrange
+        var person = new PersonWithPartial() as IInterceptorSubject;
+        
+        // Act
+        var properties = person.Properties;
+        
+        // Assert
+        Assert.NotNull(person);
+        Assert.Contains("FirstName", properties.Keys);
+        Assert.Contains("LastName", properties.Keys);
+        Assert.Equal(2, properties.Count);
     }
 }
