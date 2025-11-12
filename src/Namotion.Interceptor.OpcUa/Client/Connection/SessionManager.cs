@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.Sources;
@@ -6,18 +5,18 @@ using Opc.Ua;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;
 
-namespace Namotion.Interceptor.OpcUa.Client;
+namespace Namotion.Interceptor.OpcUa.Client.Connection;
 
 /// <summary>
 /// Manages OPC UA session lifecycle, reconnection handling, and thread-safe session access.
 /// Optimized for fast session reads (hot path) with simple lock-based writes (cold path).
 /// </summary>
-internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
+internal sealed class SessionManager : IDisposable, IAsyncDisposable
 {
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
-    private readonly OpcUaSubscriptionManager _subscriptionManager;
+    private readonly SubscriptionManager _subscriptionManager;
     private readonly SessionReconnectHandler _reconnectHandler;
     private readonly PollingManager? _pollingManager;
 
@@ -30,43 +29,22 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
     /// <summary>
-    /// Gets the current session, or null if not connected.
-    /// <para>
-    /// <strong>Thread-Safety:</strong> Thread-safe for reading without lock using volatile semantics for memory visibility.
-    /// WARNING: The session reference can change at any time due to reconnection. Do not cache this value.
-    /// Always read CurrentSession immediately before use, and handle null gracefully.
-    /// </para>
+    /// Gets the current session. WARNING: Can change at any time due to reconnection. Never cache - read immediately before use.
     /// </summary>
     public Session? CurrentSession => Volatile.Read(ref _session);
 
-    /// <summary>
-    /// Gets whether a session is currently connected.
-    /// Thread-safe using volatile semantics for memory visibility.
-    /// </summary>
     public bool IsConnected => Volatile.Read(ref _session) is not null;
 
-    /// <summary>
-    /// Gets whether a reconnection is in progress.
-    /// Thread-safe via Interlocked operations.
-    /// </summary>
     public bool IsReconnecting => Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1;
 
-    /// <summary>
-    /// Gets the current list of subscriptions.
-    /// Thread-safe - returns a snapshot of subscriptions.
-    /// </summary>
     public IReadOnlyCollection<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
 
     /// <summary>
-    /// Occurs when a reconnection attempt completes (successfully or not).
-    /// <para>
-    /// <strong>Thread-Safety:</strong> This event is invoked on a background thread (reconnection handler thread).
-    /// Event handlers MUST be thread-safe and should not perform blocking operations.
-    /// </para>
+    /// Fires when reconnection completes successfully. Invoked on background thread.
     /// </summary>
     public event EventHandler? ReconnectionCompleted;
 
-    public OpcUaSessionManager(ISubjectUpdater updater, OpcUaClientConfiguration configuration, ILogger logger)
+    public SessionManager(ISubjectUpdater updater, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _logger = logger;
         _configuration = configuration;
@@ -88,7 +66,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
             _pollingManager.Start();
         }
 
-        _subscriptionManager = new OpcUaSubscriptionManager(updater, _pollingManager, configuration, logger);
+        _subscriptionManager = new SubscriptionManager(updater, _pollingManager, configuration, logger);
     }
 
     /// <summary>
@@ -99,8 +77,6 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
         OpcUaClientConfiguration configuration,
         CancellationToken cancellationToken)
     {
-        // This method will never be called concurrently, so no lock is needed here.
-        
         var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
         var endpointDescription = CoreClientUtils.SelectEndpoint(
             application.ApplicationConfiguration,
@@ -177,16 +153,12 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
                 return;
             }
 
-            // Use Volatile.Read for memory visibility consistency after Interlocked operations
             var session = Volatile.Read(ref _session);
             if (session is null || !ReferenceEquals(sender, session))
             {
                 return;
             }
 
-            // Pre-check handler state to avoid unnecessary BeginReconnect calls (optimization only)
-            // Note: State could change between check and BeginReconnect call, but this is safe because
-            // we validate the return value from BeginReconnect and only set _isReconnecting on success.
             if (_reconnectHandler.State is not SessionReconnectHandler.ReconnectState.Ready)
             {
                 _logger.LogWarning("OPC UA SessionReconnectHandler not ready. State: {State}", _reconnectHandler.State);
@@ -195,7 +167,6 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
 
             _logger.LogInformation("OPC UA server connection lost. Beginning reconnect...");
 
-            // Return value is authoritative - only set _isReconnecting if BeginReconnect succeeds
             var newState = _reconnectHandler.BeginReconnect(session, _configuration.ReconnectInterval, OnReconnectComplete);
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
             {
@@ -204,7 +175,6 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
             }
             else
             {
-                // BeginReconnect failed - don't set _isReconnecting, allow retry on next KeepAlive
                 _logger.LogError("Failed to begin OPC UA reconnect. Handler state: {State}", newState);
             }
         }
@@ -214,14 +184,9 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// Callback invoked by SessionReconnectHandler when reconnection completes.
-    /// Uses synchronous continuation to avoid fire-and-forget anti-pattern.
-    /// </summary>
     private void OnReconnectComplete(object? sender, EventArgs e)
     {
-        bool reconnectionSucceeded = false;
-
+        var reconnectionSucceeded = false;
         lock (_reconnectingLock)
         {
             if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
@@ -234,7 +199,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
             {
                 _logger.LogError("Reconnect completed but received null OPC UA session. Will retry on next KeepAlive.");
                 Interlocked.Exchange(ref _isReconnecting, 0);
-                return; // Don't fire event - reconnection failed
+                return;
             }
 
             var oldSession = _session;
@@ -248,7 +213,7 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
 
                 if (newSession is not null)
                 {
-                    newSession.KeepAlive -= OnKeepAlive; // Defensive
+                    newSession.KeepAlive -= OnKeepAlive;
                     newSession.KeepAlive += OnKeepAlive;
 
                     var transferredSubscriptions = newSession.Subscriptions.ToList();
@@ -261,8 +226,6 @@ internal sealed class OpcUaSessionManager : IDisposable, IAsyncDisposable
 
                 if (oldSession is not null && !ReferenceEquals(oldSession, newSession))
                 {
-                    // Task.Run is safe here: DisposeSessionAsync handles all exceptions internally
-                    // No unobserved exceptions possible - all operations are try-catch wrapped
                     Task.Run(() => DisposeSessionAsync(oldSession, _stoppingToken));
                 }
             }

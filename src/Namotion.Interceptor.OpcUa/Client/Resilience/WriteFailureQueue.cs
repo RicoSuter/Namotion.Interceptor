@@ -42,13 +42,8 @@ internal sealed class WriteFailureQueue
     }
 
     /// <summary>
-    /// Enqueues multiple write operations. If the queue reaches capacity,
-    /// oldest writes are dropped to make room (ring buffer semantics).
-    /// Thread-safety: EnqueueBatch can be called concurrently with DequeueAll. This is safe because:
-    /// - ConcurrentQueue itself is fully thread-safe for concurrent Enqueue/TryDequeue operations
-    /// - DequeueAll is always called inside _writeFlushSemaphore (OpcUaSubjectClientSource.cs:281)
-    /// - Ring buffer enforcement (lines 66-76) is best-effort; slight variance in queue size
-    ///   under concurrent access is acceptable and won't cause data corruption
+    /// Enqueues writes. Ring buffer: oldest dropped when full.
+    /// Thread-safe: DequeueAll called inside semaphore, ConcurrentQueue handles concurrent access.
     /// </summary>
     public void EnqueueBatch(IReadOnlyList<SubjectPropertyChange> changes)
     {
@@ -64,9 +59,7 @@ internal sealed class WriteFailureQueue
             _pendingWrites.Enqueue(change);
         }
 
-        // Enforce size limit by removing oldest items (ring buffer semantics)
-        // Note: Count might be slightly stale if DequeueAll is running concurrently, but this is
-        // acceptable - the queue will converge to the correct size on the next EnqueueBatch call
+        // Ring buffer: drop oldest if over capacity (Count may be slightly stale, acceptable)
         while (_pendingWrites.Count > _maxQueueSize)
         {
             if (_pendingWrites.TryDequeue(out _))

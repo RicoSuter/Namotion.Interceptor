@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Tracking.Change;
@@ -10,32 +11,13 @@ using Opc.Ua.Client;
 namespace Namotion.Interceptor.OpcUa.Client.Polling;
 
 /// <summary>
-/// Manages polling-based reading for OPC UA nodes that don't support subscriptions.
-/// Provides automatic fallback when subscription creation fails.
-///
-/// Thread-Safety: This class is thread-safe for concurrent access to all public methods.
-/// The polling loop runs on a background thread and uses concurrent collections for item management.
-///
-/// Initialization Order:
-/// 1. Construct the OpcUaPollingManager instance
-/// 2. Call Start() to begin the background polling loop (idempotent - safe to call multiple times)
-/// 3. Add items via AddItem() as subscription failures are detected
-/// Note: Start() can be called before or after items are added - the polling loop will process
-/// items whenever the collection is non-empty.
-///
-/// Behavior During Disconnection: When the OPC UA session is disconnected, polling is suspended
-/// and cached values become stale. Upon reconnection, cached values are reset and polling resumes,
-/// causing all polled properties to receive fresh values on the next polling cycle. This is acceptable
-/// for polling-based monitoring where some data loss during disconnection is expected and tolerable.
-///
-/// Circuit Breaker: After consecutive polling failures reach the configured threshold, the circuit breaker
-/// opens and suspends polling for the configured cooldown period. This prevents resource exhaustion when
-/// the server is persistently unavailable. The circuit automatically attempts to close after the cooldown.
+/// Polling fallback for nodes that don't support subscriptions. Circuit breaker prevents resource exhaustion.
+/// Thread-safe. Start() is idempotent. Values reset on reconnection (some data loss during disconnection is expected).
 /// </summary>
 internal sealed class PollingManager : IDisposable
 {
     private readonly ILogger _logger;
-    private readonly OpcUaSessionManager _sessionManager;
+    private readonly SessionManager _sessionManager;
     private readonly ISubjectUpdater _updater;
     private readonly TimeSpan _pollingInterval;
     private readonly int _batchSize;
@@ -54,7 +36,7 @@ internal sealed class PollingManager : IDisposable
 
     public PollingManager(
         ILogger logger,
-        OpcUaSessionManager sessionManager,
+        SessionManager sessionManager,
         ISubjectUpdater updater,
         TimeSpan pollingInterval,
         int batchSize,
@@ -408,7 +390,7 @@ internal sealed class PollingManager : IDisposable
             }
 
             // Create update record (same pattern as subscription manager)
-            var update = new OpcUaPropertyUpdate
+            var update = new PropertyUpdate
             {
                 Property = pollingItem.Property,
                 Value = newValue,

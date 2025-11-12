@@ -33,7 +33,12 @@ public class OpcUaValueConverter
                 targetElement == typeof(decimal) && 
                 nodeValue is double[] doubleArray)
             {
-                return doubleArray.Select(d => (decimal)d).ToArray();
+                var result = new decimal[doubleArray.Length];
+                for (var i = 0; i < doubleArray.Length; i++)
+                {
+                    result[i] = (decimal)doubleArray[i];
+                }
+                return result;
             }
         }
 

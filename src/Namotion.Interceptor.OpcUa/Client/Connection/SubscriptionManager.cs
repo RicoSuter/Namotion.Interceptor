@@ -9,12 +9,12 @@ using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
 
-namespace Namotion.Interceptor.OpcUa.Client;
+namespace Namotion.Interceptor.OpcUa.Client.Connection;
 
-internal class OpcUaSubscriptionManager
+internal class SubscriptionManager
 {
-    private static readonly ObjectPool<List<OpcUaPropertyUpdate>> ChangesPool
-        = new(() => new List<OpcUaPropertyUpdate>(16));
+    private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
+        = new(() => new List<PropertyUpdate>(16));
 
     private readonly ISubjectUpdater? _updater;
     private readonly PollingManager? _pollingManager;
@@ -36,7 +36,7 @@ internal class OpcUaSubscriptionManager
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
-    public OpcUaSubscriptionManager(ISubjectUpdater updater, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
+    public SubscriptionManager(ISubjectUpdater updater, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _updater = updater;
         _pollingManager = pollingManager;
@@ -49,14 +49,7 @@ internal class OpcUaSubscriptionManager
         Session session,
         CancellationToken cancellationToken)
     {
-        // Thread-safety design: Uses TEMPORAL SEPARATION to prevent race conditions
-        // - Subscriptions are fully initialized (including ApplyChanges) BEFORE being added to _subscriptions
-        // - Health monitor only operates on subscriptions already in _subscriptions collection
-        // - No overlap possible between initialization and health monitoring
-        // - No semaphore needed due to this temporal separation pattern
-        //
-        // This method is called only once during StartListeningAsync, never concurrently.
-
+        // Temporal separation: subscriptions added to _subscriptions AFTER initialization (line 112) prevents health monitor races.
         _shuttingDown = false;
 
         var itemCount = monitoredItems.Count;
@@ -106,23 +99,15 @@ internal class OpcUaSubscriptionManager
                 _logger.LogWarning(sre, "ApplyChanges failed for a batch; attempting to keep valid OPC UA monitored items by removing failed ones.");
             }
 
-            // Phase 2: Filter and retry failed items (subscription STILL NOT in _subscriptions)
             await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
 
-            // Phase 3: Make subscription visible to health monitor (AFTER all initialization complete)
-            // CRITICAL: This ordering ensures temporal separation - health monitor never sees
-            // subscriptions during their initialization phase (lines 101-110)
+            // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             _subscriptions.TryAdd(subscription, 0);
         }
     }
     
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
-        // Thread-safety: This callback is invoked sequentially per subscription (OPC UA stack guarantee).
-        // Multiple subscriptions can invoke callbacks concurrently, but each subscription manages
-        // distinct monitored items (no overlap), so concurrent callbacks won't interfere.
-        // The EnqueueOrApplyUpdate ensures changes are directly applied or enqueued in order.
-
         if (_shuttingDown || _updater is null)
         {
             return;
@@ -142,7 +127,7 @@ internal class OpcUaSubscriptionManager
             var item = notification.MonitoredItems[i];
             if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
             {
-                changes.Add(new OpcUaPropertyUpdate
+                changes.Add(new PropertyUpdate
                 {
                     Property = property,
                     Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),

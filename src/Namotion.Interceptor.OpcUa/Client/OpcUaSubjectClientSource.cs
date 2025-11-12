@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -24,9 +25,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
     private readonly WriteFailureQueue _writeFailureQueue;
-    
-    private OpcUaSessionManager? _sessionManager;
-    
+
+    private SessionManager? _sessionManager;
+
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private CancellationToken _stoppingToken;
 
@@ -60,8 +61,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         Reset();
 
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
-        
-        _sessionManager = new OpcUaSessionManager(updater, _configuration, _logger);
+
+        _sessionManager = new SessionManager(updater, _configuration, _logger);
         _sessionManager.ReconnectionCompleted += OnReconnectionCompleted;
         
         var application = _configuration.CreateApplicationInstance();
@@ -161,23 +162,38 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _stoppingToken = stoppingToken; // Store for event handlers
+        _stoppingToken = stoppingToken;
 
+        // Single-threaded health check loop. Coordinates with automatic reconnection via IsReconnecting flag.
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                if (_sessionManager?.CurrentSession is not null)
+                var sessionManager = _sessionManager; // Capture reference to avoid TOCTOU
+                if (sessionManager is not null)
                 {
-                    // Health monitor only operates on subscriptions already in the collection
-                    // Thread-safety: Temporal separation ensures subscriptions are fully initialized
-                    // before being added to _sessionManager.Subscriptions (see OpcUaSubscriptionManager.cs:115)
-                    //
-                    // Session validation: Not needed here - OPC Foundation SDK's SessionReconnectHandler
-                    // automatically transfers subscriptions to new sessions and updates subscription.Session
-                    // property. Each subscription references its own session internally, and ApplyChangesAsync
-                    // operates on that internal reference, not on any externally passed session.
-                    await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(_sessionManager.Subscriptions, stoppingToken).ConfigureAwait(false);
+                    var currentSession = sessionManager.CurrentSession;
+                    var isReconnecting = sessionManager.IsReconnecting;
+
+                    if (currentSession is null && !isReconnecting)
+                    {
+                        // SessionReconnectHandler timed out. Restart session manually.
+                        // !isReconnecting prevents conflicts with automatic reconnection.
+                        _logger.LogWarning(
+                            "OPC UA session is dead with no active reconnection. " +
+                            "SessionReconnectHandler likely timed out after {Timeout}ms. " +
+                            "Restarting session manager...",
+                            _configuration.ReconnectHandlerTimeout);
+
+                        await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
+                    }
+                    else if (currentSession is not null)
+                    {
+                        // Temporal separation: subscriptions added to collection AFTER initialization (see SubscriptionManager.cs:112)
+                        await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
+                            sessionManager.Subscriptions,
+                            stoppingToken).ConfigureAwait(false);
+                    }
                 }
 
                 await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false);
@@ -186,9 +202,72 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             {
                 // Normal shutdown
             }
+            catch (Exception ex)
+            {
+                // Log error but continue health monitoring loop
+                _logger.LogError(ex, "Error during health check or session restart. Will retry.");
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
+            }
         }
 
         _logger.LogInformation("OPC UA client has stopped.");
+    }
+
+    /// <summary>
+    /// Restarts the session after SessionReconnectHandler timeout.
+    /// Reuses existing SessionManager (CreateSessionAsync disposes old session internally).
+    /// Thread-safe: Only called from single-threaded ExecuteAsync loop.
+    /// </summary>
+    private async Task ReconnectSessionAsync(CancellationToken cancellationToken)
+    {
+        var sessionManager = _sessionManager;
+        if (sessionManager is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _logger.LogInformation(
+                "Restarting OPC UA session after SessionReconnectHandler timeout ({Timeout}ms)...",
+                _configuration.ReconnectHandlerTimeout);
+
+            // Create new session (CreateSessionAsync disposes old session internally)
+            var application = _configuration.CreateApplicationInstance();
+            var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken)
+                .ConfigureAwait(false);
+
+            _logger.LogInformation("New OPC UA session created successfully.");
+
+            // Recreate subscriptions using cached monitored items
+            if (_initialMonitoredItems is not null && _initialMonitoredItems.Count > 0)
+            {
+                await sessionManager.CreateSubscriptionsAsync(_initialMonitoredItems, session, cancellationToken)
+                    .ConfigureAwait(false);
+
+                _logger.LogInformation(
+                    "Subscriptions recreated successfully with {Count} monitored items.",
+                    _initialMonitoredItems.Count);
+            }
+
+            // Flush any queued writes after successful reconnection
+            // We're already in async context, so just await directly (no Task.Run needed)
+            try
+            {
+                await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to flush queued writes after session restart.");
+            }
+
+            _logger.LogInformation("Session restart complete.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to restart session. Will retry on next health check.");
+            throw; // Re-throw to trigger retry in ExecuteAsync
+        }
     }
 
     private async Task<ReferenceDescription?> TryGetRootNodeAsync(Session session, CancellationToken cancellationToken)
@@ -207,8 +286,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     }
     
     /// <summary>
-    /// Writes property changes to the OPC UA server. If disconnected, changes are queued using ring buffer semantics.
-    /// HOT PATH - optimized for the common case of direct write to connected session.
+    /// Writes changes to OPC UA server. Queues with ring buffer semantics if disconnected.
+    /// Session staleness handled defensively via session.Connected checks.
     /// </summary>
     public async ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
@@ -245,16 +324,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             return;
         }
 
-        // Capture cancellation token as local variable to avoid race condition where
-        // _stoppingToken field could be cancelled between event firing and Task.Run execution
         var cancellationToken = _stoppingToken;
 
-        // Task.Run is intentional here (not a fire-and-forget anti-pattern):
-        // - We're in a synchronous event handler context (cannot await)
-        // - All exceptions are caught and logged (no unobserved exceptions)
-        // - Semaphore in FlushQueuedWritesAsync coordinates with concurrent WriteToSourceAsync calls
-        // - If concurrent write happens: it waits on semaphore, then its own flush is empty (early return)
-        // - Session is resolved internally to avoid capturing potentially stale session reference
+        // Task.Run needed: synchronous event handler, cannot await.
+        // Safe: All exceptions caught, semaphore coordinates concurrent access, cancellation coordinated with disposal.
         Task.Run(async () =>
         {
             try
@@ -262,8 +335,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 var session = _sessionManager?.CurrentSession;
                 if (session is not null)
                 {
-                    // Validate session is still connected before flushing
-                    // (defensive check in case session changed between capture and Task.Run execution)
                     if (!session.Connected)
                     {
                         _logger.LogDebug("Session disconnected before flush could execute, will retry on next reconnection");
@@ -317,19 +388,17 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     }
 
     /// <summary>
-    /// Attempts to write changes to the OPC UA server in chunks.
-    /// On partial failure, automatically re-queues only the failed portion.
-    /// Returns true if all writes succeeded, false if any write failed.
+    /// Writes changes in chunks. Re-queues only failed portion on partial failure.
+    /// Returns true if all succeeded. Defensive session.Connected check handles staleness.
     /// </summary>
     private async Task<bool> TryWriteToSourceWithoutFlushAsync(IReadOnlyList<SubjectPropertyChange> changes, Session session, CancellationToken cancellationToken)
     {
         var count = changes.Count;
         if (count is 0)
         {
-            return true; // Nothing to write = success
+            return true;
         }
 
-        // Defensive check: verify session is still connected before expensive operation
         if (!session.Connected)
         {
             _logger.LogWarning("Session not connected, queuing {Count} writes.", count);
@@ -462,25 +531,15 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private void Reset()
     {
-        // Note: Session manager disposal is NOT needed here.
-        // The SubjectSourceBackgroundService.ExecuteAsync retry loop calls DisposeAsync()
-        // on the disposable returned by StartListeningAsync, which properly disposes the
-        // session manager BEFORE Reset() is called on the next retry.
-        // Reset() is called at the START of StartListeningAsync, where the old session
-        // manager has already been disposed by the background service.
-
+        // No disposal needed - SubjectSourceBackgroundService disposes session manager before calling Reset().
         _initialMonitoredItems = null;
 
         if (_sessionManager is not null)
         {
-            // Unsubscribe from events to prevent leaks (defensive, already unsubscribed in DisposeAsync)
             _sessionManager.ReconnectionCompleted -= OnReconnectionCompleted;
             _sessionManager = null;
         }
 
-        // Clean up property data before reloading
-        // This is already done in DisposeAsync, but we do it here too for completeness
-        // since we're about to reload properties with new OPC UA node mappings
         CleanupPropertyData();
     }
 
