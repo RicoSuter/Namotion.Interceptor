@@ -238,7 +238,8 @@ internal class OpcUaSubjectLoader
             Handle = property
         };
 
-        property.Reference.SetPropertyData(_source.OpcVariableKey, nodeId);
+        property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
+
         _propertiesWithOpcData.Add(property.Reference);
         monitoredItems.Add(monitoredItem);
     }
