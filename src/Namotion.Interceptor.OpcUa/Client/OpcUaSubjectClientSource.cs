@@ -218,7 +218,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             try
             {
                 await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
-                await WriteToSourceAsync(changes, session, cancellationToken).ConfigureAwait(false);
+                await WriteToSourceWithoutFlushAsync(changes, session, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -234,7 +234,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             _writeFailureQueue.EnqueueBatch(changes);
         }
     }
-    
+
     private void OnReconnectionCompleted(object? sender, EventArgs e)
     {
         if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
@@ -242,26 +242,35 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             return;
         }
 
-        var session = _sessionManager?.CurrentSession;
-        if (session is not null)
+        // Task.Run is intentional here (not a fire-and-forget anti-pattern):
+        // - We're in a synchronous event handler context (cannot await)
+        // - All exceptions are caught and logged (no unobserved exceptions)
+        // - Semaphore in FlushQueuedWritesAsync coordinates with concurrent WriteToSourceAsync calls
+        // - If concurrent write happens: it waits on semaphore, then its own flush is empty (early return)
+        // - Session is resolved internally to avoid capturing potentially stale session reference
+        Task.Run(async () =>
         {
-            // Task.Run is intentional here (not a fire-and-forget anti-pattern):
-            // - We're in a synchronous event handler context (cannot await)
-            // - All exceptions are caught and logged (no unobserved exceptions)
-            // - Semaphore in FlushQueuedWritesAsync coordinates with concurrent WriteToSourceAsync calls
-            // - If concurrent write happens: it waits on semaphore, then its own flush is empty (early return)
-            Task.Run(async () =>
+            try
             {
-                try
+                var session = _sessionManager?.CurrentSession;
+                if (session is not null)
                 {
+                    // Validate session is still connected before flushing
+                    // (defensive check in case session changed between capture and Task.Run execution)
+                    if (!session.Connected)
+                    {
+                        _logger.LogDebug("Session disconnected before flush could execute, will retry on next reconnection");
+                        return;
+                    }
+
                     await FlushQueuedWritesAsync(session, _stoppingToken).ConfigureAwait(false);
                 }
-                catch (Exception exception)
-                {
-                    _logger.LogError(exception, "Failed to flush pending OPC UA writes after reconnection.");
-                }
-            });
-        }
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Failed to flush pending OPC UA writes after reconnection.");
+            }
+        }, _stoppingToken);
     }
 
     private async Task FlushQueuedWritesAsync(Session session, CancellationToken cancellationToken)
@@ -282,13 +291,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 {
                     try
                     {
-                        await WriteToSourceAsync(pendingWrites, session, cancellationToken).ConfigureAwait(false);
+                        await WriteToSourceWithoutFlushAsync(pendingWrites, session, cancellationToken).ConfigureAwait(false);
 
                         _logger.LogInformation("Successfully flushed {Count} pending OPC UA writes after reconnection.", pendingWrites.Count);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "OPC UA queue flusing failed, putting back.");
+                        _logger.LogWarning(ex, "OPC UA queue flushing failed, re-queuing writes.");
                         _writeFailureQueue.EnqueueBatch(pendingWrites);
                     }
                 }
@@ -298,18 +307,24 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 _writeFlushSemaphore.Release();
             }
         }
-        catch (OperationCanceledException) when (_stoppingToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             _logger.LogInformation("Write flush cancelled during shutdown");
         }
     }
-    
-    private async Task WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, Session session, CancellationToken cancellationToken)
+
+    private async Task WriteToSourceWithoutFlushAsync(IReadOnlyList<SubjectPropertyChange> changes, Session session, CancellationToken cancellationToken)
     {
         var count = changes.Count;
         if (count is 0)
         {
             return;
+        }
+
+        // Defensive check: verify session is still connected before expensive operation
+        if (!session.Connected)
+        {
+            throw new ServiceResultException(StatusCodes.BadSessionClosed, "Session is not connected");
         }
 
         var chunkSize = (int)(session.OperationLimits?.MaxNodesPerWrite ?? DefaultChunkSize);
@@ -325,12 +340,20 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 continue;
             }
 
-            var writeResponse = await session.WriteAsync(
-                requestHeader: null,
-                writeValues,
-                cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var writeResponse = await session.WriteAsync(
+                    requestHeader: null,
+                    writeValues,
+                    cancellationToken).ConfigureAwait(false);
 
-            LogWriteFailures(changes, writeValues, writeResponse.Results, offset);
+                LogWriteFailures(changes, writeValues, writeResponse.Results, offset);
+            }
+            catch (ObjectDisposedException)
+            {
+                // Session was disposed mid-operation - treat as disconnection
+                throw new ServiceResultException(StatusCodes.BadSessionClosed, "Session disposed during write operation");
+            }
         }
     }
     
