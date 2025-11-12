@@ -874,9 +874,144 @@ configure: options =>
 
 ---
 
+## Open Improvements
+
+### High Priority
+
+#### 1. Health Check Integration (2-4 hours)
+Implement `IHealthCheck` from `Microsoft.Extensions.Diagnostics.HealthChecks` for standardized health monitoring.
+
+**Benefits:**
+- Kubernetes/Azure health probes integration
+- ASP.NET Core `/health` endpoint
+- Production diagnostics and monitoring
+
+**Implementation:**
+```csharp
+public class OpcUaClientHealthCheck : IHealthCheck
+{
+    public async Task<HealthCheckResult> CheckHealthAsync(
+        HealthCheckContext context,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_sessionManager.IsConnected)
+            return HealthCheckResult.Unhealthy("OPC UA session disconnected");
+
+        if (_sessionManager.IsReconnecting)
+            return HealthCheckResult.Degraded("Reconnection in progress");
+
+        if (_pollingManager?.IsCircuitOpen == true)
+            return HealthCheckResult.Degraded("Polling circuit breaker open");
+
+        var data = new Dictionary<string, object>
+        {
+            ["connected"] = _sessionManager.IsConnected,
+            ["subscriptions"] = _sessionManager.Subscriptions.Count,
+            ["pollingItems"] = _pollingManager?.PollingItemCount ?? 0,
+            ["queuedWrites"] = _writeFailureQueue.PendingWriteCount,
+            ["droppedWrites"] = _writeFailureQueue.DroppedWriteCount
+        };
+
+        return HealthCheckResult.Healthy("OPC UA client operational", data);
+    }
+}
+```
+
+**File:** Create new `OpcUaClientHealthCheck.cs`
+
+---
+
+#### 2. DateTimeOffset.Now → UtcNow (1 minute)
+**Status:** Will be done in another PR
+
+**Location:** `OpcUaSubscriptionManager.cs:137`
+
+**Issue:** `DateTimeOffset.Now` performs timezone lookup (kernel call), ~100ns overhead per notification
+
+**Fix:** Use `DateTimeOffset.UtcNow` instead for better performance
+
+---
+
+### Medium Priority
+
+#### 3. Metrics/Telemetry Integration (4-8 hours)
+Integrate with `System.Diagnostics.Metrics` for real-time telemetry and monitoring.
+
+**Benefits:**
+- Real-time monitoring dashboards
+- OpenTelemetry integration
+- Prometheus/Grafana export
+- Production performance tracking
+
+**Implementation:**
+```csharp
+public class OpcUaClientMetrics
+{
+    private static readonly Meter Meter = new("Namotion.Interceptor.OpcUa");
+
+    private readonly Counter<long> _subscriptionNotifications =
+        Meter.CreateCounter<long>("opcua.subscriptions.notifications.count");
+
+    private readonly Counter<long> _writeOperations =
+        Meter.CreateCounter<long>("opcua.writes.count");
+
+    private readonly ObservableGauge<int> _queuedWrites;
+    private readonly ObservableGauge<int> _subscriptionCount;
+}
+```
+
+**File:** Create new `OpcUaClientMetrics.cs`
+
+---
+
+#### 4. Make Configuration Immutable (1-2 hours)
+**Location:** `OpcUaClientConfiguration.cs`
+
+**Issue:** Configuration properties use `set` allowing modification after construction
+
+**Fix:** Change all configuration properties from `set` to `init`
+
+**Benefit:** Prevents accidental configuration changes after initialization
+
+---
+
+#### 5. Add Per-Item Write Retry (2-4 hours)
+**Location:** `OpcUaSubjectClientSource.cs:320-370`
+
+**Issue:** Write chunking treats entire chunk as failed on any error
+
+**Fix:** Implement per-item retry logic to identify specific failing items
+
+**Benefit:** Better handling of partial write failures in large batches
+
+---
+
+### Low Priority (Architectural Risks)
+
+#### RISK 2: Write Chunking Without Per-Item Retry (Medium Severity)
+When a write chunk fails, all items in chunk are re-queued even if some succeeded. Under persistent partial failures, this creates inefficiency.
+
+**Mitigation:** Same as improvement #5 above - implement per-item retry
+
+---
+
+#### RISK 3: Configuration Mutability (Low Severity)
+Configuration can be modified after initialization, potentially causing inconsistent state.
+
+**Mitigation:** Same as improvement #4 above - use `init` accessors
+
+---
+
+#### RISK 5: Ring Buffer Count Variance (Very Low Severity)
+`ConcurrentQueue.Count` may vary slightly under concurrent access during ring buffer enforcement.
+
+**Assessment:** Acceptable by design - slight variance in queue size is tolerable and won't cause corruption
+
+---
+
 ## Future Enhancements (Not Blockers)
 
-### Medium Priority (Reliability Improvements)
+### Additional Reliability Improvements
 
 1. **Concurrent Access to _monitoredItems During Filtering**
    - **Location:** `OpcUaSubscriptionManager.cs:207-285`
