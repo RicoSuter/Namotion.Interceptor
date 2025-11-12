@@ -187,12 +187,25 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                             _logger.LogError(
                                 "OPC UA reconnection stalled for {Iterations} health check iterations " +
                                 "(~{Seconds}s). OnReconnectComplete callback likely never fired. " +
-                                "Forcing reconnecting flag reset to allow manual recovery.",
+                                "Attempting stall recovery with synchronized flag reset.",
                                 iterations,
                                 iterations * (_configuration.SubscriptionHealthCheckInterval.TotalSeconds));
 
-                            sessionManager.ForceResetReconnectingFlag();
-                            Interlocked.Exchange(ref _reconnectingIterations, 0);
+                            // Use synchronized reset to prevent race with delayed OnReconnectComplete
+                            if (sessionManager.TryForceResetIfStalled())
+                            {
+                                _logger.LogWarning(
+                                    "Stall confirmed: reconnecting flag reset to allow manual recovery. " +
+                                    "Session will be recreated on next health check.");
+                                Interlocked.Exchange(ref _reconnectingIterations, 0);
+                            }
+                            else
+                            {
+                                _logger.LogInformation(
+                                    "Stall recovery skipped: reconnection completed while acquiring lock. " +
+                                    "Session restoration successful.");
+                                Interlocked.Exchange(ref _reconnectingIterations, 0);
+                            }
                         }
                     }
                     else
