@@ -32,7 +32,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private IReadOnlyList<MonitoredItem>? _initialMonitoredItems;
 
-    internal string OpcVariableKey { get; } = "OpcVariable:" + Guid.NewGuid();
+    internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
     
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger<OpcUaSubjectClientSource> logger)
     {
@@ -364,7 +364,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         for (var i = 0; i < take; i++)
         {
             var change = changes[offset + i];
-            if (!change.Property.TryGetPropertyData(OpcVariableKey, out var v) || v is not NodeId nodeId)
+            if (!change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var v) || v is not NodeId nodeId)
             {
                 continue;
             }
@@ -438,23 +438,26 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private void Reset()
     {
+        // Note: Session manager disposal is NOT needed here.
+        // The SubjectSourceBackgroundService.ExecuteAsync retry loop calls DisposeAsync()
+        // on the disposable returned by StartListeningAsync, which properly disposes the
+        // session manager BEFORE Reset() is called on the next retry.
+        // Reset() is called at the START of StartListeningAsync, where the old session
+        // manager has already been disposed by the background service.
+
         _initialMonitoredItems = null;
-        
+
         if (_sessionManager is not null)
         {
+            // Unsubscribe from events to prevent leaks (defensive, already unsubscribed in DisposeAsync)
             _sessionManager.ReconnectionCompleted -= OnReconnectionCompleted;
+            _sessionManager = null;
         }
 
-        foreach (var property in _propertiesWithOpcData)
-        {
-            try
-            {
-                property.SetPropertyData(OpcVariableKey, null);
-            }
-            catch { /* Ignore cleanup exceptions */ }
-        }
-
-        _propertiesWithOpcData.Clear();
+        // Clean up property data before reloading
+        // This is already done in DisposeAsync, but we do it here too for completeness
+        // since we're about to reload properties with new OPC UA node mappings
+        CleanupPropertyData();
     }
 
     public async ValueTask DisposeAsync()
@@ -471,9 +474,23 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             sessionManager.ReconnectionCompleted -= OnReconnectionCompleted;
             await sessionManager.DisposeAsync().ConfigureAwait(false);
         }
-        
+
+        // Clean up property data to prevent memory leaks
+        // This ensures that property data associated with this OpcUaNodeIdKey is cleared
+        // even if properties are reused across multiple source instances
+        CleanupPropertyData();
         Dispose();
-        
+
         _writeFlushSemaphore.Dispose();
+    }
+
+    private void CleanupPropertyData()
+    {
+        foreach (var property in _propertiesWithOpcData)
+        {
+            property.RemovePropertyData(OpcUaNodeIdKey);
+        }
+
+        _propertiesWithOpcData.Clear();
     }
 }
