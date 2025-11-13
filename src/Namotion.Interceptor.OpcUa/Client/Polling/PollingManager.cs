@@ -218,29 +218,23 @@ internal sealed class PollingManager : IDisposable
         }
 
         var session = _sessionManager.CurrentSession;
-        if (session == null)
+        if (session is null || !session.Connected)
         {
-            _logger.LogDebug("No active session available for polling");
+            _logger.LogDebug("No active session available for polling (null: {IsNull}, connected: {Connected})",
+                session is null, session?.Connected);
             Volatile.Write(ref _lastKnownSession, null);
             return;
         }
 
         // Detect session change (reconnection)
         var lastSession = Volatile.Read(ref _lastKnownSession);
-        if (lastSession != null && !ReferenceEquals(lastSession, session))
+        if (!ReferenceEquals(lastSession, session))
         {
             _logger.LogInformation("Session change detected, resetting polled item values and circuit breaker");
             ResetPolledValues();
             _circuitBreaker.Reset();
         }
         Volatile.Write(ref _lastKnownSession, session);
-
-        // Validate session is connected and operational
-        if (!session.Connected)
-        {
-            _logger.LogDebug("Session not connected, skipping poll");
-            return;
-        }
 
         var startTime = DateTimeOffset.UtcNow;
         var pollSucceeded = false;
@@ -338,7 +332,7 @@ internal sealed class PollingManager : IDisposable
                 cancellationToken).ConfigureAwait(false);
 
             // Process results - count metrics per item for accurate monitoring
-            for (var i = 0; i < response.Results.Count && i < batch.Count; i++)
+            for (var i = 0; i < Math.Min(response.Results.Count, batch.Count); i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
