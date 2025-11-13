@@ -24,62 +24,123 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                     var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
 
                     var model = ctx.SemanticModel;
-                    if (!HasInterceptorSubjectAttribute(classDeclaration, model, ct))
-                        return null!;
+                    
+                    // Get the type symbol to access all partial declarations
+                    var typeSymbol = model.GetDeclaredSymbol(classDeclaration, ct);
+                    if (typeSymbol is null)
+                        return null;
+                    
+                    // Check if ANY partial declaration has the InterceptorSubjectAttribute
+                    var hasAttributeInAnyPartial = typeSymbol.DeclaringSyntaxReferences
+                        .Select(r => r.GetSyntax(ct))
+                        .OfType<ClassDeclarationSyntax>()
+                        .Any(c =>
+                        {
+                            var declarationModel = model.Compilation.GetSemanticModel(c.SyntaxTree);
+                            return HasInterceptorSubjectAttribute(c, declarationModel, ct);
+                        });
+                    
+                    if (!hasAttributeInAnyPartial)
+                        return null;
+                    
+                    // Collect all properties from all partial declarations
+                    var allProperties = typeSymbol.DeclaringSyntaxReferences
+                        .Select(r => r.GetSyntax(ct))
+                        .OfType<ClassDeclarationSyntax>()
+                        .SelectMany(c =>
+                        {
+                            var declarationModel = model.Compilation.GetSemanticModel(c.SyntaxTree);
+                            return c.Members
+                                .OfType<PropertyDeclarationSyntax>()
+                                .Select(p => new
+                                {
+                                    Property = p,
+                                    Type = declarationModel.GetTypeInfo(p.Type, ct),
+                                    AccessModifier = 
+                                        p.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) ? "public" :
+                                        p.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword)) ? "internal" :
+                                        p.Modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)) ? "protected" : 
+                                        "private",
+
+                                    IsPartial = p.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)),
+                                    IsDerived = HasDerivedAttribute(p, declarationModel, ct),
+                                    IsRequired = p.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword)),
+                                    HasGetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
+                                                p.ExpressionBody.IsKind(SyntaxKind.ArrowExpressionClause),
+                                    HasSetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true,
+                                    HasInit = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.InitAccessorDeclaration)) == true
+                                });
+                        })
+                        .ToArray();
+                    
+                    // Collect all methods from all partial declarations
+                    var allMethods = typeSymbol.DeclaringSyntaxReferences
+                        .Select(r => r.GetSyntax(ct))
+                        .OfType<ClassDeclarationSyntax>()
+                        .SelectMany(c =>
+                        {
+                            var declarationModel = model.Compilation.GetSemanticModel(c.SyntaxTree);
+                            return c.Members
+                                .OfType<MethodDeclarationSyntax>()
+                                .Where(p => p.Identifier.Text.EndsWith(InterceptedMethodPostfix))
+                                .Select(p => new
+                                {
+                                    Method = p,
+                                    ReturnType = p.ReturnType,
+                                    Parameters = p.ParameterList.Parameters,
+                                    SemanticModel = declarationModel
+                                });
+                        })
+                        .ToArray();
                     
                     return new
                     {
                         Model = model,
-                        ClassNode = (ClassDeclarationSyntax)ctx.Node,
-                        Properties = classDeclaration.Members
-                            .OfType<PropertyDeclarationSyntax>()
-                            .Select(p => new
-                            {
-                                Property = p,
-                                Type = model.GetTypeInfo(p.Type, ct),
-                                AccessModifier = 
-                                    p.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) ? "public" :
-                                    p.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword)) ? "internal" :
-                                    p.Modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)) ? "protected" : 
-                                    "private",
-
-                                IsPartial = p.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)),
-                                IsDerived = HasDerivedAttribute(p, model, ct),
-                                IsRequired = p.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword)),
-                                HasGetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
-                                            p.ExpressionBody.IsKind(SyntaxKind.ArrowExpressionClause),
-                                HasSetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true,
-                                HasInit = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.InitAccessorDeclaration)) == true
-                            })
-                            .ToArray(),
-                        Methods = classDeclaration.Members
-                            .OfType<MethodDeclarationSyntax>()
-                            .Where(p => p.Identifier.Text.EndsWith(InterceptedMethodPostfix))
-                            .Select(p => new
-                            {
-                                Method = p,
-                                ReturnType = p.ReturnType,
-                                Parameters = p.ParameterList.Parameters
-                            })
-                            .ToArray()
+                        ClassNode = classDeclaration,
+                        TypeSymbol = typeSymbol,
+                        Properties = allProperties,
+                        Methods = allMethods
                     };
                 })
-            .Where(static m => m is not null)!;
-
-        var compilationAndClasses = context.CompilationProvider.Combine(classWithAttributeProvider.Collect());
-
-        context.RegisterSourceOutput(compilationAndClasses, (spc, source) =>
-        {
-            var (_, classes) = source;
-            foreach (var cls in classes.GroupBy(c => c.ClassNode.Identifier.ValueText))
+            .Select((m, _) =>
             {
-                var fileName = $"{cls.First().ClassNode.Identifier.Value}.g.cs";
-                try
+                if (m is null)
                 {
-                    var semanticModel = cls.First().Model;
-                    var className = cls.First().ClassNode.Identifier.ValueText;
+                    return null;
+                }
+
+                var typeSymbol = m.TypeSymbol;
+                return new
+                {
+                    m.Model,
+                    m.ClassNode,
+                    TypeSymbol = typeSymbol,
+                    TypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                    AllClassDeclarations = typeSymbol.DeclaringSyntaxReferences
+                        .Select(r => r.GetSyntax())
+                        .OfType<ClassDeclarationSyntax>()
+                        .ToArray(),
+                    m.Properties,
+                    m.Methods
+                };
+            })
+            .Where(m => m is not null)
+            .Collect()
+            .SelectMany((items, _) => items
+                .GroupBy(x => x!.TypeName)
+                .Select(g => g.First())); // take only one per type name to avoid duplicates
+
+        context.RegisterSourceOutput(classWithAttributeProvider, (spc, cls) =>
+        {
+            if (cls is null) return;
+            
+            var fileName = $"{cls.ClassNode.Identifier.Value}.g.cs";
+            try
+            {
+                var semanticModel = cls.Model;
+                var className = cls.ClassNode.Identifier.ValueText;
                     
-                    var baseClass = cls.First().ClassNode.BaseList?.Types
+                    var baseClass = cls.ClassNode.BaseList?.Types
                         .Select(t => semanticModel.GetTypeInfo(t.Type).Type as INamedTypeSymbol)
                         .FirstOrDefault(t => t != null && 
                             (HasInterceptorSubjectAttribute(t) || // <= needed when partial class with IInterceptorSubject is not yet generated
@@ -87,8 +148,8 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                     
                     var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
                     
-                    var namespaceName = (cls.First().ClassNode.Parent as NamespaceDeclarationSyntax)?.Name.ToString() ??
-                                        (cls.First().ClassNode.Parent as FileScopedNamespaceDeclarationSyntax)?.Name.ToString()
+                    var namespaceName = (cls.ClassNode.Parent as NamespaceDeclarationSyntax)?.Name.ToString() ??
+                                        (cls.ClassNode.Parent as FileScopedNamespaceDeclarationSyntax)?.Name.ToString()
                                         ?? "YourDefaultNamespace";
 
                     var defaultPropertiesNewModifier = baseClass is not null ? "new " : string.Empty;
@@ -141,7 +202,7 @@ namespace {namespaceName}
         public {defaultPropertiesNewModifier}static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties {{ get; }} =
             new Dictionary<string, SubjectPropertyMetadata>
             {{";
-                    foreach (var property in cls.SelectMany(c => c.Properties))
+                    foreach (var property in cls.Properties)
                     {
                         var fullyQualifiedName = property.Type.Type!.ToString();
                         var propertyName = property.Property.Identifier.Value;
@@ -166,7 +227,8 @@ namespace {namespaceName}
             .ToFrozenDictionary();
 ";
 
-                    var firstConstructor = cls.SelectMany(c => c.ClassNode.Members)
+                    var firstConstructor = cls.AllClassDeclarations
+                        .SelectMany(c => c.Members)
                         .FirstOrDefault(m => m.IsKind(SyntaxKind.ConstructorDeclaration))
                         as ConstructorDeclarationSyntax;
 
@@ -192,7 +254,7 @@ namespace {namespaceName}
 ";
                     }
 
-                    foreach (var property in cls.SelectMany(c => c.Properties).Where(p => p.IsPartial))
+                    foreach (var property in cls.Properties.Where(p => p.IsPartial))
                     {
                         var fullyQualifiedName = property.Type.Type!.ToString();
                         var propertyName = property.Property.Identifier.Value;
@@ -235,15 +297,15 @@ namespace {namespaceName}
 ";
                     }
 
-                    foreach (var method in cls.SelectMany(c => c.Methods))
+                    foreach (var method in cls.Methods)
                     {
                         var fullMethodName = method.Method.Identifier.Text;
                         var methodName = fullMethodName.Substring(0, fullMethodName.Length - InterceptedMethodPostfix.Length);
-                        var returnType = GetFullTypeName(method.ReturnType, semanticModel);
+                        var returnType = GetFullTypeName(method.ReturnType, method.SemanticModel);
                         var parameters = method.Parameters.Select(p => new
                         {
                             Name = p.Identifier.ValueText,
-                            Type = GetFullTypeName(p.Type, semanticModel)
+                            Type = GetFullTypeName(p.Type, method.SemanticModel)
                         }).ToList();
 
                         var directParameterCode = string.Join(", ", parameters.Select((p, i) => $"({p.Type})p[{i}]!"));
@@ -301,11 +363,10 @@ namespace {namespaceName}
 }}
 ";
                     spc.AddSource(fileName, SourceText.From(generatedCode, Encoding.UTF8));
-                }
-                catch (Exception ex)
-                {
-                    spc.AddSource(fileName, SourceText.From($"/* {ex} */", Encoding.UTF8));
-                }
+            }
+            catch (Exception ex)
+            {
+                spc.AddSource(fileName, SourceText.From($"/* {ex} */", Encoding.UTF8));
             }
         });
     }
