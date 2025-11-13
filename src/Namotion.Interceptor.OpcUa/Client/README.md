@@ -321,8 +321,9 @@ OpcUaSubjectClientSource.WriteToSourceAsync (line 317)
     ├─> Success: Acknowledge (line 456)
     │
     └─> Failure:
-        ↓ Network exception (line 456-472): Queue remaining changes
-        ↓ Bad status code (line 529-547): Log error (NOT retried - Issue #3)
+        ↓ Network exception (line 517-532): Queue remaining changes
+        ↓ Bad status code - Transient errors (line 506-515): Auto-retry via WriteFailureQueue
+        ↓ Bad status code - Permanent errors: Log error, no retry
         ↓ WriteFailureQueue (ring buffer, drops oldest on overflow)
 ```
 
@@ -391,7 +392,7 @@ OnKeepAlive → sets _isReconnecting = 1 → BeginReconnect → OnReconnectCompl
 ExecuteAsync → if (currentSession is null && !isReconnecting) → ReconnectSessionAsync
 ```
 
-**Protection:** Manual path only proceeds when `!IsReconnecting`, blocking when automatic reconnection active. **⚠️ ISSUE #5: Stall detection breaks this coordination.**
+**Protection:** Manual path only proceeds when `!IsReconnecting`, blocking when automatic reconnection active. Stall detection uses synchronized `TryForceResetIfStalled()` with lock + double-check to safely handle edge cases.
 
 #### 4. **Object Pooling** (Zero-Allocation Hot Path)
 
@@ -543,15 +544,25 @@ catch (Exception ex)
 
 **Status Code Error Handling:**
 ```csharp
-// OpcUaSubjectClientSource.cs:529-547 (Issue #3: NOT retried)
+// OpcUaSubjectClientSource.cs:568-634
 if (StatusCode.IsBad(results[i]))
 {
-    _logger.LogError("Failed to write {PropertyName} ...", ...);
-    // Logged but NOT queued for retry
+    var isTransient = IsTransientWriteError(statusCode);
+
+    if (isTransient)
+    {
+        _logger.LogWarning("Transient write failure: {StatusCode}. Will retry.");
+        transientFailures.Add(change);  // Auto-retry via WriteFailureQueue
+    }
+    else
+    {
+        _logger.LogError("Permanent write failure: {StatusCode}. Not retrying.");
+    }
 }
 ```
 
-**⚠️ Issue #3:** Transient status code errors (e.g., `BadTooManyOperations`, `BadTimeout`) should be retried, not just logged.
+**Transient errors** (auto-retry): `BadSessionIdInvalid`, `BadTimeout`, `BadTooManyOperations`, `BadOutOfService`
+**Permanent errors** (no retry): `BadNodeIdUnknown`, `BadTypeMismatch`, `BadWriteNotSupported`
 
 **Ring Buffer Semantics:**
 ```csharp
@@ -585,7 +596,7 @@ Connection lost
   │   ↓ Clears _isReconnecting = 0
   │   ↓ Fires ReconnectionCompleted event
   │   ↓ Event handler flushes queued writes
-  │   ↓ ⚠️ Issue #1: Missing full read (data loss)
+  │   ↓ ✅ LoadCompleteStateAndReplayUpdatesAsync() - full read + replay buffered notifications
   │
   └─> Timeout: _isReconnecting stuck at 1
       ↓ Health check detects after 10 iterations (~100s)
@@ -601,10 +612,11 @@ Health check loop (every 10 seconds)
   ↓ if (currentSession is null && !isReconnecting)
   ↓ SessionReconnectHandler timed out
   ↓ Calls ReconnectSessionAsync
+  ↓ StartCollectingUpdates() - buffer incoming notifications
   ↓ Creates NEW session
   ↓ Recreates subscriptions from cached MonitoredItems
   ↓ Flushes queued writes
-  ↓ ⚠️ Issue #1: Missing full read (data loss)
+  ↓ ✅ LoadCompleteStateAndReplayUpdatesAsync() - full read + replay buffered notifications
 ```
 
 #### Stall Detection
@@ -754,7 +766,7 @@ A comprehensive multi-agent review identified and resolved all issues:
 ---
 
 
-## Performance Optimizations (After Critical Fixes)
+## Optional Performance Optimizations
 
 ### Priority 1: Eliminate Polling Snapshot Allocation
 
@@ -792,26 +804,19 @@ A comprehensive multi-agent review identified and resolved all issues:
 2. **High-Frequency Data Change Test**
    - 1000 items @ 10 Hz for 60 seconds
    - Measure: GC collections, allocation rate, throughput
-   - Target: <100 MB/sec allocations (after boxing fix)
+   - Target: <100 MB/sec allocations
 
 3. **Write Failure Retry Test**
-   - Simulate transient write errors (BadSessionIdInvalid)
-   - Verify writes are retried (after status code categorization fix)
-   - Expected: No data loss on transient errors
+   - Simulate transient write errors (BadSessionIdInvalid, BadTimeout)
+   - Verify writes are automatically retried via WriteFailureQueue
+   - Expected: Transient errors auto-retry, permanent errors (BadTypeMismatch) logged only
 
 4. **Reconnection Stall Test**
    - Prevent OnReconnectComplete from firing (mock SDK)
-   - Verify health check detects stall and recovers
-   - Expected: System recovers within timeout + grace period
+   - Verify health check detects stall with TryForceResetIfStalled()
+   - Expected: System recovers within ~100s, no race conditions
 
-5. **Object Pool Leak Test**
-   - Inject exceptions in EnqueueOrApplyUpdate callback
-   - Monitor pool item count over time
-   - Expected: No pool exhaustion (after leak fix)
-
----
-
-**Prepared By:** Claude Code
-**Review Methodology:** Multi-agent analysis (Architecture, Performance, Threading)
-**Status:** ❌ Critical bugs found - **NOT production ready** until fixed
-**Next Steps:** Fix issues #1-5, run critical test scenarios, re-review
+5. **Queue-Read-Replay Test**
+   - Disconnect during active data changes, reconnect after 30 seconds
+   - Verify all property values are current after reconnection
+   - Expected: Full state load + buffered notification replay, zero data loss
