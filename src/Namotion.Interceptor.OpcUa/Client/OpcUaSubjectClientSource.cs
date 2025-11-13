@@ -27,6 +27,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly WriteFailureQueue _writeFailureQueue;
 
     private SessionManager? _sessionManager;
+    private ISubjectUpdater? _updater;
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private int _reconnectingIterations; // Tracks health check iterations while reconnecting (for stall detection)
@@ -60,6 +61,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     public async Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
     {
         Reset();
+
+        _updater = updater;
 
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
@@ -270,6 +273,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 "Restarting OPC UA session after SessionReconnectHandler timeout ({Timeout}ms)...",
                 _configuration.ReconnectHandlerTimeout);
 
+            // Start collecting updates - any incoming subscription notifications will be buffered
+            // until we complete the full state reload
+            _updater?.StartCollectingUpdates();
+
             // Create new session (CreateSessionAsync disposes old session internally)
             var application = _configuration.CreateApplicationInstance();
             var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken)
@@ -297,6 +304,22 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to flush queued writes after session restart.");
+            }
+
+            // Load complete state and replay buffered updates (queue-read-replay pattern)
+            // This ensures no data loss from values that changed during the disconnection period
+            if (_updater is not null)
+            {
+                try
+                {
+                    _logger.LogInformation("Loading complete OPC UA state after reconnection...");
+                    await _updater.LoadCompleteStateAndReplayUpdatesAsync(cancellationToken).ConfigureAwait(false);
+                    _logger.LogInformation("Complete OPC UA state loaded and buffered updates replayed successfully.");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to load complete state after reconnection. Some data may be stale.");
+                }
             }
 
             _logger.LogInformation("Session restart complete.");
@@ -381,10 +404,26 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
                     await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
                 }
+
+                // Load complete state and replay buffered updates (queue-read-replay pattern)
+                // This ensures no data loss from values that changed during the disconnection period
+                if (_updater is not null)
+                {
+                    try
+                    {
+                        _logger.LogInformation("Loading complete OPC UA state after automatic reconnection...");
+                        await _updater.LoadCompleteStateAndReplayUpdatesAsync(cancellationToken).ConfigureAwait(false);
+                        _logger.LogInformation("Complete OPC UA state loaded and buffered updates replayed successfully.");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to load complete state after automatic reconnection. Some data may be stale.");
+                    }
+                }
             }
             catch (Exception exception)
             {
-                _logger.LogError(exception, "Failed to flush pending OPC UA writes after reconnection.");
+                _logger.LogError(exception, "Failed to complete reconnection tasks (flush writes and reload state).");
             }
         }, cancellationToken);
     }
@@ -464,11 +503,20 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     writeValues,
                     cancellationToken).ConfigureAwait(false);
 
-                LogWriteFailures(changes, writeValues, writeResponse.Results, offset);
+                var transientFailures = LogWriteFailures(changes, writeValues, writeResponse.Results, offset);
+
+                // Re-queue changes that had transient errors for automatic retry
+                if (transientFailures is not null && transientFailures.Count > 0)
+                {
+                    _logger.LogInformation(
+                        "Re-queuing {Count} writes with transient errors for automatic retry.",
+                        transientFailures.Count);
+                    _writeFailureQueue.EnqueueBatch(transientFailures);
+                }
             }
             catch (Exception ex)
             {
-                // Partial write failure - re-queue only the remaining changes from this offset onwards
+                // Network/communication failure - re-queue only the remaining changes from this offset onwards
                 var remainingCount = count - offset;
                 var remainingChanges = new List<SubjectPropertyChange>(remainingCount);
                 for (var i = offset; i < count; i++)
@@ -476,8 +524,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     remainingChanges.Add(changes[i]);
                 }
 
-                _logger.LogWarning(ex, 
-                    "OPC UA write failed at offset {Offset}, re-queuing {Count} remaining changes.",
+                _logger.LogWarning(ex,
+                    "OPC UA write communication failed at offset {Offset}, re-queuing {Count} remaining changes.",
                     offset, remainingCount);
 
                 _writeFailureQueue.EnqueueBatch(remainingChanges);
@@ -526,24 +574,72 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         return writeValues;
     }
 
-    private void LogWriteFailures(
+    /// <summary>
+    /// Determines if a write failure status code represents a transient error that should be retried.
+    /// Returns true for transient errors (connectivity, timeouts, server load), false for permanent errors (invalid node, type mismatch).
+    /// </summary>
+    private static bool IsTransientWriteError(StatusCode statusCode)
+    {
+        // Permanent design-time errors - don't retry
+        if (statusCode == StatusCodes.BadNodeIdUnknown ||
+            statusCode == StatusCodes.BadAttributeIdInvalid ||
+            statusCode == StatusCodes.BadTypeMismatch ||
+            statusCode == StatusCodes.BadWriteNotSupported ||
+            statusCode == StatusCodes.BadUserAccessDenied ||
+            statusCode == StatusCodes.BadNotWritable)
+        {
+            return false;
+        }
+
+        // Transient connectivity/server errors - retry
+        // Examples: BadSessionIdInvalid, BadConnectionClosed, BadServerNotConnected,
+        // BadTimeout, BadRequestTimeout, BadTooManyOperations, BadOutOfService
+        return StatusCode.IsBad(statusCode);
+    }
+
+    /// <summary>
+    /// Logs write failures and collects changes with transient errors for retry.
+    /// Returns list of changes that had transient errors and should be re-queued.
+    /// </summary>
+    private List<SubjectPropertyChange>? LogWriteFailures(
         IReadOnlyList<SubjectPropertyChange> changes,
         WriteValueCollection writeValues,
         StatusCodeCollection results,
         int offset)
     {
+        List<SubjectPropertyChange>? transientFailures = null;
+
         for (var i = 0; i < Math.Min(results.Count, writeValues.Count); i++)
         {
             if (StatusCode.IsBad(results[i]))
             {
                 var change = changes[offset + i];
-                _logger.LogError(
-                    "Failed to write {PropertyName} (NodeId: {NodeId}): {StatusCode}",
-                    change.Property.Name,
-                    writeValues[i].NodeId,
-                    results[i]);
+                var statusCode = results[i];
+                var isTransient = IsTransientWriteError(statusCode);
+
+                if (isTransient)
+                {
+                    _logger.LogWarning(
+                        "Transient write failure for {PropertyName} (NodeId: {NodeId}): {StatusCode}. Will retry.",
+                        change.Property.Name,
+                        writeValues[i].NodeId,
+                        statusCode);
+
+                    transientFailures ??= [];
+                    transientFailures.Add(change);
+                }
+                else
+                {
+                    _logger.LogError(
+                        "Permanent write failure for {PropertyName} (NodeId: {NodeId}): {StatusCode}. Not retrying.",
+                        change.Property.Name,
+                        writeValues[i].NodeId,
+                        statusCode);
+                }
             }
         }
+
+        return transientFailures;
     }
 
     private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
