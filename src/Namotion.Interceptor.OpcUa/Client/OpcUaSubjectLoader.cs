@@ -273,13 +273,7 @@ internal class OpcUaSubjectLoader
 
         if (response.Results.Count > 0)
         {
-            if (response.Results[0].References is { Count: > 0 } references)
-            {
-                foreach (var reference in references)
-                {
-                    results.Add(reference);
-                }
-            }
+            results.AddRange(response.Results[0].References);
 
             var continuationPoint = response.Results[0].ContinuationPoint;
             while (continuationPoint is { Length: > 0 })

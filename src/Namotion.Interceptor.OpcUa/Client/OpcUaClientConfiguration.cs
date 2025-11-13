@@ -295,13 +295,6 @@ public class OpcUaClientConfiguration
                 nameof(WriteQueueSize));
         }
 
-        if (WriteQueueSize > 10000)
-        {
-            throw new ArgumentException(
-                $"WriteQueueSize must not exceed {10000} (got: {WriteQueueSize})",
-                nameof(WriteQueueSize));
-        }
-
         if (EnableAutoHealing)
         {
             if (SubscriptionHealthCheckInterval < TimeSpan.FromSeconds(5))

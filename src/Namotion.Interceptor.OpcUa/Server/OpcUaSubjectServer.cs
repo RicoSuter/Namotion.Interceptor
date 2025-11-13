@@ -6,11 +6,18 @@ namespace Namotion.Interceptor.OpcUa.Server;
 internal class OpcUaSubjectServer : StandardServer
 {
     private readonly ILogger _logger;
+    private readonly CustomNodeManagerFactory _nodeManagerFactory;
 
     public OpcUaSubjectServer(IInterceptorSubject subject, OpcUaSubjectServerSource source, OpcUaServerConfiguration configuration, ILogger logger)
     {
         _logger = logger;
-        AddNodeManager(new CustomNodeManagerFactory(subject, source, configuration));
+        _nodeManagerFactory = new CustomNodeManagerFactory(subject, source, configuration);
+        AddNodeManager(_nodeManagerFactory);
+    }
+
+    public void ClearPropertyData()
+    {
+        _nodeManagerFactory.NodeManager?.ClearPropertyData();
     }
 
     protected override void OnServerStarted(IServerInternal server)
