@@ -77,7 +77,7 @@ public class SubjectSourceBenchmark
     {
         for (var i = 0; i < _updates.Length; i++)
         {
-            _service.EnqueueOrApplyUpdate(null, _updates[i]);
+            _source.Updater.EnqueueOrApplyUpdate(null, _updates[i]);
         }
 
         _signal.WaitOne();
@@ -116,6 +116,8 @@ public class SubjectSourceBenchmark
         private int _count;
         private readonly int _targetCount;
         private readonly AutoResetEvent _signal = new(false);
+        
+        public ISubjectUpdater Updater { get; private set; }
 
         public TestSubjectSource(int targetCount)
         {
@@ -136,6 +138,7 @@ public class SubjectSourceBenchmark
 
         public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
         {
+            Updater = updater;
             return Task.FromResult<IDisposable?>(null);
         }
 

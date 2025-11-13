@@ -13,6 +13,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Connection;
 /// </summary>
 internal sealed class SessionManager : IDisposable, IAsyncDisposable
 {
+    private readonly ISubjectUpdater _updater;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
@@ -46,6 +47,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
 
     public SessionManager(ISubjectUpdater updater, OpcUaClientConfiguration configuration, ILogger logger)
     {
+        _updater = updater;
         _logger = logger;
         _configuration = configuration;
         _reconnectHandler = new SessionReconnectHandler(false, (int)configuration.ReconnectHandlerTimeout);
@@ -170,6 +172,9 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             }
 
             _logger.LogInformation("OPC UA server connection lost. Beginning reconnect...");
+
+            // Start collecting updates before reconnection - any incoming notifications will be buffered
+            _updater.StartCollectingUpdates();
 
             var newState = _reconnectHandler.BeginReconnect(session, _configuration.ReconnectInterval, OnReconnectComplete);
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
@@ -308,17 +313,20 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         {
             return;
         }
-        
+
+        // Dispose managers FIRST (children) - they reference the session
+        // Proper cleanup order: children before parent
+        _subscriptionManager.Dispose();       // Clean up subscription references on session
+        _pollingManager?.Dispose();           // Stop polling operations
+        _reconnectHandler.Dispose();          // Stop reconnection attempts
+
+        // Then dispose session LAST (parent)
         var sessionToDispose = _session;
         if (sessionToDispose is not null)
         {
             await DisposeSessionAsync(sessionToDispose, CancellationToken.None).ConfigureAwait(false);
             _session = null;
         }
-
-        _pollingManager?.Dispose();
-        _subscriptionManager.Dispose();
-        _reconnectHandler.Dispose();
     }
 
     public void Dispose()
