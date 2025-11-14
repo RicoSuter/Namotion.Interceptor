@@ -348,7 +348,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     
     /// <summary>
     /// Writes changes to OPC UA server. Queues with ring buffer semantics if disconnected.
-    /// Session staleness handled defensively via session.Connected checks.
     /// </summary>
     public async ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
@@ -358,9 +357,14 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
 
         var session = _sessionManager?.CurrentSession;
-        if (session is not null)
+        if (session is null || !session.Connected)
         {
-            // Flush old pending writes first - if this fails, don't attempt new writes
+            _writeFailureQueue.EnqueueBatch(changes);
+            return;
+        }
+
+        try
+        {
             var succeeded = await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
             if (succeeded)
             {
@@ -371,26 +375,26 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 _writeFailureQueue.EnqueueBatch(changes);
             }
         }
-        else
+        catch (Exception ex)
         {
-            // When session is not available, queue the changes to try to apply later
+            _logger.LogWarning(ex, "Failed to write {Count} changes to OPC UA server, queuing for retry.", changes.Count);
             _writeFailureQueue.EnqueueBatch(changes);
         }
     }
 
     private void OnReconnectionCompleted(object? sender, EventArgs e)
     {
-        if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
-        {
-            return;
-        }
-
         var cancellationToken = _stoppingToken;
 
         // Task.Run needed: synchronous event handler, cannot await.
-        // Safe: All exceptions caught, semaphore coordinates concurrent access, cancellation coordinated with disposal.
+        // Double-check disposal inside task ensures clean shutdown.
         Task.Run(async () =>
         {
+            if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
+            {
+                return; // Already disposing, skip reconnection work
+            }
+
             try
             {
                 var session = _sessionManager?.CurrentSession;
@@ -460,7 +464,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
         finally
         {
-            _writeFlushSemaphore.Release();
+            try { _writeFlushSemaphore.Release(); } catch { /* might be disposed already */ }
         }
     }
 
@@ -698,6 +702,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         CleanupPropertyData();
         Dispose();
 
+        // Dispose semaphore directly - any in-flight flush will handle ObjectDisposedException
+        // During shutdown, losing in-flight writes is acceptable
         _writeFlushSemaphore.Dispose();
     }
 
