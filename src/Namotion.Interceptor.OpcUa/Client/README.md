@@ -780,15 +780,38 @@ A comprehensive multi-agent review identified and resolved all issues:
 
 ---
 
-### Priority 2: Replace Semaphore with Interlocked
+### Priority 2: Replace Semaphore with Interlocked ❌ REJECTED
 
-**Location:** `OpcUaSubjectClientSource.cs:18, 362`
+**Location:** `OpcUaSubjectClientSource.cs:18, 439-463`
 
-**Current:** `SemaphoreSlim _writeFlushSemaphore`
+**Current:** `SemaphoreSlim _writeFlushSemaphore` - Coordinates concurrent flush operations
 
-**Fix:** Use Interlocked CAS pattern for lock-free single-writer coordination
+**Proposed:** Use Interlocked CAS pattern for lock-free single-writer coordination
 
 **Impact:** +2-5% write throughput
+
+**Status:** ❌ **REJECTED - Too Dangerous**
+
+**Reason:** The semaphore provides strict ordering guarantees that prevent subtle data loss scenarios:
+
+**Semaphore behavior (current):**
+1. Thread A: Flushes [W1, W2]
+2. Thread B: BLOCKS waiting for A to complete
+3. Thread A: Fails, re-queues [W1, W2]
+4. Thread B: Acquires lock, immediately flushes [W1, W2] again
+5. Thread B: Then writes [W3]
+6. Result: Strict order, no delays ✅
+
+**Interlocked CAS behavior (proposed):**
+1. Thread A: Flushes [W1, W2]
+2. Thread B: Sees flush in progress, returns TRUE immediately
+3. Thread B: Writes [W3] in parallel with A
+4. Thread A: Fails, re-queues [W1, W2]
+5. Result: [W1, W2] delayed until next write triggers flush ⚠️
+
+**Risk:** In low-write-frequency scenarios, failed writes could be delayed indefinitely. The semaphore's blocking behavior ensures failed writes are retried immediately by the next caller, providing stronger consistency guarantees that outweigh the 2-5% throughput gain.
+
+**Decision:** Keep SemaphoreSlim for correctness. The blocking overhead is acceptable compared to potential data loss from delayed retries.
 
 ---
 
