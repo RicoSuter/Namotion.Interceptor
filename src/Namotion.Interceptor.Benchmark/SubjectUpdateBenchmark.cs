@@ -26,10 +26,10 @@ public class SubjectUpdateBenchmark
         _car = new Car(context);
         _changes =
         [
-            SubjectPropertyChange.Create(new PropertyReference(_car.Tires[2], "Pressure"), null, DateTimeOffset.Now, null, 10d, 42d),
-            SubjectPropertyChange.Create(new PropertyReference(_car, "Name"), null, DateTimeOffset.Now, null, "OldName", "NewName"),
-            SubjectPropertyChange.Create(new PropertyReference(_car, nameof(Car.Name_MaxLength_Unit)), null, DateTimeOffset.Now, null, "OldUnit", "NewUnit"),
-            SubjectPropertyChange.Create(new PropertyReference(_car.Tires[1], "Pressure"), null, DateTimeOffset.Now, null, 10d, 42d),
+            SubjectPropertyChange.Create(new PropertyReference(_car.Tires[2], "Pressure"), null, DateTimeOffset.UtcNow, null, 10d, 42d),
+            SubjectPropertyChange.Create(new PropertyReference(_car, "Name"), null, DateTimeOffset.UtcNow, null, "OldName", "NewName"),
+            SubjectPropertyChange.Create(new PropertyReference(_car, nameof(Car.Name_MaxLength_Unit)), null, DateTimeOffset.UtcNow, null, "OldUnit", "NewUnit"),
+            SubjectPropertyChange.Create(new PropertyReference(_car.Tires[1], "Pressure"), null, DateTimeOffset.UtcNow, null, 10d, 42d),
         ];
 
         _processors = [JsonCamelCasePathProcessor.Instance];

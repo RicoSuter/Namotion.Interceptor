@@ -165,7 +165,7 @@ namespace Namotion.Interceptor.Mqtt
                 {
                     var document = JsonDocument.Parse(s.payload);
                     s.source._subject.UpdatePropertyValueFromSourcePath(s.path,
-                        DateTimeOffset.Now, // TODO: What timestamp to use here?
+                        DateTimeOffset.UtcNow, // TODO: What timestamp to use here?
                         (property, _) => document.Deserialize(property.Type),
                         s.source._sourcePathProvider, s.source);
                 }
