@@ -18,11 +18,11 @@ public class Worker : BackgroundService
         // Expected updates/second = number of persons * 2 / delay
         
         var delay = TimeSpan.FromSeconds(1);
-        var lastChange = DateTimeOffset.Now;
+        var lastChange = DateTimeOffset.UtcNow;
         while (!stoppingToken.IsCancellationRequested)
         {
             var mod = _root.Persons.Length / 50;
-            var now = DateTimeOffset.Now;
+            var now = DateTimeOffset.UtcNow;
             if (now - lastChange > delay)
             {
                 lastChange = lastChange.AddSeconds(1);
