@@ -314,18 +314,16 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             return;
         }
 
-        // Dispose managers FIRST (children) - they reference the session
-        // Proper cleanup order: children before parent
-        _subscriptionManager.Dispose();       // Clean up subscription references on session
-        _pollingManager?.Dispose();           // Stop polling operations
-        _reconnectHandler.Dispose();          // Stop reconnection attempts
+        try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
+        try { _subscriptionManager.Dispose(); } catch { /* best effort */ }
+        try { _pollingManager?.Dispose(); } catch { /* best effort */ }
 
-        // Then dispose session LAST (parent)
+        // Then dispose session LAST (parent) - always execute even if children fail
         var sessionToDispose = _session;
         if (sessionToDispose is not null)
         {
             await DisposeSessionAsync(sessionToDispose, CancellationToken.None).ConfigureAwait(false);
-            _session = null;
+            Volatile.Write(ref _session, null);
         }
     }
 
