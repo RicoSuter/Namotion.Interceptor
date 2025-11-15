@@ -24,12 +24,12 @@ internal class OpcUaSubjectServer : StandardServer
     {
         server.SessionManager.SessionCreated += (s, _) =>
         {
-            _logger.LogInformation("OPC UA session {SessionId} created.", s.Id);
+            _logger.LogInformation("OPC UA session {SessionId} with user {UserIdentity} created.", s.Id, s.Identity.DisplayName);
         };
 
         server.SessionManager.SessionClosing += (s, _) =>
         {
-            _logger.LogInformation("OPC UA session {SessionId} closing.", s.Id);
+            _logger.LogInformation("OPC UA session {SessionId} with user {UserIdentity} closing.", s.Id, s.Identity.DisplayName);
         };
     }
 }
