@@ -30,6 +30,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private ISubjectUpdater? _updater;
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
+    private volatile bool _isStarted;
     private int _reconnectingIterations; // Tracks health check iterations while reconnecting (for stall detection)
     private CancellationToken _stoppingToken;
 
@@ -57,17 +58,15 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
         _configuration.SourcePathProvider.IsPropertyIncluded(property);
-
+    
     public async Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
     {
         Reset();
 
         _updater = updater;
-
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
-
-        _sessionManager = new SessionManager(updater, _configuration, _logger);
-        _sessionManager.ReconnectionCompleted += OnReconnectionCompleted;
+        
+        _sessionManager = new SessionManager(this, updater, _configuration, _logger);
         
         var application = _configuration.CreateApplicationInstance();
         var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
@@ -93,6 +92,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
         }
 
+        _isStarted = true;
         return _sessionManager;
     }
     
@@ -174,12 +174,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             try
             {
                 var sessionManager = _sessionManager; // Capture reference to avoid TOCTOU
-                if (sessionManager is not null)
+                if (sessionManager is not null && _isStarted)
                 {
-                    var currentSession = sessionManager.CurrentSession;
                     var isReconnecting = sessionManager.IsReconnecting;
-
-                    // Stall detection: Track consecutive iterations where isReconnecting = true
                     if (isReconnecting)
                     {
                         var iterations = Interlocked.Increment(ref _reconnectingIterations);
@@ -215,11 +212,17 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     {
                         Interlocked.Exchange(ref _reconnectingIterations, 0); // Reset when not reconnecting
                     }
-
-                    if (currentSession is null && !isReconnecting)
+                    
+                    var currentSession = sessionManager.CurrentSession;
+                    if (currentSession is not null)
                     {
-                        // SessionReconnectHandler timed out. Restart session manually.
-                        // !isReconnecting prevents conflicts with automatic reconnection.
+                        // Temporal separation: subscriptions added to collection AFTER initialization (see SubscriptionManager.cs:112)
+                        await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
+                            sessionManager.Subscriptions,
+                            stoppingToken).ConfigureAwait(false);
+                    }
+                    else if (!isReconnecting)
+                    {
                         _logger.LogWarning(
                             "OPC UA session is dead with no active reconnection. " +
                             "SessionReconnectHandler likely timed out after {Timeout}ms. " +
@@ -227,13 +230,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                             _configuration.ReconnectHandlerTimeout);
 
                         await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
-                    }
-                    else if (currentSession is not null)
-                    {
-                        // Temporal separation: subscriptions added to collection AFTER initialization (see SubscriptionManager.cs:112)
-                        await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
-                            sessionManager.Subscriptions,
-                            stoppingToken).ConfigureAwait(false);
                     }
                 }
 
@@ -279,16 +275,14 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
             // Create new session (CreateSessionAsync disposes old session internally)
             var application = _configuration.CreateApplicationInstance();
-            var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken)
-                .ConfigureAwait(false);
+            var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation("New OPC UA session created successfully.");
 
             // Recreate subscriptions using cached monitored items
             if (_initialMonitoredItems is not null && _initialMonitoredItems.Count > 0)
             {
-                await sessionManager.CreateSubscriptionsAsync(_initialMonitoredItems, session, cancellationToken)
-                    .ConfigureAwait(false);
+                await sessionManager.CreateSubscriptionsAsync(_initialMonitoredItems, session, cancellationToken).ConfigureAwait(false);
 
                 _logger.LogInformation(
                     "Subscriptions recreated successfully with {Count} monitored items.",
@@ -310,16 +304,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             // This ensures no data loss from values that changed during the disconnection period
             if (_updater is not null)
             {
-                try
-                {
-                    _logger.LogInformation("Loading complete OPC UA state after reconnection...");
-                    await _updater.LoadCompleteStateAndReplayUpdatesAsync(cancellationToken).ConfigureAwait(false);
-                    _logger.LogInformation("Complete OPC UA state loaded and buffered updates replayed successfully.");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to load complete state after reconnection. Some data may be stale.");
-                }
+                await _updater.LoadCompleteStateAndReplayUpdatesAsync(cancellationToken).ConfigureAwait(false);
             }
 
             _logger.LogInformation("Session restart complete.");
@@ -382,61 +367,11 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
     }
 
-    private void OnReconnectionCompleted(object? sender, EventArgs e)
-    {
-        var cancellationToken = _stoppingToken;
-
-        // Task.Run needed: synchronous event handler, cannot await.
-        // Double-check disposal inside task ensures clean shutdown.
-        Task.Run(async () =>
-        {
-            if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
-            {
-                return; // Already disposing, skip reconnection work
-            }
-
-            try
-            {
-                var session = _sessionManager?.CurrentSession;
-                if (session is not null)
-                {
-                    if (!session.Connected)
-                    {
-                        _logger.LogDebug("Session disconnected before flush could execute, will retry on next reconnection");
-                        return;
-                    }
-
-                    await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
-                }
-
-                // Load complete state and replay buffered updates (queue-read-replay pattern)
-                // This ensures no data loss from values that changed during the disconnection period
-                if (_updater is not null)
-                {
-                    try
-                    {
-                        _logger.LogInformation("Loading complete OPC UA state after automatic reconnection...");
-                        await _updater.LoadCompleteStateAndReplayUpdatesAsync(cancellationToken).ConfigureAwait(false);
-                        _logger.LogInformation("Complete OPC UA state loaded and buffered updates replayed successfully.");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to load complete state after automatic reconnection. Some data may be stale.");
-                    }
-                }
-            }
-            catch (Exception exception)
-            {
-                _logger.LogError(exception, "Failed to complete reconnection tasks (flush writes and reload state).");
-            }
-        }, cancellationToken);
-    }
-
     /// <summary>
     /// Flushes pending writes from the queue.
     /// Returns true if flush succeeded (or queue was empty), false if flush failed.
     /// </summary>
-    private async Task<bool> FlushQueuedWritesAsync(Session session, CancellationToken cancellationToken)
+    internal async Task<bool> FlushQueuedWritesAsync(Session session, CancellationToken cancellationToken)
     {
         try
         {
@@ -669,15 +604,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private void Reset()
     {
-        // No disposal needed - SubjectSourceBackgroundService disposes session manager before calling Reset().
+        _isStarted = false;
         _initialMonitoredItems = null;
-
-        if (_sessionManager is not null)
-        {
-            _sessionManager.ReconnectionCompleted -= OnReconnectionCompleted;
-            _sessionManager = null;
-        }
-
         CleanupPropertyData();
     }
 
@@ -692,8 +620,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var sessionManager = _sessionManager;
         if (sessionManager is not null)
         {
-            sessionManager.ReconnectionCompleted -= OnReconnectionCompleted;
             await sessionManager.DisposeAsync().ConfigureAwait(false);
+            _sessionManager = null;
         }
 
         // Clean up property data to prevent memory leaks
