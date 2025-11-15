@@ -26,7 +26,7 @@ public class TimestampTests
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(c => changes.Add(c));
        
-        var timestamp = DateTimeOffset.Now.AddDays(-200);
+        var timestamp = DateTimeOffset.UtcNow.AddDays(-200);
 
         // Act
         using (SubjectChangeContext.WithChangedTimestamp(timestamp))

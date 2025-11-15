@@ -393,7 +393,7 @@ internal class CustomNodeManager : CustomNodeManager2
             AccessLevel = AccessLevels.CurrentReadOrWrite,
             UserAccessLevel = AccessLevels.CurrentReadOrWrite,
             StatusCode = StatusCodes.Good,
-            Timestamp = DateTime.UtcNow,
+            Timestamp = DateTime.UtcNow, // TODO: Is using now correct here?
 
             ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasProperty
         };

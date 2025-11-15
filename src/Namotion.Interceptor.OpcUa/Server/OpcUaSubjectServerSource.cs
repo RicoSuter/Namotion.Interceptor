@@ -175,7 +175,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
     {
-        var receivedTimestamp = DateTimeOffset.Now;
+        var receivedTimestamp = DateTimeOffset.UtcNow;
 
         var registeredProperty = property.TryGetRegisteredProperty();
         if (registeredProperty is not null)

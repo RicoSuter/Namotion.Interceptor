@@ -121,7 +121,7 @@ internal class SubscriptionManager
             return;
         }
 
-        var receivedTimestamp = DateTimeOffset.Now;
+        var receivedTimestamp = DateTimeOffset.UtcNow;
         var changes = ChangesPool.Rent();
 
         for (var i = 0; i < monitoredItemsCount; i++)

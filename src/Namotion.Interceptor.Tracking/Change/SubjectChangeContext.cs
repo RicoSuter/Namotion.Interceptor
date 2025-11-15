@@ -26,9 +26,9 @@ public readonly struct SubjectChangeContext
     }
     
     /// <summary>
-    /// Gets or sets a function which retrieves the current timestamp (default is <see cref="DateTimeOffset.Now"/>).
+    /// Gets or sets a function which retrieves the current timestamp (default is <see cref="DateTimeOffset.UtcNow"/>).
     /// </summary>
-    public static Func<DateTimeOffset> GetTimestampFunction { get; set; } = () => DateTimeOffset.Now;
+    public static Func<DateTimeOffset> GetTimestampFunction { get; set; } = () => DateTimeOffset.UtcNow;
 
     /// <summary>Gets the current change context.</summary>
     public static SubjectChangeContext Current

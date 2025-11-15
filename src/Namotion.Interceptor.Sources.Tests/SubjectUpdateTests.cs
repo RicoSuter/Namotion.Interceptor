@@ -70,10 +70,10 @@ public class SubjectUpdateTests
 
         var changes = new[]
         {
-            SubjectPropertyChange.Create(new PropertyReference(person, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewPerson"),
-            SubjectPropertyChange.Create(new PropertyReference(father, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewFather"),
-            SubjectPropertyChange.Create(new PropertyReference(child1, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewChild1"),
-            SubjectPropertyChange.Create(new PropertyReference(child3, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewChild3"),
+            SubjectPropertyChange.Create(new PropertyReference(person, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewPerson"),
+            SubjectPropertyChange.Create(new PropertyReference(father, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewFather"),
+            SubjectPropertyChange.Create(new PropertyReference(child1, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewChild1"),
+            SubjectPropertyChange.Create(new PropertyReference(child3, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewChild3"),
         };
 
         var counter = new TransformCounter();
@@ -113,10 +113,10 @@ public class SubjectUpdateTests
 
         var changes = new[]
         {
-            SubjectPropertyChange.Create(new PropertyReference(person, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewPerson"),
-            SubjectPropertyChange.Create(new PropertyReference(father, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewFather"),
-            SubjectPropertyChange.Create(new PropertyReference(child1, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewChild1"),
-            SubjectPropertyChange.Create(new PropertyReference(child3, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewChild3"),
+            SubjectPropertyChange.Create(new PropertyReference(person, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewPerson"),
+            SubjectPropertyChange.Create(new PropertyReference(father, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewFather"),
+            SubjectPropertyChange.Create(new PropertyReference(child1, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewChild1"),
+            SubjectPropertyChange.Create(new PropertyReference(child3, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewChild3"),
         };
 
         // Act
@@ -186,11 +186,11 @@ public class SubjectUpdateTests
 
         var changes = new[]
         {
-            SubjectPropertyChange.Create(new PropertyReference(person, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewPerson"), // ignored
-            SubjectPropertyChange.Create(new PropertyReference(father, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewFather"),
-            SubjectPropertyChange.Create(new PropertyReference(mother, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewMother"), // ignored
-            SubjectPropertyChange.Create(new PropertyReference(child1, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewChild1"),
-            SubjectPropertyChange.Create(new PropertyReference(child3, "FirstName"), null, DateTimeOffset.Now, null, "Old", "NewChild3"),
+            SubjectPropertyChange.Create(new PropertyReference(person, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewPerson"), // ignored
+            SubjectPropertyChange.Create(new PropertyReference(father, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewFather"),
+            SubjectPropertyChange.Create(new PropertyReference(mother, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewMother"), // ignored
+            SubjectPropertyChange.Create(new PropertyReference(child1, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewChild1"),
+            SubjectPropertyChange.Create(new PropertyReference(child3, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewChild3"),
         };
 
         // Act
@@ -270,10 +270,10 @@ public class SubjectUpdateTests
 
         var changes = new[]
         {
-            SubjectPropertyChange.Create(attribute2, null, DateTimeOffset.Now, null, 20, 21),
-            SubjectPropertyChange.Create(attribute1, null, DateTimeOffset.Now, null, 10, 11),
-            SubjectPropertyChange.Create(attribute1, null, DateTimeOffset.Now, null, 11, 12),
-            SubjectPropertyChange.Create(attribute2, null, DateTimeOffset.Now, null, 20, 22),
+            SubjectPropertyChange.Create(attribute2, null, DateTimeOffset.UtcNow, null, 20, 21),
+            SubjectPropertyChange.Create(attribute1, null, DateTimeOffset.UtcNow, null, 10, 11),
+            SubjectPropertyChange.Create(attribute1, null, DateTimeOffset.UtcNow, null, 11, 12),
+            SubjectPropertyChange.Create(attribute2, null, DateTimeOffset.UtcNow, null, 20, 22),
         };
 
         // Act
