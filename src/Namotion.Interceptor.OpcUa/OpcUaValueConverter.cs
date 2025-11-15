@@ -66,7 +66,12 @@ public class OpcUaValueConverter
                 if (elementType == typeof(decimal))
                 {
                     var decimals = (decimal[])array;
-                    return decimals.Select(d => (double)d).ToArray();
+                    var result = new double[decimals.Length];
+                    for (var i = 0; i < decimals.Length; i++)
+                    {
+                        result[i] = (double)decimals[i];
+                    }
+                    return result;
                 }
 
                 return propertyValue;
