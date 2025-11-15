@@ -25,11 +25,6 @@ public class SubjectUpdater : ISubjectUpdater
     
     public async Task LoadCompleteStateAndReplayUpdatesAsync(CancellationToken cancellationToken)
     {
-        lock (_lock)
-        {
-            _updates = [];
-        }
-        
         var applyAction = await _source.LoadCompleteSourceStateAsync(cancellationToken).ConfigureAwait(false);
         lock (_lock)
         {
