@@ -16,12 +16,11 @@ namespace Namotion.Interceptor.OpcUa.Client.Polling;
 /// </summary>
 internal sealed class PollingManager : IDisposable
 {
+    private readonly OpcUaSubjectClientSource _source;
     private readonly ILogger _logger;
     private readonly SessionManager _sessionManager;
     private readonly ISubjectUpdater _updater;
-    private readonly TimeSpan _pollingInterval;
-    private readonly int _batchSize;
-    private readonly TimeSpan _disposalTimeout;
+    private readonly OpcUaClientConfiguration _configuration;
     private readonly PollingCircuitBreaker _circuitBreaker;
     private readonly PollingMetrics _metrics = new();
 
@@ -34,40 +33,24 @@ internal sealed class PollingManager : IDisposable
     private ISession? _lastKnownSession;
     private int _disposed;
 
-    public PollingManager(
-        ILogger logger,
+    public PollingManager(OpcUaSubjectClientSource source,
         SessionManager sessionManager,
         ISubjectUpdater updater,
-        TimeSpan pollingInterval,
-        int batchSize,
-        TimeSpan disposalTimeout,
-        int circuitBreakerThreshold,
-        TimeSpan circuitBreakerCooldown)
+        OpcUaClientConfiguration configuration,
+        ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(sessionManager);
         ArgumentNullException.ThrowIfNull(updater);
 
-        if (pollingInterval <= TimeSpan.Zero)
-            throw new ArgumentOutOfRangeException(nameof(pollingInterval), "Polling interval must be greater than zero");
-
-        if (pollingInterval < TimeSpan.FromMilliseconds(100))
-            logger.LogWarning("Polling interval of {Interval}ms is very short and may cause excessive server load", pollingInterval.TotalMilliseconds);
-
-        if (batchSize <= 0)
-            throw new ArgumentOutOfRangeException(nameof(batchSize), "Batch size must be greater than zero");
-
-        if (disposalTimeout <= TimeSpan.Zero)
-            throw new ArgumentOutOfRangeException(nameof(disposalTimeout), "Disposal timeout must be greater than zero");
-
+        _source = source;
         _logger = logger;
         _sessionManager = sessionManager;
         _updater = updater;
-        _pollingInterval = pollingInterval;
-        _batchSize = batchSize;
-        _disposalTimeout = disposalTimeout;
-        _circuitBreaker = new PollingCircuitBreaker(circuitBreakerThreshold, circuitBreakerCooldown);
-        _timer = new PeriodicTimer(pollingInterval);
+        _configuration = configuration;
+
+        _circuitBreaker = new PollingCircuitBreaker(configuration.PollingCircuitBreakerThreshold, configuration.PollingCircuitBreakerCooldown);
+        _timer = new PeriodicTimer(configuration.PollingInterval);
     }
 
     /// <summary>
@@ -132,7 +115,7 @@ internal sealed class PollingManager : IDisposable
             Volatile.Write(ref _pollingTask, task); // Ensure task assignment is visible to all threads
         }
 
-        _logger.LogInformation("OPC UA polling manager started with interval {Interval}ms", _pollingInterval.TotalMilliseconds);
+        _logger.LogInformation("OPC UA polling manager started with interval {Interval}ms", _configuration.PollingInterval.TotalMilliseconds);
     }
 
     /// <summary>
@@ -245,9 +228,9 @@ internal sealed class PollingManager : IDisposable
             var itemsToRead = _pollingItems.Values.ToArray();
 
             // Process in batches using direct indexing
-            for (int i = 0; i < itemsToRead.Length; i += _batchSize)
+            for (int i = 0; i < itemsToRead.Length; i += _configuration.PollingBatchSize)
             {
-                var batchSize = Math.Min(_batchSize, itemsToRead.Length - i);
+                var batchSize = Math.Min(_configuration.PollingBatchSize, itemsToRead.Length - i);
                 var batch = new ArraySegment<PollingItem>(itemsToRead, i, batchSize);
                 await ReadBatchAsync(session, batch, cancellationToken).ConfigureAwait(false);
             }
@@ -273,11 +256,11 @@ internal sealed class PollingManager : IDisposable
 
             // Detect slow polls that exceed the polling interval
             var duration = DateTimeOffset.UtcNow - startTime;
-            if (duration > _pollingInterval)
+            if (duration > _configuration.PollingInterval)
             {
                 _metrics.RecordSlowPoll();
                 _logger.LogWarning("Slow poll detected: polling took {Duration}ms, which exceeds interval of {Interval}ms. Consider increasing polling interval or batch size.",
-                    duration.TotalMilliseconds, _pollingInterval.TotalMilliseconds);
+                    duration.TotalMilliseconds, _configuration.PollingInterval.TotalMilliseconds);
             }
         }
     }
@@ -392,7 +375,7 @@ internal sealed class PollingManager : IDisposable
             };
 
             // Queue update using same pattern as subscriptions
-            var state = (source: this, update, receivedTimestamp);
+            var state = (source: _source, update, receivedTimestamp, logger: _logger);
             _updater.EnqueueOrApplyUpdate(state, static s =>
             {
                 try
@@ -401,7 +384,7 @@ internal sealed class PollingManager : IDisposable
                 }
                 catch (Exception e)
                 {
-                    s.source._logger.LogError(e, "Failed to apply polled value change for {Path}", s.update.Property.Name);
+                    s.logger.LogError(e, "Failed to apply polled value change for {Path}", s.update.Property.Name);
                 }
             });
 
@@ -427,9 +410,9 @@ internal sealed class PollingManager : IDisposable
         // Wait for polling task to complete (with timeout)
         try
         {
-            if (_pollingTask != null && !_pollingTask.Wait(_disposalTimeout))
+            if (_pollingTask != null && !_pollingTask.Wait(_configuration.PollingDisposalTimeout))
             {
-                _logger.LogWarning("Polling task did not complete within {Timeout} timeout", _disposalTimeout);
+                _logger.LogWarning("Polling task did not complete within {Timeout} timeout", _configuration.PollingDisposalTimeout);
             }
         }
         catch (OperationCanceledException)

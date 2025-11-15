@@ -47,25 +47,18 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         _updater = updater;
         _logger = logger;
         _configuration = configuration;
-        _reconnectHandler = new SessionReconnectHandler(false, (int)configuration.ReconnectHandlerTimeout);
+        _reconnectHandler = new SessionReconnectHandler(false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
         if (_configuration.EnablePollingFallback)
         {
             _pollingManager = new PollingManager(
-                logger: _logger,
-                sessionManager: this,
-                updater: updater,
-                pollingInterval: _configuration.PollingInterval,
-                batchSize: _configuration.PollingBatchSize,
-                disposalTimeout: _configuration.PollingDisposalTimeout,
-                circuitBreakerThreshold: _configuration.PollingCircuitBreakerThreshold,
-                circuitBreakerCooldown: _configuration.PollingCircuitBreakerCooldown
-            );
+                _source, sessionManager: this,
+                updater, _configuration, _logger);
 
             _pollingManager.Start();
         }
 
-        _subscriptionManager = new SubscriptionManager(updater, _pollingManager, configuration, logger);
+        _subscriptionManager = new SubscriptionManager(_source, updater, _pollingManager, configuration, logger);
     }
 
     /// <summary>
@@ -93,7 +86,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             endpoint,
             updateBeforeConnect: false,
             application.ApplicationName,
-            sessionTimeout: configuration.SessionTimeout,
+            sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
             new UserIdentity(),
             preferredLocales: null,
             cancellationToken).ConfigureAwait(false);
@@ -171,7 +164,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             // Start collecting updates before reconnection - any incoming notifications will be buffered
             _updater.StartCollectingUpdates();
 
-            var newState = _reconnectHandler.BeginReconnect(session, _configuration.ReconnectInterval, OnReconnectComplete);
+            var newState = _reconnectHandler.BeginReconnect(session, (int)_configuration.ReconnectInterval.TotalMilliseconds, OnReconnectComplete);
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
             {
                 Interlocked.Exchange(ref _isReconnecting, 1);
@@ -251,20 +244,26 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
                 {
                     return; // Already disposing, skip reconnection work
                 }
-
-                try
+                var session = CurrentSession;
+                if (session is not null)
                 {
-                    await _updater.LoadCompleteStateAndReplayUpdatesAsync(_stoppingToken).ConfigureAwait(false);
-
-                    var session = CurrentSession;
-                    if (session is not null)
+                    try
                     {
+                        await _updater.LoadCompleteStateAndReplayUpdatesAsync(_stoppingToken).ConfigureAwait(false);
                         await _source.FlushQueuedWritesAsync(session, _stoppingToken).ConfigureAwait(false);
                     }
-                }
-                catch (Exception exception)
-                {
-                    _logger.LogError(exception, "Failed to complete reconnection tasks (reload state and flush writes).");
+                    catch (Exception exception)
+                    {
+                        _logger.LogError(exception, "Reconnect failed, closing session and retry.");
+                        try
+                        {
+                            await session.CloseAsync(_stoppingToken);
+                        }
+                        finally
+                        {
+                            session.Dispose();
+                        }
+                    }
                 }
             }, _stoppingToken);
             
