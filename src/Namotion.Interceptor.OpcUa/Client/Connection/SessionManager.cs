@@ -329,12 +329,24 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         try { _subscriptionManager.Dispose(); } catch { /* best effort */ }
         try { _pollingManager?.Dispose(); } catch { /* best effort */ }
 
-        // Then dispose session LAST (parent) - always execute even if children fail
         var sessionToDispose = _session;
         if (sessionToDispose is not null)
         {
-            // TODO: This blocks shutdown, should we just use session.Dispose()?
-            await DisposeSessionAsync(sessionToDispose, CancellationToken.None).ConfigureAwait(false);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try
+            {
+                await DisposeSessionAsync(sessionToDispose, cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning(
+                    "Session disposal timed out after 5 seconds during shutdown. " +
+                    "Forcing synchronous disposal to complete cleanup.");
+
+                // Force immediate disposal without waiting for server acknowledgment
+                try { sessionToDispose.Dispose(); } catch { /* best effort */ }
+            }
+
             Volatile.Write(ref _session, null);
         }
     }

@@ -63,6 +63,8 @@ public class SubjectUpdater : ISubjectUpdater
                 beforeInitializationUpdates = _updates;
                 if (beforeInitializationUpdates is not null)
                 {
+                    // Accepted closure memory allocation: Lambda captures 'update' and 'state'
+                    // This is acceptable because buffering only occurs during startup/reconnection (cold path).
                     beforeInitializationUpdates.Add(() => update(state));
                     return;
                 }
