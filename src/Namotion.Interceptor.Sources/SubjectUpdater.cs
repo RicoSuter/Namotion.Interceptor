@@ -31,10 +31,14 @@ public class SubjectUpdater : ISubjectUpdater
             applyAction?.Invoke();
 
             // Replay previously buffered updates
-            var beforeInitializationUpdates = _updates;
-            _updates = null;
+            var updates = _updates;
+            if (updates is null)
+            {
+                throw new InvalidOperationException("LoadCompleteStateAndReplayUpdatesAsync was called with null _updates.");
+            }
 
-            foreach (var action in beforeInitializationUpdates!)
+            _updates = null;
+            foreach (var action in updates)
             {
                 try
                 {

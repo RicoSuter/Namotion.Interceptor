@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 public class OpcUaSubjectLoaderTests
 {
-    private readonly List<PropertyReference> _propertiesWithOpcData;
+    private readonly HashSet<PropertyReference> _propertiesWithOpcData;
     private readonly OpcUaClientConfiguration _baseConfiguration;
 
     public OpcUaSubjectLoaderTests()

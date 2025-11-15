@@ -16,6 +16,7 @@ internal class SubscriptionManager
     private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
         = new(() => new List<PropertyUpdate>(16));
 
+    private readonly OpcUaSubjectClientSource _source;
     private readonly ISubjectUpdater? _updater;
     private readonly PollingManager? _pollingManager;
     private readonly OpcUaClientConfiguration _configuration;
@@ -36,8 +37,9 @@ internal class SubscriptionManager
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
-    public SubscriptionManager(ISubjectUpdater updater, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
+    public SubscriptionManager(OpcUaSubjectClientSource source, ISubjectUpdater updater, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
     {
+        _source = source;
         _updater = updater;
         _pollingManager = pollingManager;
         _configuration = configuration;
@@ -140,7 +142,7 @@ internal class SubscriptionManager
         {
             // Pool item returned inside callback (line 158). Safe because EnqueueOrApplyUpdate never throws -
             // it wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
-            var state = (source: this, subscription, receivedTimestamp, changes);
+            var state = (source: _source, subscription, receivedTimestamp, changes, logger: _logger);
             _updater?.EnqueueOrApplyUpdate(state, static s =>
             {
                 for (var i = 0; i < s.changes.Count; i++)
@@ -152,7 +154,7 @@ internal class SubscriptionManager
                     }
                     catch (Exception e)
                     {
-                        s.source._logger.LogError(e, "Failed to apply change for property {PropertyName}.", change.Property.Name);
+                        s.logger.LogError(e, "Failed to apply change for property {PropertyName}.", change.Property.Name);
                     }
                 }
 

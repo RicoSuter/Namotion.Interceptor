@@ -32,11 +32,6 @@ public class OpcUaClientConfiguration
     /// Gets the maximum number of monitored items per subscription. Default is 1000.
     /// </summary>
     public int MaximumItemsPerSubscription { get; init; } = 1000;
-    
-    /// <summary>
-    /// Gets the delay before attempting to reconnect after a disconnect. Default is 5 seconds.
-    /// </summary>
-    public TimeSpan ReconnectDelay { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Gets the maximum number of write operations to buffer when disconnected. Default is 1000.
@@ -95,11 +90,11 @@ public class OpcUaClientConfiguration
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
     /// </summary>
     public TimeSpan? BufferTime { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the retry time (default: 10s).
     /// </summary>
-    public TimeSpan? RetryTime { get; set; }
+    public TimeSpan? RetryTime { get; set; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute (default: 0).
@@ -192,23 +187,23 @@ public class OpcUaClientConfiguration
     public TimeSpan PollingCircuitBreakerCooldown { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Gets or sets the OPC UA session timeout in milliseconds.
+    /// Gets or sets the OPC UA session timeout.
     /// This determines how long the server will maintain the session after losing communication.
     /// Default is 60 seconds.
     /// </summary>
-    public uint SessionTimeout { get; set; } = 60000;
+    public TimeSpan SessionTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Gets or sets the maximum time the reconnect handler will attempt to reconnect before giving up.
     /// Default is 60 seconds.
     /// </summary>
-    public uint ReconnectHandlerTimeout { get; set; } = 60000;
+    public TimeSpan ReconnectHandlerTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Gets or sets the interval between reconnection attempts when connection is lost.
     /// Default is 5 seconds.
     /// </summary>
-    public int ReconnectInterval { get; set; } = 5000;
+    public TimeSpan ReconnectInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     public virtual ApplicationInstance CreateApplicationInstance()
     {
@@ -343,21 +338,21 @@ public class OpcUaClientConfiguration
             }
         }
 
-        if (SessionTimeout < 1000)
+        if (SessionTimeout < TimeSpan.FromSeconds(1))
         {
             throw new ArgumentException(
                 $"SessionTimeout must be at least 1000ms, got: {SessionTimeout}",
                 nameof(SessionTimeout));
         }
 
-        if (ReconnectHandlerTimeout < 1000)
+        if (ReconnectHandlerTimeout < TimeSpan.FromSeconds(1))
         {
             throw new ArgumentException(
                 $"ReconnectHandlerTimeout must be at least 1000ms, got: {ReconnectHandlerTimeout}",
                 nameof(ReconnectHandlerTimeout));
         }
 
-        if (ReconnectInterval < 100)
+        if (ReconnectInterval < TimeSpan.FromSeconds(0.1))
         {
             throw new ArgumentException(
                 $"ReconnectInterval must be at least 100ms, got: {ReconnectInterval}",

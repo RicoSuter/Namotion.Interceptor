@@ -13,28 +13,22 @@ public class PerformanceProfiler : IDisposable
     public PerformanceProfiler(IInterceptorSubjectContext context)
     {
         // Window and allocation tracking state (moved above PrintStats)
+        var syncLock = new Lock();
         var allUpdatesSinceLastSample = 0;
         var startTime = DateTimeOffset.UtcNow;
 
         var windowStartTime = startTime;
         var lastAllThroughputTime = startTime;
-        long windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: false); // track allocation baseline per window
+        long windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true); // track allocation baseline per window
 
-        void PrintStats(string title, List<double> changedLatencyData, List<double?> receivedLatencyData, List<double> throughputData)
+        void PrintStats(string title, DateTimeOffset windowStartTimeCopy, List<double> changedLatencyData, List<double?> receivedLatencyData, List<double> throughputData)
         {
-            var avgThroughput = throughputData.Average();
-            var maxThroughput = throughputData.Max();
-            var p50ThroughputIndex = (int)Math.Ceiling(throughputData.Count * 0.50) - 1;
-            var p50Throughput = throughputData[Math.Max(0, Math.Min(p50ThroughputIndex, throughputData.Count - 1))];
-            var p99ThroughputIndex = (int)Math.Ceiling(throughputData.Count * 0.99) - 1;
-            var p99Throughput = throughputData[Math.Max(0, Math.Min(p99ThroughputIndex, throughputData.Count - 1))];
-
             // Memory metrics
             var proc = Process.GetCurrentProcess();
             var workingSetMb = proc.WorkingSet64 / (1024.0 * 1024.0);
             var now = DateTimeOffset.UtcNow;
-            var elapsedSec = Math.Round((now - windowStartTime).TotalSeconds, 0);
-            var totalAllocatedBytesNow = GC.GetTotalAllocatedBytes(precise: false);
+            var elapsedSec = Math.Round((now - windowStartTimeCopy).TotalSeconds, 0);
+            var totalAllocatedBytesNow = GC.GetTotalAllocatedBytes(precise: true);
             var allocatedBytesDelta = Math.Max(0, totalAllocatedBytesNow - windowStartTotalAllocatedBytes);
             var allocRateBytesPerSec = allocatedBytesDelta / elapsedSec;
             var allocRateMbPerSec = allocRateBytesPerSec / (1024.0 * 1024.0);
@@ -44,7 +38,17 @@ public class PerformanceProfiler : IDisposable
             Console.WriteLine($"Process memory:                  {Math.Round(workingSetMb, 2)} MB");
             Console.WriteLine($"Avg allocations over last {elapsedSec}s:   {Math.Round(allocRateMbPerSec, 2)} MB/s");
 
-            Console.WriteLine($"Throughput:      Avg: {avgThroughput,8:F2} | P50: {p50Throughput,8:F2} | P99: {p99Throughput,8:F2} | Max: {maxThroughput,8:F2} changes/sec");
+            if (throughputData.Any())
+            {
+                var avgThroughput = throughputData.Average();
+                var maxThroughput = throughputData.Max();
+                var p50ThroughputIndex = (int)Math.Ceiling(throughputData.Count * 0.50) - 1;
+                var p50Throughput = throughputData[Math.Max(0, Math.Min(p50ThroughputIndex, throughputData.Count - 1))];
+                var p99ThroughputIndex = (int)Math.Ceiling(throughputData.Count * 0.99) - 1;
+                var p99Throughput = throughputData[Math.Max(0, Math.Min(p99ThroughputIndex, throughputData.Count - 1))];
+            
+                Console.WriteLine($"Throughput:      Avg: {avgThroughput,8:F2} | P50: {p50Throughput,8:F2} | P99: {p99Throughput,8:F2} | Max: {maxThroughput,8:F2} changes/sec");
+            }
 
             // Client side processing: From receiving it on client to processing here
             PrintLatencies("Client latency:  ", receivedLatencyData.OfType<double>());
@@ -75,33 +79,28 @@ public class PerformanceProfiler : IDisposable
         _change = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
         {
             var now = DateTimeOffset.UtcNow;
-            lock (allThroughputSamples)
+
+            lock (syncLock)
+            {
                 allUpdatesSinceLastSample++;
 
-            // change timestamp
-            var changedTimestamp = change.ChangedTimestamp;
-            var changedLatencyMs = (now - changedTimestamp).TotalMilliseconds;
-
-            lock (allChangedLatencies)
+                // change timestamp
+                var changedTimestamp = change.ChangedTimestamp;
+                var changedLatencyMs = (now - changedTimestamp).TotalMilliseconds;
                 allChangedLatencies.Add(changedLatencyMs);
 
-            // change timestamp
-            var receivedTimestamp = change.ReceivedTimestamp;
-            var receivedLatencyMs = (now - receivedTimestamp)?.TotalMilliseconds;
-
-            lock (allReceivedLatencies)
+                // change timestamp
+                var receivedTimestamp = change.ReceivedTimestamp;
+                var receivedLatencyMs = (now - receivedTimestamp)?.TotalMilliseconds;
                 allReceivedLatencies.Add(receivedLatencyMs);
 
-            var timeSinceLastAllSample = (now - lastAllThroughputTime).TotalSeconds;
-            if (timeSinceLastAllSample >= 1.0)
-            {
-                lock (allThroughputSamples)
+                var timeSinceLastAllSample = (now - lastAllThroughputTime).TotalSeconds;
+                if (timeSinceLastAllSample >= 1.0)
                 {
                     allThroughputSamples.Add(allUpdatesSinceLastSample / timeSinceLastAllSample);
                     allUpdatesSinceLastSample = 0;
+                    lastAllThroughputTime = now;
                 }
-
-                lastAllThroughputTime = now;
             }
         });
 
@@ -109,44 +108,40 @@ public class PerformanceProfiler : IDisposable
             .Timer(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(60))
             .Subscribe(index =>
             {
+                GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced);
+
                 List<double> allChangedLatenciesCopy;
-                lock (allChangedLatencies)
-                    allChangedLatenciesCopy = [..allChangedLatencies];
-
                 List<double?> allReceivedLatenciesCopy;
-                lock (allReceivedLatencies)
-                    allReceivedLatenciesCopy = [..allReceivedLatencies];
-
                 List<double> allThroughputSamplesCopy;
-                lock (allThroughputSamples)
+                DateTimeOffset windowStartTimeCopy;
+
+                lock (syncLock)
+                {
+                    allChangedLatenciesCopy = [..allChangedLatencies];
+                    allReceivedLatenciesCopy = [..allReceivedLatencies];
                     allThroughputSamplesCopy = [..allThroughputSamples];
+                    windowStartTimeCopy = windowStartTime;
 
-                if (index == 0 && allChangedLatenciesCopy.Count > 0)
-                {
-                    PrintStats("Benchmark - Intermediate (10 seconds)", allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy.ToList());
-                }
-
-                if (index > 0 && allChangedLatenciesCopy.Count > 0)
-                {
-                    Console.WriteLine($"\n[{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss.fff}]");
-                    PrintStats("Benchmark - 1 minute", allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy);
-                }
-
-                lock (allChangedLatencies)
                     allChangedLatencies.Clear();
-
-                lock (allReceivedLatencies)
                     allReceivedLatencies.Clear();
-                
-                lock (allThroughputSamples)
-                {
                     allThroughputSamples.Clear();
                     allUpdatesSinceLastSample = 0;
+
+                    windowStartTime = startTime + TimeSpan.FromSeconds(10) + index * TimeSpan.FromSeconds(60);
+                    lastAllThroughputTime = windowStartTime;
+                }
+                
+                if (index == 0)
+                {
+                    PrintStats("Benchmark - Intermediate (10 seconds)", windowStartTimeCopy, allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy);
+                }
+                else
+                {
+                    Console.WriteLine($"\n[{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss.fff}]");
+                    PrintStats("Benchmark - 1 minute", windowStartTimeCopy, allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy);
                 }
 
-                windowStartTime = startTime + TimeSpan.FromSeconds(10) + index * TimeSpan.FromSeconds(60);
-                lastAllThroughputTime = windowStartTime;
-                windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: false); // reset baseline for next window
+                windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true); // reset baseline for next window
             });
     }
 

@@ -19,7 +19,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
-    private readonly List<PropertyReference> _propertiesWithOpcData = [];
+    private readonly HashSet<PropertyReference> _propertiesWithOpcData = [];
 
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
@@ -32,7 +32,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
     private int _reconnectingIterations; // Tracks health check iterations while reconnecting (for stall detection)
-    private CancellationToken _stoppingToken;
 
     private IReadOnlyList<MonitoredItem>? _initialMonitoredItems;
 
@@ -166,8 +165,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _stoppingToken = stoppingToken;
-
         // Single-threaded health check loop. Coordinates with automatic reconnection via IsReconnecting flag.
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -180,32 +177,17 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     if (isReconnecting)
                     {
                         var iterations = Interlocked.Increment(ref _reconnectingIterations);
-
-                        // Timeout: 10 iterations × health check interval (default 10s) = ~100s
                         if (iterations > 10)
                         {
-                            _logger.LogError(
-                                "OPC UA reconnection stalled for {Iterations} health check iterations " +
-                                "(~{Seconds}s). OnReconnectComplete callback likely never fired. " +
-                                "Attempting stall recovery with synchronized flag reset.",
-                                iterations,
-                                iterations * (_configuration.SubscriptionHealthCheckInterval.TotalSeconds));
-
-                            // Use synchronized reset to prevent race with delayed OnReconnectComplete
+                            // Timeout: 10 iterations × health check interval (default 10s) = ~100s
                             if (sessionManager.TryForceResetIfStalled())
                             {
                                 _logger.LogWarning(
-                                    "Stall confirmed: reconnecting flag reset to allow manual recovery. " +
+                                    "Stall confirmed: Reconnecting flag reset to allow manual recovery. " +
                                     "Session will be recreated on next health check.");
-                                Interlocked.Exchange(ref _reconnectingIterations, 0);
                             }
-                            else
-                            {
-                                _logger.LogInformation(
-                                    "Stall recovery skipped: reconnection completed while acquiring lock. " +
-                                    "Session restoration successful.");
-                                Interlocked.Exchange(ref _reconnectingIterations, 0);
-                            }
+
+                            Interlocked.Exchange(ref _reconnectingIterations, 0);
                         }
                     }
                     else
