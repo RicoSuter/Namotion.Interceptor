@@ -35,10 +35,19 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
     /// </summary>
     public Session? CurrentSession => Volatile.Read(ref _session);
 
+    /// <summary>
+    /// Gets a value indicating whether the session is currently connected.
+    /// </summary>
     public bool IsConnected => Volatile.Read(ref _session) is not null;
 
+    /// <summary>
+    /// Gets a value indicating whether the session is currently reconnecting.
+    /// </summary>
     public bool IsReconnecting => Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1;
 
+    /// <summary>
+    /// Gets the current subscriptions managed by the subscription manager.
+    /// </summary>
     public IReadOnlyCollection<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
 
     public SessionManager(OpcUaSubjectClientSource source, ISubjectUpdater updater, OpcUaClientConfiguration configuration, ILogger logger)
@@ -123,12 +132,8 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
     /// </summary>
     private void OnKeepAlive(ISession sender, KeepAliveEventArgs e)
     {
-        if (ServiceResult.IsGood(e.Status))
-        {
-            return;
-        }
-
-        if (e.CurrentState is not (ServerState.Unknown or ServerState.Failed))
+        if (ServiceResult.IsGood(e.Status) || 
+            e.CurrentState is not (ServerState.Unknown or ServerState.Failed))
         {
             return;
         }
@@ -155,13 +160,11 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
 
             if (_reconnectHandler.State is not SessionReconnectHandler.ReconnectState.Ready)
             {
-                _logger.LogWarning("OPC UA SessionReconnectHandler not ready. State: {State}", _reconnectHandler.State);
+                _logger.LogWarning("OPC UA reconnect handler not ready. State: {State}.", _reconnectHandler.State);
                 return;
             }
 
             _logger.LogInformation("OPC UA server connection lost. Beginning reconnect...");
-
-            // Start collecting updates before reconnection - any incoming notifications will be buffered
             _updater.StartCollectingUpdates();
 
             var newState = _reconnectHandler.BeginReconnect(session, (int)_configuration.ReconnectInterval.TotalMilliseconds, OnReconnectComplete);
@@ -172,7 +175,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             }
             else
             {
-                _logger.LogError("Failed to begin OPC UA reconnect. Handler state: {State}", newState);
+                _logger.LogError("Failed to begin OPC UA reconnect. Handler state: {State}.", newState);
             }
         }
         finally
@@ -235,7 +238,6 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             Interlocked.Exchange(ref _isReconnecting, 0);
         }
 
-        // Only fire event if reconnection actually succeeded
         if (reconnectionSucceeded)
         {
             Task.Run(async () =>
@@ -255,14 +257,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
                     catch (Exception exception)
                     {
                         _logger.LogError(exception, "Reconnect failed, closing session and retry.");
-                        try
-                        {
-                            await session.CloseAsync(_stoppingToken);
-                        }
-                        finally
-                        {
-                            session.Dispose();
-                        }
+                        await DisposeSessionAsync(session, _stoppingToken).ConfigureAwait(false);
                     }
                 }
             }, _stoppingToken);
@@ -338,6 +333,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         var sessionToDispose = _session;
         if (sessionToDispose is not null)
         {
+            // TODO: This blocks shutdown, should we just use session.Dispose()?
             await DisposeSessionAsync(sessionToDispose, CancellationToken.None).ConfigureAwait(false);
             Volatile.Write(ref _session, null);
         }
