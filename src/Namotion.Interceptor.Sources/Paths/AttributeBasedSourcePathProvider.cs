@@ -1,5 +1,6 @@
 ﻿using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Paths.Attributes;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Sources.Paths;
 
@@ -20,9 +21,26 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
 
     public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return TryGetSourcePathAttribute(property) is not null && 
-            (property.Parent.Parents.Count == 0 || 
-             property.Parent.Parents.Any(p => TryGetSourcePathAttribute(p.Property) is not null));
+        if (TryGetSourcePathAttribute(property) is null)
+        {
+            return false;
+        }
+
+        if (property.Parent.Parents.Length == 0)
+        {
+            return true;
+        }
+
+        for (var index = 0; index < property.Parent.Parents.Length; index++)
+        {
+            var parent = property.Parent.Parents[index];
+            if (TryGetSourcePathAttribute(parent.Property) is not null)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
     
     public override IEnumerable<(string segment, object? index)> ParsePathSegments(string path)
@@ -44,7 +62,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
             .Where(p => !string.IsNullOrEmpty(p))
             .SelectMany(s => s
                 .Split(_attributePathDelimiter)
-                .Select((ss, i) =>
+                .Select(ss =>
                 {
                     var segmentParts = ss.Split('[', ']');
                     object? index = segmentParts.Length >= 2 ? 
@@ -85,7 +103,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
         var attribute = property.Parent
             .Parents
             .Select(p => new { property = p, attribute = TryGetSourcePathAttribute(p.Property) })
-            .FirstOrDefault(p => p.attribute is not null);
+            .FirstOrDefault(static p => p.attribute is not null);
 
         if (attribute is not null)
         {
@@ -101,9 +119,38 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
 
     private SourcePathAttribute? TryGetSourcePathAttribute(RegisteredSubjectProperty property)
     {
-        return property
-            .ReflectionAttributes
-            .OfType<SourcePathAttribute>()
-            .FirstOrDefault(a => a.SourceName == _sourceName);
+        if (property.ReflectionAttributes is Attribute[] array)
+        {
+            if (array.Length == 0)
+            {
+                return null;
+            }
+            
+            for (var i = 0; i < array.Length; i++)
+            {
+                if (array[i] is SourcePathAttribute spa && spa.SourceName == _sourceName)
+                {
+                    return spa;
+                }
+            }
+
+            return null;
+        }
+
+        var attributes = property.ReflectionAttributes;
+        if (attributes.Count == 0)
+        {
+            return null;
+        }
+            
+        foreach (var attribute in attributes)
+        {
+            if (attribute is SourcePathAttribute spa && spa.SourceName == _sourceName)
+            {
+                return spa;
+            }
+        }
+        
+        return null;
     }
 }
