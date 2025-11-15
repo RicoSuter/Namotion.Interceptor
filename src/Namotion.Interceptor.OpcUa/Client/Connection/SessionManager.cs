@@ -13,6 +13,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Connection;
 /// </summary>
 internal sealed class SessionManager : IDisposable, IAsyncDisposable
 {
+    private readonly OpcUaSubjectClientSource _source;
     private readonly ISubjectUpdater _updater;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
@@ -40,13 +41,9 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
 
     public IReadOnlyCollection<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
 
-    /// <summary>
-    /// Fires when reconnection completes successfully. Invoked on background thread.
-    /// </summary>
-    public event EventHandler? ReconnectionCompleted;
-
-    public SessionManager(ISubjectUpdater updater, OpcUaClientConfiguration configuration, ILogger logger)
+    public SessionManager(OpcUaSubjectClientSource source, ISubjectUpdater updater, OpcUaClientConfiguration configuration, ILogger logger)
     {
+        _source = source;
         _updater = updater;
         _logger = logger;
         _configuration = configuration;
@@ -116,8 +113,6 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         IReadOnlyList<MonitoredItem> monitoredItems,
         Session session, CancellationToken cancellationToken)
     {
-        // This method will never be called concurrently, so no lock is needed here.
-
         _stoppingToken = cancellationToken;
 
         await _subscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
@@ -250,7 +245,29 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         // Only fire event if reconnection actually succeeded
         if (reconnectionSucceeded)
         {
-            ReconnectionCompleted?.Invoke(this, EventArgs.Empty);
+            Task.Run(async () =>
+            {
+                if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
+                {
+                    return; // Already disposing, skip reconnection work
+                }
+
+                try
+                {
+                    await _updater.LoadCompleteStateAndReplayUpdatesAsync(_stoppingToken).ConfigureAwait(false);
+
+                    var session = CurrentSession;
+                    if (session is not null)
+                    {
+                        await _source.FlushQueuedWritesAsync(session, _stoppingToken).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogError(exception, "Failed to complete reconnection tasks (reload state and flush writes).");
+                }
+            }, _stoppingToken);
+            
             _logger.LogInformation("OPC UA session reconnect completed.");
         }
     }
