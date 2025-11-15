@@ -74,7 +74,7 @@ public class PathExtensionsTests
             Children = [child1, child2, child3]
         };
 
-        var timestamp = DateTimeOffset.Now.AddDays(-200);
+        var timestamp = DateTimeOffset.UtcNow.AddDays(-200);
 
         // Act
         person.UpdatePropertyValuesFromSourcePaths(new Dictionary<string, object?>

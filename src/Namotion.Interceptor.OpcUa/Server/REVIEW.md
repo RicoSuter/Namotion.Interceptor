@@ -395,7 +395,7 @@ catch (Exception ex)
 ```csharp
 internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
 {
-    var receivedTimestamp = DateTimeOffset.Now;
+    var receivedTimestamp = DateTimeOffset.UtcNow;
     var registeredProperty = property.TryGetRegisteredProperty();
     if (registeredProperty is not null)
     {
@@ -427,7 +427,7 @@ private volatile ISubjectUpdater? _updater;
 
 internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
 {
-    var receivedTimestamp = DateTimeOffset.Now;
+    var receivedTimestamp = DateTimeOffset.UtcNow;
 
     var registeredProperty = property.TryGetRegisteredProperty();
     if (registeredProperty is not null)
