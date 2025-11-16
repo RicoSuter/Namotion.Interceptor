@@ -96,7 +96,7 @@ public class SampleSource : ISubjectSource
     }
 
     public async Task<IDisposable?> StartListeningAsync(
-        ISubjectUpdater updater,
+        SourceUpdateBuffer updateBuffer,
         CancellationToken cancellationToken)
     {
         // Set up source change notifications
@@ -139,6 +139,6 @@ Built-in providers include:
 
 When multiple sources update properties concurrently, the library provides automatic thread-safety at the property field access level. Individual property updates are atomic and thread-safe without requiring additional synchronization in your source implementation.
 
-**Source responsibility**: While the library ensures thread-safe property access, **sources are responsible for maintaining correct update ordering** according to their protocol semantics. When implementing `ISubjectSource`, use the provided `ISubjectUpdater` to enqueue updates, which handles sequencing and prevents race conditions where newer values could be overwritten by delayed older updates.
+**Source responsibility**: While the library ensures thread-safe property access, **sources are responsible for maintaining correct update ordering** according to their protocol semantics. When implementing `ISubjectSource`, use the provided `SourceUpdateBuffer` to apply updates, which handles buffering during initialization and prevents race conditions where newer values could be overwritten by delayed older updates.
 
 Custom source implementations should ensure that the temporal ordering of external events is preserved when applying property updates. This is critical for maintaining data consistency when events arrive out of order or concurrently from the same source.
