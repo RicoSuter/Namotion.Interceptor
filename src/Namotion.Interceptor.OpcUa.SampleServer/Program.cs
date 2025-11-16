@@ -35,6 +35,6 @@ builder.Services.AddSingleton(root);
 builder.Services.AddOpcUaSubjectServer<Root>("opc", rootName: "Root");
 builder.Services.AddHostedService<Worker>();
 
-using var performanceProfiler = new PerformanceProfiler(context);
+using var performanceProfiler = new PerformanceProfiler(context, "Server");
 var host = builder.Build();
 host.Run();
