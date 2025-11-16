@@ -89,86 +89,86 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
     /// </summary>
-    public TimeSpan? BufferTime { get; set; }
+    public TimeSpan? BufferTime { get; init; }
 
     /// <summary>
     /// Gets or sets the retry time (default: 10s).
     /// </summary>
-    public TimeSpan? RetryTime { get; set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan? RetryTime { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute (default: 0).
     /// </summary>
-    public int DefaultSamplingInterval { get; set; }
+    public int DefaultSamplingInterval { get; init; }
 
     /// <summary>
     /// Gets or sets the default queue size for monitored items when not specified on the [OpcUaNode] attribute (default: 10).
     /// </summary>
-    public uint DefaultQueueSize { get; set; } = 10;
+    public uint DefaultQueueSize { get; init; } = 10;
 
     /// <summary>
     /// Gets or sets whether the server should discard the oldest value in the queue when the queue is full for monitored items (default: true).
     /// </summary>
-    public bool DefaultDiscardOldest { get; set; } = true;
+    public bool DefaultDiscardOldest { get; init; } = true;
 
     /// <summary>
     /// Gets or sets the default publishing interval for subscriptions in milliseconds (default: 0).
     /// Larger values reduce overhead by batching more notifications per publish.
     /// </summary>
-    public int DefaultPublishingInterval { get; set; } = 0;
+    public int DefaultPublishingInterval { get; init; } = 0;
 
     /// <summary>
     /// Gets or sets the subscription keep-alive count (default: 10).
     /// </summary>
-    public uint SubscriptionKeepAliveCount { get; set; } = 10;
+    public uint SubscriptionKeepAliveCount { get; init; } = 10;
 
     /// <summary>
     /// Gets or sets the subscription lifetime count (default: 100).
     /// </summary>
-    public uint SubscriptionLifetimeCount { get; set; } = 100;
+    public uint SubscriptionLifetimeCount { get; init; } = 100;
 
     /// <summary>
     /// Gets or sets the subscription priority (default: 0 = server default).
     /// </summary>
-    public byte SubscriptionPriority { get; set; } = 0;
+    public byte SubscriptionPriority { get; init; } = 0;
 
     /// <summary>
     /// Gets or sets the maximum notifications per publish that the client requests (default: 0 = server default).
     /// </summary>
-    public uint SubscriptionMaximumNotificationsPerPublish { get; set; } = 0;
+    public uint SubscriptionMaximumNotificationsPerPublish { get; init; } = 0;
 
     /// <summary>
     /// Gets or sets the maximum references per node to read per browse request. 0 uses server default.
     /// </summary>
-    public uint MaximumReferencesPerNode { get; set; } = 0;
+    public uint MaximumReferencesPerNode { get; init; } = 0;
 
     /// <summary>
     /// Gets or sets whether to enable automatic polling fallback when subscriptions are not supported.
     /// When enabled, items that fail subscription creation automatically fall back to periodic polling.
     /// Default is true.
     /// </summary>
-    public bool EnablePollingFallback { get; set; } = true;
+    public bool EnablePollingFallback { get; init; } = true;
 
     /// <summary>
     /// Gets or sets the polling interval for items that don't support subscriptions.
     /// Only used when EnablePollingFallback is true.
     /// Default is 1000ms (1 second).
     /// </summary>
-    public TimeSpan PollingInterval { get; set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan PollingInterval { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// Gets or sets the maximum batch size for polling read operations.
     /// Larger batches reduce network calls but increase latency.
     /// Default is 100 items per batch.
     /// </summary>
-    public int PollingBatchSize { get; set; } = 100;
+    public int PollingBatchSize { get; init; } = 100;
 
     /// <summary>
     /// Gets or sets the timeout to wait for the polling manager to complete during disposal.
     /// If the polling task does not complete within this timeout, it will be abandoned.
     /// Default is 10 seconds.
     /// </summary>
-    public TimeSpan PollingDisposalTimeout { get; set; } = TimeSpan.FromSeconds(10);
+    public TimeSpan PollingDisposalTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// Gets or sets the number of consecutive polling failures before the circuit breaker opens.
@@ -176,7 +176,7 @@ public class OpcUaClientConfiguration
     /// Only used when EnablePollingFallback is true.
     /// Default is 5 failures.
     /// </summary>
-    public int PollingCircuitBreakerThreshold { get; set; } = 5;
+    public int PollingCircuitBreakerThreshold { get; init; } = 5;
 
     /// <summary>
     /// Gets or sets the cooldown period after the circuit breaker opens before attempting to resume polling.
@@ -184,26 +184,26 @@ public class OpcUaClientConfiguration
     /// Only used when EnablePollingFallback is true.
     /// Default is 30 seconds.
     /// </summary>
-    public TimeSpan PollingCircuitBreakerCooldown { get; set; } = TimeSpan.FromSeconds(30);
+    public TimeSpan PollingCircuitBreakerCooldown { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Gets or sets the OPC UA session timeout.
     /// This determines how long the server will maintain the session after losing communication.
     /// Default is 60 seconds.
     /// </summary>
-    public TimeSpan SessionTimeout { get; set; } = TimeSpan.FromSeconds(60);
+    public TimeSpan SessionTimeout { get; init; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Gets or sets the maximum time the reconnect handler will attempt to reconnect before giving up.
     /// Default is 60 seconds.
     /// </summary>
-    public TimeSpan ReconnectHandlerTimeout { get; set; } = TimeSpan.FromSeconds(60);
+    public TimeSpan ReconnectHandlerTimeout { get; init; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Gets or sets the interval between reconnection attempts when connection is lost.
     /// Default is 5 seconds.
     /// </summary>
-    public TimeSpan ReconnectInterval { get; set; } = TimeSpan.FromSeconds(5);
+    public TimeSpan ReconnectInterval { get; init; } = TimeSpan.FromSeconds(5);
 
     public virtual ApplicationInstance CreateApplicationInstance()
     {

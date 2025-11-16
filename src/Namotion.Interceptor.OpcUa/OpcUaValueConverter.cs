@@ -33,7 +33,7 @@ public class OpcUaValueConverter
                 targetElement == typeof(decimal) && 
                 nodeValue is double[] doubleArray)
             {
-                var result = new decimal[doubleArray.Length];
+                var result = new decimal[doubleArray.Length]; // TODO(perf): Avoid memory allocation
                 for (var i = 0; i < doubleArray.Length; i++)
                 {
                     result[i] = (decimal)doubleArray[i];

@@ -245,6 +245,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             return;
         }
 
+        var updateBuffer = _updateBuffer;
+        if (updateBuffer is null)
+        {
+            return;
+        }
+
         try
         {
             _logger.LogInformation(
@@ -253,15 +259,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
             // Start collecting updates - any incoming subscription notifications will be buffered
             // until we complete the full state reload
-            _updateBuffer?.StartBuffering();
+            updateBuffer.StartBuffering();
 
             // Create new session (CreateSessionAsync disposes old session internally)
             var application = _configuration.CreateApplicationInstance();
             var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
-
             _logger.LogInformation("New OPC UA session created successfully.");
-
-            // Recreate subscriptions using cached monitored items
+            
             if (_initialMonitoredItems is not null && _initialMonitoredItems.Count > 0)
             {
                 await sessionManager.CreateSubscriptionsAsync(_initialMonitoredItems, session, cancellationToken).ConfigureAwait(false);
@@ -271,23 +275,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     _initialMonitoredItems.Count);
             }
 
-            // Flush any queued writes after successful reconnection
-            // We're already in async context, so just await directly (no Task.Run needed)
-            try
-            {
-                await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to flush queued writes after session restart.");
-            }
-
-            // Load complete state and replay buffered updates (queue-read-replay pattern)
-            // This ensures no data loss from values that changed during the disconnection period
-            if (_updateBuffer is not null)
-            {
-                await _updateBuffer.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
-            }
+            await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
+            await updateBuffer.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation("Session restart complete.");
         }
@@ -406,12 +395,11 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         var chunkSize = (int)(session.OperationLimits?.MaxNodesPerWrite ?? DefaultChunkSize);
         chunkSize = chunkSize is 0 ? int.MaxValue : chunkSize;
-
         for (var offset = 0; offset < count; offset += chunkSize)
         {
             var take = Math.Min(chunkSize, count - offset);
 
-            var writeValues = BuildWriteValues(changes, offset, take);
+            var writeValues = CreateWriteValuesCollection(changes, offset, take);
             if (writeValues.Count is 0)
             {
                 continue;
@@ -432,6 +420,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     _logger.LogInformation(
                         "Re-queuing {Count} writes with transient errors for automatic retry.",
                         transientFailures.Count);
+
                     _writeFailureQueue.EnqueueBatch(transientFailures);
                 }
             }
@@ -457,10 +446,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         return true; // All writes succeeded
     }
     
-    private WriteValueCollection BuildWriteValues(IReadOnlyList<SubjectPropertyChange> changes, int offset, int take)
+    private WriteValueCollection CreateWriteValuesCollection(IReadOnlyList<SubjectPropertyChange> changes, int offset, int take)
     {
         var writeValues = new WriteValueCollection(take);
-
         for (var i = 0; i < take; i++)
         {
             var change = changes[offset + i];
@@ -501,7 +489,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// </summary>
     private static bool IsTransientWriteError(StatusCode statusCode)
     {
-        // Permanent design-time errors - don't retry
+        // Permanent design-time error: Don't retry
         if (statusCode == StatusCodes.BadNodeIdUnknown ||
             statusCode == StatusCodes.BadAttributeIdInvalid ||
             statusCode == StatusCodes.BadTypeMismatch ||
@@ -512,9 +500,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             return false;
         }
 
-        // Transient connectivity/server errors - retry
-        // Examples: BadSessionIdInvalid, BadConnectionClosed, BadServerNotConnected,
-        // BadTimeout, BadRequestTimeout, BadTooManyOperations, BadOutOfService
+        // Transient connectivity/server errors: Retry
         return StatusCode.IsBad(statusCode);
     }
 
@@ -529,7 +515,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         int offset)
     {
         List<SubjectPropertyChange>? transientFailures = null;
-
         for (var i = 0; i < Math.Min(results.Count, writeValues.Count); i++)
         {
             if (StatusCode.IsBad(results[i]))

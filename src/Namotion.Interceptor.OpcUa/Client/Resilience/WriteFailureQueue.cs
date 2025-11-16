@@ -10,6 +10,8 @@ namespace Namotion.Interceptor.OpcUa.Client.Resilience;
 /// </summary>
 internal sealed class WriteFailureQueue
 {
+    // TODO(high): Consider moving as native feature of SubjectSourceBackgroundService (for all sources)
+    
     private readonly ConcurrentQueue<SubjectPropertyChange> _pendingWrites = new();
 
     private readonly ILogger _logger;
@@ -59,7 +61,7 @@ internal sealed class WriteFailureQueue
             _pendingWrites.Enqueue(change);
         }
 
-        // Ring buffer: drop oldest if over capacity (Count may be slightly stale, acceptable)
+        // Ring buffer: Drop the oldest if over capacity (Count may be slightly stale, acceptable)
         while (_pendingWrites.Count > _maxQueueSize)
         {
             if (_pendingWrites.TryDequeue(out _))

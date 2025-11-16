@@ -51,12 +51,11 @@ internal class SubscriptionManager
         Session session,
         CancellationToken cancellationToken)
     {
-        // Temporal separation: subscriptions added to _subscriptions AFTER initialization (line 112) prevents health monitor races.
+        // Temporal separation: subscriptions added to _subscriptions AFTER initialization prevents health monitor races.
         _shuttingDown = false;
 
         var itemCount = monitoredItems.Count;
         var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
-
         for (var i = 0; i < itemCount; i += maximumItemsPerSubscription)
         {
             var subscription = new Subscription(session.DefaultSubscription)
@@ -73,7 +72,7 @@ internal class SubscriptionManager
 
             if (!session.AddSubscription(subscription))
             {
-                throw new InvalidOperationException("Failed to add subscription.");
+                throw new InvalidOperationException("Failed to add OPC UA subscription.");
             }
 
             subscription.FastDataChangeCallback += OnFastDataChange;
@@ -93,7 +92,6 @@ internal class SubscriptionManager
 
             try
             {
-                // Phase 1: Apply changes to OPC UA server (subscription NOT in _subscriptions yet)
                 await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (ServiceResultException sre)
@@ -110,7 +108,8 @@ internal class SubscriptionManager
     
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
-        if (_shuttingDown || _updateBuffer is null)
+        var updateBuffer = _updateBuffer;
+        if (_shuttingDown || updateBuffer is null)
         {
             return;
         }
@@ -140,10 +139,10 @@ internal class SubscriptionManager
 
         if (changes.Count > 0)
         {
-            // Pool item returned inside callback. Safe because ApplyUpdate never throws -
-            // it wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
+            // Pool item returned inside callback. Safe because ApplyUpdate never throws:
+            // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
             var state = (source: _source, subscription, receivedTimestamp, changes, logger: _logger);
-            _updateBuffer?.ApplyUpdate(state, static s =>
+            updateBuffer.ApplyUpdate(state, static s =>
             {
                 for (var i = 0; i < s.changes.Count; i++)
                 {
@@ -175,7 +174,6 @@ internal class SubscriptionManager
     public void UpdateTransferredSubscriptions(IReadOnlyCollection<Subscription> transferredSubscriptions)
     {
         var oldSubscriptions = _subscriptions.Keys.ToArray();
-
         foreach (var subscription in transferredSubscriptions)
         {
             subscription.FastDataChangeCallback -= OnFastDataChange;
@@ -195,15 +193,15 @@ internal class SubscriptionManager
     
     private async Task FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
     {
-        List<MonitoredItem>? itemsToRemove = null;
-        List<MonitoredItem>? itemsToPolled = null;
+        List<MonitoredItem>? failedItems = null;
+        List<MonitoredItem>? polledItems = null;
 
         foreach (var monitoredItem in subscription.MonitoredItems)
         {
             if (SubscriptionHealthMonitor.IsUnhealthy(monitoredItem))
             {
-                itemsToRemove ??= [];
-                itemsToRemove.Add(monitoredItem);
+                failedItems ??= [];
+                failedItems.Add(monitoredItem);
 
                 _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
 
@@ -214,8 +212,8 @@ internal class SubscriptionManager
                     _pollingManager != null &&
                     IsSubscriptionUnsupported(statusCode))
                 {
-                    itemsToPolled ??= [];
-                    itemsToPolled.Add(monitoredItem);
+                    polledItems ??= [];
+                    polledItems.Add(monitoredItem);
                     _logger.LogWarning("Monitored item {DisplayName} does not support subscriptions ({Status}), falling back to polling",
                         monitoredItem.DisplayName, statusCode);
                 }
@@ -227,10 +225,9 @@ internal class SubscriptionManager
             }
         }
 
-        if (itemsToRemove?.Count > 0)
+        if (failedItems?.Count > 0)
         {
-            // Remove failed items from subscription
-            foreach (var monitoredItem in itemsToRemove)
+            foreach (var monitoredItem in failedItems)
             {
                 subscription.RemoveItem(monitoredItem);
             }
@@ -245,30 +242,29 @@ internal class SubscriptionManager
             }
 
             // Add items that support polling to polling manager
-            if (itemsToPolled?.Count > 0 && _pollingManager != null)
+            if (polledItems?.Count > 0 && _pollingManager != null)
             {
-                foreach (var item in itemsToPolled)
+                foreach (var item in polledItems)
                 {
                     _pollingManager.AddItem(item);
                 }
             }
 
-            var removed = itemsToRemove.Count;
-            var polled = itemsToPolled?.Count;
-
-            if (polled > 0)
+            var failedCount = failedItems.Count;
+            var polledCount = polledItems?.Count;
+            if (polledCount > 0)
             {
                 _logger.LogWarning(
                     "Removed {Removed} failed monitored items from subscription " +
                     "{SubscriptionId}. {Polled} items switched to polling fallback.",
-                    removed, subscription.Id, polled);
+                    failedCount, subscription.Id, polledCount);
             }
             else
             {
                 _logger.LogWarning(
                     "Removed {Removed} failed monitored items " +
                     "from subscription {SubscriptionId}.",
-                    removed, subscription.Id);
+                    failedCount, subscription.Id);
             }
         }
     }
