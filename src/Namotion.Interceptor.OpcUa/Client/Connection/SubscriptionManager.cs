@@ -17,7 +17,7 @@ internal class SubscriptionManager
         = new(() => new List<PropertyUpdate>(16));
 
     private readonly OpcUaSubjectClientSource _source;
-    private readonly ISubjectUpdater? _updater;
+    private readonly SourceUpdateBuffer? _updateBuffer;
     private readonly PollingManager? _pollingManager;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
@@ -37,10 +37,10 @@ internal class SubscriptionManager
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
-    public SubscriptionManager(OpcUaSubjectClientSource source, ISubjectUpdater updater, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
+    public SubscriptionManager(OpcUaSubjectClientSource source, SourceUpdateBuffer updateBuffer, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _source = source;
-        _updater = updater;
+        _updateBuffer = updateBuffer;
         _pollingManager = pollingManager;
         _configuration = configuration;
         _logger = logger;
@@ -110,7 +110,7 @@ internal class SubscriptionManager
     
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
-        if (_shuttingDown || _updater is null)
+        if (_shuttingDown || _updateBuffer is null)
         {
             return;
         }
@@ -140,10 +140,10 @@ internal class SubscriptionManager
 
         if (changes.Count > 0)
         {
-            // Pool item returned inside callback. Safe because EnqueueOrApplyUpdate never throws -
+            // Pool item returned inside callback. Safe because ApplyUpdate never throws -
             // it wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
             var state = (source: _source, subscription, receivedTimestamp, changes, logger: _logger);
-            _updater?.EnqueueOrApplyUpdate(state, static s =>
+            _updateBuffer?.ApplyUpdate(state, static s =>
             {
                 for (var i = 0; i < s.changes.Count; i++)
                 {

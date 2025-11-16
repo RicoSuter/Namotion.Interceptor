@@ -27,7 +27,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly WriteFailureQueue _writeFailureQueue;
 
     private SessionManager? _sessionManager;
-    private ISubjectUpdater? _updater;
+    private SourceUpdateBuffer? _updateBuffer;
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
@@ -58,14 +58,14 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     public bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
         _configuration.SourcePathProvider.IsPropertyIncluded(property);
     
-    public async Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
+    public async Task<IDisposable?> StartListeningAsync(SourceUpdateBuffer updateBuffer, CancellationToken cancellationToken)
     {
         Reset();
 
-        _updater = updater;
+        _updateBuffer = updateBuffer;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
-        
-        _sessionManager = new SessionManager(this, updater, _configuration, _logger);
+
+        _sessionManager = new SessionManager(this, updateBuffer, _configuration, _logger);
         
         var application = _configuration.CreateApplicationInstance();
         var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
@@ -253,7 +253,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
             // Start collecting updates - any incoming subscription notifications will be buffered
             // until we complete the full state reload
-            _updater?.StartCollectingUpdates();
+            _updateBuffer?.StartBuffering();
 
             // Create new session (CreateSessionAsync disposes old session internally)
             var application = _configuration.CreateApplicationInstance();
@@ -284,9 +284,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
             // Load complete state and replay buffered updates (queue-read-replay pattern)
             // This ensures no data loss from values that changed during the disconnection period
-            if (_updater is not null)
+            if (_updateBuffer is not null)
             {
-                await _updater.LoadCompleteStateAndReplayUpdatesAsync(cancellationToken).ConfigureAwait(false);
+                await _updateBuffer.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
             }
 
             _logger.LogInformation("Session restart complete.");

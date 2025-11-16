@@ -143,8 +143,8 @@ Exception-based error handling is simpler and equally robust compared to retry l
 - Ring buffer race condition (soft limit, documented as acceptable)
 - Array comparison boxing in polling fallback (use Span<T>, polling-only code path)
 
-**SubjectUpdater Closure Allocation** (Cold Path Only):
-- Lambda `() => update(state)` in `EnqueueOrApplyUpdate` creates ~40-150 byte closure
+**SourceUpdateBuffer Closure Allocation** (Cold Path Only):
+- Lambda `() => update(state)` in `ApplyUpdate` creates ~40-150 byte closure
 - Only occurs during startup/reconnection buffering (<0.1% of runtime)
 - Fast path (99% of time) has zero allocations
 - **Verdict**: Acceptable - optimization would add complexity for negligible benefit
@@ -250,22 +250,22 @@ services.AddOpcUaSubjectClient<MySubject>(
 
 **Other Disposal Paths**: Session disposal during reconnection uses appropriate cancellation tokens and doesn't need explicit timeout (failures trigger retry logic).
 
-### Why SubjectUpdater.LoadCompleteStateAndReplayUpdatesAsync is Idempotent?
+### Why SourceUpdateBuffer.CompleteInitializationAsync is Idempotent?
 
-**Context**: SubjectUpdater buffers property updates during reconnection using the queue-read-replay pattern, ensuring zero data loss.
+**Context**: SourceUpdateBuffer buffers property updates during reconnection using the queue-read-replay pattern, ensuring zero data loss.
 
 **Problem**: Fire-and-forget `Task.Run` in `SessionManager.OnReconnectComplete` can race with manual reconnection:
-1. Automatic reconnection queues `LoadCompleteStateAndReplayUpdatesAsync` via Task.Run
+1. Automatic reconnection queues `CompleteInitializationAsync` via Task.Run
 2. Before Task.Run executes, manual reconnection completes and sets `_updates = null`
 3. Queued task finally executes but finds `_updates` is null
 
-**Solution**: Made `LoadCompleteStateAndReplayUpdatesAsync` idempotent:
+**Solution**: Made `CompleteInitializationAsync` idempotent:
 ```csharp
 var updates = _updates;
 if (updates is null)
 {
     // Already replayed by concurrent reconnection - safe to ignore
-    _logger.LogDebug("LoadCompleteStateAndReplayUpdatesAsync called but updates already replayed");
+    _logger.LogDebug("CompleteInitializationAsync called but updates already replayed");
     return;
 }
 ```
