@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Logging;
 
 namespace Namotion.Interceptor.Sources;
 
@@ -58,17 +59,16 @@ public class SubjectUpdater : ISubjectUpdater
     /// <inheritdoc />
     public void EnqueueOrApplyUpdate<TState>(TState state, Action<TState> update)
     {
-        var beforeInitializationUpdates = _updates;
-        if (beforeInitializationUpdates is not null)
+        var updates = _updates;
+        if (updates is not null)
         {
             lock (_lock)
             {
-                beforeInitializationUpdates = _updates;
-                if (beforeInitializationUpdates is not null)
+                updates = _updates;
+                if (updates is not null)
                 {
-                    // Accepted closure memory allocation: Lambda captures 'update' and 'state'
-                    // This is acceptable because buffering only occurs during startup/reconnection (cold path).
-                    beforeInitializationUpdates.Add(() => update(state));
+                    // Still initializing, buffer the update (cold path, allocations acceptable)
+                    AddBeforeInitializationUpdate(updates, state, update);
                     return;
                 }
             }
@@ -82,5 +82,13 @@ public class SubjectUpdater : ISubjectUpdater
         {
             _logger.LogError(e, "Failed to apply subject update.");
         }
+    }
+    
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void AddBeforeInitializationUpdate<TState>(List<Action> beforeInitializationUpdates, TState state, Action<TState> update)
+    {
+        // The allocation for the closure happens only on the cold path (needs to be in an own non-inlined method
+        // to avoid capturing unnecessary locals and causing allocations on the hot path).
+        beforeInitializationUpdates.Add(() => update(state));
     }
 }

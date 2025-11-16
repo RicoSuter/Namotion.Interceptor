@@ -28,6 +28,7 @@ public class SubjectSourceBenchmark
 
     private readonly AutoResetEvent _signal = new(false);
     private Action<object?>[] _updates;
+    private SubjectUpdater _updater;
 
     [GlobalSetup]
     public async Task Setup()
@@ -60,6 +61,9 @@ public class SubjectSourceBenchmark
 
         _cts = new CancellationTokenSource();
         await _service.StartAsync(_cts.Token);
+        
+        _updater = (SubjectUpdater)_source.Updater;
+        await _updater.LoadCompleteStateAndReplayUpdatesAsync(_cts.Token);
 
         _updates = Enumerable
             .Range(1, 1000000)
@@ -77,7 +81,7 @@ public class SubjectSourceBenchmark
     {
         for (var i = 0; i < _updates.Length; i++)
         {
-            _source.Updater.EnqueueOrApplyUpdate(null, _updates[i]);
+            _updater.EnqueueOrApplyUpdate(null, _updates[i]);
         }
 
         _signal.WaitOne();
