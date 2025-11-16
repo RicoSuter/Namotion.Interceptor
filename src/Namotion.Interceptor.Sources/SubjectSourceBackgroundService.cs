@@ -16,7 +16,7 @@ public class SubjectSourceBackgroundService : BackgroundService
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
     
-    private readonly SubjectUpdater _updater;
+    private readonly SourceUpdateBuffer _updateBuffer;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
@@ -45,7 +45,7 @@ public class SubjectSourceBackgroundService : BackgroundService
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
-        _updater = new SubjectUpdater(source, logger);
+        _updateBuffer = new SourceUpdateBuffer(source, logger);
     }
 
     /// <inheritdoc />
@@ -55,11 +55,11 @@ public class SubjectSourceBackgroundService : BackgroundService
         {
             try
             {
-                _updater.StartCollectingUpdates();
-                var disposable = await _source.StartListeningAsync(_updater, stoppingToken).ConfigureAwait(false);
+                _updateBuffer.StartBuffering();
+                var disposable = await _source.StartListeningAsync(_updateBuffer, stoppingToken).ConfigureAwait(false);
                 try
                 {
-                    await _updater.LoadCompleteStateAndReplayUpdatesAsync(stoppingToken);
+                    await _updateBuffer.CompleteInitializationAsync(stoppingToken);
 
                     using var subscription = _context.CreatePropertyChangeQueueSubscription();
                     await ProcessPropertyChangesAsync(subscription, stoppingToken).ConfigureAwait(false);

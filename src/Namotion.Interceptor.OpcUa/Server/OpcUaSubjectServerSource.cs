@@ -18,7 +18,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
     private readonly OpcUaServerConfiguration _configuration;
 
     private volatile OpcUaSubjectServer? _server;
-    private volatile ISubjectUpdater? _updater;
+    private volatile SourceUpdateBuffer? _updateBuffer;
     private int _consecutiveFailures;
     
     public OpcUaSubjectServerSource(
@@ -36,9 +36,9 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         return _configuration.SourcePathProvider.IsPropertyIncluded(property);
     }
 
-    public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
+    public Task<IDisposable?> StartListeningAsync(SourceUpdateBuffer updateBuffer, CancellationToken cancellationToken)
     {
-        _updater = updater;
+        _updateBuffer = updateBuffer;
         return Task.FromResult<IDisposable?>(null);
     }
 
@@ -183,7 +183,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, registeredProperty);
 
             var state = (source: this, property, changedTimestamp, receivedTimestamp, value: convertedValue);
-            _updater?.EnqueueOrApplyUpdate(state,
+            _updateBuffer?.ApplyUpdate(state,
                 static s => s.property.SetValueFromSource(
                     s.source, s.changedTimestamp, s.receivedTimestamp, s.value));
         }
