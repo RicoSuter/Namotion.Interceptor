@@ -278,13 +278,10 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         lock (_reconnectingLock)
         {
             // Double-check: still reconnecting AND session still null?
-            // If OnReconnectComplete fired while we were waiting for the lock, it would have:
-            // 1. Set session to non-null (line 216)
-            // 2. Set _isReconnecting = 0 (line 242)
             if (Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1 &&
                 Volatile.Read(ref _session) is null)
             {
-                // Truly stalled - OnReconnectComplete never fired or failed
+                // Truly stalled - OnReconnectComplete never fired or failed:
                 // Safe to clear flag and allow manual recovery
                 Interlocked.Exchange(ref _isReconnecting, 0);
                 return true;
@@ -297,9 +294,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
 
     private async Task DisposeSessionAsync(Session session, CancellationToken cancellationToken)
     {
-        // Unsubscribe from event (standard event -= operator cannot throw under normal circumstances)
         session.KeepAlive -= OnKeepAlive;
-
         try
         {
             await session.CloseAsync(cancellationToken).ConfigureAwait(false);
@@ -309,7 +304,6 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         {
             _logger.LogWarning(ex, "Error closing OPC UA session.");
         }
-
         try
         {
             session.Dispose();

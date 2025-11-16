@@ -31,6 +31,7 @@ internal sealed class SubscriptionHealthMonitor
 
                 try
                 {
+                    // Try to heal failed monitored items by reapplying the subscription changes
                     await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
 
                     var stillUnhealthyCount = GetUnhealthyCount(subscription);
