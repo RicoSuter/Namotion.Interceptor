@@ -34,7 +34,10 @@ public class SubjectUpdater : ISubjectUpdater
             var updates = _updates;
             if (updates is null)
             {
-                throw new InvalidOperationException("LoadCompleteStateAndReplayUpdatesAsync was called with null _updates.");
+                // Already replayed by a concurrent/previous call (race between automatic and manual reconnection).
+                // This is safe - it means another reconnection cycle already loaded state and replayed updates.
+                _logger.LogDebug("LoadCompleteStateAndReplayUpdatesAsync called but updates already replayed by concurrent reconnection.");
+                return;
             }
 
             _updates = null;
