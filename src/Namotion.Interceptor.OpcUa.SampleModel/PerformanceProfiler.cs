@@ -49,6 +49,7 @@ public class PerformanceProfiler : IDisposable
             // Memory metrics
             var proc = Process.GetCurrentProcess();
             var workingSetMb = proc.WorkingSet64 / (1024.0 * 1024.0);
+            var totalMemoryMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
             var now = DateTimeOffset.UtcNow;
             var elapsedSec = Math.Round((now - windowStartTimeCopy).TotalSeconds, 0);
             var totalAllocatedBytesNow = GC.GetTotalAllocatedBytes(precise: true);
@@ -61,7 +62,7 @@ public class PerformanceProfiler : IDisposable
             Console.WriteLine($"{_roleTitle} {title} - [{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss.fff}]");
             Console.WriteLine();
             Console.WriteLine($"Total processed changes:         {changedLatencyData.Count}");
-            Console.WriteLine($"Process memory:                  {Math.Round(workingSetMb, 2)} MB");
+            Console.WriteLine($"Process memory:                  {Math.Round(workingSetMb, 2)} MB ({Math.Round(totalMemoryMb, 2)} MB in .NET heap)");
             Console.WriteLine($"Avg allocations over last {elapsedSec}s:   {Math.Round(allocRateMbPerSec, 2)} MB/s");
             Console.WriteLine();
 
