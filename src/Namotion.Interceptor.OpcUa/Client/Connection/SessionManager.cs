@@ -100,7 +100,9 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             preferredLocales: null,
             cancellationToken).ConfigureAwait(false);
 
+        newSession.KeepAlive -= OnKeepAlive;
         newSession.KeepAlive += OnKeepAlive;
+
         Volatile.Write(ref _session, newSession);
 
         if (oldSession is not null)
