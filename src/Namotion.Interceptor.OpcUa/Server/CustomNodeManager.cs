@@ -42,10 +42,9 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         foreach (var node in PredefinedNodes.Values)
         {
-            if (node is BaseDataVariableState variableNode &&
-                variableNode.Handle is PropertyReference propertyRef)
+            if (node is BaseDataVariableState { Handle: PropertyReference property })
             {
-                propertyRef.RemovePropertyData(OpcUaSubjectServerSource.OpcVariableKey);
+                property.RemovePropertyData(OpcUaSubjectServerSource.OpcVariableKey);
             }
         }
     }
