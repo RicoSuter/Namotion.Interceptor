@@ -193,12 +193,12 @@ public class MyLifecycleHandler : ILifecycleHandler
 {
     public void AttachSubject(SubjectLifecycleChange change)
     {
-        Console.WriteLine($"Attached: {change.Subject} via property {change.Property?.Value.Name}");
+        Console.WriteLine($"Attached: {change.Subject} via property {change.Property?.Name}");
     }
 
     public void DetachSubject(SubjectLifecycleChange change)
     {
-        Console.WriteLine($"Detached: {change.Subject} via property {change.Property?.Value.Name}");
+        Console.WriteLine($"Detached: {change.Subject} via property {change.Property?.Name}");
     }
 }
 ```
@@ -263,14 +263,24 @@ This is primarily used internally by the derived property change detection syste
 - **Multiple Subscriptions**: Each subscription is independent with its own isolated queue. Different subscriptions can be consumed by different threads concurrently.
 - **Guarantees**: The implementation is deadlock-free, never loses updates, and ensures all enqueued items are processed before disposal completes.
 
-**Change Sources**: Use `SubjectMutationContext.ApplyChangesWithSource()` to mark changes as coming from external sources:
+**Change Sources**: Use `SubjectChangeContext.WithSource()` to mark changes as coming from external sources:
 
 ```csharp
-SubjectMutationContext.ApplyChangesWithSource(mqttSource, () =>
+using (SubjectChangeContext.WithSource(mqttSource))
 {
     subject.Temperature = newValue;
     // change.Source will be mqttSource, not null
-});
+}
+```
+
+For setting values from external sources with timestamps, use the `SetValueFromSource()` extension method:
+
+```csharp
+propertyReference.SetValueFromSource(
+    source: mqttSource,
+    changedTimestamp: DateTimeOffset.Now,
+    receivedTimestamp: DateTimeOffset.Now,
+    valueFromSource: newValue);
 ```
 
 This prevents feedback loops where changes from external sources are written back to those same sources.

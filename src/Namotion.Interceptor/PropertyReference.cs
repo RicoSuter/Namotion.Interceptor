@@ -40,6 +40,11 @@ public struct PropertyReference : IEquatable<PropertyReference>
         Subject.Data[(Name, key)] = value;
     }
 
+    public void RemovePropertyData(string key)
+    {
+        Subject.Data.TryRemove((Name, key), out _);
+    }
+
     public bool TryGetPropertyData(string key, out object? value)
     {
         return Subject.Data.TryGetValue((Name, key), out value);
