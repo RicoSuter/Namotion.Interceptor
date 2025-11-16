@@ -250,6 +250,32 @@ services.AddOpcUaSubjectClient<MySubject>(
 
 **Other Disposal Paths**: Session disposal during reconnection uses appropriate cancellation tokens and doesn't need explicit timeout (failures trigger retry logic).
 
+### Why SubjectUpdater.LoadCompleteStateAndReplayUpdatesAsync is Idempotent?
+
+**Context**: SubjectUpdater buffers property updates during reconnection using the queue-read-replay pattern, ensuring zero data loss.
+
+**Problem**: Fire-and-forget `Task.Run` in `SessionManager.OnReconnectComplete` can race with manual reconnection:
+1. Automatic reconnection queues `LoadCompleteStateAndReplayUpdatesAsync` via Task.Run
+2. Before Task.Run executes, manual reconnection completes and sets `_updates = null`
+3. Queued task finally executes but finds `_updates` is null
+
+**Solution**: Made `LoadCompleteStateAndReplayUpdatesAsync` idempotent:
+```csharp
+var updates = _updates;
+if (updates is null)
+{
+    // Already replayed by concurrent reconnection - safe to ignore
+    _logger.LogDebug("LoadCompleteStateAndReplayUpdatesAsync called but updates already replayed");
+    return;
+}
+```
+
+**Why This Works**:
+- Loading complete state multiple times is inherently safe (idempotent operation)
+- If `_updates` is null, another reconnection already succeeded and replayed buffered updates
+- Race condition becomes benign - latest successful reconnection wins
+- Debug logging provides visibility into concurrent reconnection attempts
+
 ## For Future Reviewers
 
 ### Code Review Checklist
