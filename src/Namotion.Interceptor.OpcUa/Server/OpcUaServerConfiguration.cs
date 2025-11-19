@@ -46,12 +46,12 @@ public class OpcUaServerConfiguration
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
     /// </summary>
-    public TimeSpan? BufferTime { get; set; }
+    public TimeSpan? BufferTime { get; init; }
     
     /// <summary>
     /// Gets or sets the retry time (default: 10s).
     /// </summary>
-    public TimeSpan? RetryTime { get; set; }
+    public TimeSpan? RetryTime { get; init; }
 
     public virtual ApplicationInstance CreateApplicationInstance()
     {
