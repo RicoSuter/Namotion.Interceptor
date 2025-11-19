@@ -64,6 +64,14 @@ public class GeneratorTests
     }
     
     [Fact]
+    public void WhenClassExistsInTwoNamespaces_ThenTheyAreSeparated()
+    {
+        // Arrange & Act & Assert
+        Assert.Equal(2, Models1.Calculator.DefaultProperties.Count);
+        Assert.Equal(2, Models2.Calculator.DefaultProperties.Count);
+    }
+    
+    [Fact]
     public void WhenPartialClassSpansMultipleFiles_ThenAllPropertiesAreMerged()
     {
         // Arrange
