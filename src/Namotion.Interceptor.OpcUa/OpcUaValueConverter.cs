@@ -33,7 +33,12 @@ public class OpcUaValueConverter
                 targetElement == typeof(decimal) && 
                 nodeValue is double[] doubleArray)
             {
-                return doubleArray.Select(d => (decimal)d).ToArray();
+                var result = new decimal[doubleArray.Length]; // TODO(perf): Avoid memory allocation
+                for (var i = 0; i < doubleArray.Length; i++)
+                {
+                    result[i] = (decimal)doubleArray[i];
+                }
+                return result;
             }
         }
 
@@ -61,7 +66,12 @@ public class OpcUaValueConverter
                 if (elementType == typeof(decimal))
                 {
                     var decimals = (decimal[])array;
-                    return decimals.Select(d => (double)d).ToArray();
+                    var result = new double[decimals.Length];
+                    for (var i = 0; i < decimals.Length; i++)
+                    {
+                        result[i] = (double)decimals[i];
+                    }
+                    return result;
                 }
 
                 return propertyValue;

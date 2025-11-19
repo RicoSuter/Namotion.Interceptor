@@ -28,11 +28,11 @@ public class SubjectSourceBackgroundServiceTests
 
         var updates = new List<string>();
         subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<ISubjectUpdater>(), It.IsAny<CancellationToken>()))
-            .Callback((ISubjectUpdater updater, CancellationToken _) =>
+            .Setup(s => s.StartListeningAsync(It.IsAny<SourceUpdateBuffer>(), It.IsAny<CancellationToken>()))
+            .Callback((SourceUpdateBuffer updateBuffer, CancellationToken _) =>
             {
-                updater.EnqueueOrApplyUpdate(updates, u => u.Add("Update1"));
-                updater.EnqueueOrApplyUpdate(updates, u => u.Add("Update2"));
+                updateBuffer.ApplyUpdate(updates, u => u.Add("Update1"));
+                updateBuffer.ApplyUpdate(updates, u => u.Add("Update2"));
             })
             .ReturnsAsync((IDisposable?)null);
 
@@ -83,7 +83,7 @@ public class SubjectSourceBackgroundServiceTests
             .Returns(true);
 
         subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<ISubjectUpdater>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.StartListeningAsync(It.IsAny<SourceUpdateBuffer>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((IDisposable?)null);
 
         subjectSourceMock

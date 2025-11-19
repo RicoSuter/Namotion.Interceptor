@@ -78,15 +78,12 @@ public class RegisteredSubjectProperty
     /// Checks whether this property has child subjects, which can be either
     /// a subject reference, a collection of subjects, or a dictionary of subjects.
     /// </summary>
-    public bool HasChildSubjects => 
-        IsSubjectReference || IsSubjectCollection || IsSubjectDictionary;
+    public bool HasChildSubjects => IsSubjectReference || IsSubjectCollection || IsSubjectDictionary;
 
     /// <summary>
     /// Gets a value indicating whether this property references another subject.
     /// </summary>
-    public bool IsSubjectReference => 
-        IsSubjectReferenceCache.GetOrAdd(Type, t => 
-            t == typeof(object) || t.IsAssignableTo(typeof(IInterceptorSubject)));
+    public bool IsSubjectReference => IsSubjectReferenceCache.GetOrAdd(Type, IsSubjectReferenceType);
     
     /// <summary>
     /// Gets a value indicating whether this property references multiple subject with a collection.
@@ -98,7 +95,7 @@ public class RegisteredSubjectProperty
                 t.IsAssignableTo(typeof(IEnumerable)) &&
                 t.GetInterfaces().Any(i =>
                     i.IsAssignableTo(typeof(IEnumerable)) &&
-                    i.GenericTypeArguments.FirstOrDefault()?.IsAssignableTo(typeof(IInterceptorSubject)) == true);
+                    IsSubjectReferenceType(i.GenericTypeArguments.FirstOrDefault()));
         });
 
     /// <summary>
@@ -115,8 +112,16 @@ public class RegisteredSubjectProperty
                     {
                         Name: "KeyValuePair`2",
                         Namespace: "System.Collections.Generic"
-                    } keyValueType && keyValueType.GenericTypeArguments[1].IsAssignableTo(typeof(IInterceptorSubject)));
+                    } keyValueType && IsSubjectReferenceType(keyValueType.GenericTypeArguments[1]));
         });
+
+    private static bool IsSubjectReferenceType(Type? type)
+    {
+        if (type is null) return false;
+        return type.IsInterface || // any subject type might implement an any interface
+               type == typeof(object) ||
+               type.IsAssignableTo(typeof(IInterceptorSubject));
+    }
 
     /// <summary>
     /// Gets a value indicating whether the property has a getter.

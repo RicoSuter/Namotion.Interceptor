@@ -8,16 +8,15 @@ using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Sources;
 
-public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
+public class SubjectSourceBackgroundService : BackgroundService
 {
-    private readonly Lock _lock = new();
     private readonly ISubjectSource _source;
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
-
-    private List<Action>? _beforeInitializationUpdates = [];
+    
+    private readonly SourceUpdateBuffer _updateBuffer;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
@@ -46,42 +45,7 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
-    }
-
-    /// <inheritdoc />
-    public void EnqueueOrApplyUpdate<TState>(TState state, Action<TState> update)
-    {
-        var beforeInitializationUpdates = _beforeInitializationUpdates;
-        if (beforeInitializationUpdates is not null)
-        {
-            lock (_lock)
-            {
-                beforeInitializationUpdates = _beforeInitializationUpdates;
-                if (beforeInitializationUpdates is not null)
-                {
-                    // Still initializing, buffer the update (cold path, allocations acceptable)
-                    AddBeforeInitializationUpdate(beforeInitializationUpdates, state, update);
-                    return;
-                }
-            }
-        }
-
-        try
-        {
-            update(state);
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "Failed to apply subject update.");
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void AddBeforeInitializationUpdate<TState>(List<Action> beforeInitializationUpdates, TState state, Action<TState> update)
-    {
-        // The allocation for the closure happens only on the cold path (needs to be in an own non-inlined method
-        // to avoid capturing unnecessary locals and causing allocations on the hot path).
-        beforeInitializationUpdates.Add(() => update(state));
+        _updateBuffer = new SourceUpdateBuffer(source, logger);
     }
 
     /// <inheritdoc />
@@ -91,39 +55,26 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
         {
             try
             {
-                lock (_lock)
+                _updateBuffer.StartBuffering();
+                var disposable = await _source.StartListeningAsync(_updateBuffer, stoppingToken).ConfigureAwait(false);
+                try
                 {
-                    _beforeInitializationUpdates = [];
+                    await _updateBuffer.CompleteInitializationAsync(stoppingToken);
+
+                    using var subscription = _context.CreatePropertyChangeQueueSubscription();
+                    await ProcessPropertyChangesAsync(subscription, stoppingToken).ConfigureAwait(false);
                 }
-
-                // Start listening for changes from the source
-                using var disposable = await _source.StartListeningAsync(this, stoppingToken).ConfigureAwait(false);
-                var applyAction = await _source.LoadCompleteSourceStateAsync(stoppingToken).ConfigureAwait(false);
-
-                lock (_lock)
+                finally
                 {
-                    applyAction?.Invoke();
-
-                    // Replay previously buffered updates
-                    var beforeInitializationUpdates = _beforeInitializationUpdates;
-                    _beforeInitializationUpdates = null;
-
-                    foreach (var action in beforeInitializationUpdates!)
+                    if (disposable is IAsyncDisposable asyncDisposable)
                     {
-                        try
-                        {
-                            action();
-                        }
-                        catch (Exception e)
-                        {
-                            _logger.LogError(e, "Failed to apply subject update.");
-                        }
+                        await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        disposable?.Dispose();
                     }
                 }
-                
-                // Subscribe to property changes and sync them to the source
-                using var subscription = _context.CreatePropertyChangeQueueSubscription();
-                await ProcessPropertyChangesAsync(subscription, stoppingToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -133,6 +84,8 @@ public class SubjectSourceBackgroundService : BackgroundService, ISubjectUpdater
                 }
 
                 _logger.LogError(ex, "Failed to listen for changes in source.");
+                // ResetState is called AFTER disposal in the finally block above,
+                // so all resources from the previous attempt are already cleaned up.
                 ResetState();
 
                 await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);

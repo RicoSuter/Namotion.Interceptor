@@ -47,8 +47,6 @@ Bind subjects to MQTT topics for IoT scenarios:
 
 ```csharp
 builder.Services.AddMqttSubjectServer<Sensor>("mqtt");
-// or
-builder.Services.AddMqttSubjectClient("mqtt://localhost:1883", "mqtt");
 ```
 
 Properties with `[SourcePath("mqtt", "topic")]` are automatically synchronized with MQTT messages.
@@ -83,28 +81,41 @@ Properties become queryable and subscribable through GraphQL, with automatic cha
 Implement `ISubjectSource` to create custom data source integrations:
 
 ```csharp
-public class DatabaseSource : ISubjectSource
+public class SampleSource : ISubjectSource
 {
+    public SampleSource(IInterceptorSubject root)
+    {
+        _root = root;
+    }
+    
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
         return property.ReflectionAttributes
             .OfType<SourcePathAttribute>()
-            .Any(a => a.SourceName == "database");
+            .Any(a => a.SourceName == "sample");
     }
 
     public async Task<IDisposable?> StartListeningAsync(
-        ISubjectMutationDispatcher dispatcher, 
+        SourceUpdateBuffer updateBuffer,
         CancellationToken cancellationToken)
     {
-        // Set up database change notifications
+        // Set up source change notifications
         return subscription;
     }
 
-    public async Task<Action<IInterceptorSubject>> LoadInitialStateAsync(
+    public async Task<Action?> LoadCompleteSourceStateAsync(
         CancellationToken cancellationToken)
     {
-        // Load initial values from database
-        return subject => { /* apply loaded state */ };
+        // Load initial values from source
+        var sourceState = ...;
+        return () => { /* Apply sourceState to _root */ };
+    }
+
+    public async ValueTask WriteToSourceAsync(
+        IReadOnlyCollection<SubjectPropertyChange> changes,
+        CancellationToken cancellationToken)
+    {
+        // Write changes back to source
     }
 }
 ```
@@ -128,6 +139,6 @@ Built-in providers include:
 
 When multiple sources update properties concurrently, the library provides automatic thread-safety at the property field access level. Individual property updates are atomic and thread-safe without requiring additional synchronization in your source implementation.
 
-**Source responsibility**: While the library ensures thread-safe property access, **sources are responsible for maintaining correct update ordering** according to their protocol semantics. When implementing `ISubjectSource`, use the provided `ISubjectUpdater` to enqueue updates, which handles sequencing and prevents race conditions where newer values could be overwritten by delayed older updates.
+**Source responsibility**: While the library ensures thread-safe property access, **sources are responsible for maintaining correct update ordering** according to their protocol semantics. When implementing `ISubjectSource`, use the provided `SourceUpdateBuffer` to apply updates, which handles buffering during initialization and prevents race conditions where newer values could be overwritten by delayed older updates.
 
 Custom source implementations should ensure that the temporal ordering of external events is preserved when applying property updates. This is critical for maintaining data consistency when events arrive out of order or concurrently from the same source.

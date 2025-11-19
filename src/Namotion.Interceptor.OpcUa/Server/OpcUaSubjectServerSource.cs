@@ -17,8 +17,9 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
     private readonly ILogger _logger;
     private readonly OpcUaServerConfiguration _configuration;
 
-    private OpcUaSubjectServer? _server;
-    private ISubjectUpdater? _updater;
+    private volatile OpcUaSubjectServer? _server;
+    private volatile SourceUpdateBuffer? _updateBuffer;
+    private int _consecutiveFailures;
     
     public OpcUaSubjectServerSource(
         IInterceptorSubject subject,
@@ -35,9 +36,9 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         return _configuration.SourcePathProvider.IsPropertyIncluded(property);
     }
 
-    public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
+    public Task<IDisposable?> StartListeningAsync(SourceUpdateBuffer updateBuffer, CancellationToken cancellationToken)
     {
-        _updater = updater;
+        _updateBuffer = updateBuffer;
         return Task.FromResult<IDisposable?>(null);
     }
 
@@ -48,6 +49,12 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     public ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
+        var currentInstance = _server?.CurrentInstance;
+        if (currentInstance == null)
+        {
+            return ValueTask.CompletedTask;
+        }
+
         var count = changes.Count;
         for (var i = 0; i < count; i++)
         {
@@ -60,9 +67,12 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
                 var convertedValue = _configuration.ValueConverter
                     .ConvertToNodeValue(value, registeredProperty);
 
-                node.Value = convertedValue;
-                node.Timestamp = change.ChangedTimestamp.UtcDateTime;
-                node.ClearChangeMasks(_server?.CurrentInstance.DefaultSystemContext, false);
+                lock (node)
+                {
+                    node.Value = convertedValue;
+                    node.Timestamp = change.ChangedTimestamp.UtcDateTime;
+                    node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+                }
             }
         }
 
@@ -76,37 +86,79 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         while (!stoppingToken.IsCancellationRequested)
         {
             var application = _configuration.CreateApplicationInstance();
+
             if (_configuration.CleanCertificateStore)
             {
                 CleanCertificateStore(application);
-                _logger.LogInformation("Cleaning up old certificates...");
             }
+
             try
             {
-                _server = new OpcUaSubjectServer(_subject, this, _configuration);
+                using var server = new OpcUaSubjectServer(_subject, this, _configuration, _logger);
+                try
+                {
+                    _server = server;
 
-                await application.CheckApplicationInstanceCertificates(true);
-                await application.Start(_server);
+                    await application.CheckApplicationInstanceCertificates(true);
+                    await application.Start(server);
 
-                await Task.Delay(-1, stoppingToken);
+                    await Task.Delay(-1, stoppingToken);
+
+                    _consecutiveFailures = 0;
+                }
+                finally
+                {
+                    var serverToClean = _server;
+                    _server = null;
+                    serverToClean?.ClearPropertyData();
+                }
             }
             catch (Exception ex)
             {
                 if (ex is not TaskCanceledException)
                 {
-                    _logger.LogError(ex, "Failed to start OPC UA server.");
+                    _consecutiveFailures++;
+                    _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", _consecutiveFailures);
+
+                    var delaySeconds = Math.Min(Math.Pow(2, _consecutiveFailures - 1), 30);
+                    await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken);
                 }
-
-                application.Stop();
-
-                if (ex is not TaskCanceledException)
+            }
+            finally
+            {
+                try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+                    ShutdownServer(application);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to shutdown OPC UA server.");
                 }
             }
         }
     }
-    
+
+    private void ShutdownServer(ApplicationInstance application)
+    {
+        try
+        {
+            if (application.Server is OpcUaSubjectServer { CurrentInstance.SessionManager: not null } server)
+            {
+                var sessions = server.CurrentInstance.SessionManager.GetSessions();
+                foreach (var session in sessions)
+                {
+                    session.Close();
+                }
+            }
+
+            application.Stop();
+        }
+        catch (ServiceResultException e) when (e.StatusCode == StatusCodes.BadServerHalted)
+        {
+            // Server already halted
+        }
+    }
+
     private static void CleanCertificateStore(ApplicationInstance application)
     {
         var path = application
@@ -114,7 +166,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             .SecurityConfiguration
             .ApplicationCertificate
             .StorePath;
-        
+
         if (Directory.Exists(path))
         {
             Directory.Delete(path, true);
@@ -131,7 +183,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, registeredProperty);
 
             var state = (source: this, property, changedTimestamp, receivedTimestamp, value: convertedValue);
-            _updater?.EnqueueOrApplyUpdate(state,
+            _updateBuffer?.ApplyUpdate(state,
                 static s => s.property.SetValueFromSource(
                     s.source, s.changedTimestamp, s.receivedTimestamp, s.value));
         }

@@ -28,7 +28,7 @@ namespace Namotion.Interceptor.Mqtt
         private int _numberOfClients = 0;
         private MqttServer? _mqttServer;
 
-        private ISubjectUpdater? _updater;
+        private SourceUpdateBuffer? _updateBuffer;
 
         public int Port { get; set; } = 1883;
 
@@ -90,9 +90,9 @@ namespace Namotion.Interceptor.Mqtt
             return _sourcePathProvider.IsPropertyIncluded(property);
         }
 
-        public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
+        public Task<IDisposable?> StartListeningAsync(SourceUpdateBuffer updateBuffer, CancellationToken cancellationToken)
         {
-            _updater = updater;
+            _updateBuffer = updateBuffer;
             return Task.FromResult<IDisposable?>(null);
         }
 
@@ -159,7 +159,7 @@ namespace Namotion.Interceptor.Mqtt
             var payload = Encoding.UTF8.GetString(args.ApplicationMessage.Payload);
 
             var state = (source: this, path, payload);
-            _updater?.EnqueueOrApplyUpdate(state, static s =>
+            _updateBuffer?.ApplyUpdate(state, static s =>
             {
                 try
                 {
