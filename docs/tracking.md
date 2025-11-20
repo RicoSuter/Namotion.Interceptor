@@ -240,15 +240,14 @@ var context = InterceptorSubjectContext
     .Create()
     .WithReadPropertyRecorder();
 
-var recorder = context.GetService<ReadPropertyRecorder>();
+var person = new Person(context);
 
-var accessedProperties = new HashSet<PropertyReference>();
-using (recorder.StartRecording(accessedProperties))
-{
-    var fullName = person.FullName; // Records FirstName and LastName
-}
+using var scope = ReadPropertyRecorder.Start();
 
-// accessedProperties now contains references to FirstName and LastName
+var fullName = person.FullName; // Records FirstName and LastName
+
+var accessedProperties = scope.GetPropertiesAndDispose();
+// accessedProperties contains references to FirstName and LastName
 ```
 
 This is primarily used internally by the derived property change detection system but can also be used for custom scenarios.
