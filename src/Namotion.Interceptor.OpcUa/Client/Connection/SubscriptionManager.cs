@@ -292,7 +292,14 @@ internal class SubscriptionManager
         foreach (var subscription in subscriptions)
         {
             subscription.FastDataChangeCallback -= OnFastDataChange;
-            subscription.Delete(true);
+            try
+            {
+                subscription.DeleteAsync(true).GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // Best effort during disposal
+            }
         }
     }
 }

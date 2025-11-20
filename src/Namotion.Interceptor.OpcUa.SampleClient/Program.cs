@@ -20,8 +20,6 @@ var context = InterceptorSubjectContext
     .WithDataAnnotationValidation()
     .WithHostedServices(builder.Services);
 
-Utils.SetTraceMask(Utils.TraceMasks.All);
-
 var root = new Root(context);
 context.AddService(root);
 

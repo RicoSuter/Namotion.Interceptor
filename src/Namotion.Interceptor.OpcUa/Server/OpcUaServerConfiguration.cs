@@ -53,9 +53,16 @@ public class OpcUaServerConfiguration
     /// </summary>
     public TimeSpan? RetryTime { get; init; }
 
-    public virtual ApplicationInstance CreateApplicationInstance()
+    /// <summary>
+    /// Gets or sets the telemetry context for OPC UA operations.
+    /// Defaults to a telemetry context with trace-based logging via Utils.LoggingProvider.
+    /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
+    /// </summary>
+    public ITelemetryContext TelemetryContext { get; init; } = DefaultTelemetry.Create(_ => { });
+
+    public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
-        var application = new ApplicationInstance
+        var application = new ApplicationInstance(TelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Server
@@ -168,11 +175,11 @@ public class OpcUaServerConfiguration
                 TraceMasks = 519, // Security, errors, service result exceptions & trace
                 DeleteOnLoad = true
             },
-            CertificateValidator = new CertificateValidator()
+            CertificateValidator = new CertificateValidator(TelemetryContext)
         };
 
         // Register the certificate validator with the configuration.
-        config.CertificateValidator.Update(config);
+        await config.CertificateValidator.UpdateAsync(config).ConfigureAwait(false);
 
         application.ApplicationConfiguration = config;
         return application;

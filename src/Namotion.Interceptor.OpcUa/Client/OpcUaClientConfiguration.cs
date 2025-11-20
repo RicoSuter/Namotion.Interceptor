@@ -1,5 +1,6 @@
 ﻿using Namotion.Interceptor.Sources.Paths;
 using Opc.Ua;
+using Opc.Ua.Client;
 using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Client;
@@ -205,9 +206,27 @@ public class OpcUaClientConfiguration
     /// </summary>
     public TimeSpan ReconnectInterval { get; init; } = TimeSpan.FromSeconds(5);
 
-    public virtual ApplicationInstance CreateApplicationInstance()
+    /// <summary>
+    /// Gets or sets the telemetry context for OPC UA operations.
+    /// Defaults to a telemetry context with trace-based logging via Utils.LoggingProvider.
+    /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
+    /// </summary>
+    public ITelemetryContext TelemetryContext { get; init; } = DefaultTelemetry.Create(_ => { });
+
+    /// <summary>
+    /// Gets or sets the session factory for creating OPC UA sessions.
+    /// If not specified, a DefaultSessionFactory using the configured TelemetryContext is created automatically.
+    /// </summary>
+    public ISessionFactory? SessionFactory { get; init; }
+
+    /// <summary>
+    /// Gets the actual session factory, creating a default one using TelemetryContext if not explicitly set.
+    /// </summary>
+    public ISessionFactory ActualSessionFactory => SessionFactory ?? new DefaultSessionFactory(TelemetryContext);
+
+    public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
-        var application = new ApplicationInstance
+        var application = new ApplicationInstance(TelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Client
@@ -262,10 +281,10 @@ public class OpcUaClientConfiguration
                 OutputFilePath = "Logs/UaClient.log",
                 TraceMasks = 0
             },
-            CertificateValidator = new CertificateValidator()
+            CertificateValidator = new CertificateValidator(TelemetryContext)
         };
 
-        config.CertificateValidator.Update(config);
+        await config.CertificateValidator.UpdateAsync(config).ConfigureAwait(false);
 
         application.ApplicationConfiguration = config;
         return application;
