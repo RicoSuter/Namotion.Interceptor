@@ -15,8 +15,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 {
     private const int DefaultChunkSize = 512;
 
-    private readonly SemaphoreSlim _writeFlushSemaphore = new(1, 1);
-
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
     private readonly HashSet<PropertyReference> _propertiesWithOpcData = [];
@@ -24,7 +22,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
-    private readonly WriteFailureQueue _writeFailureQueue;
 
     private SessionManager? _sessionManager;
     private SourceUpdateBuffer? _updateBuffer;
@@ -49,8 +46,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _logger = logger;
         _configuration = configuration;
 
-        _writeFailureQueue = new WriteFailureQueue(_configuration.WriteQueueSize, logger);
-   
         _subjectLoader = new OpcUaSubjectLoader(configuration, _propertiesWithOpcData, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
     }
@@ -275,7 +270,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     _initialMonitoredItems.Count);
             }
 
-            await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
             await updateBuffer.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation("Session restart complete.");
@@ -303,98 +297,28 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     }
     
     /// <summary>
-    /// Writes changes to OPC UA server. Queues with ring buffer semantics if disconnected.
+    /// Writes changes to OPC UA server in chunks.
+    /// Returns transient failures for retry, throws on complete failure.
     /// </summary>
-    public async ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public async ValueTask<SourceWriteResult> WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        if (changes.Count is 0)
+        var count = changes.Count;
+        if (count is 0)
         {
-            return;
+            return SourceWriteResult.Success;
         }
 
         var session = _sessionManager?.CurrentSession;
         if (session is null || !session.Connected)
         {
-            _writeFailureQueue.EnqueueBatch(changes);
-            return;
-        }
-
-        try
-        {
-            var succeeded = await FlushQueuedWritesAsync(session, cancellationToken).ConfigureAwait(false);
-            if (succeeded)
-            {
-                await TryWriteToSourceWithoutFlushAsync(changes, session, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                _writeFailureQueue.EnqueueBatch(changes);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to write {Count} changes to OPC UA server, queuing for retry.", changes.Count);
-            _writeFailureQueue.EnqueueBatch(changes);
-        }
-    }
-
-    /// <summary>
-    /// Flushes pending writes from the queue.
-    /// Returns true if flush succeeded (or queue was empty), false if flush failed.
-    /// </summary>
-    internal async Task<bool> FlushQueuedWritesAsync(Session session, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await _writeFlushSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            return false;
-        }
-
-        try
-        {
-            if (_writeFailureQueue.IsEmpty)
-            {
-                return true;
-            }
-
-            var pendingWrites = _writeFailureQueue.DequeueAll();
-            if (pendingWrites.Count > 0)
-            {
-                return await TryWriteToSourceWithoutFlushAsync(pendingWrites, session, cancellationToken).ConfigureAwait(false);
-            }
-
-            return true;
-        }
-        finally
-        {
-            try { _writeFlushSemaphore.Release(); } catch { /* might be disposed already */ }
-        }
-    }
-
-    /// <summary>
-    /// Writes changes in chunks. Re-queues only failed portion on partial failure.
-    /// Returns true if all succeeded. Defensive session.Connected check handles staleness.
-    /// </summary>
-    private async Task<bool> TryWriteToSourceWithoutFlushAsync(IReadOnlyList<SubjectPropertyChange> changes, Session session, CancellationToken cancellationToken)
-    {
-        var count = changes.Count;
-        if (count is 0)
-        {
-            return true;
-        }
-
-        if (!session.Connected)
-        {
-            _logger.LogWarning("Session not connected, queuing {Count} writes.", count);
-            _writeFailureQueue.EnqueueBatch(changes);
-            return false;
+            throw new InvalidOperationException("OPC UA session is not connected.");
         }
 
         var chunkSize = (int)(session.OperationLimits?.MaxNodesPerWrite ?? DefaultChunkSize);
         chunkSize = chunkSize is 0 ? int.MaxValue : chunkSize;
+
+        List<SubjectPropertyChange>? allFailures = null;
+
         for (var offset = 0; offset < count; offset += chunkSize)
         {
             var take = Math.Min(chunkSize, count - offset);
@@ -412,38 +336,33 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     writeValues,
                     cancellationToken).ConfigureAwait(false);
 
-                var transientFailures = LogWriteFailures(changes, writeValues, writeResponse.Results, offset);
-
-                // Re-queue changes that had transient errors for automatic retry
-                if (transientFailures is not null && transientFailures.Count > 0)
+                var transientFailures = GetTransientFailedChanges(changes, writeResponse.Results, offset);
+                if (transientFailures is not null)
                 {
-                    _logger.LogInformation(
-                        "Re-queuing {Count} writes with transient errors for automatic retry.",
-                        transientFailures.Count);
-
-                    _writeFailureQueue.EnqueueBatch(transientFailures);
+                    allFailures ??= [];
+                    allFailures.AddRange(transientFailures);
                 }
             }
             catch (Exception ex)
             {
-                // Network/communication failure - re-queue only the remaining changes from this offset onwards
-                var remainingCount = count - offset;
-                var remainingChanges = new List<SubjectPropertyChange>(remainingCount);
+                // Network/communication failure - return remaining changes for retry
+                _logger.LogWarning(ex,
+                    "OPC UA write communication failed at offset {Offset}, returning {Count} remaining changes for retry.",
+                    offset, count - offset);
+
+                allFailures ??= [];
                 for (var i = offset; i < count; i++)
                 {
-                    remainingChanges.Add(changes[i]);
+                    allFailures.Add(changes[i]);
                 }
 
-                _logger.LogWarning(ex,
-                    "OPC UA write communication failed at offset {Offset}, re-queuing {Count} remaining changes.",
-                    offset, remainingCount);
-
-                _writeFailureQueue.EnqueueBatch(remainingChanges);
-                return false; // Indicate failure
+                return new SourceWriteResult(allFailures);
             }
         }
 
-        return true; // All writes succeeded
+        return allFailures is { Count: > 0 }
+            ? new SourceWriteResult(allFailures)
+            : SourceWriteResult.Success;
     }
     
     private WriteValueCollection CreateWriteValuesCollection(IReadOnlyList<SubjectPropertyChange> changes, int offset, int take)
@@ -485,11 +404,11 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     /// <summary>
     /// Determines if a write failure status code represents a transient error that should be retried.
-    /// Returns true for transient errors (connectivity, timeouts, server load), false for permanent errors (invalid node, type mismatch).
+    /// Returns true for transient errors (connectivity, timeouts, server load), false for permanent errors.
     /// </summary>
     private static bool IsTransientWriteError(StatusCode statusCode)
     {
-        // Permanent design-time error: Don't retry
+        // Permanent design-time errors: Don't retry
         if (statusCode == StatusCodes.BadNodeIdUnknown ||
             statusCode == StatusCodes.BadAttributeIdInvalid ||
             statusCode == StatusCodes.BadTypeMismatch ||
@@ -505,44 +424,47 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     }
 
     /// <summary>
-    /// Logs write failures and collects changes with transient errors for retry.
-    /// Returns list of changes that had transient errors and should be re-queued.
+    /// Collects transient failures for retry and logs summary counts.
     /// </summary>
-    private List<SubjectPropertyChange>? LogWriteFailures(
+    private List<SubjectPropertyChange>? GetTransientFailedChanges(
         IReadOnlyList<SubjectPropertyChange> changes,
-        WriteValueCollection writeValues,
         StatusCodeCollection results,
         int offset)
     {
         List<SubjectPropertyChange>? transientFailures = null;
-        for (var i = 0; i < Math.Min(results.Count, writeValues.Count); i++)
+        var permanentErrorCount = 0;
+
+        for (var i = 0; i < results.Count; i++)
         {
             if (StatusCode.IsBad(results[i]))
             {
                 var change = changes[offset + i];
-                var statusCode = results[i];
-                var isTransient = IsTransientWriteError(statusCode);
+                var isTransient = IsTransientWriteError(results[i]);
 
                 if (isTransient)
                 {
-                    _logger.LogWarning(
-                        "Transient write failure for {PropertyName} (NodeId: {NodeId}): {StatusCode}. Will retry.",
-                        change.Property.Name,
-                        writeValues[i].NodeId,
-                        statusCode);
-
                     transientFailures ??= [];
                     transientFailures.Add(change);
                 }
                 else
                 {
-                    _logger.LogError(
-                        "Permanent write failure for {PropertyName} (NodeId: {NodeId}): {StatusCode}. Not retrying.",
-                        change.Property.Name,
-                        writeValues[i].NodeId,
-                        statusCode);
+                    permanentErrorCount++;
                 }
             }
+        }
+
+        if (transientFailures is { Count: > 0 })
+        {
+            _logger.LogWarning(
+                "OPC UA write had {TransientCount} transient failures (will retry).",
+                transientFailures.Count);
+        }
+
+        if (permanentErrorCount > 0)
+        {
+            _logger.LogError(
+                "OPC UA write had {PermanentCount} permanent failures (not retrying).",
+                permanentErrorCount);
         }
 
         return transientFailures;
@@ -596,10 +518,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         // even if properties are reused across multiple source instances
         CleanupPropertyData();
         Dispose();
-
-        // Dispose semaphore directly - any in-flight flush will handle ObjectDisposedException
-        // During shutdown, losing in-flight writes is acceptable
-        _writeFlushSemaphore.Dispose();
     }
 
     private void CleanupPropertyData()

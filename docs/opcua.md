@@ -323,9 +323,9 @@ Reference these types with `[OpcUaTypeDefinition]`.
 
 ## Resilience Features
 
-### Write Queue During Disconnection
+### Write Retry Queue During Disconnection
 
-The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored.
+The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored. This feature is provided by the `SubjectSourceBackgroundService` and is available to all source implementations.
 
 ```csharp
 builder.Services.AddOpcUaSubjectClient(
@@ -334,7 +334,7 @@ builder.Services.AddOpcUaSubjectClient(
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
         SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
-        WriteQueueSize = 1000 // Buffer up to 1000 writes (default)
+        WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default)
     });
 
 // Writes are automatically queued during disconnection
@@ -342,9 +342,9 @@ machine.Speed = 100; // Queued if disconnected, written immediately if connected
 ```
 
 **Configuration:**
-- `WriteQueueSize`: Maximum writes to buffer (default: 1000, set to 0 to disable, no maximum limit)
+- `WriteRetryQueueSize`: Maximum writes to buffer (default: 1000, set to 0 to disable)
 - Ring buffer semantics: drops oldest when full, keeps latest values
-- Batched flush: processes 100 items per batch to avoid memory spikes
+- Automatic flush after reconnection
 
 ### Polling Fallback for Unsupported Nodes
 

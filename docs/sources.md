@@ -109,11 +109,15 @@ public class SampleSource : ISubjectSource
         return () => { /* Apply sourceState to _root */ };
     }
 
-    public async ValueTask WriteToSourceAsync(
+    public async ValueTask<SourceWriteResult> WriteToSourceAsync(
         IReadOnlyList<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
         // Write changes back to source
+        // Return SourceWriteResult.Success if all writes succeeded
+        // Return failed changes for transient errors that should be retried
+        // Throw exception for complete failures to retry all changes
+        return SourceWriteResult.Success;
     }
 }
 ```
@@ -140,3 +144,65 @@ When multiple sources update properties concurrently, the library provides autom
 **Source responsibility**: While the library ensures thread-safe property access, **sources are responsible for maintaining correct update ordering** according to their protocol semantics. When implementing `ISubjectSource`, use the provided `SourceUpdateBuffer` to apply updates, which handles buffering during initialization and prevents race conditions where newer values could be overwritten by delayed older updates.
 
 Custom source implementations should ensure that the temporal ordering of external events is preserved when applying property updates. This is critical for maintaining data consistency when events arrive out of order or concurrently from the same source.
+
+## Write Retry Queue
+
+The `SubjectSourceBackgroundService` provides an optional write retry queue that buffers writes during disconnection and automatically flushes them when the connection is restored. This feature is available to all source implementations.
+
+```csharp
+// Configure write retry queue size when setting up a source
+services.AddHostedService(sp =>
+{
+    var source = sp.GetRequiredService<ISubjectSource>();
+    var context = sp.GetRequiredService<IInterceptorSubjectContext>();
+    var logger = sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>();
+
+    return new SubjectSourceBackgroundService(
+        source,
+        context,
+        logger,
+        bufferTime: TimeSpan.FromMilliseconds(8),
+        retryTime: TimeSpan.FromSeconds(10),
+        writeRetryQueueSize: 1000); // Enable write retry queue
+});
+```
+
+**Behavior:**
+- Ring buffer semantics: oldest writes dropped when capacity reached
+- FIFO flush order when connection restored
+- Automatic retry of transient failures returned from `WriteToSourceAsync`
+
+## Partial Write Failure Handling
+
+Sources can return partial failures from `WriteToSourceAsync` using `SourceWriteResult`:
+
+```csharp
+public async ValueTask<SourceWriteResult> WriteToSourceAsync(
+    IReadOnlyList<SubjectPropertyChange> changes,
+    CancellationToken cancellationToken)
+{
+    var failures = new List<SubjectPropertyChange>();
+
+    foreach (var change in changes)
+    {
+        try
+        {
+            await WriteToExternalSystem(change);
+        }
+        catch (TransientException)
+        {
+            // Mark for retry
+            failures.Add(change);
+        }
+    }
+
+    return failures.Count > 0
+        ? new SourceWriteResult(failures)
+        : SourceWriteResult.Success;
+}
+```
+
+**Guidelines:**
+- Return `SourceWriteResult.Success` when all writes succeed
+- Return failed changes in `SourceWriteResult` for transient errors (will be retried)
+- Throw exceptions for complete failures (all changes will be retried)

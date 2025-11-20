@@ -47,12 +47,12 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         return Task.FromResult<Action?>(null);
     }
 
-    public ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public ValueTask<SourceWriteResult> WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         var currentInstance = _server?.CurrentInstance;
         if (currentInstance == null)
         {
-            return ValueTask.CompletedTask;
+            return ValueTask.FromResult(SourceWriteResult.Success);
         }
 
         var count = changes.Count;
@@ -76,7 +76,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             }
         }
 
-        return ValueTask.CompletedTask;
+        return ValueTask.FromResult(SourceWriteResult.Success);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

@@ -254,7 +254,6 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
                     try
                     {
                         await _updateBuffer.CompleteInitializationAsync(_stoppingToken).ConfigureAwait(false);
-                        await _source.FlushQueuedWritesAsync(session, _stoppingToken).ConfigureAwait(false);
                     }
                     catch (Exception exception)
                     {

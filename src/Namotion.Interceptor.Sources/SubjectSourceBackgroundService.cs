@@ -1,10 +1,9 @@
-﻿using Microsoft.Extensions.Hosting;
+﻿using System.Collections.Concurrent;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
-using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Sources;
 
@@ -15,12 +14,15 @@ public class SubjectSourceBackgroundService : BackgroundService
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
-    
+
     private readonly SourceUpdateBuffer _updateBuffer;
+
+    // Write retry queue for resilience during disconnections (optional)
+    private readonly WriteRetryQueue? _writeRetryQueue;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
-    private int _flushGate = 0; // 0 = free, 1 = flushing
+    private int _flushGate; // 0 = free, 1 = flushing
 
     // Scratch buffers used only while holding the write semaphore (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
@@ -31,21 +33,28 @@ public class SubjectSourceBackgroundService : BackgroundService
     private readonly List<SubjectPropertyChange> _immediateChanges = new(1);
 
     // Use ticks to avoid torn reads of DateTimeOffset across threads
-    private long _flushLastTicks = 0L;
+    private long _flushLastTicks;
 
     public SubjectSourceBackgroundService(
         ISubjectSource source,
         IInterceptorSubjectContext context,
         ILogger logger,
         TimeSpan? bufferTime = null,
-        TimeSpan? retryTime = null)
+        TimeSpan? retryTime = null,
+        int? writeRetryQueueSize = null)
     {
         _source = source;
         _context = context;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
-        _updateBuffer = new SourceUpdateBuffer(source, logger);
+
+        if (writeRetryQueueSize is > 0)
+        {
+            _writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize.Value, logger);
+        }
+
+        _updateBuffer = new SourceUpdateBuffer(source, _writeRetryQueue is not null ? ct => _writeRetryQueue.FlushAsync(_source, ct) : null, logger);
     }
 
     /// <inheritdoc />
@@ -235,13 +244,46 @@ public class SubjectSourceBackgroundService : BackgroundService
 
     private async ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
+        if (_writeRetryQueue is null)
+        {
+            // Original behavior - no queuing
+            try
+            {
+                var result = await _source.WriteToSourceAsync(changes, cancellationToken).ConfigureAwait(false);
+                if (result.FailedChanges.Count > 0)
+                {
+                    _logger.LogWarning("Write returned {Count} failed changes but queuing is disabled.", result.FailedChanges.Count);
+                }
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Failed to write changes to source.");
+            }
+            return;
+        }
+
+        // With queue - flush pending writes first, then write new changes
         try
         {
-            await _source.WriteToSourceAsync(changes, cancellationToken).ConfigureAwait(false);
+            var succeeded = await _writeRetryQueue.FlushAsync(_source, cancellationToken).ConfigureAwait(false);
+            if (succeeded)
+            {
+                var result = await _source.WriteToSourceAsync(changes, cancellationToken).ConfigureAwait(false);
+                if (result.FailedChanges.Count > 0)
+                {
+                    _logger.LogInformation("Re-queuing {Count} changes with transient errors for retry.", result.FailedChanges.Count);
+                    _writeRetryQueue.EnqueueBatch(result.FailedChanges);
+                }
+            }
+            else
+            {
+                _writeRetryQueue.EnqueueBatch(changes);
+            }
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Failed to write changes to source.");
+            _logger.LogWarning(e, "Failed to write {Count} changes to source, queuing for retry.", changes.Count);
+            _writeRetryQueue.EnqueueBatch(changes);
         }
     }
 

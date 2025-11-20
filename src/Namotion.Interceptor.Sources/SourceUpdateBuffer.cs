@@ -11,13 +11,15 @@ public sealed class SourceUpdateBuffer
 {
     private readonly ISubjectSource _source;
     private readonly ILogger _logger;
+    private readonly Func<CancellationToken, ValueTask<bool>>? _flushRetryQueue;
     private readonly Lock _lock = new();
     private List<Action>? _updates = [];
 
-    public SourceUpdateBuffer(ISubjectSource source, ILogger logger)
+    public SourceUpdateBuffer(ISubjectSource source, Func<CancellationToken, ValueTask<bool>>? flushRetryQueue, ILogger logger)
     {
         _source = source;
         _logger = logger;
+        _flushRetryQueue = flushRetryQueue;
     }
 
     /// <summary>
@@ -34,7 +36,8 @@ public sealed class SourceUpdateBuffer
     }
 
     /// <summary>
-    /// Completes initialization by loading complete state from the source and replaying all buffered updates.
+    /// Completes initialization by loading complete state from the source, replaying all buffered updates,
+    /// and flushing any queued writes that accumulated during disconnection.
     /// This ensures zero data loss during the initialization period.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -68,6 +71,12 @@ public sealed class SourceUpdateBuffer
                     _logger.LogError(e, "Failed to apply subject update.");
                 }
             }
+        }
+
+        // Flush retry queue after initialization/reconnection
+        if (_flushRetryQueue is not null)
+        {
+            await _flushRetryQueue(cancellationToken).ConfigureAwait(false);
         }
     }
 
