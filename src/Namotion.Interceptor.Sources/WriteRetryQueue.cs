@@ -2,17 +2,17 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.OpcUa.Client.Resilience;
+namespace Namotion.Interceptor.Sources;
 
 /// <summary>
-/// Manages a write queue with ring buffer semantics for buffering writes during disconnection.
+/// Manages a write retry queue with ring buffer semantics for buffering writes during disconnection.
 /// When the queue is full, oldest writes are dropped to make room for new ones.
 /// </summary>
-internal sealed class WriteFailureQueue
+internal sealed class WriteRetryQueue
 {
-    // TODO(high): Consider moving as native feature of SubjectSourceBackgroundService (for all sources)
-    
     private readonly ConcurrentQueue<SubjectPropertyChange> _pendingWrites = new();
+    private readonly SemaphoreSlim _flushSemaphore = new(1, 1);
+    private readonly List<SubjectPropertyChange> _scratchBuffer = [];
 
     private readonly ILogger _logger;
     private readonly int _maxQueueSize;
@@ -34,7 +34,7 @@ internal sealed class WriteFailureQueue
     /// </summary>
     public int DroppedWriteCount => Interlocked.CompareExchange(ref _droppedWriteCount, 0, 0);
 
-    public WriteFailureQueue(int maxQueueSize, ILogger logger)
+    public WriteRetryQueue(int maxQueueSize, ILogger logger)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maxQueueSize);
         ArgumentNullException.ThrowIfNull(logger);
@@ -45,7 +45,7 @@ internal sealed class WriteFailureQueue
 
     /// <summary>
     /// Enqueues writes. Ring buffer: oldest dropped when full.
-    /// Thread-safe: DequeueAll called inside semaphore, ConcurrentQueue handles concurrent access.
+    /// Thread-safe: DequeueAllTo called inside semaphore, ConcurrentQueue handles concurrent access.
     /// </summary>
     public void EnqueueBatch(IReadOnlyList<SubjectPropertyChange> changes)
     {
@@ -85,23 +85,70 @@ internal sealed class WriteFailureQueue
     }
 
     /// <summary>
-    /// Dequeues all pending writes and returns them as a list.
-    /// Resets the dropped write counter.
+    /// Flushes pending writes from the queue to the source.
+    /// Returns true if flush succeeded (or queue was empty), false if flush failed.
     /// </summary>
-    public List<SubjectPropertyChange> DequeueAll()
+    public async ValueTask<bool> FlushAsync(ISubjectSource source, CancellationToken cancellationToken)
     {
-        var pendingWrites = new List<SubjectPropertyChange>(_pendingWrites.Count);
-        while (_pendingWrites.TryDequeue(out var change))
+        if (IsEmpty)
         {
-            pendingWrites.Add(change);
+            return true;
         }
 
-        if (pendingWrites.Count > 0)
+        try
         {
-            // Reset dropped counter after successful flush
+            await _flushSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            return false;
+        }
+
+        try
+        {
+            if (IsEmpty)
+            {
+                return true;
+            }
+
+            // Dequeue all pending writes into scratch buffer
+            _scratchBuffer.Clear();
+            _scratchBuffer.EnsureCapacity(_pendingWrites.Count); // Hint to reduce resizes
+            while (_pendingWrites.TryDequeue(out var change))
+            {
+                _scratchBuffer.Add(change);
+            }
+
+            var count = _scratchBuffer.Count;
+            if (count == 0)
+            {
+                return true;
+            }
+
+            // Reset dropped counter after successful dequeue
             Interlocked.Exchange(ref _droppedWriteCount, 0);
-        }
 
-        return pendingWrites;
+            try
+            {
+                var result = await source.WriteToSourceAsync(_scratchBuffer, cancellationToken).ConfigureAwait(false);
+                if (result.FailedChanges.Count > 0)
+                {
+                    _logger.LogInformation("Re-queuing {Count} changes with transient errors from flush.", result.FailedChanges.Count);
+                    EnqueueBatch(result.FailedChanges);
+                }
+                return true;
+            }
+            catch (Exception e)
+            {
+                _logger.LogWarning(e, "Failed to flush {Count} queued writes to source, re-queuing.", count);
+                EnqueueBatch(_scratchBuffer);
+                return false;
+            }
+        }
+        finally
+        {
+            _scratchBuffer.Clear();
+            try { _flushSemaphore.Release(); } catch { /* might be disposed already */ }
+        }
     }
 }

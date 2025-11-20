@@ -42,5 +42,10 @@ public interface ISubjectSource
     /// </summary>
     /// <param name="changes">The collection of subject property changes.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken);
+    /// <returns>
+    /// Returns <see cref="SourceWriteResult.Success"/> if all writes succeeded.
+    /// Returns a result with failed changes for transient errors that should be retried.
+    /// Throws an exception for complete failures (e.g., network disconnect) to retry all changes.
+    /// </returns>
+    ValueTask<SourceWriteResult> WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken);
 }

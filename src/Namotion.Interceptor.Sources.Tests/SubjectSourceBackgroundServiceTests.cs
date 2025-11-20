@@ -42,7 +42,7 @@ public class SubjectSourceBackgroundServiceTests
 
         subjectSourceMock
             .Setup(s => s.WriteToSourceAsync(It.IsAny<IReadOnlyList<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(ValueTask.CompletedTask);
+            .Returns(ValueTask.FromResult(SourceWriteResult.Success));
 
         var cancellationTokenSource = new CancellationTokenSource();
 
@@ -95,7 +95,7 @@ public class SubjectSourceBackgroundServiceTests
         subjectSourceMock
             .Setup(s => s.WriteToSourceAsync(It.IsAny<IReadOnlyList<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback((IEnumerable<SubjectPropertyChange> c, CancellationToken _) => changes = c)
-            .Returns(ValueTask.CompletedTask);
+            .Returns(ValueTask.FromResult(SourceWriteResult.Success));
 
         var cancellationTokenSource = new CancellationTokenSource();
 

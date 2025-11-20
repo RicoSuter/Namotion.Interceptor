@@ -101,7 +101,7 @@ namespace Namotion.Interceptor.Mqtt
             return Task.FromResult<Action?>(null);
         }
 
-        public async ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public async ValueTask<SourceWriteResult> WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
             foreach (var (path, change) in changes
                 .Where(c => c.Property.TryGetRegisteredProperty() is { HasChildSubjects: false })
@@ -109,6 +109,8 @@ namespace Namotion.Interceptor.Mqtt
             {
                 await PublishPropertyValueAsync(path, change.GetNewValue<object?>(), cancellationToken);
             }
+
+            return SourceWriteResult.Success;
         }
 
         private Task ClientConnectedAsync(ClientConnectedEventArgs arg)

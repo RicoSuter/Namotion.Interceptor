@@ -73,11 +73,11 @@ Exception-based error handling is simpler and equally robust compared to retry l
 
 ### Write Resilience
 
-**Write Queue (Ring Buffer)**:
+**Write Retry Queue (Ring Buffer)**:
 - Buffered during disconnection (FIFO semantics)
 - Oldest writes dropped when capacity reached
 - Automatic flush after reconnection
-- Default: 1000 writes (configurable via `WriteQueueSize`)
+- Default: 1000 writes (configurable via `WriteRetryQueueSize`)
 
 **Implementation Note**: Ring buffer has documented temporary overshoot behavior - while loop may drop multiple items if concurrent enqueues occur during capacity check. This is acceptable as it's self-correcting and rare (requires concurrent burst exactly at capacity).
 
@@ -173,7 +173,7 @@ services.AddOpcUaSubjectClient<MySubject>(
     {
         options.SessionTimeout = 30000; // 30s
         options.ReconnectInterval = 2000; // 2s
-        options.WriteQueueSize = 5000; // Large buffer for extended outages
+        options.WriteRetryQueueSize = 5000; // Large buffer for extended outages
         options.EnableAutoHealing = true;
         options.SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5);
         options.EnablePollingFallback = true;

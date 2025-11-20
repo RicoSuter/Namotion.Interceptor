@@ -74,7 +74,8 @@ public static class OpcUaSubjectServerExtensions
                     subject.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
                     configuration.BufferTime,
-                    configuration.RetryTime);
+                    configuration.RetryTime,
+                    configuration.WriteRetryQueueSize);
             });
     }
 
