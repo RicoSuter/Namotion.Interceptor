@@ -40,6 +40,10 @@ public sealed class SourceUpdateBuffer
     /// and flushing any queued writes that accumulated during disconnection.
     /// This ensures zero data loss during the initialization period.
     /// </summary>
+    /// <remarks>
+    /// If the retry queue flush fails, the exception propagates to signal initialization failure
+    /// and trigger reconnection. Queued writes remain in the queue for retry on next connection.
+    /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The task.</returns>
     public async Task CompleteInitializationAsync(CancellationToken cancellationToken)

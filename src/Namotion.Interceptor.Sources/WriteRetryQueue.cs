@@ -61,7 +61,9 @@ internal sealed class WriteRetryQueue
             _pendingWrites.Enqueue(change);
         }
 
-        // Ring buffer: Drop the oldest if over capacity (Count may be slightly stale, acceptable)
+        // Ring buffer: Drop the oldest if over capacity.
+        // Note: Under high contention, Count may be slightly stale causing temporary overshoot,
+        // but this is self-correcting as excess items are drained. This is acceptable for a lossy buffer.
         while (_pendingWrites.Count > _maxQueueSize)
         {
             if (_pendingWrites.TryDequeue(out _))
