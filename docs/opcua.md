@@ -1,6 +1,9 @@
 # OPC UA
 
-**IMPORTANT: This library is licensed under GPL-2.0-only due to its dependency on the OPC Foundation .NET Standard Stack, which requires GPL-2.0 licensing for non-members.**
+> [!IMPORTANT]
+> **License:** The library 'Namotion.Interceptor.OpcUa' is licensed under GPL-2.0-only due to its dependency on the [OPC Foundation .NET Standard Stack](https://github.com/OPCFoundation/UA-.NETStandard), which requires GPL-2.0 licensing for non-members.
+>
+> OPC Foundation Corporate Members may use this library under MIT terms, as they have access to the OPC UA Stack under the RCL (Reciprocal Community License) which is MIT-compatible.
 
 The `Namotion.Interceptor.OpcUa` package provides integration between Namotion.Interceptor and OPC UA (Open Platform Communications Unified Architecture), enabling bidirectional synchronization between C# objects and industrial automation systems. It supports both client and server modes.
 
