@@ -86,17 +86,17 @@ builder.Services.AddOpcUaSubjectClient(
         RootName = "Machines",
         DefaultNamespaceUri = "http://factory.com/machines",
         ApplicationName = "MyOpcUaClient",
-        ReconnectDelay = TimeSpan.FromSeconds(5),
+        ReconnectInterval = TimeSpan.FromSeconds(5),
 
         // Subscription settings
         DefaultSamplingInterval = 100,
-        DefaultPublishingInterval = 50,
+        DefaultPublishingInterval = 100,
         DefaultQueueSize = 10,
         MaximumItemsPerSubscription = 1000,
 
         // Performance tuning
         BufferTime = TimeSpan.FromMilliseconds(10),
-        RetryTime = TimeSpan.FromSeconds(5)
+        RetryTime = TimeSpan.FromSeconds(1)
     });
 ```
 
@@ -328,12 +328,13 @@ Reference these types with `[OpcUaTypeDefinition]`.
 The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient<Machine>(
-    serverUrl: "opc.tcp://plc.factory.com:4840",
-    sourceName: "opc",
-    configure: options =>
+builder.Services.AddOpcUaSubjectClient(
+    subjectSelector: sp => sp.GetRequiredService<Machine>(),
+    configurationProvider: sp => new OpcUaClientConfiguration
     {
-        options.WriteQueueSize = 1000; // Buffer up to 1000 writes (default)
+        ServerUrl = "opc.tcp://plc.factory.com:4840",
+        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        WriteQueueSize = 1000 // Buffer up to 1000 writes (default)
     });
 
 // Writes are automatically queued during disconnection
@@ -341,7 +342,7 @@ machine.Speed = 100; // Queued if disconnected, written immediately if connected
 ```
 
 **Configuration:**
-- `WriteQueueSize`: Maximum writes to buffer (default: 1000, set to 0 to disable)
+- `WriteQueueSize`: Maximum writes to buffer (default: 1000, set to 0 to disable, no maximum limit)
 - Ring buffer semantics: drops oldest when full, keeps latest values
 - Batched flush: processes 100 items per batch to avoid memory spikes
 
@@ -350,14 +351,15 @@ machine.Speed = 100; // Queued if disconnected, written immediately if connected
 The library automatically falls back to periodic polling when OPC UA nodes don't support subscriptions. This ensures all properties remain synchronized even with legacy servers or special node types.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient<Machine>(
-    serverUrl: "opc.tcp://plc.factory.com:4840",
-    sourceName: "opc",
-    configure: options =>
+builder.Services.AddOpcUaSubjectClient(
+    subjectSelector: sp => sp.GetRequiredService<Machine>(),
+    configurationProvider: sp => new OpcUaClientConfiguration
     {
-        options.EnablePollingFallback = true; // Default
-        options.PollingInterval = TimeSpan.FromSeconds(1); // Default: 1 second
-        options.PollingBatchSize = 100; // Default: 100 items per batch
+        ServerUrl = "opc.tcp://plc.factory.com:4840",
+        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        EnablePollingFallback = true, // Default
+        PollingInterval = TimeSpan.FromSeconds(1), // Default: 1 second
+        PollingBatchSize = 100 // Default: 100 items per batch
     });
 ```
 
@@ -372,13 +374,14 @@ builder.Services.AddOpcUaSubjectClient<Machine>(
 The library automatically retries failed subscription items that may succeed later, such as when server resources become available.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient<Machine>(
-    serverUrl: "opc.tcp://plc.factory.com:4840",
-    sourceName: "opc",
-    configure: options =>
+builder.Services.AddOpcUaSubjectClient(
+    subjectSelector: sp => sp.GetRequiredService<Machine>(),
+    configurationProvider: sp => new OpcUaClientConfiguration
     {
-        options.EnableAutoHealing = true; // Default
-        options.SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10); // Default: 10 seconds
+        ServerUrl = "opc.tcp://plc.factory.com:4840",
+        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        EnableAutoHealing = true, // Default
+        SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10) // Default: 10 seconds
     });
 ```
 
@@ -389,28 +392,9 @@ builder.Services.AddOpcUaSubjectClient<Machine>(
 - Items that permanently don't support subscriptions automatically fall back to polling
 
 **Configuration validation:**
-- `WriteQueueSize` limited to 10,000 items maximum
 - `SubscriptionHealthCheckInterval` minimum of 5 seconds enforced
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
-
-### Observability
-
-Monitor connection health, queue status, and polling metrics through exposed properties:
-
-```csharp
-// Connection status
-var isConnected = clientSource.IsConnected;
-
-// Write queue metrics
-var pendingWrites = clientSource.PendingWriteCount;
-var droppedWrites = clientSource.DroppedWriteCount;
-
-// Subscription and polling metrics
-var activeSubscriptions = subscriptionManager.ActiveSubscriptionCount;
-var totalItems = subscriptionManager.TotalMonitoredItemCount;
-var pollingItems = clientSource.PollingItemCount; // Items using polling fallback
-```
 
 ## Thread Safety
 

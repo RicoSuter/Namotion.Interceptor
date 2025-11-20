@@ -4,13 +4,11 @@ The `Namotion.Interceptor.Sources` package enables binding subject properties to
 
 ## Setup
 
-Enable sources in your interceptor context:
+Sources are enabled through their specific extension methods. Each source type (MQTT, OPC UA, etc.) provides its own registration:
 
 ```csharp
-var context = InterceptorSubjectContext
-    .Create()
-    .WithRegistry()
-    .WithSources();
+// MQTT
+builder.Services.AddMqttSubjectServer<Sensor>("mqtt");
 ```
 
 The Sources package builds on the Registry to discover properties and their source path mappings.
@@ -112,7 +110,7 @@ public class SampleSource : ISubjectSource
     }
 
     public async ValueTask WriteToSourceAsync(
-        IReadOnlyCollection<SubjectPropertyChange> changes,
+        IReadOnlyList<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
         // Write changes back to source
