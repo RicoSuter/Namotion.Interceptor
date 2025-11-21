@@ -255,8 +255,11 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
                     }
                     catch (Exception exception)
                     {
-                        _logger.LogError(exception, "Reconnect failed, closing session and retry.");
+                        _logger.LogError(exception, "Reconnect failed, closing session. Health check will trigger full restart.");
                         await DisposeSessionAsync(session, _stoppingToken).ConfigureAwait(false);
+
+                        // Clear session - health check will detect null session and trigger full restart
+                        Volatile.Write(ref _session, null);
                     }
                 }
             }, _stoppingToken);

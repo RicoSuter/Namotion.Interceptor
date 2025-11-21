@@ -202,7 +202,9 @@ services.AddHostedService(sp =>
 ```
 
 **Behavior:**
-- Ring buffer semantics: oldest writes dropped when capacity reached
+- Ring buffer semantics: oldest writes dropped when capacity reached (configurable via `writeRetryQueueSize` to balance memory usage vs buffering capacity)
 - FIFO flush order when connection restored
 - Automatic retry when `WriteToSourceAsync` throws an exception
+- In-memory only: queued writes are lost on process restart (by design for simplicity; implement persistent queue wrapper if needed for critical data)
+- No dead letter queue: permanent write failures are logged but not preserved (implement custom error handling via connector wrapper if needed for auditing)
 

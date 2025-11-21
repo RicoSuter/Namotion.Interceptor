@@ -34,7 +34,7 @@ public class SubjectChangeContextTests
    
         // Act
         person.FirstName = "A";
-        registeredProperty.SetValueFromSource(source, null, "B");
+        registeredProperty.SetValueFromConnector(source, null, "B");
         person.FirstName = "C";
 
         // Assert
