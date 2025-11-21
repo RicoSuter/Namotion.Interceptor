@@ -1,4 +1,4 @@
-﻿using Namotion.Interceptor.Sources.Paths;
+﻿using Namotion.Interceptor.Connectors.Paths;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 
@@ -65,10 +65,10 @@ public class OpcUaClientConfiguration
         static (_, _) => Task.FromResult(true);
     
     /// <summary>
-    /// Gets the source path provider used to map between OPC UA node browse names and C# property names.
+    /// Gets the connector path provider used to map between OPC UA node browse names and C# property names.
     /// This provider determines which properties are included and how their names are translated.
     /// </summary>
-    public required ISourcePathProvider SourcePathProvider { get; init; }
+    public required IConnectorPathProvider ConnectorPathProvider { get; init; }
 
     /// <summary>
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
@@ -278,7 +278,7 @@ public class OpcUaClientConfiguration
     public void Validate()
     {
         ArgumentNullException.ThrowIfNull(ServerUrl);
-        ArgumentNullException.ThrowIfNull(SourcePathProvider);
+        ArgumentNullException.ThrowIfNull(ConnectorPathProvider);
         ArgumentNullException.ThrowIfNull(TypeResolver);
         ArgumentNullException.ThrowIfNull(ValueConverter);
         ArgumentNullException.ThrowIfNull(SubjectFactory);

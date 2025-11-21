@@ -19,7 +19,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Blazor
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.SampleConsole", "Namotion.Interceptor.SampleConsole\Namotion.Interceptor.SampleConsole.csproj", "{499EBD8C-9968-47C9-88AB-219C5424AA0F}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Sources", "Namotion.Interceptor.Sources\Namotion.Interceptor.Sources.csproj", "{B0BD7C00-43AC-41A4-B33E-3D4404C13397}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.Connectors", "Namotion.Interceptor.Connectors\Namotion.Interceptor.Connectors.csproj", "{B0BD7C00-43AC-41A4-B33E-3D4404C13397}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Namotion.Interceptor.SampleWeb", "Namotion.Interceptor.SampleWeb\Namotion.Interceptor.SampleWeb.csproj", "{E6F9EB15-FA03-4330-9ED6-B82287EE7926}"
 EndProject
@@ -71,7 +71,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Hostin
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Generator.Tests", "Namotion.Interceptor.Generator.Tests\Namotion.Interceptor.Generator.Tests.csproj", "{B87CCDF4-A443-47A0-8A56-1CEB0A6EBACD}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Sources.Tests", "Namotion.Interceptor.Sources.Tests\Namotion.Interceptor.Sources.Tests.csproj", "{D266C5C9-D82A-4E4E-9ABB-8C1941295A08}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Connectors.Tests", "Namotion.Interceptor.Connectors.Tests\Namotion.Interceptor.Connectors.Tests.csproj", "{D266C5C9-D82A-4E4E-9ABB-8C1941295A08}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.OpcUa.SampleClient", "Namotion.Interceptor.OpcUa.SampleClient\Namotion.Interceptor.OpcUa.SampleClient.csproj", "{993D95D7-2BB6-4414-8F8A-C097B40173D4}"
 EndProject

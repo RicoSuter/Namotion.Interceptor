@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Client.Polling;
-using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Connectors;
 using Opc.Ua;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;
@@ -13,8 +13,8 @@ namespace Namotion.Interceptor.OpcUa.Client.Connection;
 /// </summary>
 internal sealed class SessionManager : IDisposable, IAsyncDisposable
 {
-    private readonly OpcUaSubjectClientSource _source;
-    private readonly SourceUpdateBuffer _updateBuffer;
+    private readonly OpcUaClientConnector _source;
+    private readonly ConnectorUpdateBuffer _updateBuffer;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
@@ -50,7 +50,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
     /// </summary>
     public IReadOnlyCollection<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
 
-    public SessionManager(OpcUaSubjectClientSource source, SourceUpdateBuffer updateBuffer, OpcUaClientConfiguration configuration, ILogger logger)
+    public SessionManager(OpcUaClientConnector source, ConnectorUpdateBuffer updateBuffer, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _source = source;
         _updateBuffer = updateBuffer;

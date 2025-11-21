@@ -17,7 +17,7 @@ The `Namotion.Interceptor.OpcUa` package provides integration between Namotion.I
 
 ## Client Setup
 
-Connect to an OPC UA server by configuring a client with `AddOpcUaSubjectClient`. The client automatically establishes connections, subscribes to node changes, and synchronizes values with your C# properties.
+Connect to an OPC UA server by configuring a client with `AddOpcUaClientConnector`. The client automatically establishes connections, subscribes to node changes, and synchronizes values with your C# properties.
 
 ```csharp
 [InterceptorSubject]
@@ -30,7 +30,7 @@ public partial class Machine
     public partial decimal Speed { get; set; }
 }
 
-builder.Services.AddOpcUaSubjectClient<Machine>(
+builder.Services.AddOpcUaClientConnector<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
     sourceName: "opc",
     pathPrefix: null,
@@ -45,7 +45,7 @@ machine.Speed = 100; // Writes to OPC UA server
 
 ## Server Setup
 
-Expose your C# objects as an OPC UA server by configuring with `AddOpcUaSubjectServer`. The server creates OPC UA nodes from your properties and handles client read/write requests automatically.
+Expose your C# objects as an OPC UA server by configuring with `AddOpcUaServerConnector`. The server creates OPC UA nodes from your properties and handles client read/write requests automatically.
 
 ```csharp
 [InterceptorSubject]
@@ -55,7 +55,7 @@ public partial class Sensor
     public partial decimal Value { get; set; }
 }
 
-builder.Services.AddOpcUaSubjectServer<Sensor>(
+builder.Services.AddOpcUaServerConnector<Sensor>(
     sourceName: "opc",
     pathPrefix: null,
     rootName: "MySensor");
@@ -72,12 +72,12 @@ await host.StartAsync();
 For advanced scenarios, use the full configuration API to customize connection behavior, subscription settings, and dynamic property discovery. The required settings include the server URL and infrastructure components, while optional settings allow fine-tuning of reconnection delays, sampling intervals, and performance parameters.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaClientConnector(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://localhost:4840",
-        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        SourcePathProvider = new AttributeBasedConnectorPathProvider("opc", ".", null),
         TypeResolver = new OpcUaTypeResolver(logger),
         ValueConverter = new OpcUaValueConverter(),
         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -114,11 +114,11 @@ ShouldAddDynamicProperty = async (node, ct) =>
 The server configuration requires minimal setup with source path provider and value converter. Additional options control the application name, namespace URI, certificate management, and performance tuning.
 
 ```csharp
-builder.Services.AddOpcUaSubjectServer(
+builder.Services.AddOpcUaServerConnector(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaServerConfiguration
     {
-        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        SourcePathProvider = new AttributeBasedConnectorPathProvider("opc", ".", null),
         ValueConverter = new OpcUaValueConverter(),
 
         // Optional
@@ -325,15 +325,15 @@ Reference these types with `[OpcUaTypeDefinition]`.
 
 ### Write Retry Queue During Disconnection
 
-The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored. This feature is provided by the `SubjectClientSourceBackgroundService`.
+The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored. This feature is provided by the `SubjectUpstreamConnectorBackgroundService`.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaClientConnector(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        SourcePathProvider = new AttributeBasedConnectorPathProvider("opc", ".", null),
         WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default)
     });
 
@@ -351,12 +351,12 @@ machine.Speed = 100; // Queued if disconnected, written immediately if connected
 The library automatically falls back to periodic polling when OPC UA nodes don't support subscriptions. This ensures all properties remain synchronized even with legacy servers or special node types.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaClientConnector(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        SourcePathProvider = new AttributeBasedConnectorPathProvider("opc", ".", null),
         EnablePollingFallback = true, // Default
         PollingInterval = TimeSpan.FromSeconds(1), // Default: 1 second
         PollingBatchSize = 100 // Default: 100 items per batch
@@ -374,12 +374,12 @@ builder.Services.AddOpcUaSubjectClient(
 The library automatically retries failed subscription items that may succeed later, such as when server resources become available.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaClientConnector(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        SourcePathProvider = new AttributeBasedConnectorPathProvider("opc", ".", null),
         EnableAutoHealing = true, // Default
         SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10) // Default: 10 seconds
     });
@@ -405,7 +405,7 @@ Write queue operations use `Interlocked` operations for thread-safe counter upda
 To prevent feedback loops when external sources update properties, use `SubjectChangeContext.WithSource()` to mark the change source:
 
 ```csharp
-using (SubjectChangeContext.WithSource(opcUaSource))
+using (SubjectChangeContext.WithSource(opcUaConnector))
 {
     subject.Temperature = newValue;
 }

@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -16,10 +16,10 @@ namespace Namotion.Interceptor.OpcUa.Client.Polling;
 /// </summary>
 internal sealed class PollingManager : IDisposable
 {
-    private readonly OpcUaSubjectClientSource _source;
+    private readonly OpcUaClientConnector _source;
     private readonly ILogger _logger;
     private readonly SessionManager _sessionManager;
-    private readonly SourceUpdateBuffer _updateBuffer;
+    private readonly ConnectorUpdateBuffer _updateBuffer;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly PollingCircuitBreaker _circuitBreaker;
     private readonly PollingMetrics _metrics = new();
@@ -33,9 +33,9 @@ internal sealed class PollingManager : IDisposable
     private ISession? _lastKnownSession;
     private int _disposed;
 
-    public PollingManager(OpcUaSubjectClientSource source,
+    public PollingManager(OpcUaClientConnector source,
         SessionManager sessionManager,
-        SourceUpdateBuffer updateBuffer,
+        ConnectorUpdateBuffer updateBuffer,
         OpcUaClientConfiguration configuration,
         ILogger logger)
     {
