@@ -1,5 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;

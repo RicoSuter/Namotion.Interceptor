@@ -28,6 +28,7 @@ public class SubjectSourceBenchmark
 
     private readonly AutoResetEvent _signal = new(false);
     private Action<object?>[] _updates;
+    private SourceUpdateBuffer _updateBuffer;
 
     [GlobalSetup]
     public async Task Setup()
@@ -60,6 +61,9 @@ public class SubjectSourceBenchmark
 
         _cts = new CancellationTokenSource();
         await _service.StartAsync(_cts.Token);
+        
+        _updateBuffer = _source.UpdateBuffer;
+        await _updateBuffer.CompleteInitializationAsync(_cts.Token);
 
         _updates = Enumerable
             .Range(1, 1000000)
@@ -77,7 +81,7 @@ public class SubjectSourceBenchmark
     {
         for (var i = 0; i < _updates.Length; i++)
         {
-            _service.EnqueueOrApplyUpdate(null, _updates[i]);
+            _updateBuffer.ApplyUpdate(null, _updates[i]);
         }
 
         _signal.WaitOne();
@@ -116,6 +120,8 @@ public class SubjectSourceBenchmark
         private int _count;
         private readonly int _targetCount;
         private readonly AutoResetEvent _signal = new(false);
+        
+        public SourceUpdateBuffer UpdateBuffer { get; private set; }
 
         public TestSubjectSource(int targetCount)
         {
@@ -134,8 +140,9 @@ public class SubjectSourceBenchmark
         
         public bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
 
-        public Task<IDisposable?> StartListeningAsync(ISubjectUpdater updater, CancellationToken cancellationToken)
+        public Task<IDisposable?> StartListeningAsync(SourceUpdateBuffer updateBuffer, CancellationToken cancellationToken)
         {
+            UpdateBuffer = updateBuffer;
             return Task.FromResult<IDisposable?>(null);
         }
 

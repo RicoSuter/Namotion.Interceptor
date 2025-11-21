@@ -11,6 +11,8 @@ internal class CustomNodeManagerFactory : INodeManagerFactory
 
     public StringCollection NamespacesUris => new(_configuration.GetNamespaceUris());
 
+    public CustomNodeManager? NodeManager { get; private set; }
+
     public CustomNodeManagerFactory(IInterceptorSubject subject, OpcUaSubjectServerSource source, OpcUaServerConfiguration configuration)
     {
         _subject = subject;
@@ -20,6 +22,7 @@ internal class CustomNodeManagerFactory : INodeManagerFactory
 
     public INodeManager Create(IServerInternal server, ApplicationConfiguration applicationConfiguration)
     {
-        return new CustomNodeManager(_subject, _source, server, applicationConfiguration, _configuration);
+        NodeManager = new CustomNodeManager(_subject, _source, server, applicationConfiguration, _configuration);
+        return NodeManager;
     }
 }

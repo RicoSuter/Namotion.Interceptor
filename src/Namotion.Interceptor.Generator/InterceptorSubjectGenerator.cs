@@ -134,11 +134,17 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
         {
             if (cls is null) return;
             
-            var fileName = $"{cls.ClassNode.Identifier.Value}.g.cs";
+            var className = cls.ClassNode.Identifier.ValueText;
+            var namespaceName = (cls.ClassNode.Parent as NamespaceDeclarationSyntax)?.Name.ToString() ??
+                                (cls.ClassNode.Parent as FileScopedNamespaceDeclarationSyntax)?.Name.ToString()
+                                ?? "YourDefaultNamespace";
+
+            // Include namespace in filename to avoid conflicts when same class name exists in different namespaces
+            var fileName = $"{namespaceName}.{className}.g.cs";
+            
             try
             {
                 var semanticModel = cls.Model;
-                var className = cls.ClassNode.Identifier.ValueText;
                     
                     var baseClass = cls.ClassNode.BaseList?.Types
                         .Select(t => semanticModel.GetTypeInfo(t.Type).Type as INamedTypeSymbol)
@@ -147,10 +153,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                              ImplementsInterface(t, "Namotion.Interceptor.IInterceptorSubject")));
                     
                     var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-                    
-                    var namespaceName = (cls.ClassNode.Parent as NamespaceDeclarationSyntax)?.Name.ToString() ??
-                                        (cls.ClassNode.Parent as FileScopedNamespaceDeclarationSyntax)?.Name.ToString()
-                                        ?? "YourDefaultNamespace";
+
 
                     var defaultPropertiesNewModifier = baseClass is not null ? "new " : string.Empty;
 

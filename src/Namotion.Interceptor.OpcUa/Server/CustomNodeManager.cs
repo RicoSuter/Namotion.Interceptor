@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Collections.Concurrent;
+using System.Reflection;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -15,7 +16,7 @@ internal class CustomNodeManager : CustomNodeManager2
     private readonly OpcUaSubjectServerSource _source;
     private readonly OpcUaServerConfiguration _configuration;
 
-    private readonly Dictionary<RegisteredSubject, NodeState> _subjects = new();
+    private readonly ConcurrentDictionary<RegisteredSubject, NodeState> _subjects = new();
 
     public CustomNodeManager(
         IInterceptorSubject subject,
@@ -36,7 +37,18 @@ internal class CustomNodeManager : CustomNodeManager2
         _configuration.LoadPredefinedNodes(collection, context);
         return collection;
     }
-    
+
+    public void ClearPropertyData()
+    {
+        foreach (var node in PredefinedNodes.Values)
+        {
+            if (node is BaseDataVariableState { Handle: PropertyReference property })
+            {
+                property.RemovePropertyData(OpcUaSubjectServerSource.OpcVariableKey);
+            }
+        }
+    }
+
     public override void CreateAddressSpace(IDictionary<NodeId, IList<IReference>> externalReferences)
     {
         base.CreateAddressSpace(externalReferences);
@@ -147,39 +159,50 @@ internal class CustomNodeManager : CustomNodeManager2
         var browseName = GetBrowseName(propertyName, property, null);
 
         var referenceTypeId = GetReferenceTypeId(property);
-        var variable = CreateVariableNode(parentNodeId, nodeId, browseName, typeInfo, referenceTypeId);
+        var variableNode = CreateVariableNode(parentNodeId, nodeId, browseName, typeInfo, referenceTypeId);
+        variableNode.Handle = property.Reference;
 
         // Adjust access according to property setter
         if (!property.HasSetter)
         {
-            variable.AccessLevel = AccessLevels.CurrentRead;
-            variable.UserAccessLevel = AccessLevels.CurrentRead;
+            variableNode.AccessLevel = AccessLevels.CurrentRead;
+            variableNode.UserAccessLevel = AccessLevels.CurrentRead;
         }
         else
         {
-            variable.AccessLevel = AccessLevels.CurrentReadOrWrite;
-            variable.UserAccessLevel = AccessLevels.CurrentReadOrWrite;
+            variableNode.AccessLevel = AccessLevels.CurrentReadOrWrite;
+            variableNode.UserAccessLevel = AccessLevels.CurrentReadOrWrite;
         }
 
         // Set array dimensions (works for 1D and multi-D)
         if (value is Array arrayValue)
         {
-            variable.ArrayDimensions = new ReadOnlyList<uint>(
+            variableNode.ArrayDimensions = new ReadOnlyList<uint>(
                 Enumerable.Range(0, arrayValue.Rank)
                     .Select(i => (uint)arrayValue.GetLength(i))
                     .ToArray());
         }
 
-        variable.Value = value;
-        variable.StateChanged += (_, _, changes) =>
+        variableNode.Value = value;
+        variableNode.StateChanged += (_, _, changes) =>
         {
             if (changes.HasFlag(NodeStateChangeMasks.Value))
             {
-                _source.UpdateProperty(property.Reference, variable.Timestamp, variable.Value);
+                // Lock on node to prevent race conditions with WriteToSourceAsync
+
+                DateTimeOffset timestamp;
+                object? nodeValue;
+                lock (variableNode)
+                {
+                    timestamp = variableNode.Timestamp;
+                    nodeValue = variableNode.Value;
+                }
+
+                _source.UpdateProperty(property.Reference, timestamp, nodeValue);
             }
         };
 
-        property.Reference.SetPropertyData(OpcUaSubjectServerSource.OpcVariableKey, variable);
+        property.Reference.SetPropertyData(OpcUaSubjectServerSource.OpcVariableKey, variableNode);
     }
 
     private NodeId GetNodeId(RegisteredSubjectProperty property, string fullPath)
@@ -202,20 +225,26 @@ internal class CustomNodeManager : CustomNodeManager2
         NodeId? referenceTypeId)
     {
         var registeredSubject = subject.TryGetRegisteredSubject() ?? throw new InvalidOperationException("Registered subject not found.");
-        if (_subjects.TryGetValue(registeredSubject, out var objectNode))
+
+        if (_subjects.TryGetValue(registeredSubject, out var existingNode))
         {
+            // Subject already created, add reference to existing node
             var parentNode = FindNodeInAddressSpace(parentNodeId);
-            parentNode.AddReference(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, objectNode.NodeId);
+            parentNode.AddReference(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, existingNode.NodeId);
         }
         else
         {
-            var nodeId = GetNodeId(property, path);
-            var typeDefinitionId = GetTypeDefinitionId(subject);
+            // Create new node and add to dictionary (thread-safe)
+            _subjects.GetOrAdd(registeredSubject, _ =>
+            {
+                var nodeId = GetNodeId(property, path);
+                var typeDefinitionId = GetTypeDefinitionId(subject);
 
-            var node = CreateObjectNode(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
-            CreateObjectNode(node.NodeId, registeredSubject, path + PathDelimiter);
+                var node = CreateObjectNode(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
+                CreateObjectNode(node.NodeId, registeredSubject, path + PathDelimiter);
 
-            _subjects[registeredSubject] = node;
+                return node;
+            });
         }
     }
 
