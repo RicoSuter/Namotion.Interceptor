@@ -34,7 +34,7 @@ public interface ISubjectSource
     /// <summary>
     /// Applies a set of property changes to the source with all-or-nothing (transactional) semantics.
     /// If any change fails, the entire batch should throw an exception and will be retried.
-    /// IMPORTANT: This method is designed to be called sequentially (not concurrently) by the SubjectSourceBackgroundService.
+    /// This method is designed to be called sequentially (not concurrently).
     /// Concurrent calls are not supported and will result in undefined behavior.
     /// </summary>
     /// <param name="changes">The collection of subject property changes.</param>

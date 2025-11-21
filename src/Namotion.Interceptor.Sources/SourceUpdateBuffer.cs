@@ -30,12 +30,9 @@ public sealed class SourceUpdateBuffer
     /// </summary>
     public void StartBuffering()
     {
-        if (_source is ISubjectClientSource)
+        lock (_lock)
         {
-            lock (_lock)
-            {
-                _updates = [];
-            }
+            _updates = [];
         }
     }
 
@@ -53,6 +50,7 @@ public sealed class SourceUpdateBuffer
     public async Task CompleteInitializationAsync(CancellationToken cancellationToken)
     {
         Action? applyAction = null;
+     
         if (_source is ISubjectClientSource clientSource)
         {
             applyAction = await clientSource.LoadCompleteSourceStateAsync(cancellationToken).ConfigureAwait(false);
