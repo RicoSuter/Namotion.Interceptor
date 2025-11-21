@@ -5,6 +5,7 @@
         <TargetFramework>net9.0</TargetFramework>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
+        <PackageLicenseExpression>GPL-2.0-only</PackageLicenseExpression>
         <ImplicitUsings>enable</ImplicitUsings>
         <UserSecretsId>dotnet-Namotion.Interceptor.OpcUa.SampleClient-a9d0ae8f-ccba-441e-a258-f269c269e501</UserSecretsId>
     </PropertyGroup>

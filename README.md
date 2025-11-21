@@ -195,9 +195,11 @@ Creates interceptor subjects from interfaces at runtime without requiring compil
 
 Automatically start and stop subjects which implement `IHostedService` based on object graph attachment and detachment, with support for attaching and detaching hosted services to subjects.
 
-Attach a hosted service to a subject:
+Setup during application configuration:
 
 ```csharp
+var builder = WebApplication.CreateBuilder(args);
+
 var context = InterceptorSubjectContext
     .Create()
     .WithHostedServices(builder.Services);
@@ -209,7 +211,7 @@ person.AttachHostedService(hostedService);
 
 **Methods:**
 
-- `WithHostedServices()` → `Tracking.WithLifecycle()`
+- `WithHostedServices(IServiceCollection)` → `Tracking.WithLifecycle()`
 
 ### [Namotion.Interceptor.Registry](docs/registry.md)
 
@@ -281,4 +283,4 @@ var context = InterceptorSubjectContext
 
 **Namotion.Interceptor.Mqtt** - MQTT client/server integration for IoT scenarios
 
-**Namotion.Interceptor.OpcUa** - OPC UA client/server integration for industrial automation
+**[Namotion.Interceptor.OpcUa](docs/opcua.md)** - OPC UA client/server integration for industrial automation
