@@ -186,6 +186,11 @@ internal sealed class WriteRetryQueue
         }
         finally
         {
+            // Clear buffer to allow GC of SubjectPropertyChange objects
+            if (_scratchBufferCount > 0)
+            {
+                Array.Clear(_scratchBuffer, 0, _scratchBufferCount);
+            }
             try { _flushSemaphore.Release(); } catch { /* might be disposed already */ }
         }
     }
