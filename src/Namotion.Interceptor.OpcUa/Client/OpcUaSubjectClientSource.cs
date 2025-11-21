@@ -11,7 +11,7 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
+internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectClientSource, IAsyncDisposable
 {
     private const int DefaultChunkSize = 512;
 
@@ -89,7 +89,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _isStarted = true;
         return _sessionManager;
     }
-    
+
+    public int WriteBatchSize => (int)(_sessionManager?.CurrentSession?.OperationLimits?.MaxNodesPerWrite ?? 0);
+
     public async Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
     {
         var initialMonitoredItems = _initialMonitoredItems;
@@ -105,14 +107,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
         
         var itemCount = initialMonitoredItems.Count;
-            
-        var chunkSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
-        chunkSize = chunkSize is 0 ? int.MaxValue : chunkSize;
-
+        var batchSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
+        batchSize = batchSize is 0 ? int.MaxValue : batchSize;
+       
         var result = new Dictionary<RegisteredSubjectProperty, DataValue>();
-        for (var offset = 0; offset < itemCount; offset += chunkSize)
+        for (var offset = 0; offset < itemCount; offset += batchSize)
         {
-            var take = Math.Min(chunkSize, itemCount - offset);
+            var take = Math.Min(batchSize, itemCount - offset);
             var readValues = new ReadValueIdCollection(take);
 
             for (var i = 0; i < take; i++)
@@ -297,80 +298,76 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     }
     
     /// <summary>
-    /// Writes changes to OPC UA server in chunks.
-    /// Returns transient failures for retry, throws on complete failure.
+    /// Writes changes to OPC UA server atomically (all-or-nothing).
+    /// Throws if any write fails, allowing the entire batch to be retried.
     /// </summary>
-    public async ValueTask<SourceWriteResult> WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public async ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        var count = changes.Count;
-        if (count is 0)
-        {
-            return SourceWriteResult.Success;
-        }
-
         var session = _sessionManager?.CurrentSession;
         if (session is null || !session.Connected)
         {
             throw new InvalidOperationException("OPC UA session is not connected.");
         }
 
-        var chunkSize = (int)(session.OperationLimits?.MaxNodesPerWrite ?? DefaultChunkSize);
-        chunkSize = chunkSize is 0 ? int.MaxValue : chunkSize;
-
-        List<SubjectPropertyChange>? allFailures = null;
-
-        for (var offset = 0; offset < count; offset += chunkSize)
+        var writeValues = CreateWriteValuesCollection(changes);
+        if (writeValues.Count is 0)
         {
-            var take = Math.Min(chunkSize, count - offset);
+            return;
+        }
 
-            var writeValues = CreateWriteValuesCollection(changes, offset, take);
-            if (writeValues.Count is 0)
+        var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
+        ValidateWriteResults(writeResponse.Results);
+    }
+
+    /// <summary>
+    /// Validates write results and throws if any write failed (all-or-nothing semantics).
+    /// </summary>
+    private void ValidateWriteResults(StatusCodeCollection results)
+    {
+        var transientFailureCount = 0;
+        var permanentFailureCount = 0;
+
+        for (var i = 0; i < results.Count; i++)
+        {
+            if (StatusCode.IsBad(results[i]))
             {
-                continue;
-            }
-
-            try
-            {
-                var writeResponse = await session.WriteAsync(
-                    requestHeader: null,
-                    writeValues,
-                    cancellationToken).ConfigureAwait(false);
-
-                var transientFailures = GetTransientFailedChanges(changes, writeResponse.Results, offset);
-                if (transientFailures is not null)
+                if (IsTransientWriteError(results[i]))
                 {
-                    allFailures ??= [];
-                    allFailures.AddRange(transientFailures);
+                    transientFailureCount++;
                 }
-            }
-            catch (Exception ex)
-            {
-                // Network/communication failure - return remaining changes for retry
-                _logger.LogWarning(ex,
-                    "OPC UA write communication failed at offset {Offset}, returning {Count} remaining changes for retry.",
-                    offset, count - offset);
-
-                allFailures ??= [];
-                for (var i = offset; i < count; i++)
+                else
                 {
-                    allFailures.Add(changes[i]);
+                    permanentFailureCount++;
                 }
-
-                return new SourceWriteResult(allFailures);
             }
         }
 
-        return allFailures is { Count: > 0 }
-            ? new SourceWriteResult(allFailures)
-            : SourceWriteResult.Success;
+        if (transientFailureCount > 0 || permanentFailureCount > 0)
+        {
+            _logger.LogWarning(
+                "OPC UA write batch failed: {TransientCount} transient, {PermanentCount} permanent failures out of {TotalCount} writes.",
+                transientFailureCount, permanentFailureCount, results.Count);
+
+            if (transientFailureCount > 0)
+            {
+                throw new InvalidOperationException(
+                    $"OPC UA write failed with {transientFailureCount} transient errors. Entire batch will be retried.");
+            }
+
+            // Only permanent errors, log but don't retry
+            _logger.LogError(
+                "OPC UA write batch had {PermanentCount} permanent failures. These changes will not be retried.",
+                permanentFailureCount);
+        }
     }
     
-    private WriteValueCollection CreateWriteValuesCollection(IReadOnlyList<SubjectPropertyChange> changes, int offset, int take)
+    private WriteValueCollection CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
-        var writeValues = new WriteValueCollection(take);
-        for (var i = 0; i < take; i++)
+        var span = changes.Span;
+        var writeValues = new WriteValueCollection(span.Length);
+        for (var i = 0; i < span.Length; i++)
         {
-            var change = changes[offset + i];
+            var change = span[i];
             if (!change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var v) || v is not NodeId nodeId)
             {
                 continue;
@@ -423,53 +420,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         return StatusCode.IsBad(statusCode);
     }
 
-    /// <summary>
-    /// Collects transient failures for retry and logs summary counts.
-    /// </summary>
-    private List<SubjectPropertyChange>? GetTransientFailedChanges(
-        IReadOnlyList<SubjectPropertyChange> changes,
-        StatusCodeCollection results,
-        int offset)
-    {
-        List<SubjectPropertyChange>? transientFailures = null;
-        var permanentErrorCount = 0;
-
-        for (var i = 0; i < results.Count; i++)
-        {
-            if (StatusCode.IsBad(results[i]))
-            {
-                var change = changes[offset + i];
-                var isTransient = IsTransientWriteError(results[i]);
-
-                if (isTransient)
-                {
-                    transientFailures ??= [];
-                    transientFailures.Add(change);
-                }
-                else
-                {
-                    permanentErrorCount++;
-                }
-            }
-        }
-
-        if (transientFailures is { Count: > 0 })
-        {
-            _logger.LogWarning(
-                "OPC UA write had {TransientCount} transient failures (will retry).",
-                transientFailures.Count);
-        }
-
-        if (permanentErrorCount > 0)
-        {
-            _logger.LogError(
-                "OPC UA write had {PermanentCount} permanent failures (not retrying).",
-                permanentErrorCount);
-        }
-
-        return transientFailures;
-    }
-
     private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
         Session session,
         NodeId nodeId,
@@ -500,7 +450,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     public async ValueTask DisposeAsync()
     {
-        // Set disposed flag first to prevent new operations (thread-safe)
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return; // Already disposed

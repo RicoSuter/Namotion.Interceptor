@@ -24,7 +24,7 @@ public class SubjectSourceBackgroundServiceTests
             .Setup(s => s.Context)
             .Returns(subjectContextMock.Object);
 
-        var subjectSourceMock = new Mock<ISubjectSource>();
+        var subjectSourceMock = new Mock<ISubjectClientSource>();
 
         var updates = new List<string>();
         subjectSourceMock
@@ -41,13 +41,13 @@ public class SubjectSourceBackgroundServiceTests
             .ReturnsAsync(() => { updates.Add("Complete"); });
 
         subjectSourceMock
-            .Setup(s => s.WriteToSourceAsync(It.IsAny<IReadOnlyList<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(ValueTask.FromResult(SourceWriteResult.Success));
+            .Setup(s => s.WriteToSourceAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.CompletedTask);
 
         var cancellationTokenSource = new CancellationTokenSource();
 
         // Act
-        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, subjectContextMock.Object, NullLogger.Instance);
+        var service = new SubjectClientSourceBackgroundService(subjectSourceMock.Object, subjectContextMock.Object, NullLogger.Instance);
 
         await service.StartAsync(cancellationTokenSource.Token);
         await Task.Delay(1000, cancellationTokenSource.Token);
@@ -76,7 +76,7 @@ public class SubjectSourceBackgroundServiceTests
         context.AddService(propertyChangedChannel);
 
         var subject = new Person(context);
-        var subjectSourceMock = new Mock<ISubjectSource>();
+        var subjectSourceMock = new Mock<ISubjectClientSource>();
 
         subjectSourceMock
             .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
@@ -90,17 +90,17 @@ public class SubjectSourceBackgroundServiceTests
             .Setup(s => s.LoadCompleteSourceStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((Action?)null);
 
-        IEnumerable<SubjectPropertyChange>? changes = null;
+        SubjectPropertyChange[]? changes = null;
 
         subjectSourceMock
-            .Setup(s => s.WriteToSourceAsync(It.IsAny<IReadOnlyList<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback((IEnumerable<SubjectPropertyChange> c, CancellationToken _) => changes = c)
-            .Returns(ValueTask.FromResult(SourceWriteResult.Success));
+            .Setup(s => s.WriteToSourceAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Callback((ReadOnlyMemory<SubjectPropertyChange> c, CancellationToken _) => changes = c.ToArray())
+            .Returns(ValueTask.CompletedTask);
 
         var cancellationTokenSource = new CancellationTokenSource();
 
         // Act
-        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance);
+        var service = new SubjectClientSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance);
         await service.StartAsync(cancellationTokenSource.Token);
         
         var writeContext = new PropertyWriteContext<string?>(

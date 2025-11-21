@@ -9,7 +9,7 @@ using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
+internal class OpcUaSubjectServerSource : BackgroundService, ISubjectServerSource
 {
     internal const string OpcVariableKey = "OpcVariable";
 
@@ -42,23 +42,20 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         return Task.FromResult<IDisposable?>(null);
     }
 
-    public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
-    {
-        return Task.FromResult<Action?>(null);
-    }
+    public int WriteBatchSize => int.MaxValue;
 
-    public ValueTask<SourceWriteResult> WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         var currentInstance = _server?.CurrentInstance;
         if (currentInstance == null)
         {
-            return ValueTask.FromResult(SourceWriteResult.Success);
+            return ValueTask.CompletedTask;
         }
 
-        var count = changes.Count;
-        for (var i = 0; i < count; i++)
+        var span = changes.Span;
+        for (var i = 0; i < span.Length; i++)
         {
-            var change = changes[i];
+            var change = span[i];
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
                 data is BaseDataVariableState node &&
                 change.Property.TryGetRegisteredProperty() is { } registeredProperty)
@@ -76,7 +73,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             }
         }
 
-        return ValueTask.FromResult(SourceWriteResult.Success);
+        return ValueTask.CompletedTask;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

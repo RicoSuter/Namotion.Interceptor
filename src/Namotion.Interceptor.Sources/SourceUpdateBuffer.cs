@@ -13,6 +13,7 @@ public sealed class SourceUpdateBuffer
     private readonly ILogger _logger;
     private readonly Func<CancellationToken, ValueTask<bool>>? _flushRetryQueue;
     private readonly Lock _lock = new();
+
     private List<Action>? _updates = [];
 
     public SourceUpdateBuffer(ISubjectSource source, Func<CancellationToken, ValueTask<bool>>? flushRetryQueue, ILogger logger)
@@ -29,9 +30,12 @@ public sealed class SourceUpdateBuffer
     /// </summary>
     public void StartBuffering()
     {
-        lock (_lock)
+        if (_source is ISubjectClientSource)
         {
-            _updates = [];
+            lock (_lock)
+            {
+                _updates = [];
+            }
         }
     }
 
@@ -48,7 +52,12 @@ public sealed class SourceUpdateBuffer
     /// <returns>The task.</returns>
     public async Task CompleteInitializationAsync(CancellationToken cancellationToken)
     {
-        var applyAction = await _source.LoadCompleteSourceStateAsync(cancellationToken).ConfigureAwait(false);
+        Action? applyAction = null;
+        if (_source is ISubjectClientSource clientSource)
+        {
+            applyAction = await clientSource.LoadCompleteSourceStateAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         lock (_lock)
         {
             applyAction?.Invoke();

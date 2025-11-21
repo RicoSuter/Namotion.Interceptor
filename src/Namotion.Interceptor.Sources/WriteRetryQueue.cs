@@ -12,7 +12,10 @@ internal sealed class WriteRetryQueue
 {
     private readonly ConcurrentQueue<SubjectPropertyChange> _pendingWrites = new();
     private readonly SemaphoreSlim _flushSemaphore = new(1, 1);
-    private readonly List<SubjectPropertyChange> _scratchBuffer = [];
+
+    // Reusable buffer to avoid allocation on each flush
+    private SubjectPropertyChange[] _scratchBuffer = new SubjectPropertyChange[64];
+    private int _scratchBufferCount;
 
     private readonly ILogger _logger;
     private readonly int _maxQueueSize;
@@ -47,18 +50,19 @@ internal sealed class WriteRetryQueue
     /// Enqueues writes. Ring buffer: oldest dropped when full.
     /// Thread-safe: DequeueAllTo called inside semaphore, ConcurrentQueue handles concurrent access.
     /// </summary>
-    public void EnqueueBatch(IReadOnlyList<SubjectPropertyChange> changes)
+    public void EnqueueBatch(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
         if (_maxQueueSize is 0)
         {
-            _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes", changes.Count);
+            _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes", changes.Length);
             return;
         }
 
         // Add all new items first
-        foreach (var change in changes)
+        var span = changes.Span;
+        for (var i = 0; i < span.Length; i++)
         {
-            _pendingWrites.Enqueue(change);
+            _pendingWrites.Enqueue(span[i]);
         }
 
         // Ring buffer: Drop the oldest if over capacity.
@@ -114,14 +118,21 @@ internal sealed class WriteRetryQueue
             }
 
             // Dequeue all pending writes into scratch buffer
-            _scratchBuffer.Clear();
-            _scratchBuffer.EnsureCapacity(_pendingWrites.Count); // Hint to reduce resizes
-            while (_pendingWrites.TryDequeue(out var change))
+            _scratchBufferCount = 0;
+            var pendingCount = _pendingWrites.Count;
+
+            // Ensure buffer is large enough
+            if (_scratchBuffer.Length < pendingCount)
             {
-                _scratchBuffer.Add(change);
+                _scratchBuffer = new SubjectPropertyChange[Math.Max(pendingCount, _scratchBuffer.Length * 2)];
             }
 
-            var count = _scratchBuffer.Count;
+            while (_pendingWrites.TryDequeue(out var change))
+            {
+                _scratchBuffer[_scratchBufferCount++] = change;
+            }
+
+            var count = _scratchBufferCount;
             if (count == 0)
             {
                 return true;
@@ -130,26 +141,51 @@ internal sealed class WriteRetryQueue
             // Reset dropped counter after successful dequeue
             Interlocked.Exchange(ref _droppedWriteCount, 0);
 
+            // Do inline batching to track exactly which items succeed
+            var batchSize = source.WriteBatchSize;
+            var writtenCount = 0;
+
+            // Use ReadOnlyMemory over the reusable buffer for zero-allocation slicing
+            var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);
             try
             {
-                var result = await source.WriteToSourceAsync(_scratchBuffer, cancellationToken).ConfigureAwait(false);
-                if (result.FailedChanges.Count > 0)
+                if (batchSize <= 0)
                 {
-                    _logger.LogInformation("Re-queuing {Count} changes with transient errors from flush.", result.FailedChanges.Count);
-                    EnqueueBatch(result.FailedChanges);
+                    // No batching - send all at once
+                    await source.WriteToSourceAsync(memory, cancellationToken).ConfigureAwait(false);
+                    return true;
                 }
+
+                for (var i = 0; i < count; i += batchSize)
+                {
+                    var currentBatchSize = Math.Min(batchSize, count - i);
+                    var batch = memory.Slice(i, currentBatchSize);
+
+                    await source.WriteToSourceAsync(batch, cancellationToken).ConfigureAwait(false);
+                    writtenCount += currentBatchSize;
+                }
+
                 return true;
             }
             catch (Exception e)
             {
-                _logger.LogWarning(e, "Failed to flush {Count} queued writes to source, re-queuing.", count);
-                EnqueueBatch(_scratchBuffer);
+                var remainingCount = count - writtenCount;
+                _logger.LogWarning(e,
+                    "Failed to flush queued writes to source. {WrittenCount} succeeded, {RemainingCount} re-queuing.",
+                    writtenCount, remainingCount);
+
+                // Re-queue only items that weren't successfully written
+                if (remainingCount > 0)
+                {
+                    var remaining = memory.Slice(writtenCount, remainingCount);
+                    EnqueueBatch(remaining);
+                }
+
                 return false;
             }
         }
         finally
         {
-            _scratchBuffer.Clear();
             try { _flushSemaphore.Release(); } catch { /* might be disposed already */ }
         }
     }

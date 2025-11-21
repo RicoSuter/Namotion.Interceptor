@@ -15,10 +15,7 @@ public class SubjectSourceBackgroundService : BackgroundService
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
 
-    private readonly SourceUpdateBuffer _updateBuffer;
-
-    // Write retry queue for resilience during disconnections (optional)
-    private readonly WriteRetryQueue? _writeRetryQueue;
+    protected SourceUpdateBuffer UpdateBuffer { get; init; }
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
@@ -27,34 +24,31 @@ public class SubjectSourceBackgroundService : BackgroundService
     // Scratch buffers used only while holding the write semaphore (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
     private readonly HashSet<PropertyReference> _flushTouchedChanges = new(PropertyReference.Comparer);
-    private readonly List<SubjectPropertyChange> _flushDedupedChanges = [];
+
+    // Reusable buffer for deduped changes (avoids allocation on each flush)
+    private SubjectPropertyChange[] _flushDedupedBuffer = new SubjectPropertyChange[64];
+    private int _flushDedupedCount;
 
     // Reusable single-item buffer for the no-buffer (immediate) path
-    private readonly List<SubjectPropertyChange> _immediateChanges = new(1);
+    private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
 
     // Use ticks to avoid torn reads of DateTimeOffset across threads
     private long _flushLastTicks;
 
-    public SubjectSourceBackgroundService(
+#pragma warning disable CS8618
+    internal SubjectSourceBackgroundService(
         ISubjectSource source,
         IInterceptorSubjectContext context,
         ILogger logger,
-        TimeSpan? bufferTime = null,
-        TimeSpan? retryTime = null,
-        int? writeRetryQueueSize = null)
+        TimeSpan? bufferTime,
+        TimeSpan? retryTime)
+#pragma warning restore CS8618
     {
         _source = source;
         _context = context;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
-
-        if (writeRetryQueueSize is > 0)
-        {
-            _writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize.Value, logger);
-        }
-
-        _updateBuffer = new SourceUpdateBuffer(source, _writeRetryQueue is not null ? ct => _writeRetryQueue.FlushAsync(_source, ct) : null, logger);
     }
 
     /// <inheritdoc />
@@ -64,11 +58,11 @@ public class SubjectSourceBackgroundService : BackgroundService
         {
             try
             {
-                _updateBuffer.StartBuffering();
-                var disposable = await _source.StartListeningAsync(_updateBuffer, stoppingToken).ConfigureAwait(false);
+                UpdateBuffer.StartBuffering();
+                var disposable = await _source.StartListeningAsync(UpdateBuffer, stoppingToken).ConfigureAwait(false);
                 try
                 {
-                    await _updateBuffer.CompleteInitializationAsync(stoppingToken);
+                    await UpdateBuffer.CompleteInitializationAsync(stoppingToken);
 
                     using var subscription = _context.CreatePropertyChangeQueueSubscription();
                     await ProcessPropertyChangesAsync(subscription, stoppingToken).ConfigureAwait(false);
@@ -126,7 +120,7 @@ public class SubjectSourceBackgroundService : BackgroundService
                 {
                     continue; // Ignore changes originating from this source (avoid update loops)
                 }
-                
+
                 var registeredProperty = item.Property.TryGetRegisteredProperty();
                 if (registeredProperty is null || !_source.IsPropertyIncluded(registeredProperty))
                 {
@@ -136,10 +130,9 @@ public class SubjectSourceBackgroundService : BackgroundService
 
                 if (periodicTimer is null)
                 {
-                    // Immediate path: send the single change without buffering using a reusable list (no allocations)
-                    _immediateChanges.Add(item);
-                    await WriteToSourceAsync(_immediateChanges, linkedTokenSource.Token).ConfigureAwait(false);
-                    _immediateChanges.Clear();
+                    // Immediate path: send the single change without buffering (zero allocation)
+                    _immediateBuffer[0] = item;
+                    await WriteToSourceAsync(_immediateBuffer, linkedTokenSource.Token).ConfigureAwait(false);
                 }
                 else
                 {
@@ -207,11 +200,16 @@ public class SubjectSourceBackgroundService : BackgroundService
             Volatile.Write(ref _flushLastTicks, newFlushTicks);
 
             _flushTouchedChanges.Clear();
-            _flushDedupedChanges.Clear();
+            _flushDedupedCount = 0;
 
             // Pre-size to avoid resizes under bursts
             _flushTouchedChanges.EnsureCapacity(_flushChanges.Count);
-            _flushDedupedChanges.EnsureCapacity(_flushChanges.Count);
+
+            // Ensure buffer is large enough
+            if (_flushDedupedBuffer.Length < _flushChanges.Count)
+            {
+                _flushDedupedBuffer = new SubjectPropertyChange[Math.Max(_flushChanges.Count, _flushDedupedBuffer.Length * 2)];
+            }
 
             // Deduplicate by Property, keeping the last write, and preserve order of last occurrences
             for (var i = _flushChanges.Count - 1; i >= 0; i--)
@@ -219,19 +217,19 @@ public class SubjectSourceBackgroundService : BackgroundService
                 var change = _flushChanges[i];
                 if (_flushTouchedChanges.Add(change.Property))
                 {
-                    _flushDedupedChanges.Add(change);
+                    _flushDedupedBuffer[_flushDedupedCount++] = change;
                 }
             }
 
             // Reverse in place to keep ascending order of last occurrences without allocations
-            if (_flushDedupedChanges.Count > 1)
+            if (_flushDedupedCount > 1)
             {
-                _flushDedupedChanges.Reverse();
+                Array.Reverse(_flushDedupedBuffer, 0, _flushDedupedCount);
             }
-            
-            if (_flushDedupedChanges.Count > 0)
+
+            if (_flushDedupedCount > 0)
             {
-                await WriteToSourceAsync(_flushDedupedChanges, cancellationToken).ConfigureAwait(false);
+                await WriteToSourceAsync(new ReadOnlyMemory<SubjectPropertyChange>(_flushDedupedBuffer, 0, _flushDedupedCount), cancellationToken).ConfigureAwait(false);
             }
 
             _flushChanges.Clear();
@@ -242,48 +240,19 @@ public class SubjectSourceBackgroundService : BackgroundService
         }
     }
 
-    private async ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    protected virtual async ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        if (_writeRetryQueue is null)
-        {
-            // Original behavior - no queuing
-            try
-            {
-                var result = await _source.WriteToSourceAsync(changes, cancellationToken).ConfigureAwait(false);
-                if (result.FailedChanges.Count > 0)
-                {
-                    _logger.LogWarning("Write returned {Count} failed changes but queuing is disabled.", result.FailedChanges.Count);
-                }
-            }
-            catch (Exception e)
-            {
-                _logger.LogError(e, "Failed to write changes to source.");
-            }
-            return;
-        }
-
-        // With queue - flush pending writes first, then write new changes
         try
         {
-            var succeeded = await _writeRetryQueue.FlushAsync(_source, cancellationToken).ConfigureAwait(false);
-            if (succeeded)
-            {
-                var result = await _source.WriteToSourceAsync(changes, cancellationToken).ConfigureAwait(false);
-                if (result.FailedChanges.Count > 0)
-                {
-                    _logger.LogInformation("Re-queuing {Count} changes with transient errors for retry.", result.FailedChanges.Count);
-                    _writeRetryQueue.EnqueueBatch(result.FailedChanges);
-                }
-            }
-            else
-            {
-                _writeRetryQueue.EnqueueBatch(changes);
-            }
+            await _source.WriteToSourceInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // Don't swallow cancellation - allows flush task to exit
         }
         catch (Exception e)
         {
-            _logger.LogWarning(e, "Failed to write {Count} changes to source, queuing for retry.", changes.Count);
-            _writeRetryQueue.EnqueueBatch(changes);
+            _logger.LogError(e, "Failed to write changes to source.");
         }
     }
 
@@ -292,7 +261,7 @@ public class SubjectSourceBackgroundService : BackgroundService
         _changes.Clear();
         _flushChanges.Clear();
         _flushTouchedChanges.Clear();
-        _flushDedupedChanges.Clear();
+        _flushDedupedCount = 0;
         Volatile.Write(ref _flushLastTicks, 0L);
         Volatile.Write(ref _flushGate, 0);
     }

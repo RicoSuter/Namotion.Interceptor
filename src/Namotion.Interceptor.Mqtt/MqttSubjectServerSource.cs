@@ -17,7 +17,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt
 {
-    public class MqttSubjectServerSource : BackgroundService, ISubjectSource
+    public class MqttSubjectServerSource : BackgroundService, ISubjectServerSource
     {
         private readonly string _serverClientId = "Server_" + Guid.NewGuid().ToString("N");
 
@@ -44,6 +44,19 @@ namespace Namotion.Interceptor.Mqtt
             _sourcePathProvider = sourcePathProvider;
             _logger = logger;
         }
+
+        public bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        {
+            return _sourcePathProvider.IsPropertyIncluded(property);
+        }
+
+        public Task<IDisposable?> StartListeningAsync(SourceUpdateBuffer updateBuffer, CancellationToken cancellationToken)
+        {
+            _updateBuffer = updateBuffer;
+            return Task.FromResult<IDisposable?>(null);
+        }
+
+        public int WriteBatchSize => 0;
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -85,32 +98,23 @@ namespace Namotion.Interceptor.Mqtt
             }
         }
 
-        public bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        public async ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
-            return _sourcePathProvider.IsPropertyIncluded(property);
-        }
-
-        public Task<IDisposable?> StartListeningAsync(SourceUpdateBuffer updateBuffer, CancellationToken cancellationToken)
-        {
-            _updateBuffer = updateBuffer;
-            return Task.FromResult<IDisposable?>(null);
-        }
-
-        public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
-        {
-            return Task.FromResult<Action?>(null);
-        }
-
-        public async ValueTask<SourceWriteResult> WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-        {
-            foreach (var (path, change) in changes
-                .Where(c => c.Property.TryGetRegisteredProperty() is { HasChildSubjects: false })
-                .GetSourcePaths(_sourcePathProvider, _subject))
+            for (var i = 0; i < changes.Length; i++)
             {
-                await PublishPropertyValueAsync(path, change.GetNewValue<object?>(), cancellationToken);
-            }
+                var change = changes.Span[i];
+                var registeredProperty = change.Property.TryGetRegisteredProperty();
+                if (registeredProperty is not { HasChildSubjects: false })
+                {
+                    continue;
+                }
 
-            return SourceWriteResult.Success;
+                var path = registeredProperty.TryGetSourcePath(_sourcePathProvider, _subject);
+                if (path is not null)
+                {
+                    await PublishPropertyValueAsync(path, change.GetNewValue<object?>(), cancellationToken);
+                }
+            }
         }
 
         private Task ClientConnectedAsync(ClientConnectedEventArgs arg)
@@ -143,7 +147,7 @@ namespace Namotion.Interceptor.Mqtt
                         Topic = path,
                         ContentType = "application/json",
                         PayloadSegment = new ArraySegment<byte>(
-                            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))),
+                            JsonSerializer.SerializeToUtf8Bytes(value)),
                     })
                 {
                     SenderClientId = _serverClientId
