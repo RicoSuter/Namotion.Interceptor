@@ -152,7 +152,7 @@ internal sealed class OpcUaClientConnector : BackgroundService, ISubjectUpstream
             foreach (var (property, dataValue) in result)
             {
                 var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
-                property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
+                property.SetValueFromConnector(this, dataValue.SourceTimestamp, value);
             }
 
             _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);

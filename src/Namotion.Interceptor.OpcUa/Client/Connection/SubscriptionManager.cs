@@ -149,7 +149,7 @@ internal class SubscriptionManager
                     var change = s.changes[i];
                     try
                     {
-                        change.Property.SetValueFromSource(s.connector, change.Timestamp, s.receivedTimestamp, change.Value);
+                        change.Property.SetValueFromConnector(s.connector, change.Timestamp, s.receivedTimestamp, change.Value);
                     }
                     catch (Exception e)
                     {

@@ -12,8 +12,8 @@ public static class RegisteredSubjectPropertyExtensions
     /// <param name="connector">The connector which changes the property.</param>
     /// <param name="timestamp">The timestamp to set in the context.</param>
     /// <param name="value">The new value.</param>
-    public static void SetValueFromSource(this RegisteredSubjectProperty property, ISubjectConnector connector, DateTimeOffset? timestamp, object? value)
+    public static void SetValueFromConnector(this RegisteredSubjectProperty property, ISubjectConnector connector, DateTimeOffset? timestamp, object? value)
     {
-        property.Reference.SetValueFromSource(connector, timestamp, null, value);
+        property.Reference.SetValueFromConnector(connector, timestamp, null, value);
     }
 }

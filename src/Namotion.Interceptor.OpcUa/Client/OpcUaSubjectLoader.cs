@@ -155,7 +155,7 @@ internal class OpcUaSubjectLoader
             var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
             newSubject.Context.AddFallbackContext(subject.Context);
             await LoadSubjectAsync(newSubject, nodeReference, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
-            property.SetValueFromSource(_connector, null, newSubject);
+            property.SetValueFromConnector(_connector, null, newSubject);
         }
     }
 
@@ -185,7 +185,7 @@ internal class OpcUaSubjectLoader
         var collection = DefaultSubjectFactory.Instance
             .CreateSubjectCollection(property.Type, children.Select(c => c.Subject));
 
-        property.SetValueFromSource(_connector, null, collection);
+        property.SetValueFromConnector(_connector, null, collection);
 
         foreach (var child in children)
         {

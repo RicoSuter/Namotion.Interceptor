@@ -380,7 +380,7 @@ internal sealed class PollingManager : IDisposable
             {
                 try
                 {
-                    s.update.Property.SetValueFromSource(s.connector, s.update.Timestamp, s.receivedTimestamp, s.update.Value);
+                    s.update.Property.SetValueFromConnector(s.connector, s.update.Timestamp, s.receivedTimestamp, s.update.Value);
                 }
                 catch (Exception e)
                 {

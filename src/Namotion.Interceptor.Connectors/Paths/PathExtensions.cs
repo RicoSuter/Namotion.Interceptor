@@ -89,7 +89,7 @@ public static class PathExtensions
     {
         if (connector is not null)
         {
-            property.SetValueFromSource(connector, timestamp, value);
+            property.SetValueFromConnector(connector, timestamp, value);
         }
         else
         {

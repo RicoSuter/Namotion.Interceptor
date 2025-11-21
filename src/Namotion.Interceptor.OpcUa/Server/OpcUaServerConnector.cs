@@ -181,7 +181,7 @@ internal class OpcUaServerConnector : BackgroundService, ISubjectDownstreamConne
 
             var state = (connector: this, property, changedTimestamp, receivedTimestamp, value: convertedValue);
             _updateBuffer?.ApplyUpdate(state,
-                static s => s.property.SetValueFromSource(
+                static s => s.property.SetValueFromConnector(
                     s.connector, s.changedTimestamp, s.receivedTimestamp, s.value));
         }
     }

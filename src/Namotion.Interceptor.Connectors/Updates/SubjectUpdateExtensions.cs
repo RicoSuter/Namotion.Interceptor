@@ -26,7 +26,7 @@ public static class SubjectUpdateExtensions
             (registeredProperty, propertyUpdate) =>
             {
                 transformValueBeforeApply?.Invoke(registeredProperty, propertyUpdate);
-                registeredProperty.SetValueFromSource(connector, propertyUpdate.Timestamp, propertyUpdate.Value);
+                registeredProperty.SetValueFromConnector(connector, propertyUpdate.Timestamp, propertyUpdate.Value);
             },
             subjectFactory);
     }
