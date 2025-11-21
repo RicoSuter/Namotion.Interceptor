@@ -22,7 +22,7 @@ namespace Namotion.Interceptor.Mqtt
         private readonly string _serverClientId = "Server_" + Guid.NewGuid().ToString("N");
 
         private readonly IInterceptorSubject _subject;
-        private readonly IConnectorPathProvider _connectorPathProvider;
+        private readonly IConnectorPathProvider _pathProvider;
         private readonly ILogger _logger;
 
         private int _numberOfClients;
@@ -37,17 +37,17 @@ namespace Namotion.Interceptor.Mqtt
         public int? NumberOfClients => _numberOfClients;
 
         public MqttServerConnector(IInterceptorSubject subject,
-            IConnectorPathProvider connectorPathProvider,
+            IConnectorPathProvider pathProvider,
             ILogger<MqttServerConnector> logger)
         {
             _subject = subject;
-            _connectorPathProvider = connectorPathProvider;
+            _pathProvider = pathProvider;
             _logger = logger;
         }
 
         public bool IsPropertyIncluded(RegisteredSubjectProperty property)
         {
-            return _connectorPathProvider.IsPropertyIncluded(property);
+            return _pathProvider.IsPropertyIncluded(property);
         }
 
         public Task<IDisposable?> StartListeningAsync(ConnectorUpdateBuffer updateBuffer, CancellationToken cancellationToken)
@@ -109,7 +109,7 @@ namespace Namotion.Interceptor.Mqtt
                     continue;
                 }
 
-                var path = registeredProperty.TryGetSourcePath(_connectorPathProvider, _subject);
+                var path = registeredProperty.TryGetSourcePath(_pathProvider, _subject);
                 if (path is not null)
                 {
                     await PublishPropertyValueAsync(path, change.GetNewValue<object?>(), cancellationToken);
@@ -128,7 +128,7 @@ namespace Namotion.Interceptor.Mqtt
                     .TryGetRegisteredSubject()?
                     .GetAllProperties()
                     .Where(p => !p.HasChildSubjects)
-                    .GetSourcePaths(_connectorPathProvider, _subject) ?? [])
+                    .GetSourcePaths(_pathProvider, _subject) ?? [])
                 {
                     // TODO: Send only to new client
                     await PublishPropertyValueAsync(path, property.GetValue(), CancellationToken.None);
@@ -173,7 +173,7 @@ namespace Namotion.Interceptor.Mqtt
                     s.connector._subject.UpdatePropertyValueFromSourcePath(s.path,
                         DateTimeOffset.UtcNow, // TODO: What timestamp to use here?
                         (property, _) => document.Deserialize(property.Type),
-                        s.connector._connectorPathProvider, s.connector);
+                        s.connector._pathProvider, s.connector);
                 }
                 catch (Exception ex)
                 {

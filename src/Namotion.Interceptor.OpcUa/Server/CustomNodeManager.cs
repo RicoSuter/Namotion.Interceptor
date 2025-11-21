@@ -74,7 +74,7 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         foreach (var property in subject.Properties)
         {
-            var propertyName = property.ResolvePropertyName(_configuration.ConnectorPathProvider);
+            var propertyName = property.ResolvePropertyName(_configuration.PathProvider);
             if (propertyName is not null)
             {
                 if (property.IsSubjectReference)

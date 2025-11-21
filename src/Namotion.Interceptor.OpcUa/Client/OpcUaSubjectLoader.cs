@@ -110,7 +110,7 @@ internal class OpcUaSubjectLoader
                     });
             }
 
-            var propertyName = property.ResolvePropertyName(_configuration.ConnectorPathProvider);
+            var propertyName = property.ResolvePropertyName(_configuration.PathProvider);
             if (propertyName is not null)
             {
                 var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, session.NamespaceUris);
@@ -215,7 +215,7 @@ internal class OpcUaSubjectLoader
             }
         }
 
-        return _configuration.ConnectorPathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
+        return _configuration.PathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
     }
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
