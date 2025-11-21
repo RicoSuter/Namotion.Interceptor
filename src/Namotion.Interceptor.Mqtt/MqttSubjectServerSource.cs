@@ -25,7 +25,7 @@ namespace Namotion.Interceptor.Mqtt
         private readonly ISourcePathProvider _sourcePathProvider;
         private readonly ILogger _logger;
 
-        private int _numberOfClients = 0;
+        private int _numberOfClients;
         private MqttServer? _mqttServer;
 
         private SourceUpdateBuffer? _updateBuffer;
@@ -119,7 +119,7 @@ namespace Namotion.Interceptor.Mqtt
 
         private Task ClientConnectedAsync(ClientConnectedEventArgs arg)
         {
-            _numberOfClients++;
+            Interlocked.Increment(ref _numberOfClients);
 
             Task.Run(async () =>
             {
@@ -186,7 +186,7 @@ namespace Namotion.Interceptor.Mqtt
 
         private Task ClientDisconnectedAsync(ClientDisconnectedEventArgs arg)
         {
-            _numberOfClients--;
+            Interlocked.Decrement(ref _numberOfClients);
             return Task.CompletedTask;
         }
     }

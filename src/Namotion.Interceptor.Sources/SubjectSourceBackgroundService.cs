@@ -231,11 +231,16 @@ public class SubjectSourceBackgroundService : BackgroundService
             {
                 await WriteToSourceAsync(new ReadOnlyMemory<SubjectPropertyChange>(_flushDedupedBuffer, 0, _flushDedupedCount), cancellationToken).ConfigureAwait(false);
             }
-
-            _flushChanges.Clear();
         }
         finally
         {
+            // Clear buffers to allow GC of SubjectPropertyChange objects
+            _flushChanges.Clear();
+            _flushTouchedChanges.Clear();
+            if (_flushDedupedCount > 0)
+            {
+                Array.Clear(_flushDedupedBuffer, 0, _flushDedupedCount);
+            }
             Volatile.Write(ref _flushGate, 0);
         }
     }
