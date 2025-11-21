@@ -376,7 +376,6 @@ FodyWeavers.xsd
 *.png.bkp
 **/.DS_Store
 /.idea/*
-/src/.claude/
 
 **/pki/own/certs/**
 **/pki/trusted/certs/**
