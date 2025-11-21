@@ -28,11 +28,11 @@ public class SubjectConnectorBackgroundServiceTests
 
         var updates = new List<string>();
         subjectConnectorMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<ConnectorUpdateBuffer>(), It.IsAny<CancellationToken>()))
-            .Callback((ConnectorUpdateBuffer updateBuffer, CancellationToken _) =>
+            .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
+            .Callback((SubjectPropertyWriter propertyWriter, CancellationToken _) =>
             {
-                updateBuffer.ApplyUpdate(updates, u => u.Add("Update1"));
-                updateBuffer.ApplyUpdate(updates, u => u.Add("Update2"));
+                propertyWriter.Write(updates, u => u.Add("Update1"));
+                propertyWriter.Write(updates, u => u.Add("Update2"));
             })
             .ReturnsAsync((IDisposable?)null);
 
@@ -83,7 +83,7 @@ public class SubjectConnectorBackgroundServiceTests
             .Returns(true);
 
         subjectConnectorMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<ConnectorUpdateBuffer>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((IDisposable?)null);
 
         subjectConnectorMock

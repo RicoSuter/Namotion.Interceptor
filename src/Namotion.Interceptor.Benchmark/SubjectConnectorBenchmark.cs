@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -28,7 +27,7 @@ public class SubjectConnectorBenchmark
 
     private readonly AutoResetEvent _signal = new(false);
     private Action<object?>[] _updates;
-    private ConnectorUpdateBuffer _updateBuffer;
+    private SubjectPropertyWriter _propertyWriter;
 
     [GlobalSetup]
     public async Task Setup()
@@ -62,8 +61,8 @@ public class SubjectConnectorBenchmark
         _cts = new CancellationTokenSource();
         await _service.StartAsync(_cts.Token);
 
-        _updateBuffer = _connector.UpdateBuffer;
-        await _updateBuffer.CompleteInitializationAsync(_cts.Token);
+        _propertyWriter = _connector.PropertyWriter;
+        await _propertyWriter.CompleteInitializationAsync(_cts.Token);
 
         _updates = Enumerable
             .Range(1, 1000000)
@@ -81,7 +80,7 @@ public class SubjectConnectorBenchmark
     {
         for (var i = 0; i < _updates.Length; i++)
         {
-            _updateBuffer.ApplyUpdate(null, _updates[i]);
+            _propertyWriter.Write(null, _updates[i]);
         }
 
         _signal.WaitOne();
@@ -121,7 +120,7 @@ public class SubjectConnectorBenchmark
         private readonly int _targetCount;
         private readonly AutoResetEvent _signal = new(false);
 
-        public ConnectorUpdateBuffer UpdateBuffer { get; private set; }
+        public SubjectPropertyWriter PropertyWriter { get; private set; }
 
         public TestSubjectConnector(int targetCount)
         {
@@ -140,9 +139,9 @@ public class SubjectConnectorBenchmark
 
         public bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
 
-        public Task<IDisposable?> StartListeningAsync(ConnectorUpdateBuffer updateBuffer, CancellationToken cancellationToken)
+        public Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
         {
-            UpdateBuffer = updateBuffer;
+            PropertyWriter = propertyWriter;
             return Task.FromResult<IDisposable?>(null);
         }
 

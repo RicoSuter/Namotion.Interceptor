@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -28,7 +27,7 @@ namespace Namotion.Interceptor.Mqtt
         private int _numberOfClients;
         private MqttServer? _mqttServer;
 
-        private ConnectorUpdateBuffer? _updateBuffer;
+        private SubjectPropertyWriter? _propertyWriter;
 
         public int Port { get; set; } = 1883;
 
@@ -50,9 +49,9 @@ namespace Namotion.Interceptor.Mqtt
             return _pathProvider.IsPropertyIncluded(property);
         }
 
-        public Task<IDisposable?> StartListeningAsync(ConnectorUpdateBuffer updateBuffer, CancellationToken cancellationToken)
+        public Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
         {
-            _updateBuffer = updateBuffer;
+            _propertyWriter = propertyWriter;
             return Task.FromResult<IDisposable?>(null);
         }
 
@@ -165,7 +164,7 @@ namespace Namotion.Interceptor.Mqtt
             var payload = Encoding.UTF8.GetString(args.ApplicationMessage.Payload);
 
             var state = (connector: this, path, payload);
-            _updateBuffer?.ApplyUpdate(state, static s =>
+            _propertyWriter?.Write(state, static s =>
             {
                 try
                 {

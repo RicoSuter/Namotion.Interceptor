@@ -1,7 +1,3 @@
-using System.Collections;
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
-
 namespace Namotion.Interceptor.Connectors.Paths;
 
 public static class SubjectUpdatePathExtensions

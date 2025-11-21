@@ -1,4 +1,3 @@
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -17,14 +16,14 @@ public interface ISubjectConnector
     bool IsPropertyIncluded(RegisteredSubjectProperty property);
 
     /// <summary>
-    /// Initializes the connector and starts listening for changes.
+    /// Initializes the connector and starts listening for external changes.
     /// </summary>
-    /// <param name="updateBuffer">The buffer to apply subject property updates to.</param>
+    /// <param name="propertyWriter">The writer to use for applying inbound property updates to the subject.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>
     /// A disposable that can be used to stop listening for changes. Returns <c>null</c> if there is no active listener or nothing needs to be disposed.
     /// </returns>
-    Task<IDisposable?> StartListeningAsync(ConnectorUpdateBuffer updateBuffer, CancellationToken cancellationToken);
+    Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken);
 
     /// <summary>
     /// Gets the maximum number of property changes that can be applied in a single batch (0 = no limit).
