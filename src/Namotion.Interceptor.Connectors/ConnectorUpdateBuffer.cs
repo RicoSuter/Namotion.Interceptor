@@ -51,9 +51,9 @@ public sealed class ConnectorUpdateBuffer
     {
         Action? applyAction = null;
 
-        if (_connector is ISubjectUpstreamConnector upstreamConnector)
+        if (_connector is ISubjectClientConnector clientConnector)
         {
-            applyAction = await upstreamConnector.LoadCompleteSourceStateAsync(cancellationToken).ConfigureAwait(false);
+            applyAction = await clientConnector.LoadCompleteSourceStateAsync(cancellationToken).ConfigureAwait(false);
         }
 
         lock (_lock)

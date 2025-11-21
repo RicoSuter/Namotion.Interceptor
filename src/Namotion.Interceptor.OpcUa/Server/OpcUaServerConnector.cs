@@ -9,7 +9,7 @@ using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaServerConnector : BackgroundService, ISubjectDownstreamConnector
+internal class OpcUaServerConnector : BackgroundService, ISubjectServerConnector
 {
     internal const string OpcVariableKey = "OpcVariable";
 

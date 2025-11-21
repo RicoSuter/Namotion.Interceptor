@@ -24,7 +24,7 @@ public class SubjectConnectorBackgroundServiceTests
             .Setup(s => s.Context)
             .Returns(subjectContextMock.Object);
 
-        var subjectConnectorMock = new Mock<ISubjectUpstreamConnector>();
+        var subjectConnectorMock = new Mock<ISubjectClientConnector>();
 
         var updates = new List<string>();
         subjectConnectorMock
@@ -47,7 +47,7 @@ public class SubjectConnectorBackgroundServiceTests
         var cancellationTokenSource = new CancellationTokenSource();
 
         // Act
-        var service = new SubjectUpstreamConnectorBackgroundService(subjectConnectorMock.Object, subjectContextMock.Object, NullLogger.Instance);
+        var service = new SubjectClientConnectorBackgroundService(subjectConnectorMock.Object, subjectContextMock.Object, NullLogger.Instance);
 
         await service.StartAsync(cancellationTokenSource.Token);
         await Task.Delay(1000, cancellationTokenSource.Token);
@@ -76,7 +76,7 @@ public class SubjectConnectorBackgroundServiceTests
         context.AddService(propertyChangedChannel);
 
         var subject = new Person(context);
-        var subjectConnectorMock = new Mock<ISubjectUpstreamConnector>();
+        var subjectConnectorMock = new Mock<ISubjectClientConnector>();
 
         subjectConnectorMock
             .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
@@ -100,7 +100,7 @@ public class SubjectConnectorBackgroundServiceTests
         var cancellationTokenSource = new CancellationTokenSource();
 
         // Act
-        var service = new SubjectUpstreamConnectorBackgroundService(subjectConnectorMock.Object, context, NullLogger.Instance);
+        var service = new SubjectClientConnectorBackgroundService(subjectConnectorMock.Object, context, NullLogger.Instance);
         await service.StartAsync(cancellationTokenSource.Token);
         
         var writeContext = new PropertyWriteContext<string?>(

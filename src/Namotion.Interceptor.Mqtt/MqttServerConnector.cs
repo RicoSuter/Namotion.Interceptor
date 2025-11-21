@@ -17,7 +17,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt
 {
-    public class MqttServerConnector : BackgroundService, ISubjectDownstreamConnector
+    public class MqttServerConnector : BackgroundService, ISubjectServerConnector
     {
         private readonly string _serverClientId = "Server_" + Guid.NewGuid().ToString("N");
 
