@@ -44,7 +44,7 @@ internal class OpcUaServerConnector : BackgroundService, ISubjectServerConnector
 
     public int WriteBatchSize => int.MaxValue;
 
-    public ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         var currentInstance = _server?.CurrentInstance;
         if (currentInstance == null)

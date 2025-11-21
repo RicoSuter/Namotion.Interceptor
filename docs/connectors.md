@@ -137,19 +137,19 @@ public class SampleConnector : ISubjectConnector
         return subscription;
     }
 
-    public async Task<Action?> LoadCompleteSourceStateAsync(
+    public async Task<Action?> LoadInitialStateAsync(
         CancellationToken cancellationToken)
     {
-        // Load initial values from source
-        var sourceState = ...;
-        return () => { /* Apply sourceState to _root */ };
+        // Load initial values from external system
+        var externalState = ...;
+        return () => { /* Apply externalState to _root */ };
     }
 
-    public ValueTask WriteToSourceAsync(
+    public ValueTask WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
-        // Write changes back to source
+        // Write changes to external system
         // Throw exception for failures - the entire batch will be retried
         return ValueTask.CompletedTask;
     }

@@ -21,7 +21,7 @@ public static class SubjectConnectorExtensions
         var batchSize = connector.WriteBatchSize;
         if (batchSize <= 0 || count <= batchSize)
         {
-            await connector.WriteToSourceAsync(changes, cancellationToken).ConfigureAwait(false);
+            await connector.WriteChangesAsync(changes, cancellationToken).ConfigureAwait(false);
             return count;
         }
 
@@ -32,7 +32,7 @@ public static class SubjectConnectorExtensions
         {
             var currentBatchSize = Math.Min(batchSize, count - i);
             var batch = changes.Slice(i, currentBatchSize);
-            await connector.WriteToSourceAsync(batch, cancellationToken).ConfigureAwait(false);
+            await connector.WriteChangesAsync(batch, cancellationToken).ConfigureAwait(false);
             writtenCount += currentBatchSize;
         }
 

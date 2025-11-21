@@ -146,14 +146,14 @@ public class SubjectConnectorBenchmark
             return Task.FromResult<IDisposable?>(null);
         }
 
-        public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
+        public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
         {
             return Task.FromResult<Action?>(null);
         }
 
         public int WriteBatchSize => int.MaxValue;
 
-        public ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
             _count += changes.Length;
 

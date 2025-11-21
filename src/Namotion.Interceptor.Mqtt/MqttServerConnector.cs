@@ -98,7 +98,7 @@ namespace Namotion.Interceptor.Mqtt
             }
         }
 
-        public async ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
             for (var i = 0; i < changes.Length; i++)
             {

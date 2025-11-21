@@ -92,7 +92,7 @@ internal sealed class OpcUaClientConnector : BackgroundService, ISubjectClientCo
 
     public int WriteBatchSize => (int)(_sessionManager?.CurrentSession?.OperationLimits?.MaxNodesPerWrite ?? 0);
 
-    public async Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
+    public async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         var initialMonitoredItems = _initialMonitoredItems;
         if (initialMonitoredItems is null)
@@ -301,7 +301,7 @@ internal sealed class OpcUaClientConnector : BackgroundService, ISubjectClientCo
     /// Writes changes to OPC UA server atomically (all-or-nothing).
     /// Throws if any write fails, allowing the entire batch to be retried.
     /// </summary>
-    public async ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         var session = _sessionManager?.CurrentSession;
         if (session is null || !session.Connected)

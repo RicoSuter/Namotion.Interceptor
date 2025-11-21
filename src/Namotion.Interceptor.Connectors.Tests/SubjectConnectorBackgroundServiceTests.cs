@@ -37,11 +37,11 @@ public class SubjectConnectorBackgroundServiceTests
             .ReturnsAsync((IDisposable?)null);
 
         subjectConnectorMock
-            .Setup(s => s.LoadCompleteSourceStateAsync(It.IsAny<CancellationToken>()))
+            .Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => { updates.Add("Complete"); });
 
         subjectConnectorMock
-            .Setup(s => s.WriteToSourceAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Returns(ValueTask.CompletedTask);
 
         var cancellationTokenSource = new CancellationTokenSource();
@@ -87,13 +87,13 @@ public class SubjectConnectorBackgroundServiceTests
             .ReturnsAsync((IDisposable?)null);
 
         subjectConnectorMock
-            .Setup(s => s.LoadCompleteSourceStateAsync(It.IsAny<CancellationToken>()))
+            .Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((Action?)null);
 
         SubjectPropertyChange[]? changes = null;
 
         subjectConnectorMock
-            .Setup(s => s.WriteToSourceAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback((ReadOnlyMemory<SubjectPropertyChange> c, CancellationToken _) => changes = c.ToArray())
             .Returns(ValueTask.CompletedTask);
 
