@@ -3,7 +3,7 @@ using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Sources.Paths.Attributes;
+using Namotion.Interceptor.Connectors.Paths.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 
@@ -110,12 +110,12 @@ namespace Namotion.Interceptor.SampleWeb
             builder.Services.AddSingleton(context);
 
             // expose subject via OPC UA
-            builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
-            // builder.Services.AddOpcUaSubjectClient<Car>("opc.tcp://localhost:4840", "opc", rootName: "Root");
+            builder.Services.AddOpcUaServerConnector<Car>("opc", rootName: "Root");
+            // builder.Services.AddOpcUaClientConnector<Car>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 
             // expose subject via MQTT
-            builder.Services.AddMqttSubjectServer<Car>("mqtt");
-            //builder.Services.AddMqttSubjectServer<Tire>(sp => sp.GetRequiredService<Car>().Tires[2], "mqtt");
+            builder.Services.AddMqttServerConnector<Car>("mqtt");
+            //builder.Services.AddMqttServerConnector<Tire>(sp => sp.GetRequiredService<Car>().Tires[2], "mqtt");
 
             // expose subject via GraphQL
             builder.Services

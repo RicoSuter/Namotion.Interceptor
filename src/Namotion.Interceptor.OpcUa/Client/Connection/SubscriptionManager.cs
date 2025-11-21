@@ -4,7 +4,7 @@ using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
-using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -16,8 +16,8 @@ internal class SubscriptionManager
     private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
         = new(() => new List<PropertyUpdate>(16));
 
-    private readonly OpcUaSubjectClientSource _source;
-    private readonly SourceUpdateBuffer? _updateBuffer;
+    private readonly OpcUaClientConnector _source;
+    private readonly ConnectorUpdateBuffer? _updateBuffer;
     private readonly PollingManager? _pollingManager;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
@@ -37,7 +37,7 @@ internal class SubscriptionManager
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
-    public SubscriptionManager(OpcUaSubjectClientSource source, SourceUpdateBuffer updateBuffer, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
+    public SubscriptionManager(OpcUaClientConnector source, ConnectorUpdateBuffer updateBuffer, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _source = source;
         _updateBuffer = updateBuffer;

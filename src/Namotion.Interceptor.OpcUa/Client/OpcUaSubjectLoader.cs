@@ -2,7 +2,7 @@
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Connectors;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -15,12 +15,12 @@ internal class OpcUaSubjectLoader
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly HashSet<PropertyReference> _propertiesWithOpcData;
-    private readonly OpcUaSubjectClientSource _source;
+    private readonly OpcUaClientConnector _source;
 
     public OpcUaSubjectLoader(
         OpcUaClientConfiguration configuration,
         HashSet<PropertyReference> propertiesWithOpcData,
-        OpcUaSubjectClientSource source,
+        OpcUaClientConnector source,
         ILogger logger)
     {
         _configuration = configuration;
@@ -110,7 +110,7 @@ internal class OpcUaSubjectLoader
                     });
             }
 
-            var propertyName = property.ResolvePropertyName(_configuration.SourcePathProvider);
+            var propertyName = property.ResolvePropertyName(_configuration.ConnectorPathProvider);
             if (propertyName is not null)
             {
                 var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, session.NamespaceUris);
@@ -215,7 +215,7 @@ internal class OpcUaSubjectLoader
             }
         }
 
-        return _configuration.SourcePathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
+        return _configuration.ConnectorPathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
     }
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)

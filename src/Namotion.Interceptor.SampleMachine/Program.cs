@@ -160,7 +160,7 @@ namespace Namotion.Interceptor.SampleMachine
             builder.Services.AddSingleton(root);
 
             // expose subject via OPC UA
-            builder.Services.AddOpcUaSubjectServer<Root>("opc");
+            builder.Services.AddOpcUaServerConnector<Root>("opc");
 
             // expose subject via GraphQL
             builder.Services

@@ -13,14 +13,14 @@ internal class CustomNodeManager : CustomNodeManager2
     private const string PathDelimiter = ".";
 
     private readonly IInterceptorSubject _subject;
-    private readonly OpcUaSubjectServerSource _source;
+    private readonly OpcUaServerConnector _source;
     private readonly OpcUaServerConfiguration _configuration;
 
     private readonly ConcurrentDictionary<RegisteredSubject, NodeState> _subjects = new();
 
     public CustomNodeManager(
         IInterceptorSubject subject,
-        OpcUaSubjectServerSource source,
+        OpcUaServerConnector source,
         IServerInternal server,
         ApplicationConfiguration applicationConfiguration,
         OpcUaServerConfiguration configuration) :
@@ -44,7 +44,7 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             if (node is BaseDataVariableState { Handle: PropertyReference property })
             {
-                property.RemovePropertyData(OpcUaSubjectServerSource.OpcVariableKey);
+                property.RemovePropertyData(OpcUaServerConnector.OpcVariableKey);
             }
         }
     }
@@ -74,7 +74,7 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         foreach (var property in subject.Properties)
         {
-            var propertyName = property.ResolvePropertyName(_configuration.SourcePathProvider);
+            var propertyName = property.ResolvePropertyName(_configuration.ConnectorPathProvider);
             if (propertyName is not null)
             {
                 if (property.IsSubjectReference)
@@ -202,7 +202,7 @@ internal class CustomNodeManager : CustomNodeManager2
             }
         };
 
-        property.Reference.SetPropertyData(OpcUaSubjectServerSource.OpcVariableKey, variableNode);
+        property.Reference.SetPropertyData(OpcUaServerConnector.OpcVariableKey, variableNode);
     }
 
     private NodeId GetNodeId(RegisteredSubjectProperty property, string fullPath)

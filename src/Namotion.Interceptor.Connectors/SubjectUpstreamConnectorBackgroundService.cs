@@ -1,0 +1,62 @@
+using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Tracking.Change;
+
+namespace Namotion.Interceptor.Connectors;
+
+public class SubjectUpstreamConnectorBackgroundService : SubjectConnectorBackgroundService
+{
+    private readonly ISubjectConnector _connector;
+    private readonly WriteRetryQueue? _writeRetryQueue;
+    private readonly ILogger _logger;
+
+    public SubjectUpstreamConnectorBackgroundService(
+        ISubjectUpstreamConnector connector,
+        IInterceptorSubjectContext context,
+        ILogger logger,
+        TimeSpan? bufferTime = null,
+        TimeSpan? retryTime = null,
+        int? writeRetryQueueSize = null)
+        : base(connector, context, logger, bufferTime, retryTime)
+    {
+        _connector = connector;
+        _logger = logger;
+
+        if (writeRetryQueueSize is > 0)
+        {
+            _writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize.Value, logger);
+        }
+
+        UpdateBuffer = new ConnectorUpdateBuffer(connector, _writeRetryQueue is not null ? ct => _writeRetryQueue.FlushAsync(connector, ct) : null, logger);
+    }
+
+    protected override async ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    {
+        if (_writeRetryQueue is null)
+        {
+            await base.WriteToSourceAsync(changes, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            var succeeded = await _writeRetryQueue.FlushAsync(_connector, cancellationToken).ConfigureAwait(false);
+            if (succeeded)
+            {
+                await _connector.WriteToSourceInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                _writeRetryQueue.EnqueueBatch(changes);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // Don't swallow cancellation
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "Failed to write {Count} changes to connector, queuing for retry.", changes.Length);
+            _writeRetryQueue.EnqueueBatch(changes);
+        }
+    }
+}

@@ -32,7 +32,7 @@ root.Persons = Enumerable
     .ToArray();
 
 builder.Services.AddSingleton(root);
-builder.Services.AddOpcUaSubjectServer<Root>("opc", rootName: "Root");
+builder.Services.AddOpcUaServerConnector<Root>("opc", rootName: "Root");
 builder.Services.AddHostedService<Worker>();
 
 using var performanceProfiler = new PerformanceProfiler(context, "Server");
