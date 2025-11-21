@@ -37,17 +37,16 @@ public class SubjectClientConnectorBackgroundService : SubjectConnectorBackgroun
             return;
         }
 
+        var succeeded = await _writeRetryQueue.FlushAsync(_connector, cancellationToken).ConfigureAwait(false);
+        if (!succeeded)
+        {
+            _writeRetryQueue.Enqueue(changes);
+            return;
+        }
+
         try
         {
-            var succeeded = await _writeRetryQueue.FlushAsync(_connector, cancellationToken).ConfigureAwait(false);
-            if (succeeded)
-            {
-                await _connector.WriteToSourceInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                _writeRetryQueue.EnqueueBatch(changes);
-            }
+            await _connector.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -56,7 +55,7 @@ public class SubjectClientConnectorBackgroundService : SubjectConnectorBackgroun
         catch (Exception e)
         {
             _logger.LogWarning(e, "Failed to write {Count} changes to connector, queuing for retry.", changes.Length);
-            _writeRetryQueue.EnqueueBatch(changes);
+            _writeRetryQueue.Enqueue(changes);
         }
     }
 }

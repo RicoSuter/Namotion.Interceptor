@@ -237,10 +237,13 @@ public class SubjectConnectorBackgroundService : BackgroundService
             // Clear buffers to allow GC of SubjectPropertyChange objects
             _flushChanges.Clear();
             _flushTouchedChanges.Clear();
-            if (_flushDedupedCount > 0)
+
+            // Null out references to allow GC (SubjectPropertyChange contains object refs)
+            for (var i = 0; i < _flushDedupedCount; i++)
             {
-                Array.Clear(_flushDedupedBuffer, 0, _flushDedupedCount);
+                _flushDedupedBuffer[i] = default;
             }
+
             Volatile.Write(ref _flushGate, 0);
         }
     }
@@ -249,7 +252,7 @@ public class SubjectConnectorBackgroundService : BackgroundService
     {
         try
         {
-            await _connector.WriteToSourceInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+            await _connector.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
