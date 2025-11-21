@@ -10,7 +10,7 @@ public static class SubjectConnectorExtensions
     /// up to (but not including) the failed batch are counted as successful.
     /// </summary>
     /// <returns>The number of items successfully written to the connector.</returns>
-    public static async ValueTask<int> WriteToSourceInBatchesAsync(this ISubjectConnector connector, ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public static async ValueTask<int> WriteChangesInBatchesAsync(this ISubjectConnector connector, ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         var count = changes.Length;
         if (count == 0)
