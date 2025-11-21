@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(dotnet test:*)",
+      "Bash(for f in \"C:\\Users\\rsute\\GitHub\\Namotion.Interceptor\\src\\Namotion.Interceptor.OpcUa\\Client\"/*.cs)",
+      "Bash(do wc -l \"$f\")",
+      "Bash(done)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:patch-diff.githubusercontent.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(find:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
