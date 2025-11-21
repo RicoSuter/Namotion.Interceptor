@@ -17,7 +17,7 @@ internal class SubscriptionManager
         = new(() => new List<PropertyUpdate>(16));
 
     private readonly OpcUaClientConnector _connector;
-    private readonly ConnectorUpdateBuffer? _updateBuffer;
+    private readonly SubjectPropertyWriter? _propertyWriter;
     private readonly PollingManager? _pollingManager;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
@@ -37,10 +37,10 @@ internal class SubscriptionManager
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
-    public SubscriptionManager(OpcUaClientConnector connector, ConnectorUpdateBuffer updateBuffer, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
+    public SubscriptionManager(OpcUaClientConnector connector, SubjectPropertyWriter propertyWriter, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _connector = connector;
-        _updateBuffer = updateBuffer;
+        _propertyWriter = propertyWriter;
         _pollingManager = pollingManager;
         _configuration = configuration;
         _logger = logger;
@@ -108,8 +108,8 @@ internal class SubscriptionManager
     
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
-        var updateBuffer = _updateBuffer;
-        if (_shuttingDown || updateBuffer is null)
+        var propertyWriter = _propertyWriter;
+        if (_shuttingDown || propertyWriter is null)
         {
             return;
         }
@@ -142,7 +142,7 @@ internal class SubscriptionManager
             // Pool item returned inside callback. Safe because ApplyUpdate never throws:
             // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
             var state = (connector: _connector, subscription, receivedTimestamp, changes, logger: _logger);
-            updateBuffer.ApplyUpdate(state, static s =>
+            propertyWriter.Write(state, static s =>
             {
                 for (var i = 0; i < s.changes.Count; i++)
                 {

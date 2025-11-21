@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Connection;
 /// </summary>
 internal sealed class SessionManager : IDisposable, IAsyncDisposable
 {
-    private readonly ConnectorUpdateBuffer _updateBuffer;
+    private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
@@ -49,9 +49,9 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
     /// </summary>
     public IReadOnlyCollection<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
 
-    public SessionManager(OpcUaClientConnector connector, ConnectorUpdateBuffer updateBuffer, OpcUaClientConfiguration configuration, ILogger logger)
+    public SessionManager(OpcUaClientConnector connector, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
     {
-        _updateBuffer = updateBuffer;
+        _propertyWriter = propertyWriter;
         _logger = logger;
         _configuration = configuration;
         _reconnectHandler = new SessionReconnectHandler(false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
@@ -60,12 +60,12 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         {
             _pollingManager = new PollingManager(
                 connector, sessionManager: this,
-                updateBuffer, _configuration, _logger);
+                propertyWriter, _configuration, _logger);
 
             _pollingManager.Start();
         }
 
-        _subscriptionManager = new SubscriptionManager(connector, updateBuffer, _pollingManager, configuration, logger);
+        _subscriptionManager = new SubscriptionManager(connector, propertyWriter, _pollingManager, configuration, logger);
     }
 
     /// <summary>
@@ -165,7 +165,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             }
 
             _logger.LogInformation("OPC UA server connection lost. Beginning reconnect...");
-            _updateBuffer.StartBuffering();
+            _propertyWriter.StartBuffering();
 
             var newState = _reconnectHandler.BeginReconnect(session, (int)_configuration.ReconnectInterval.TotalMilliseconds, OnReconnectComplete);
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
@@ -251,7 +251,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
                 {
                     try
                     {
-                        await _updateBuffer.CompleteInitializationAsync(_stoppingToken).ConfigureAwait(false);
+                        await _propertyWriter.CompleteInitializationAsync(_stoppingToken).ConfigureAwait(false);
                     }
                     catch (Exception exception)
                     {

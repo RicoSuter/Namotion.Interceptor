@@ -1,7 +1,6 @@
 using Namotion.Interceptor.SampleBlazor.Components;
 using Namotion.Interceptor.SampleBlazor.Models;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Recorder;
 
 namespace Namotion.Interceptor.SampleBlazor
 {

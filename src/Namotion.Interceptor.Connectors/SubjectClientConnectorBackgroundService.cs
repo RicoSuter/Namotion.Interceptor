@@ -26,7 +26,7 @@ public class SubjectClientConnectorBackgroundService : SubjectConnectorBackgroun
             _writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize.Value, logger);
         }
 
-        UpdateBuffer = new ConnectorUpdateBuffer(connector, _writeRetryQueue is not null ? ct => _writeRetryQueue.FlushAsync(connector, ct) : null, logger);
+        PropertyWriter = new SubjectPropertyWriter(connector, _writeRetryQueue is not null ? ct => _writeRetryQueue.FlushAsync(connector, ct) : null, logger);
     }
 
     protected override async ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)

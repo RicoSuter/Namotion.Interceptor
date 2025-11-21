@@ -24,7 +24,7 @@ internal sealed class OpcUaClientConnector : BackgroundService, ISubjectClientCo
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
 
     private SessionManager? _sessionManager;
-    private ConnectorUpdateBuffer? _updateBuffer;
+    private SubjectPropertyWriter? _propertyWriter;
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
@@ -53,14 +53,14 @@ internal sealed class OpcUaClientConnector : BackgroundService, ISubjectClientCo
     public bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
         _configuration.PathProvider.IsPropertyIncluded(property);
 
-    public async Task<IDisposable?> StartListeningAsync(ConnectorUpdateBuffer updateBuffer, CancellationToken cancellationToken)
+    public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
         Reset();
 
-        _updateBuffer = updateBuffer;
+        _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
-        _sessionManager = new SessionManager(this, updateBuffer, _configuration, _logger);
+        _sessionManager = new SessionManager(this, propertyWriter, _configuration, _logger);
 
         var application = _configuration.CreateApplicationInstance();
         var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
@@ -241,8 +241,8 @@ internal sealed class OpcUaClientConnector : BackgroundService, ISubjectClientCo
             return;
         }
 
-        var updateBuffer = _updateBuffer;
-        if (updateBuffer is null)
+        var propertyWriter = _propertyWriter;
+        if (propertyWriter is null)
         {
             return;
         }
@@ -255,7 +255,7 @@ internal sealed class OpcUaClientConnector : BackgroundService, ISubjectClientCo
 
             // Start collecting updates - any incoming subscription notifications will be buffered
             // until we complete the full state reload
-            updateBuffer.StartBuffering();
+            propertyWriter.StartBuffering();
 
             // Create new session (CreateSessionAsync disposes old session internally)
             var application = _configuration.CreateApplicationInstance();
@@ -271,7 +271,7 @@ internal sealed class OpcUaClientConnector : BackgroundService, ISubjectClientCo
                     _initialMonitoredItems.Count);
             }
 
-            await updateBuffer.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
+            await propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation("Session restart complete.");
         }

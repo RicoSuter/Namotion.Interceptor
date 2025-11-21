@@ -12,6 +12,6 @@ public class SubjectServerConnectorBackgroundService : SubjectConnectorBackgroun
         TimeSpan? retryTime = null)
         : base(connector, context, logger, bufferTime, retryTime)
     {
-        UpdateBuffer = new ConnectorUpdateBuffer(connector, null, logger);
+        PropertyWriter = new SubjectPropertyWriter(connector, null, logger);
     }
 }

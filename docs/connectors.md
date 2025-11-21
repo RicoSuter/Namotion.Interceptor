@@ -36,7 +36,31 @@ Examples: OPC UA server exposing sensor data, MQTT broker publishing values
 
 Failure handling is inherently asymmetric in client-server relationships. A client must gracefully handle server unavailability by buffering writes for retry. A server doesn't block on client availability - it publishes data and clients subscribe or reconnect as needed.
 
-This design maps to common patterns: master/replica replication, publisher/subscriber messaging, and request/response protocols.
+This design maps to common patterns: primary/replica replication, publisher/subscriber messaging, and request/response protocols.
+
+## Inbound vs Outbound Data Flow
+
+The library uses consistent terminology to distinguish data flow directions:
+
+| Direction | Term | Type | Description |
+|-----------|------|------|-------------|
+| **Inbound** | Update | `SubjectPropertyWriter.Write()` | Data FROM external system TO subject |
+| **Outbound** | Change | `SubjectPropertyChange` | Data FROM subject TO external system |
+
+- **Inbound updates**: External system notifies connector → connector calls `propertyWriter.Write()` → subject property updated
+- **Outbound changes**: Subject property changed → `WriteChangesAsync()` called → connector writes to external system
+
+## Buffer-Load-Replay Pattern (Client Connectors)
+
+Client connectors use a buffer-load-replay pattern during initialization to ensure zero data loss:
+
+1. **Buffer**: During `StartListeningAsync()`, inbound updates are buffered (not applied immediately)
+2. **Load**: `LoadInitialStateAsync()` fetches complete state from external system
+3. **Replay**: Buffered updates are replayed in order after initial state is applied
+
+This pattern ensures that updates received during initialization are not lost and are applied in the correct order relative to the initial state.
+
+**Note**: This pattern only applies to client connectors (`ISubjectClientConnector`). Server connectors don't implement `LoadInitialStateAsync()` since they are the source of truth and don't need to load external state.
 
 ## Setup
 
@@ -130,10 +154,11 @@ public class SampleConnector : ISubjectConnector
     }
 
     public async Task<IDisposable?> StartListeningAsync(
-        ConnectorUpdateBuffer updateBuffer,
+        SubjectPropertyWriter propertyWriter,
         CancellationToken cancellationToken)
     {
-        // Set up source change notifications
+        // Set up external change notifications
+        // Use propertyWriter.Write() to apply inbound updates
         return subscription;
     }
 
@@ -175,7 +200,7 @@ Built-in providers include:
 
 When multiple connectors update properties concurrently, the library provides automatic thread-safety at the property field access level. Individual property updates are atomic and thread-safe without requiring additional synchronization in your connector implementation.
 
-**Connector responsibility**: While the library ensures thread-safe property access, **connectors are responsible for maintaining correct update ordering** according to their protocol semantics. When implementing `ISubjectConnector`, use the provided `ConnectorUpdateBuffer` to apply updates, which handles buffering during initialization and prevents race conditions where newer values could be overwritten by delayed older updates.
+**Connector responsibility**: While the library ensures thread-safe property access, **connectors are responsible for maintaining correct update ordering** according to their protocol semantics. When implementing `ISubjectConnector`, use the provided `SubjectPropertyWriter` to write inbound updates, which handles buffering during initialization and prevents race conditions where newer values could be overwritten by delayed older updates.
 
 Custom connector implementations should ensure that the temporal ordering of external events is preserved when applying property updates. This is critical for maintaining data consistency when events arrive out of order or concurrently from the same connector.
 

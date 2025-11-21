@@ -15,7 +15,7 @@ public class SubjectConnectorBackgroundService : BackgroundService
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
 
-    protected ConnectorUpdateBuffer UpdateBuffer { get; init; }
+    protected SubjectPropertyWriter PropertyWriter { get; init; }
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
@@ -58,11 +58,11 @@ public class SubjectConnectorBackgroundService : BackgroundService
         {
             try
             {
-                UpdateBuffer.StartBuffering();
-                var disposable = await _connector.StartListeningAsync(UpdateBuffer, stoppingToken).ConfigureAwait(false);
+                PropertyWriter.StartBuffering();
+                var disposable = await _connector.StartListeningAsync(PropertyWriter, stoppingToken).ConfigureAwait(false);
                 try
                 {
-                    await UpdateBuffer.CompleteInitializationAsync(stoppingToken);
+                    await PropertyWriter.CompleteInitializationAsync(stoppingToken);
 
                     using var subscription = _context.CreatePropertyChangeQueueSubscription();
                     await ProcessPropertyChangesAsync(subscription, stoppingToken).ConfigureAwait(false);

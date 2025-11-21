@@ -1,6 +1,5 @@
 using System.Collections;
 using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors;
 

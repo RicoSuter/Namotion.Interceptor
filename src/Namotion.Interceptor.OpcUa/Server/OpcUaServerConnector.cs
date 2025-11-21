@@ -18,7 +18,7 @@ internal class OpcUaServerConnector : BackgroundService, ISubjectServerConnector
     private readonly OpcUaServerConfiguration _configuration;
 
     private volatile OpcUaSubjectServer? _server;
-    private volatile ConnectorUpdateBuffer? _updateBuffer;
+    private volatile SubjectPropertyWriter? _propertyWriter;
     private int _consecutiveFailures;
 
     public OpcUaServerConnector(
@@ -36,9 +36,9 @@ internal class OpcUaServerConnector : BackgroundService, ISubjectServerConnector
         return _configuration.PathProvider.IsPropertyIncluded(property);
     }
 
-    public Task<IDisposable?> StartListeningAsync(ConnectorUpdateBuffer updateBuffer, CancellationToken cancellationToken)
+    public Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
-        _updateBuffer = updateBuffer;
+        _propertyWriter = propertyWriter;
         return Task.FromResult<IDisposable?>(null);
     }
 
@@ -180,7 +180,7 @@ internal class OpcUaServerConnector : BackgroundService, ISubjectServerConnector
             var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, registeredProperty);
 
             var state = (connector: this, property, changedTimestamp, receivedTimestamp, value: convertedValue);
-            _updateBuffer?.ApplyUpdate(state,
+            _propertyWriter?.Write(state,
                 static s => s.property.SetValueFromConnector(
                     s.connector, s.changedTimestamp, s.receivedTimestamp, s.value));
         }

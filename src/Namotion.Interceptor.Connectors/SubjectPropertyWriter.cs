@@ -4,23 +4,34 @@ using Microsoft.Extensions.Logging;
 namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
-/// Buffers updates from a connector during initialization and replays them after loading complete state.
-/// Implements the queue-read-replay pattern to ensure zero data loss during connector initialization.
+/// Writes inbound property updates from connectors to subjects.
+/// Implements the buffer-load-replay pattern to ensure zero data loss during connector initialization.
 /// </summary>
-public sealed class ConnectorUpdateBuffer
+/// <remarks>
+/// During initialization, updates are buffered. Once <see cref="CompleteInitializationAsync"/> is called,
+/// the initial state is loaded, buffered updates are replayed, and subsequent writes are applied immediately.
+/// This buffering behavior is transparent to connectors - they simply call <see cref="Write{TState}"/>.
+/// </remarks>
+public sealed class SubjectPropertyWriter
 {
     private readonly ISubjectConnector _connector;
     private readonly ILogger _logger;
-    private readonly Func<CancellationToken, ValueTask<bool>>? _flushRetryQueue;
+    private readonly Func<CancellationToken, ValueTask<bool>>? _onInitializationCompleted;
     private readonly Lock _lock = new();
 
     private List<Action>? _updates = [];
 
-    public ConnectorUpdateBuffer(ISubjectConnector connector, Func<CancellationToken, ValueTask<bool>>? flushRetryQueue, ILogger logger)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SubjectPropertyWriter"/> class.
+    /// </summary>
+    /// <param name="connector">The connector associated with this writer.</param>
+    /// <param name="onInitializationCompleted">Optional callback invoked after initialization completes (e.g., to flush pending outbound writes).</param>
+    /// <param name="logger">The logger.</param>
+    public SubjectPropertyWriter(ISubjectConnector connector, Func<CancellationToken, ValueTask<bool>>? onInitializationCompleted, ILogger logger)
     {
         _connector = connector;
         _logger = logger;
-        _flushRetryQueue = flushRetryQueue;
+        _onInitializationCompleted = onInitializationCompleted;
     }
 
     /// <summary>
@@ -37,13 +48,13 @@ public sealed class ConnectorUpdateBuffer
     }
 
     /// <summary>
-    /// Completes initialization by loading complete state from the connector, replaying all buffered updates,
-    /// and flushing any queued writes that accumulated during disconnection.
+    /// Completes initialization by loading initial state from the connector, replaying all buffered updates,
+    /// and invoking the initialization completed callback.
     /// This ensures zero data loss during the initialization period.
     /// </summary>
     /// <remarks>
-    /// If the retry queue flush fails, the exception propagates to signal initialization failure
-    /// and trigger reconnection. Queued writes remain in the queue for retry on next connection.
+    /// If the callback fails, the exception propagates to signal initialization failure
+    /// and trigger reconnection.
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The task.</returns>
@@ -84,20 +95,20 @@ public sealed class ConnectorUpdateBuffer
             }
         }
 
-        // Flush retry queue after initialization/reconnection
-        if (_flushRetryQueue is not null)
+        // Invoke callback after initialization/reconnection completes
+        if (_onInitializationCompleted is not null)
         {
-            await _flushRetryQueue(cancellationToken).ConfigureAwait(false);
+            await _onInitializationCompleted(cancellationToken).ConfigureAwait(false);
         }
     }
 
     /// <summary>
-    /// Applies an update by either buffering it during initialization or executing it immediately.
-    /// The buffering behavior is transparent to the caller - updates are always eventually applied.
+    /// Writes a property update to the subject. During initialization, the update is buffered;
+    /// otherwise it is applied immediately. This buffering is transparent to the caller.
     /// </summary>
-    /// <param name="state">The state provided to the action (avoid delegate allocations by allowing action to be static).</param>
-    /// <param name="update">The update action to apply.</param>
-    public void ApplyUpdate<TState>(TState state, Action<TState> update)
+    /// <param name="state">The state provided to the action (allows static delegates to avoid allocations).</param>
+    /// <param name="update">The update action to apply to the subject.</param>
+    public void Write<TState>(TState state, Action<TState> update)
     {
         var updates = _updates;
         if (updates is not null)
