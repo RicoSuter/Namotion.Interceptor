@@ -152,7 +152,7 @@ internal sealed class WriteRetryQueue
                 if (batchSize <= 0)
                 {
                     // No batching - send all at once
-                    await connector.WriteToSourceAsync(memory, cancellationToken).ConfigureAwait(false);
+                    await connector.WriteChangesAsync(memory, cancellationToken).ConfigureAwait(false);
                     return true;
                 }
 
@@ -161,7 +161,7 @@ internal sealed class WriteRetryQueue
                     var currentBatchSize = Math.Min(batchSize, count - i);
                     var batch = memory.Slice(i, currentBatchSize);
 
-                    await connector.WriteToSourceAsync(batch, cancellationToken).ConfigureAwait(false);
+                    await connector.WriteChangesAsync(batch, cancellationToken).ConfigureAwait(false);
                     writtenCount += currentBatchSize;
                 }
 

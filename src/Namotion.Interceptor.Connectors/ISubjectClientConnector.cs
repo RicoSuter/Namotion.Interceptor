@@ -8,11 +8,11 @@ namespace Namotion.Interceptor.Connectors;
 public interface ISubjectClientConnector : ISubjectConnector
 {
     /// <summary>
-    /// Loads the complete state from the external authoritative system and returns a delegate that applies the loaded state to the associated subject.
+    /// Loads the initial state from the external authoritative system and returns a delegate that applies it to the associated subject.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>
-    /// A delegate that applies the loaded state to the subject. Returns <c>null</c> if there is no state to apply.
+    /// A delegate that applies the initial state to the subject. Returns <c>null</c> if there is no state to apply.
     /// </returns>
-    Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken);
+    Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken);
 }
