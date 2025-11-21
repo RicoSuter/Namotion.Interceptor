@@ -325,7 +325,7 @@ Reference these types with `[OpcUaTypeDefinition]`.
 
 ### Write Retry Queue During Disconnection
 
-The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored. This feature is provided by the `SubjectUpstreamConnectorBackgroundService`.
+The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored. This feature is provided by the `SubjectClientConnectorBackgroundService`.
 
 ```csharp
 builder.Services.AddOpcUaClientConnector(
