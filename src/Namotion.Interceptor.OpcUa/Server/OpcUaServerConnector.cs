@@ -33,7 +33,7 @@ internal class OpcUaServerConnector : BackgroundService, ISubjectDownstreamConne
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return _configuration.ConnectorPathProvider.IsPropertyIncluded(property);
+        return _configuration.PathProvider.IsPropertyIncluded(property);
     }
 
     public Task<IDisposable?> StartListeningAsync(ConnectorUpdateBuffer updateBuffer, CancellationToken cancellationToken)

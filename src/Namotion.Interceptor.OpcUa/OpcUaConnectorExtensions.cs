@@ -40,7 +40,7 @@ public static class OpcUaConnectorExtensions
         {
             ServerUrl = serverUrl,
             RootName = rootName,
-            ConnectorPathProvider = new AttributeBasedConnectorPathProvider(sourceName, ".", pathPrefix),
+            PathProvider = new AttributeBasedConnectorPathProvider(sourceName, ".", pathPrefix),
             TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)
@@ -103,7 +103,7 @@ public static class OpcUaConnectorExtensions
         return serviceCollection.AddOpcUaServerConnector(subjectSelector, _ => new OpcUaServerConfiguration
         {
             RootName = rootName,
-            ConnectorPathProvider = new AttributeBasedConnectorPathProvider(sourceName, ".", pathPrefix),
+            PathProvider = new AttributeBasedConnectorPathProvider(sourceName, ".", pathPrefix),
             ValueConverter = new OpcUaValueConverter()
         });
     }

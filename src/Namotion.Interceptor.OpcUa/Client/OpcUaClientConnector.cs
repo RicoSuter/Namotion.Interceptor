@@ -51,7 +51,7 @@ internal sealed class OpcUaClientConnector : BackgroundService, ISubjectUpstream
     }
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
-        _configuration.ConnectorPathProvider.IsPropertyIncluded(property);
+        _configuration.PathProvider.IsPropertyIncluded(property);
 
     public async Task<IDisposable?> StartListeningAsync(ConnectorUpdateBuffer updateBuffer, CancellationToken cancellationToken)
     {

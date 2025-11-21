@@ -24,7 +24,7 @@ public class OpcUaSubjectLoaderTests
         _baseConfiguration = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            ConnectorPathProvider = new AttributeBasedConnectorPathProvider("opc", "."),
+            PathProvider = new AttributeBasedConnectorPathProvider("opc", "."),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaClientConnector>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(new DefaultSubjectFactory()),
@@ -219,7 +219,7 @@ public class OpcUaSubjectLoaderTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = _baseConfiguration.ServerUrl,
-            ConnectorPathProvider = _baseConfiguration.ConnectorPathProvider,
+            PathProvider = _baseConfiguration.PathProvider,
             TypeResolver = typeResolver ?? _baseConfiguration.TypeResolver,
             ValueConverter = _baseConfiguration.ValueConverter,
             SubjectFactory = _baseConfiguration.SubjectFactory,

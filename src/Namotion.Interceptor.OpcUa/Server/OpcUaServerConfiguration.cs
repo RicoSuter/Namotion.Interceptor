@@ -29,7 +29,7 @@ public class OpcUaServerConfiguration
     /// Gets the connector path provider used to map between OPC UA node browse names and C# property names.
     /// This provider determines which properties are included and how their names are translated.
     /// </summary>
-    public required IConnectorPathProvider ConnectorPathProvider { get; init; }
+    public required IConnectorPathProvider PathProvider { get; init; }
 
     /// <summary>
     /// Gets the value converter used to convert between OPC UA node values and C# property values.

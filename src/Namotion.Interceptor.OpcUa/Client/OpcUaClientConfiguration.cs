@@ -68,7 +68,7 @@ public class OpcUaClientConfiguration
     /// Gets the connector path provider used to map between OPC UA node browse names and C# property names.
     /// This provider determines which properties are included and how their names are translated.
     /// </summary>
-    public required IConnectorPathProvider ConnectorPathProvider { get; init; }
+    public required IConnectorPathProvider PathProvider { get; init; }
 
     /// <summary>
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
@@ -278,7 +278,7 @@ public class OpcUaClientConfiguration
     public void Validate()
     {
         ArgumentNullException.ThrowIfNull(ServerUrl);
-        ArgumentNullException.ThrowIfNull(ConnectorPathProvider);
+        ArgumentNullException.ThrowIfNull(PathProvider);
         ArgumentNullException.ThrowIfNull(TypeResolver);
         ArgumentNullException.ThrowIfNull(ValueConverter);
         ArgumentNullException.ThrowIfNull(SubjectFactory);
