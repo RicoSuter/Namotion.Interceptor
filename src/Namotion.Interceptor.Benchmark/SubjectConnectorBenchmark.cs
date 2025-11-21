@@ -44,7 +44,7 @@ public class SubjectConnectorBenchmark
             .ToArray();
 
         _connector = new TestSubjectConnector(_propertyNames.Length);
-        _service = new SubjectUpstreamConnectorBackgroundService(
+        _service = new SubjectClientConnectorBackgroundService(
             _connector,
             _context,
             NullLogger.Instance,
@@ -115,7 +115,7 @@ public class SubjectConnectorBenchmark
         _service.Dispose();
     }
 
-    private class TestSubjectConnector : ISubjectUpstreamConnector
+    private class TestSubjectConnector : ISubjectClientConnector
     {
         private int _count;
         private readonly int _targetCount;

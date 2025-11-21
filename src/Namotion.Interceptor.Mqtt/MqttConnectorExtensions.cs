@@ -35,7 +35,7 @@ public static class MqttConnectorExtensions
             .AddSingleton<IHostedService>(sp =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new SubjectDownstreamConnectorBackgroundService(
+                return new SubjectServerConnectorBackgroundService(
                     sp.GetRequiredKeyedService<MqttServerConnector>(key),
                     subject.Context,
                     sp.GetRequiredService<ILogger<SubjectConnectorBackgroundService>>());

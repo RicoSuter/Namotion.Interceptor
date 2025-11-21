@@ -2,10 +2,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Namotion.Interceptor.Connectors;
 
-public class SubjectDownstreamConnectorBackgroundService : SubjectConnectorBackgroundService
+public class SubjectServerConnectorBackgroundService : SubjectConnectorBackgroundService
 {
-    public SubjectDownstreamConnectorBackgroundService(
-        ISubjectDownstreamConnector connector,
+    public SubjectServerConnectorBackgroundService(
+        ISubjectServerConnector connector,
         IInterceptorSubjectContext context,
         ILogger logger,
         TimeSpan? bufferTime = null,

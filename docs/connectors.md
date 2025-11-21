@@ -2,17 +2,17 @@
 
 The `Namotion.Interceptor.Connectors` package enables binding subject properties to external data sources like MQTT, OPC UA, or custom providers. It provides a powerful abstraction layer that automatically synchronizes property values with external systems while maintaining full type safety and change tracking.
 
-## Upstream vs Downstream Connectors
+## Client vs Server Connectors
 
 The library distinguishes between two connector types based on data ownership:
 
 **Cardinality rules:**
-- Zero or one upstream connector per property (single source of truth)
-- Zero or many downstream connectors per property (multiple publish channels)
+- Zero or one client connector per property (single source of truth)
+- Zero or many server connectors per property (multiple publish channels)
 
-### Upstream Connectors (`ISubjectUpstreamConnector`)
+### Client Connectors (`ISubjectClientConnector`)
 
-The C# object is a **replica** of external data:
+The C# object is a **replica** of external data (local is a CLIENT of an external authoritative system):
 
 - Loads initial state FROM the external source (not authoritative)
 - Writes TO an external system that may be unavailable
@@ -21,9 +21,9 @@ The C# object is a **replica** of external data:
 
 Examples: OPC UA client connecting to a PLC, database client, REST API consumer
 
-### Downstream Connectors (`ISubjectDownstreamConnector`)
+### Server Connectors (`ISubjectServerConnector`)
 
-The C# object IS the **source of truth**:
+The C# object IS the **source of truth** (local is an authoritative SERVER):
 
 - No initial state to load (it defines the state)
 - "Writes" are publishing/notifying subscribers
@@ -181,17 +181,17 @@ Custom connector implementations should ensure that the temporal ordering of ext
 
 ## Write Retry Queue
 
-The `SubjectUpstreamConnectorBackgroundService` provides an optional write retry queue that buffers writes during disconnection and automatically flushes them when the connection is restored. This feature is available to upstream connector implementations.
+The `SubjectClientConnectorBackgroundService` provides an optional write retry queue that buffers writes during disconnection and automatically flushes them when the connection is restored. This feature is available to client connector implementations.
 
 ```csharp
-// Configure write retry queue size when setting up an upstream connector
+// Configure write retry queue size when setting up a client connector
 services.AddHostedService(sp =>
 {
-    var connector = sp.GetRequiredService<ISubjectUpstreamConnector>();
+    var connector = sp.GetRequiredService<ISubjectClientConnector>();
     var context = sp.GetRequiredService<IInterceptorSubjectContext>();
-    var logger = sp.GetRequiredService<ILogger<SubjectUpstreamConnectorBackgroundService>>();
+    var logger = sp.GetRequiredService<ILogger<SubjectClientConnectorBackgroundService>>();
 
-    return new SubjectUpstreamConnectorBackgroundService(
+    return new SubjectClientConnectorBackgroundService(
         connector,
         context,
         logger,

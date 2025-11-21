@@ -3,14 +3,14 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
 
-public class SubjectUpstreamConnectorBackgroundService : SubjectConnectorBackgroundService
+public class SubjectClientConnectorBackgroundService : SubjectConnectorBackgroundService
 {
     private readonly ISubjectConnector _connector;
     private readonly WriteRetryQueue? _writeRetryQueue;
     private readonly ILogger _logger;
 
-    public SubjectUpstreamConnectorBackgroundService(
-        ISubjectUpstreamConnector connector,
+    public SubjectClientConnectorBackgroundService(
+        ISubjectClientConnector connector,
         IInterceptorSubjectContext context,
         ILogger logger,
         TimeSpan? bufferTime = null,

@@ -69,7 +69,7 @@ public static class OpcUaConnectorExtensions
             {
                 var configuration = sp.GetRequiredKeyedService<OpcUaClientConfiguration>(key);
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new SubjectUpstreamConnectorBackgroundService(
+                return new SubjectClientConnectorBackgroundService(
                     sp.GetRequiredKeyedService<OpcUaClientConnector>(key),
                     subject.Context,
                     sp.GetRequiredService<ILogger<SubjectConnectorBackgroundService>>(),
@@ -130,7 +130,7 @@ public static class OpcUaConnectorExtensions
             {
                 var configuration = sp.GetRequiredKeyedService<OpcUaServerConfiguration>(key);
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new SubjectDownstreamConnectorBackgroundService(
+                return new SubjectServerConnectorBackgroundService(
                     sp.GetRequiredKeyedService<OpcUaServerConnector>(key),
                     subject.Context,
                     sp.GetRequiredService<ILogger<SubjectConnectorBackgroundService>>(),
