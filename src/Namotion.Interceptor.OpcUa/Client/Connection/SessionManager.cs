@@ -13,7 +13,6 @@ namespace Namotion.Interceptor.OpcUa.Client.Connection;
 /// </summary>
 internal sealed class SessionManager : IDisposable, IAsyncDisposable
 {
-    private readonly OpcUaClientConnector _source;
     private readonly ConnectorUpdateBuffer _updateBuffer;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
@@ -52,7 +51,6 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
 
     public SessionManager(OpcUaClientConnector source, ConnectorUpdateBuffer updateBuffer, OpcUaClientConfiguration configuration, ILogger logger)
     {
-        _source = source;
         _updateBuffer = updateBuffer;
         _logger = logger;
         _configuration = configuration;
@@ -61,13 +59,13 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         if (_configuration.EnablePollingFallback)
         {
             _pollingManager = new PollingManager(
-                _source, sessionManager: this,
+                source, sessionManager: this,
                 updateBuffer, _configuration, _logger);
 
             _pollingManager.Start();
         }
 
-        _subscriptionManager = new SubscriptionManager(_source, updateBuffer, _pollingManager, configuration, logger);
+        _subscriptionManager = new SubscriptionManager(source, updateBuffer, _pollingManager, configuration, logger);
     }
 
     /// <summary>

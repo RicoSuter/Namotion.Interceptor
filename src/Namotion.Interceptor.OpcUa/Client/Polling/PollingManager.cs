@@ -16,7 +16,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Polling;
 /// </summary>
 internal sealed class PollingManager : IDisposable
 {
-    private readonly OpcUaClientConnector _source;
+    private readonly OpcUaClientConnector _connector;
     private readonly ILogger _logger;
     private readonly SessionManager _sessionManager;
     private readonly ConnectorUpdateBuffer _updateBuffer;
@@ -33,7 +33,7 @@ internal sealed class PollingManager : IDisposable
     private ISession? _lastKnownSession;
     private int _disposed;
 
-    public PollingManager(OpcUaClientConnector source,
+    public PollingManager(OpcUaClientConnector connector,
         SessionManager sessionManager,
         ConnectorUpdateBuffer updateBuffer,
         OpcUaClientConfiguration configuration,
@@ -43,7 +43,7 @@ internal sealed class PollingManager : IDisposable
         ArgumentNullException.ThrowIfNull(sessionManager);
         ArgumentNullException.ThrowIfNull(updateBuffer);
 
-        _source = source;
+        _connector = connector;
         _logger = logger;
         _sessionManager = sessionManager;
         _updateBuffer = updateBuffer;
@@ -375,7 +375,7 @@ internal sealed class PollingManager : IDisposable
             };
 
             // Queue update using same pattern as subscriptions
-            var state = (source: _source, update, receivedTimestamp, logger: _logger);
+            var state = (source: _connector, update, receivedTimestamp, logger: _logger);
             _updateBuffer.ApplyUpdate(state, static s =>
             {
                 try
