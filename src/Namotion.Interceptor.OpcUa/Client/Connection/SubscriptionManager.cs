@@ -37,9 +37,9 @@ internal class SubscriptionManager
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
-    public SubscriptionManager(OpcUaClientConnector source, ConnectorUpdateBuffer updateBuffer, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
+    public SubscriptionManager(OpcUaClientConnector connector, ConnectorUpdateBuffer updateBuffer, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
     {
-        _connector = source;
+        _connector = connector;
         _updateBuffer = updateBuffer;
         _pollingManager = pollingManager;
         _configuration = configuration;
