@@ -2,6 +2,38 @@
 
 The `Namotion.Interceptor.Sources` package enables binding subject properties to external data sources like MQTT, OPC UA, or custom providers. It provides a powerful abstraction layer that automatically synchronizes property values with external systems while maintaining full type safety and change tracking.
 
+## Client vs Server Sources
+
+The library distinguishes between two source types based on data ownership:
+
+### Client Sources (`ISubjectClientSource`)
+
+The C# object is a **replica** of external data:
+
+- Loads initial state FROM the external source (not authoritative)
+- Writes TO an external system that may be unavailable
+- Write failures are expected (network issues, server down)
+- Provides write retry queue to buffer changes during disconnection
+
+Examples: OPC UA client connecting to a PLC, database client, REST API consumer
+
+### Server Sources (`ISubjectServerSource`)
+
+The C# object IS the **source of truth**:
+
+- No initial state to load (it defines the state)
+- "Writes" are publishing/notifying subscribers
+- Subscribers that miss updates must reconnect
+- No retry queue needed - server continues regardless of client availability
+
+Examples: OPC UA server exposing sensor data, MQTT broker publishing values
+
+### Why This Distinction?
+
+Failure handling is inherently asymmetric in client-server relationships. A client must gracefully handle server unavailability by buffering writes for retry. A server doesn't block on client availability - it publishes data and clients subscribe or reconnect as needed.
+
+This design maps to common patterns: master/replica replication, publisher/subscriber messaging, and request/response protocols.
+
 ## Setup
 
 Sources are enabled through their specific extension methods. Each source type (MQTT, OPC UA, etc.) provides its own registration:
@@ -109,15 +141,13 @@ public class SampleSource : ISubjectSource
         return () => { /* Apply sourceState to _root */ };
     }
 
-    public async ValueTask<SourceWriteResult> WriteToSourceAsync(
-        IReadOnlyList<SubjectPropertyChange> changes,
+    public ValueTask WriteToSourceAsync(
+        ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
         // Write changes back to source
-        // Return SourceWriteResult.Success if all writes succeeded
-        // Return failed changes for transient errors that should be retried
-        // Throw exception for complete failures to retry all changes
-        return SourceWriteResult.Success;
+        // Throw exception for failures - the entire batch will be retried
+        return ValueTask.CompletedTask;
     }
 }
 ```
@@ -147,17 +177,17 @@ Custom source implementations should ensure that the temporal ordering of extern
 
 ## Write Retry Queue
 
-The `SubjectSourceBackgroundService` provides an optional write retry queue that buffers writes during disconnection and automatically flushes them when the connection is restored. This feature is available to all source implementations.
+The `SubjectClientSourceBackgroundService` provides an optional write retry queue that buffers writes during disconnection and automatically flushes them when the connection is restored. This feature is available to client source implementations.
 
 ```csharp
-// Configure write retry queue size when setting up a source
+// Configure write retry queue size when setting up a client source
 services.AddHostedService(sp =>
 {
-    var source = sp.GetRequiredService<ISubjectSource>();
+    var source = sp.GetRequiredService<ISubjectClientSource>();
     var context = sp.GetRequiredService<IInterceptorSubjectContext>();
-    var logger = sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>();
+    var logger = sp.GetRequiredService<ILogger<SubjectClientSourceBackgroundService>>();
 
-    return new SubjectSourceBackgroundService(
+    return new SubjectClientSourceBackgroundService(
         source,
         context,
         logger,
@@ -170,39 +200,5 @@ services.AddHostedService(sp =>
 **Behavior:**
 - Ring buffer semantics: oldest writes dropped when capacity reached
 - FIFO flush order when connection restored
-- Automatic retry of transient failures returned from `WriteToSourceAsync`
+- Automatic retry when `WriteToSourceAsync` throws an exception
 
-## Partial Write Failure Handling
-
-Sources can return partial failures from `WriteToSourceAsync` using `SourceWriteResult`:
-
-```csharp
-public async ValueTask<SourceWriteResult> WriteToSourceAsync(
-    IReadOnlyList<SubjectPropertyChange> changes,
-    CancellationToken cancellationToken)
-{
-    var failures = new List<SubjectPropertyChange>();
-
-    foreach (var change in changes)
-    {
-        try
-        {
-            await WriteToExternalSystem(change);
-        }
-        catch (TransientException)
-        {
-            // Mark for retry
-            failures.Add(change);
-        }
-    }
-
-    return failures.Count > 0
-        ? new SourceWriteResult(failures)
-        : SourceWriteResult.Success;
-}
-```
-
-**Guidelines:**
-- Return `SourceWriteResult.Success` when all writes succeed
-- Return failed changes in `SourceWriteResult` for transient errors (will be retried)
-- Throw exceptions for complete failures (all changes will be retried)
