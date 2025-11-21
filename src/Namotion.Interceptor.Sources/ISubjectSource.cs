@@ -25,27 +25,19 @@ public interface ISubjectSource
     /// A disposable that can be used to stop listening for changes. Returns <c>null</c> if there is no active listener or nothing needs to be disposed.
     /// </returns>
     Task<IDisposable?> StartListeningAsync(SourceUpdateBuffer updateBuffer, CancellationToken cancellationToken);
-
+    
     /// <summary>
-    /// Loads the complete state of the source and returns a delegate that applies the loaded state to the associated subject.
+    /// Gets the maximum number of property changes that can be applied in a single batch (0 = no limit).
     /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>
-    /// A delegate that applies the loaded state to the subject. Returns <c>null</c> if there is no state to apply.
-    /// </returns>
-    Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken);
-
+    public int WriteBatchSize { get; }
+    
     /// <summary>
-    /// Applies a set of property changes to the source.
+    /// Applies a set of property changes to the source with all-or-nothing (transactional) semantics.
+    /// If any change fails, the entire batch should throw an exception and will be retried.
     /// IMPORTANT: This method is designed to be called sequentially (not concurrently) by the SubjectSourceBackgroundService.
     /// Concurrent calls are not supported and will result in undefined behavior.
     /// </summary>
     /// <param name="changes">The collection of subject property changes.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>
-    /// Returns <see cref="SourceWriteResult.Success"/> if all writes succeeded.
-    /// Returns a result with failed changes for transient errors that should be retried.
-    /// Throws an exception for complete failures (e.g., network disconnect) to retry all changes.
-    /// </returns>
-    ValueTask<SourceWriteResult> WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken);
+    ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
 }

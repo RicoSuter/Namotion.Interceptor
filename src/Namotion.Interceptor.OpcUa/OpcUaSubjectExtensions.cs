@@ -10,7 +10,7 @@ using Namotion.Interceptor.Sources.Paths;
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class OpcUaSubjectServerExtensions
+public static class OpcUaSubjectExtensions
 {
     public static IServiceCollection AddOpcUaSubjectClient<TSubject>(
         this IServiceCollection serviceCollection,
@@ -69,7 +69,7 @@ public static class OpcUaSubjectServerExtensions
             {
                 var configuration = sp.GetRequiredKeyedService<OpcUaClientConfiguration>(key);
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new SubjectSourceBackgroundService(
+                return new SubjectClientSourceBackgroundService(
                     sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key),
                     subject.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
@@ -130,7 +130,7 @@ public static class OpcUaSubjectServerExtensions
             {
                 var configuration = sp.GetRequiredKeyedService<OpcUaServerConfiguration>(key);
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new SubjectSourceBackgroundService(
+                return new SubjectServerSourceBackgroundService(
                     sp.GetRequiredKeyedService<OpcUaSubjectServerSource>(key),
                     subject.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),

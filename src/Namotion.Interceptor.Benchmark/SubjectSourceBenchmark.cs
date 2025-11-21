@@ -44,7 +44,7 @@ public class SubjectSourceBenchmark
             .ToArray();
 
         _source = new TestSubjectSource(_propertyNames.Length);
-        _service = new SubjectSourceBackgroundService(
+        _service = new SubjectClientSourceBackgroundService(
             _source,
             _context,
             NullLogger.Instance,
@@ -115,7 +115,7 @@ public class SubjectSourceBenchmark
         _service.Dispose();
     }
 
-    private class TestSubjectSource : ISubjectSource
+    private class TestSubjectSource : ISubjectClientSource
     {
         private int _count;
         private readonly int _targetCount;
@@ -151,16 +151,18 @@ public class SubjectSourceBenchmark
             return Task.FromResult<Action?>(null);
         }
 
-        public ValueTask<SourceWriteResult> WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public int WriteBatchSize => int.MaxValue;
+
+        public ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
-            _count += changes.Count;
+            _count += changes.Length;
 
             if (_count >= _targetCount)
             {
                 _signal.Set();
             }
 
-            return ValueTask.FromResult(SourceWriteResult.Success);
+            return ValueTask.CompletedTask;
         }
     }
 }
