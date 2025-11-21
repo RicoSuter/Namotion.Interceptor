@@ -375,12 +375,12 @@ internal sealed class PollingManager : IDisposable
             };
 
             // Queue update using same pattern as subscriptions
-            var state = (source: _connector, update, receivedTimestamp, logger: _logger);
+            var state = (connector: _connector, update, receivedTimestamp, logger: _logger);
             _updateBuffer.ApplyUpdate(state, static s =>
             {
                 try
                 {
-                    s.update.Property.SetValueFromSource(s.source, s.update.Timestamp, s.receivedTimestamp, s.update.Value);
+                    s.update.Property.SetValueFromSource(s.connector, s.update.Timestamp, s.receivedTimestamp, s.update.Value);
                 }
                 catch (Exception e)
                 {

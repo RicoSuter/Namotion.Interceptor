@@ -49,7 +49,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
     /// </summary>
     public IReadOnlyCollection<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
 
-    public SessionManager(OpcUaClientConnector source, ConnectorUpdateBuffer updateBuffer, OpcUaClientConfiguration configuration, ILogger logger)
+    public SessionManager(OpcUaClientConnector connector, ConnectorUpdateBuffer updateBuffer, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _updateBuffer = updateBuffer;
         _logger = logger;
@@ -59,13 +59,13 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         if (_configuration.EnablePollingFallback)
         {
             _pollingManager = new PollingManager(
-                source, sessionManager: this,
+                connector, sessionManager: this,
                 updateBuffer, _configuration, _logger);
 
             _pollingManager.Start();
         }
 
-        _subscriptionManager = new SubscriptionManager(source, updateBuffer, _pollingManager, configuration, logger);
+        _subscriptionManager = new SubscriptionManager(connector, updateBuffer, _pollingManager, configuration, logger);
     }
 
     /// <summary>
@@ -226,7 +226,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
 
                 if (oldSession is not null && !ReferenceEquals(oldSession, newSession))
                 {
-                    Task.Run(() => DisposeSessionAsync(oldSession, _stoppingToken));
+                    Task.Run(() => DisposeSessionAsync(oldSession, _stoppingToken), _stoppingToken);
                 }
             }
             else
