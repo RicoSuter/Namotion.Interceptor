@@ -1,3 +1,4 @@
+using Moq;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
@@ -143,5 +144,38 @@ public class SubjectUpdateExtensionsTests
         // Assert
         Assert.Equal("John", person.Children.First().FirstName);
         Assert.Equal("Anna", person.Children.Last().FirstName);
+    }
+
+    [Fact]
+    public void WhenApplyingFromConnectorWithTransform_ThenTransformIsApplied()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        var connectorMock = new Mock<ISubjectConnector>();
+        var transformCalled = false;
+
+        // Act
+        person.ApplySubjectUpdateFromConnector(
+            new SubjectUpdate
+            {
+                Properties = new Dictionary<string, SubjectPropertyUpdate>
+                {
+                    {
+                        nameof(Person.FirstName), SubjectPropertyUpdate.Create("John")
+                    }
+                }
+            }, 
+            connectorMock.Object, 
+            DefaultSubjectFactory.Instance,
+            (_, update) =>
+            {
+                transformCalled = true;
+                update.Value = "Transformed";
+            });
+
+        // Assert
+        Assert.True(transformCalled);
+        Assert.Equal("Transformed", person.FirstName);
     }
 }
