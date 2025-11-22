@@ -62,6 +62,17 @@ This pattern ensures that updates received during initialization are not lost an
 
 **Note**: This pattern only applies to client connectors (`ISubjectClientConnector`). Server connectors don't implement `LoadInitialStateAsync()` since they are the source of truth and don't need to load external state.
 
+### Inbound Update Error Handling
+
+When applying inbound updates (writing data from the external system to the local subject model), if an individual update fails (the action throws an exception), the error is logged and **the update is dropped**. There is no retry mechanism for inbound updates.
+
+This is by design:
+- The external source is expected to send the value again if synchronization is needed
+- Individual update failures don't block other updates from being applied
+- Monitor logs for `Failed to apply subject update` errors to detect issues
+
+This differs from outbound changes (writing from local model to external system), which use a retry queue to handle transient failures.
+
 ## Setup
 
 Connectors are enabled through their specific extension methods. Each connector type (MQTT, OPC UA, etc.) provides its own registration:

@@ -132,7 +132,7 @@ public class SubjectConnectorBackgroundService : BackgroundService
                 {
                     // Immediate path: send the single change without buffering (zero allocation)
                     _immediateBuffer[0] = item;
-                    await WriteToSourceAsync(_immediateBuffer, linkedTokenSource.Token).ConfigureAwait(false);
+                    await WriteChangesAsync(_immediateBuffer, linkedTokenSource.Token).ConfigureAwait(false);
                 }
                 else
                 {
@@ -229,7 +229,7 @@ public class SubjectConnectorBackgroundService : BackgroundService
 
             if (_flushDedupedCount > 0)
             {
-                await WriteToSourceAsync(new ReadOnlyMemory<SubjectPropertyChange>(_flushDedupedBuffer, 0, _flushDedupedCount), cancellationToken).ConfigureAwait(false);
+                await WriteChangesAsync(new ReadOnlyMemory<SubjectPropertyChange>(_flushDedupedBuffer, 0, _flushDedupedCount), cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -248,7 +248,7 @@ public class SubjectConnectorBackgroundService : BackgroundService
         }
     }
 
-    protected virtual async ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    protected virtual async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         try
         {

@@ -29,11 +29,11 @@ public class SubjectClientConnectorBackgroundService : SubjectConnectorBackgroun
         PropertyWriter = new SubjectPropertyWriter(connector, _writeRetryQueue is not null ? ct => _writeRetryQueue.FlushAsync(connector, ct) : null, logger);
     }
 
-    protected override async ValueTask WriteToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    protected override async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (_writeRetryQueue is null)
         {
-            await base.WriteToSourceAsync(changes, cancellationToken).ConfigureAwait(false);
+            await base.WriteChangesAsync(changes, cancellationToken).ConfigureAwait(false);
             return;
         }
 
