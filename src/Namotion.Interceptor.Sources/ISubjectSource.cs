@@ -4,19 +4,19 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Sources;
 
 /// <summary>
-/// Represents a connector that can provide and synchronize data for an <see cref="IInterceptorSubject"/>.
+/// Represents a source that can provide and synchronize data for an <see cref="IInterceptorSubject"/>.
 /// </summary>
 public interface ISubjectSource
 {
     /// <summary>
-    /// Checks whether the specified property is included in the connector.
+    /// Checks whether the specified property is included in the source.
     /// </summary>
     /// <param name="property">The property.</param>
     /// <returns>The result.</returns>
     bool IsPropertyIncluded(RegisteredSubjectProperty property);
 
     /// <summary>
-    /// Initializes the connector and starts listening for external changes.
+    /// Initializes the source and starts listening for external changes.
     /// </summary>
     /// <param name="propertyWriter">The writer to use for applying inbound property updates to the subject.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -31,7 +31,7 @@ public interface ISubjectSource
     public int WriteBatchSize { get; }
 
     /// <summary>
-    /// Applies a set of property changes to the connector with all-or-nothing (transactional) semantics.
+    /// Applies a set of property changes to the source with all-or-nothing (transactional) semantics.
     /// If any change fails, the entire batch should throw an exception and will be retried.
     /// This method is designed to be called sequentially (not concurrently).
     /// Concurrent calls are not supported and will result in undefined behavior.

@@ -4,13 +4,13 @@ using Microsoft.Extensions.Logging;
 namespace Namotion.Interceptor.Sources;
 
 /// <summary>
-/// Writes inbound property updates from connectors to subjects.
+/// Writes inbound property updates from sources to subjects.
 /// Implements the buffer-load-replay pattern to ensure zero data loss during connector initialization.
 /// </summary>
 /// <remarks>
 /// During initialization, updates are buffered. Once <see cref="CompleteInitializationAsync"/> is called,
 /// the initial state is loaded, buffered updates are replayed, and subsequent writes are applied immediately.
-/// This buffering behavior is transparent to connectors - they simply call <see cref="Write{TState}"/>.
+/// This buffering behavior is transparent to sources - they simply call <see cref="Write{TState}"/>.
 /// </remarks>
 public sealed class SubjectPropertyWriter
 {
@@ -37,7 +37,7 @@ public sealed class SubjectPropertyWriter
     /// <summary>
     /// Starts buffering updates instead of applying them directly.
     /// Buffered updates will be replayed when <see cref="CompleteInitializationAsync"/> is called.
-    /// This method should be called before the connector starts listening for changes.
+    /// This method should be called before the source starts listening for changes.
     /// </summary>
     public void StartBuffering()
     {

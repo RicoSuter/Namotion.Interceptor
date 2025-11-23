@@ -1,66 +1,52 @@
 # Sources
 
-The `Namotion.Interceptor.Sources` package enables binding subject properties to external data sources like MQTT, OPC UA, or custom providers. It provides a powerful abstraction layer that automatically synchronizes property values with external systems while maintaining full type safety and change tracking.
+The `Namotion.Interceptor.Sources` package enables binding subject properties to external data sources. It provides a powerful abstraction layer that automatically synchronizes property values with external systems while maintaining full type safety and change tracking.
 
-## Client vs Server Sources
+## What is a Source?
 
-The library distinguishes between two source types based on data ownership:
+A **source** (`ISubjectSource`) represents an external authoritative system where the data originates. The C# object is a **replica** that synchronizes with this external source of truth.
 
-**Cardinality rules:**
-- Zero or one client source per property (single source of truth)
-- Zero or many server sources per property (multiple publish channels)
-
-### Client Sources (`ISubjectSource`)
-
-The C# object is a **replica** of external data (local is a CLIENT of an external authoritative system):
-
-- Loads initial state FROM the external source (not authoritative)
-- Writes TO an external system that may be unavailable
-- Write failures are expected (network issues, server down)
+Key characteristics:
+- Loads initial state FROM the external system
+- Writes changes TO the external system (which may fail)
 - Provides write retry queue to buffer changes during disconnection
+- Uses `SubjectSourceBackgroundService` for lifecycle management
 
-Examples: OPC UA client connecting to a PLC, database client, REST API consumer
+**Cardinality**: Each property can have at most one source (single source of truth)
 
-### Server Sources (`ISubjectSource`)
+**Examples**: OPC UA client connecting to a PLC, database client, REST API consumer
 
-The C# object IS the **source of truth** (local is an authoritative SERVER):
+> **Note**: When the C# object IS the source of truth and you want to expose it to external systems (like an OPC UA server or MQTT broker), use standalone background services like `OpcUaServerBackgroundService` or `MqttServerBackgroundService`. These are not sources because they don't synchronize from an external system.
 
-- No initial state to load (it defines the state)
-- "Writes" are publishing/notifying subscribers
-- Subscribers that miss updates must reconnect
-- No retry queue needed - server continues regardless of client availability
+## Data Flow
 
-Examples: OPC UA server exposing sensor data, MQTT broker publishing values
+Data flows bidirectionally between your C# subject and the external system:
 
-### Why This Distinction?
+### Inbound (External → Subject)
 
-Failure handling is inherently asymmetric in client-server relationships. A client must gracefully handle server unavailability by buffering writes for retry. A server doesn't block on client availability - it publishes data and clients subscribe or reconnect as needed.
+When the external system sends new values, the source receives them and applies them to the subject using `SubjectPropertyWriter.Write()`.
 
-This design maps to common patterns: primary/replica replication, publisher/subscriber messaging, and request/response protocols.
+```
+External System → Source → propertyWriter.Write() → Subject Property Updated
+```
 
-## Inbound vs Outbound Data Flow
+### Outbound (Subject → External)
 
-The library uses consistent terminology to distinguish data flow directions:
+When you change a property value in code, the source writes it back to the external system via `WriteChangesAsync()`.
 
-| Direction | Term | Type | Description |
-|-----------|------|------|-------------|
-| **Inbound** | Update | `SubjectPropertyWriter.Write()` | Data FROM external system TO subject |
-| **Outbound** | Change | `SubjectPropertyChange` | Data FROM subject TO external system |
+```
+Subject Property Changed → WriteChangesAsync() → Source → External System
+```
 
-- **Inbound updates**: External system notifies connector → connector calls `propertyWriter.Write()` → subject property updated
-- **Outbound changes**: Subject property changed → `WriteChangesAsync()` called → connector writes to external system
+## Buffer-Load-Replay Pattern
 
-## Buffer-Load-Replay Pattern (Client Sources)
-
-Client connectors use a buffer-load-replay pattern during initialization to ensure zero data loss:
+Sources use a buffer-load-replay pattern during initialization to ensure zero data loss:
 
 1. **Buffer**: During `StartListeningAsync()`, inbound updates are buffered (not applied immediately)
 2. **Load**: `LoadInitialStateAsync()` fetches complete state from external system
 3. **Replay**: Buffered updates are replayed in order after initial state is applied
 
 This pattern ensures that updates received during initialization are not lost and are applied in the correct order relative to the initial state.
-
-**Note**: This pattern only applies to client sources (`ISubjectSource`). Server connectors don't implement `LoadInitialStateAsync()` since they are the source of truth and don't need to load external state.
 
 ### Inbound Update Error Handling
 
@@ -75,14 +61,14 @@ This differs from outbound changes (writing from local model to external system)
 
 ## Setup
 
-Sources are enabled through their specific extension methods. Each source type (MQTT, OPC UA, etc.) provides its own registration:
+Sources are enabled through their specific extension methods:
 
 ```csharp
-// MQTT
-builder.Services.AddMqttServer<Sensor>("mqtt");
+// OPC UA Client Source
+builder.Services.AddOpcUaClientSource<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 ```
 
-The Connectors package builds on the Registry to discover properties and their source path mappings.
+The Sources package builds on the Registry to discover properties and their source path mappings.
 
 ## Source path attributes
 
@@ -92,67 +78,34 @@ Use `[SourcePath]` attributes to map properties to external data sources:
 [InterceptorSubject]
 public partial class Sensor
 {
-    [SourcePath("mqtt", "temperature")]
     [SourcePath("opc", "Temperature")]
     public partial decimal Temperature { get; set; }
 
-    [SourcePath("mqtt", "humidity")]
     [SourcePath("opc", "Humidity")]
     public partial decimal Humidity { get; set; }
-
-    [Derived]
-    [SourcePath("mqtt", "status")]
-    public string Status => Temperature > 25 ? "Hot" : "Normal";
 }
 ```
 
-Multiple `[SourcePath]` attributes allow the same property to be synchronized with different external systems using their respective naming conventions.
-
 ## Built-in source implementations
 
-### MQTT integration
+### OPC UA Client
 
-Bind subjects to MQTT topics for IoT scenarios:
-
-```csharp
-builder.Services.AddMqttServer<Sensor>("mqtt");
-```
-
-Properties with `[SourcePath("mqtt", "topic")]` are automatically synchronized with MQTT messages.
-
-### OPC UA integration
-
-Connect to industrial automation systems:
+Connect to industrial automation systems as a client:
 
 ```csharp
-builder.Services.AddOpcUaServer<Sensor>("opc", rootName: "Root");
-// or
 builder.Services.AddOpcUaClientSource<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 ```
 
-Properties with `[SourcePath("opc", "NodeName")]` map to OPC UA nodes in the address space.
-
-### GraphQL integration
-
-Enable real-time subscriptions for web applications:
-
-```csharp
-builder.Services
-    .AddGraphQLServer()
-    .AddInMemorySubscriptions()
-    .AddSubjectGraphQL<Sensor>();
-```
-
-Properties become queryable and subscribable through GraphQL, with automatic change notifications.
+Properties with `[SourcePath("opc", "NodeName")]` map to OPC UA nodes in the external server's address space.
 
 ## Custom source implementations
 
 Implement `ISubjectSource` to create custom data source integrations:
 
 ```csharp
-public class SampleConnector : ISubjectSource
+public class SampleSource : ISubjectSource
 {
-    public SampleConnector(IInterceptorSubject root)
+    public SampleSource(IInterceptorSubject root)
     {
         _root = root;
     }
@@ -195,7 +148,7 @@ public class SampleConnector : ISubjectSource
 Register your custom source:
 
 ```csharp
-builder.Services.AddSingleton<ISubjectSource, DatabaseConnector>();
+builder.Services.AddSingleton<ISubjectSource, DatabaseSource>();
 ```
 
 ## Source path providers
@@ -207,28 +160,28 @@ Built-in providers include:
 - **DefaultSourcePathProvider** - Uses paths exactly as specified in attributes
 - **JsonCamelCaseSourcePathProvider** - Converts property names to camelCase for JSON APIs
 
-## Thread Safety with Concurrent Connectors
+## Thread Safety with Concurrent Sources
 
 When multiple sources update properties concurrently, the library provides automatic thread-safety at the property field access level. Individual property updates are atomic and thread-safe without requiring additional synchronization in your source implementation.
 
-**Source responsibility**: While the library ensures thread-safe property access, **connectors are responsible for maintaining correct update ordering** according to their protocol semantics. When implementing `ISubjectSource`, use the provided `SubjectPropertyWriter` to write inbound updates, which handles buffering during initialization and prevents race conditions where newer values could be overwritten by delayed older updates.
+**Source responsibility**: While the library ensures thread-safe property access, **sources are responsible for maintaining correct update ordering** according to their protocol semantics. When implementing `ISubjectSource`, use the provided `SubjectPropertyWriter` to write inbound updates, which handles buffering during initialization and prevents race conditions where newer values could be overwritten by delayed older updates.
 
-Custom source implementations should ensure that the temporal ordering of external events is preserved when applying property updates. This is critical for maintaining data consistency when events arrive out of order or concurrently from the same connector.
+Custom source implementations should ensure that the temporal ordering of external events is preserved when applying property updates. This is critical for maintaining data consistency when events arrive out of order or concurrently from the same source.
 
 ## Write Retry Queue
 
-The `SubjectSourceBackgroundService` provides an optional write retry queue that buffers writes during disconnection and automatically flushes them when the connection is restored. This feature is available to client source implementations.
+The `SubjectSourceBackgroundService` provides an optional write retry queue that buffers writes during disconnection and automatically flushes them when the connection is restored.
 
 ```csharp
-// Configure write retry queue size when setting up a client source
+// Configure write retry queue size when setting up a source
 services.AddHostedService(sp =>
 {
-    var connector = sp.GetRequiredService<ISubjectSource>();
+    var source = sp.GetRequiredService<ISubjectSource>();
     var context = sp.GetRequiredService<IInterceptorSubjectContext>();
     var logger = sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>();
 
     return new SubjectSourceBackgroundService(
-        connector,
+        source,
         context,
         logger,
         bufferTime: TimeSpan.FromMilliseconds(8),
@@ -240,7 +193,7 @@ services.AddHostedService(sp =>
 **Behavior:**
 - Ring buffer semantics: oldest writes dropped when capacity reached (configurable via `writeRetryQueueSize` to balance memory usage vs buffering capacity)
 - FIFO flush order when connection restored
-- Automatic retry when `WriteToSourceAsync` throws an exception
+- Automatic retry when `WriteChangesAsync` throws an exception
 - In-memory only: queued writes are lost on process restart (by design for simplicity; implement persistent queue wrapper if needed for critical data)
 - No dead letter queue: permanent write failures are logged but not preserved (implement custom error handling via source wrapper if needed for auditing)
 

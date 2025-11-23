@@ -156,7 +156,7 @@ public class SubjectUpdateExtensionsTests
         var transformCalled = false;
 
         // Act
-        person.ApplySubjectUpdateFromConnector(
+        person.ApplySubjectUpdateFromSource(
             new SubjectUpdate
             {
                 Properties = new Dictionary<string, SubjectPropertyUpdate>

@@ -95,7 +95,7 @@ public class SubjectSourceBackgroundService : BackgroundService
                     return;
                 }
 
-                _logger.LogError(ex, "Failed to listen for changes in connector.");
+                _logger.LogError(ex, "Failed to listen for changes in source.");
                 // ResetState is called AFTER disposal in the finally block above,
                 // so all resources from the previous attempt are already cleaned up.
                 ResetState();

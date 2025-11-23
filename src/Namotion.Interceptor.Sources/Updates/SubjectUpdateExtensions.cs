@@ -15,7 +15,7 @@ public static class SubjectUpdateExtensions
     /// <param name="source">The source the update data is coming from.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects, null to ignore updates on missing subjects.</param>
     /// <param name="transformValueBeforeApply">The function to transform the update before applying it.</param>
-    public static void ApplySubjectUpdateFromConnector(
+    public static void ApplySubjectUpdateFromSource(
         this IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectSource source, ISubjectFactory? subjectFactory,
