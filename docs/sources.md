@@ -40,7 +40,7 @@ Subject Property Changed → WriteChangesAsync() → Source → External System
 
 ## Buffer-Load-Replay Pattern
 
-Sources use a buffer-load-replay pattern during initialization to ensure zero data loss:
+Sources use a buffer-load-replay pattern during initialization to ensure eventual consistent state:
 
 1. **Buffer**: During `StartListeningAsync()`, inbound updates are buffered (not applied immediately)
 2. **Load**: `LoadInitialStateAsync()` fetches complete state from external system
@@ -159,13 +159,16 @@ Built-in providers include:
 - **DefaultSourcePathProvider** - Uses paths exactly as specified in attributes
 - **JsonCamelCaseSourcePathProvider** - Converts property names to camelCase for JSON APIs
 
-## Thread Safety with Concurrent Sources
+## Thread Safety
 
-When multiple sources update properties concurrently, the library provides automatic thread-safety at the property field access level. Individual property updates are atomic and thread-safe without requiring additional synchronization in your source implementation.
+Properties can receive concurrent writes from multiple origins:
+- **Source**: Inbound updates from the external system
+- **Servers**: Background services exposing the property (OPC UA server, MQTT broker)
+- **Local code**: Application services, UI handlers, etc.
 
-**Source responsibility**: While the library ensures thread-safe property access, **sources are responsible for maintaining correct update ordering** according to their protocol semantics. When implementing `ISubjectSource`, use the provided `SubjectPropertyWriter` to write inbound updates, which handles buffering during initialization and prevents race conditions where newer values could be overwritten by delayed older updates.
+The library provides automatic thread-safety at the property field access level. Individual property updates are atomic and thread-safe without requiring additional synchronization.
 
-Custom source implementations should ensure that the temporal ordering of external events is preserved when applying property updates. This is critical for maintaining data consistency when events arrive out of order or concurrently from the same source.
+**Source responsibility**: When implementing `ISubjectSource`, use the provided `SubjectPropertyWriter` to write inbound updates. This handles buffering during initialization and ensures correct ordering when updates arrive concurrently or out of order from the external system.
 
 ## Write Retry Queue
 
