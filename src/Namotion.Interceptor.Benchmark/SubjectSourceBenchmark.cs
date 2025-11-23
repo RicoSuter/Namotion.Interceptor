@@ -18,7 +18,7 @@ namespace Namotion.Interceptor.Benchmark;
 [MemoryDiagnoser]
 public class SubjectSourceBenchmark
 {
-    private TestSubjectConnector _connector;
+    private TestSubjectSource _source;
     private SubjectSourceBackgroundService _service;
     private IInterceptorSubjectContext _context;
     private CancellationTokenSource _cts;
@@ -42,9 +42,9 @@ public class SubjectSourceBenchmark
             .Select(i => $"Name{i}")
             .ToArray();
 
-        _connector = new TestSubjectConnector(_propertyNames.Length);
+        _source = new TestSubjectSource(_propertyNames.Length);
         _service = new SubjectSourceBackgroundService(
-            _connector,
+            _source,
             _context,
             NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(1),
@@ -61,7 +61,7 @@ public class SubjectSourceBenchmark
         _cts = new CancellationTokenSource();
         await _service.StartAsync(_cts.Token);
 
-        _propertyWriter = _connector.PropertyWriter;
+        _propertyWriter = _source.PropertyWriter;
         await _propertyWriter.CompleteInitializationAsync(_cts.Token);
 
         _updates = Enumerable
@@ -87,9 +87,9 @@ public class SubjectSourceBenchmark
     }
 
     [Benchmark]
-    public void WriteToConnector()
+    public void WriteToSource()
     {
-        _connector.Reset();
+        _source.Reset();
 
         var queue = _context.GetService<PropertyChangeQueue>();
         for (var i = 0; i < _propertyNames.Length; i++)
@@ -102,7 +102,7 @@ public class SubjectSourceBenchmark
             queue.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});
         }
 
-        _connector.Wait();
+        _source.Wait();
     }
 
     [GlobalCleanup]
@@ -114,7 +114,7 @@ public class SubjectSourceBenchmark
         _service.Dispose();
     }
 
-    private class TestSubjectConnector : ISubjectSource
+    private class TestSubjectSource : ISubjectSource
     {
         private int _count;
         private readonly int _targetCount;
@@ -122,7 +122,7 @@ public class SubjectSourceBenchmark
 
         public SubjectPropertyWriter PropertyWriter { get; private set; }
 
-        public TestSubjectConnector(int targetCount)
+        public TestSubjectSource(int targetCount)
         {
             _targetCount = targetCount;
         }
