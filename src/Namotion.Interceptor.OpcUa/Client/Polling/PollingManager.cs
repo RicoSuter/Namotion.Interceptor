@@ -16,10 +16,10 @@ namespace Namotion.Interceptor.OpcUa.Client.Polling;
 /// </summary>
 internal sealed class PollingManager : IDisposable
 {
-    private readonly OpcUaSubjectClientSource _source;
+    private readonly OpcUaClientSource _connector;
     private readonly ILogger _logger;
     private readonly SessionManager _sessionManager;
-    private readonly SourceUpdateBuffer _updateBuffer;
+    private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly PollingCircuitBreaker _circuitBreaker;
     private readonly PollingMetrics _metrics = new();
@@ -33,20 +33,20 @@ internal sealed class PollingManager : IDisposable
     private ISession? _lastKnownSession;
     private int _disposed;
 
-    public PollingManager(OpcUaSubjectClientSource source,
+    public PollingManager(OpcUaClientSource connector,
         SessionManager sessionManager,
-        SourceUpdateBuffer updateBuffer,
+        SubjectPropertyWriter propertyWriter,
         OpcUaClientConfiguration configuration,
         ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(sessionManager);
-        ArgumentNullException.ThrowIfNull(updateBuffer);
+        ArgumentNullException.ThrowIfNull(propertyWriter);
 
-        _source = source;
+        _connector = connector;
         _logger = logger;
         _sessionManager = sessionManager;
-        _updateBuffer = updateBuffer;
+        _propertyWriter = propertyWriter;
         _configuration = configuration;
 
         _circuitBreaker = new PollingCircuitBreaker(configuration.PollingCircuitBreakerThreshold, configuration.PollingCircuitBreakerCooldown);
@@ -375,12 +375,12 @@ internal sealed class PollingManager : IDisposable
             };
 
             // Queue update using same pattern as subscriptions
-            var state = (source: _source, update, receivedTimestamp, logger: _logger);
-            _updateBuffer.ApplyUpdate(state, static s =>
+            var state = (connector: _connector, update, receivedTimestamp, logger: _logger);
+            _propertyWriter.Write(state, static s =>
             {
                 try
                 {
-                    s.update.Property.SetValueFromSource(s.source, s.update.Timestamp, s.receivedTimestamp, s.update.Value);
+                    s.update.Property.SetValueFromSource(s.connector, s.update.Timestamp, s.receivedTimestamp, s.update.Value);
                 }
                 catch (Exception e)
                 {

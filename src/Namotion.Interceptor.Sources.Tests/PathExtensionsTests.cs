@@ -1,5 +1,4 @@
 ﻿using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Sources.Updates;
@@ -17,7 +16,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public async Task WhenRetrievingAllPaths_ThenListIsCorrect(string name, ISourcePathProvider sourcePathProvider)
+    public async Task WhenRetrievingAllPaths_ThenListIsCorrect(string name, ISourcePathProvider connectorPathProvider)
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -42,7 +41,7 @@ public class PathExtensionsTests
         var allPaths = person
             .TryGetRegisteredSubject()?
             .GetAllProperties()
-            .GetSourcePaths(sourcePathProvider, person)
+            .GetSourcePaths(connectorPathProvider, person)
             .ToArray() ?? [];
 
         // Assert
@@ -53,7 +52,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public async Task WhenApplyValuesFromSourceAndPaths_ThenSubjectAndChildrenShouldBeUpdated(string name, ISourcePathProvider sourcePathProvider)
+    public async Task WhenApplyValuesFromSourceAndPaths_ThenSubjectAndChildrenShouldBeUpdated(string name, ISourcePathProvider connectorPathProvider)
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -82,12 +81,12 @@ public class PathExtensionsTests
             { "FirstName", "NewPerson" },
             { "Children[0].FirstName", "NewChild1" },
             { "Children[2].FirstName", "NewChild3" }
-        }, timestamp, sourcePathProvider, null);
-        
+        }, timestamp, connectorPathProvider, null);
+
         person.UpdatePropertyValuesFromSourcePaths(
-            ["LastName"], timestamp, (_, _) => "NewLn", sourcePathProvider, null);
+            ["LastName"], timestamp, (_, _) => "NewLn", connectorPathProvider, null);
         person.UpdatePropertyValueFromSourcePath(
-            "Father.FirstName", timestamp, "NewFather", sourcePathProvider, null);
+            "Father.FirstName", timestamp, "NewFather", connectorPathProvider, null);
         
         var completeUpdate = SubjectUpdate
             .CreateCompleteUpdate(person, [JsonCamelCasePathProcessor.Instance]);

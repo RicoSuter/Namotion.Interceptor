@@ -13,21 +13,21 @@ internal class CustomNodeManager : CustomNodeManager2
     private const string PathDelimiter = ".";
 
     private readonly IInterceptorSubject _subject;
-    private readonly OpcUaSubjectServerSource _source;
+    private readonly OpcUaServerBackgroundService _connector;
     private readonly OpcUaServerConfiguration _configuration;
 
     private readonly ConcurrentDictionary<RegisteredSubject, NodeState> _subjects = new();
 
     public CustomNodeManager(
         IInterceptorSubject subject,
-        OpcUaSubjectServerSource source,
+        OpcUaServerBackgroundService connector,
         IServerInternal server,
         ApplicationConfiguration applicationConfiguration,
         OpcUaServerConfiguration configuration) :
         base(server, applicationConfiguration, configuration.GetNamespaceUris())
     {
         _subject = subject;
-        _source = source;
+        _connector = connector;
         _configuration = configuration;
     }
 
@@ -44,7 +44,7 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             if (node is BaseDataVariableState { Handle: PropertyReference property })
             {
-                property.RemovePropertyData(OpcUaSubjectServerSource.OpcVariableKey);
+                property.RemovePropertyData(OpcUaServerBackgroundService.OpcVariableKey);
             }
         }
     }
@@ -74,7 +74,7 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         foreach (var property in subject.Properties)
         {
-            var propertyName = property.ResolvePropertyName(_configuration.SourcePathProvider);
+            var propertyName = property.ResolvePropertyName(_configuration.PathProvider);
             if (propertyName is not null)
             {
                 if (property.IsSubjectReference)
@@ -198,11 +198,11 @@ internal class CustomNodeManager : CustomNodeManager2
                     nodeValue = variableNode.Value;
                 }
 
-                _source.UpdateProperty(property.Reference, timestamp, nodeValue);
+                _connector.UpdateProperty(property.Reference, timestamp, nodeValue);
             }
         };
 
-        property.Reference.SetPropertyData(OpcUaSubjectServerSource.OpcVariableKey, variableNode);
+        property.Reference.SetPropertyData(OpcUaServerBackgroundService.OpcVariableKey, variableNode);
     }
 
     private NodeId GetNodeId(RegisteredSubjectProperty property, string fullPath)

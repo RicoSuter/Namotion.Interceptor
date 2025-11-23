@@ -4,20 +4,34 @@ using Microsoft.Extensions.Logging;
 namespace Namotion.Interceptor.Sources;
 
 /// <summary>
-/// Buffers updates from a source during initialization and replays them after loading complete state.
-/// Implements the queue-read-replay pattern to ensure zero data loss during source initialization.
+/// Writes inbound property updates from sources to subjects.
+/// Implements the buffer-load-replay pattern to ensure zero data loss during connector initialization.
 /// </summary>
-public sealed class SourceUpdateBuffer
+/// <remarks>
+/// During initialization, updates are buffered. Once <see cref="CompleteInitializationAsync"/> is called,
+/// the initial state is loaded, buffered updates are replayed, and subsequent writes are applied immediately.
+/// This buffering behavior is transparent to sources - they simply call <see cref="Write{TState}"/>.
+/// </remarks>
+public sealed class SubjectPropertyWriter
 {
     private readonly ISubjectSource _source;
     private readonly ILogger _logger;
+    private readonly Func<CancellationToken, ValueTask<bool>>? _onInitializationCompleted;
     private readonly Lock _lock = new();
+
     private List<Action>? _updates = [];
 
-    public SourceUpdateBuffer(ISubjectSource source, ILogger logger)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SubjectPropertyWriter"/> class.
+    /// </summary>
+    /// <param name="source">The source associated with this writer.</param>
+    /// <param name="onInitializationCompleted">Optional callback invoked after initialization completes (e.g., to flush pending outbound writes).</param>
+    /// <param name="logger">The logger.</param>
+    public SubjectPropertyWriter(ISubjectSource source, Func<CancellationToken, ValueTask<bool>>? onInitializationCompleted, ILogger logger)
     {
         _source = source;
         _logger = logger;
+        _onInitializationCompleted = onInitializationCompleted;
     }
 
     /// <summary>
@@ -34,14 +48,19 @@ public sealed class SourceUpdateBuffer
     }
 
     /// <summary>
-    /// Completes initialization by loading complete state from the source and replaying all buffered updates.
+    /// Completes initialization by loading initial state from the connector, replaying all buffered updates,
+    /// and invoking the initialization completed callback.
     /// This ensures zero data loss during the initialization period.
     /// </summary>
+    /// <remarks>
+    /// If the callback fails, the exception propagates to signal initialization failure
+    /// and trigger reconnection.
+    /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The task.</returns>
     public async Task CompleteInitializationAsync(CancellationToken cancellationToken)
     {
-        var applyAction = await _source.LoadCompleteSourceStateAsync(cancellationToken).ConfigureAwait(false);
+        var applyAction = await _source.LoadInitialStateAsync(cancellationToken).ConfigureAwait(false);
         lock (_lock)
         {
             applyAction?.Invoke();
@@ -69,15 +88,21 @@ public sealed class SourceUpdateBuffer
                 }
             }
         }
+
+        // Invoke callback after initialization/reconnection completes
+        if (_onInitializationCompleted is not null)
+        {
+            await _onInitializationCompleted(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
-    /// Applies an update by either buffering it during initialization or executing it immediately.
-    /// The buffering behavior is transparent to the caller - updates are always eventually applied.
+    /// Writes a property update to the subject. During initialization, the update is buffered;
+    /// otherwise it is applied immediately. This buffering is transparent to the caller.
     /// </summary>
-    /// <param name="state">The state provided to the action (avoid delegate allocations by allowing action to be static).</param>
-    /// <param name="update">The update action to apply.</param>
-    public void ApplyUpdate<TState>(TState state, Action<TState> update)
+    /// <param name="state">The state provided to the action (allows static delegates to avoid allocations).</param>
+    /// <param name="update">The update action to apply to the subject.</param>
+    public void Write<TState>(TState state, Action<TState> update)
     {
         var updates = _updates;
         if (updates is not null)

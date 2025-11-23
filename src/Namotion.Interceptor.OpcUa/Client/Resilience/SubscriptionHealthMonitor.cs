@@ -66,9 +66,15 @@ internal sealed class SubscriptionHealthMonitor
 
     private static int GetUnhealthyCount(Subscription subscription)
     {
-        return subscription
-            .MonitoredItems
-            .Count(monitoredItem => IsUnhealthy(monitoredItem) && IsRetryable(monitoredItem));
+        var count = 0;
+        foreach (var item in subscription.MonitoredItems)
+        {
+            if (IsUnhealthy(item) && IsRetryable(item))
+            {
+                count++;
+            }
+        }
+        return count;
     }
 
     /// <summary>

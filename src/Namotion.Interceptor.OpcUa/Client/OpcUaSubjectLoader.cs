@@ -15,17 +15,17 @@ internal class OpcUaSubjectLoader
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly HashSet<PropertyReference> _propertiesWithOpcData;
-    private readonly OpcUaSubjectClientSource _source;
+    private readonly OpcUaClientSource _connector;
 
     public OpcUaSubjectLoader(
         OpcUaClientConfiguration configuration,
         HashSet<PropertyReference> propertiesWithOpcData,
-        OpcUaSubjectClientSource source,
+        OpcUaClientSource connector,
         ILogger logger)
     {
         _configuration = configuration;
         _propertiesWithOpcData = propertiesWithOpcData;
-        _source = source;
+        _connector = connector;
         _logger = logger;
     }
 
@@ -110,7 +110,7 @@ internal class OpcUaSubjectLoader
                     });
             }
 
-            var propertyName = property.ResolvePropertyName(_configuration.SourcePathProvider);
+            var propertyName = property.ResolvePropertyName(_configuration.PathProvider);
             if (propertyName is not null)
             {
                 var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, session.NamespaceUris);
@@ -155,7 +155,7 @@ internal class OpcUaSubjectLoader
             var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
             newSubject.Context.AddFallbackContext(subject.Context);
             await LoadSubjectAsync(newSubject, nodeReference, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
-            property.SetValueFromSource(_source, null, newSubject);
+            property.SetValueFromSource(_connector, null, newSubject);
         }
     }
 
@@ -185,7 +185,7 @@ internal class OpcUaSubjectLoader
         var collection = DefaultSubjectFactory.Instance
             .CreateSubjectCollection(property.Type, children.Select(c => c.Subject));
 
-        property.SetValueFromSource(_source, null, collection);
+        property.SetValueFromSource(_connector, null, collection);
 
         foreach (var child in children)
         {
@@ -215,7 +215,7 @@ internal class OpcUaSubjectLoader
             }
         }
 
-        return _configuration.SourcePathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
+        return _configuration.PathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
     }
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
@@ -237,7 +237,7 @@ internal class OpcUaSubjectLoader
             Handle = property
         };
 
-        property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
+        property.Reference.SetPropertyData(_connector.OpcUaNodeIdKey, nodeId);
         _propertiesWithOpcData.Add(property.Reference);
         
         monitoredItems.Add(monitoredItem);

@@ -1,7 +1,3 @@
-using System.Collections;
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
-
 namespace Namotion.Interceptor.Sources.Paths;
 
 public static class SubjectUpdatePathExtensions
@@ -9,13 +5,13 @@ public static class SubjectUpdatePathExtensions
     // public static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> ConvertToSourcePaths(
     //     this SubjectUpdate subjectUpdate,
     //     IInterceptorSubject subject,
-    //     ISourcePathProvider sourcePathProvider,
+    //     ISourcePathProvider connectorPathProvider,
     //     string pathPrefix = "")
     // {
     //     foreach (var property in subjectUpdate.Properties)
     //     {
     //         foreach (var (path, value, registeredProperty) in property.Value
-    //                      .ConvertToSourcePaths(subject, property.Key, sourcePathProvider, pathPrefix))
+    //                      .ConvertToSourcePaths(subject, property.Key, connectorPathProvider, pathPrefix))
     //         {
     //             yield return (path, value, registeredProperty);
     //         }
@@ -25,23 +21,23 @@ public static class SubjectUpdatePathExtensions
     // private static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> ConvertToSourcePaths(
     //     this SubjectPropertyChange propertyUpdate,
     //     IInterceptorSubject subject, string propertyName,
-    //     ISourcePathProvider sourcePathProvider,
+    //     ISourcePathProvider connectorPathProvider,
     //     string pathPrefix = "")
     // {
     //     var registeredProperty = subject.TryGetRegisteredProperty(propertyName) ?? throw new KeyNotFoundException(propertyName);
-    //     if (sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
+    //     if (connectorPathProvider.IsPropertyIncluded(registeredProperty) == false)
     //     {
     //         yield break;
     //     }
     //
-    //     var fullPath = sourcePathProvider.GetPropertyFullPath(pathPrefix, registeredProperty);
+    //     var fullPath = connectorPathProvider.GetPropertyFullPath(pathPrefix, registeredProperty);
     //     if (propertyUpdate.Attributes is not null)
     //     {
     //         foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
     //         {
     //             var registeredAttribute = subject.GetRegisteredAttribute(propertyName, attributeName);
     //             foreach (var (path, value, property) in attributeUpdate
-    //                          .ConvertToSourcePaths(subject, registeredAttribute.Property.Name, sourcePathProvider, fullPath))
+    //                          .ConvertToSourcePaths(subject, registeredAttribute.Property.Name, connectorPathProvider, fullPath))
     //             {
     //                 yield return (path, value, property);
     //             }
@@ -58,7 +54,7 @@ public static class SubjectUpdatePathExtensions
     //             if (registeredProperty.GetValue() is IInterceptorSubject currentItem)
     //             {
     //                 foreach (var (path, value, property) in propertyUpdate.Item!
-    //                              .ConvertToSourcePaths(currentItem, sourcePathProvider, fullPath))
+    //                              .ConvertToSourcePaths(currentItem, connectorPathProvider, fullPath))
     //                 {
     //                     yield return (path, value, property);
     //                 }
@@ -85,7 +81,7 @@ public static class SubjectUpdatePathExtensions
     //                 {
     //                     var itemPropertyPath = $"{fullPath}[{item.Index}]";
     //                     foreach (var (path, value, property) in item.Item
-    //                                  .ConvertToSourcePaths(currentCollectionItem, sourcePathProvider, itemPropertyPath))
+    //                                  .ConvertToSourcePaths(currentCollectionItem, connectorPathProvider, itemPropertyPath))
     //                     {
     //                         yield return (path, value, property);
     //                     }
@@ -106,15 +102,15 @@ public static class SubjectUpdatePathExtensions
     // /// <param name="subject">The subject.</param>
     // /// <param name="path">The path.</param>
     // /// <param name="value">The value.</param>
-    // /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
+    // /// <param name="connectorPathProvider">The connector path provider to resolve paths.</param>
     // /// <returns>The update.</returns>
     // public static SubjectUpdate CreateUpdateFromSourcePath(
     //     this IInterceptorSubject subject,
     //     string path,
     //     object? value,
-    //     ISourcePathProvider sourcePathProvider)
+    //     ISourcePathProvider connectorPathProvider)
     // {
-    //     return subject.CreateUpdateFromSourcePaths([path], sourcePathProvider, 
+    //     return subject.CreateUpdateFromSourcePaths([path], connectorPathProvider,
     //         (_, _) => value);
     // }
     //
@@ -123,16 +119,16 @@ public static class SubjectUpdatePathExtensions
     // /// </summary>
     // /// <param name="subject">The subject.</param>
     // /// <param name="path">The path.</param>
-    // /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
+    // /// <param name="connectorPathProvider">The connector path provider to resolve paths.</param>
     // /// <param name="getPropertyValue">The function to resolve a property value, called per path.</param>
     // /// <returns>The update.</returns>
     // public static SubjectUpdate CreateUpdateFromSourcePath(
     //     this IInterceptorSubject subject,
     //     string path,
-    //     ISourcePathProvider sourcePathProvider,
+    //     ISourcePathProvider connectorPathProvider,
     //     Func<RegisteredSubjectProperty, string, object?> getPropertyValue)
     // {
-    //     return subject.CreateUpdateFromSourcePaths([path], sourcePathProvider, getPropertyValue);
+    //     return subject.CreateUpdateFromSourcePaths([path], connectorPathProvider, getPropertyValue);
     // }
     //
     // /// <summary>
@@ -140,14 +136,14 @@ public static class SubjectUpdatePathExtensions
     // /// </summary>
     // /// <param name="subject">The subject.</param>
     // /// <param name="pathsWithValues">The dictionary with paths and values.</param>
-    // /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
+    // /// <param name="connectorPathProvider">The connector path provider to resolve paths.</param>
     // /// <returns>The update.</returns>
     // public static SubjectUpdate CreateUpdateFromSourcePaths(
     //     this IInterceptorSubject subject,
     //     IReadOnlyDictionary<string, object?> pathsWithValues,
-    //     ISourcePathProvider sourcePathProvider)
+    //     ISourcePathProvider connectorPathProvider)
     // {
-    //     return subject.CreateUpdateFromSourcePaths(pathsWithValues.Keys, sourcePathProvider, 
+    //     return subject.CreateUpdateFromSourcePaths(pathsWithValues.Keys, connectorPathProvider,
     //         (_, path) => pathsWithValues[path]);
     // }
     //
@@ -156,13 +152,13 @@ public static class SubjectUpdatePathExtensions
     // /// </summary>
     // /// <param name="subject">The subject.</param>
     // /// <param name="paths">The paths.</param>
-    // /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
+    // /// <param name="connectorPathProvider">The connector path provider to resolve paths.</param>
     // /// <param name="getPropertyValue">The function to resolve a property value, called per path.</param>
     // /// <returns>The update.</returns>
     // public static SubjectUpdate CreateUpdateFromSourcePaths(
     //     this IInterceptorSubject subject,
     //     IEnumerable<string> paths,
-    //     ISourcePathProvider sourcePathProvider,
+    //     ISourcePathProvider connectorPathProvider,
     //     Func<RegisteredSubjectProperty, string, object?> getPropertyValue)
     // {
     //     var update = new SubjectUpdate();
@@ -172,8 +168,8 @@ public static class SubjectUpdatePathExtensions
     //     {
     //         var currentSubject = subject;
     //         var currentUpdate = update;
-    //         
-    //         var segments = sourcePathProvider
+    //
+    //         var segments = connectorPathProvider
     //             .ParsePathSegments(path)
     //             .ToArray();
     //
@@ -181,13 +177,13 @@ public static class SubjectUpdatePathExtensions
     //         {
     //             var (segment, index) = segments[i];
     //             var isLastSegment = i == segments.Length - 1;
-    //             
+    //
     //             var registry = currentSubject.Context.GetService<ISubjectRegistry>();
     //             var registeredSubject = registry.KnownSubjects[currentSubject];
     //
-    //             var registeredProperty = sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
-    //             if (registeredProperty is null || 
-    //                 sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
+    //             var registeredProperty = connectorPathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
+    //             if (registeredProperty is null ||
+    //                 connectorPathProvider.IsPropertyIncluded(registeredProperty) == false)
     //             {
     //                 break;
     //             }
@@ -202,10 +198,10 @@ public static class SubjectUpdatePathExtensions
     //                 currentUpdate = collectionProperty?.Collection?
     //                         .Single(u => Equals(u.Index, index)).Item!
     //                     ?? throw new InvalidOperationException("Collection item could not be found.");
-    //                 
+    //
     //                 currentSubject = item.Subject;
     //             }
-    //             else if (!isLastSegment && 
+    //             else if (!isLastSegment &&
     //                      registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
     //             {
     //                 // handle item update
@@ -214,7 +210,7 @@ public static class SubjectUpdatePathExtensions
     //                 currentUpdate = itemProperty?.Item ?? throw new InvalidOperationException("Item could not be found.");
     //                 currentSubject = item.Subject;
     //             }
-    //             else 
+    //             else
     //             {
     //                 // handle value update
     //                 currentUpdate.Properties[propertyName] = new SubjectPropertyChange
@@ -228,7 +224,7 @@ public static class SubjectUpdatePathExtensions
     //             previousProperty = registeredProperty;
     //         }
     //     }
-    //     
+    //
     //     return update;
     // }
     //
@@ -242,7 +238,7 @@ public static class SubjectUpdatePathExtensions
     //             Kind = SubjectPropertyUpdateKind.Item,
     //             Item = new SubjectUpdate()
     //         };
-    //                     
+    //
     //         currentUpdate.Properties[propertyName] = itemProperty;
     //     }
     //
@@ -268,7 +264,7 @@ public static class SubjectUpdatePathExtensions
     //             Kind = SubjectPropertyUpdateKind.Collection,
     //             Collection = childUpdates
     //         };
-    //                     
+    //
     //         currentUpdate.Properties[propertyName] = collectionProperty;
     //     }
     //

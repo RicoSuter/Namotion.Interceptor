@@ -108,10 +108,10 @@ person.Children = [];
 
 public class LogPropertyChangesHandler : ILifecycleHandler
 {
-    public void Attach(LifecycleContext context) => 
+    public void Attach(LifecycleContext context) =>
         Console.WriteLine($"Attach: {context.Subject}");
 
-    public void Detach(LifecycleContext context) => 
+    public void Detach(LifecycleContext context) =>
         Console.WriteLine($"Detach: {context.Subject}");
 }
 ```
@@ -165,13 +165,13 @@ public partial class Car
 public partial class Car : IInterceptorSubject
 {
     public IInterceptorSubjectContext Context { get; }
-    
-    public partial string Name 
-    { 
+
+    public partial string Name
+    {
         get => (string)((IInterceptorExecutor)Context).GetPropertyValue("Name", () => _name);
         set => ((IInterceptorExecutor)Context).SetPropertyValue("Name", value, () => _name, v => _name = v);
     }
-    
+
     // Constructor injection, metadata registration, etc.
 }
 ```

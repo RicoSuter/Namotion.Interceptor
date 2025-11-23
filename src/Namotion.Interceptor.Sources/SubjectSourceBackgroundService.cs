@@ -1,10 +1,9 @@
-﻿using Microsoft.Extensions.Hosting;
+using System.Collections.Concurrent;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
-using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Sources;
 
@@ -15,37 +14,50 @@ public class SubjectSourceBackgroundService : BackgroundService
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
-    
-    private readonly SourceUpdateBuffer _updateBuffer;
+    private readonly WriteRetryQueue? _writeRetryQueue;
+    private readonly SubjectPropertyWriter _propertyWriter;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
-    private int _flushGate = 0; // 0 = free, 1 = flushing
+    private int _flushGate; // 0 = free, 1 = flushing
 
     // Scratch buffers used only while holding the write semaphore (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
     private readonly HashSet<PropertyReference> _flushTouchedChanges = new(PropertyReference.Comparer);
-    private readonly List<SubjectPropertyChange> _flushDedupedChanges = [];
+
+    // Reusable buffer for deduped changes (avoids allocation on each flush)
+    private SubjectPropertyChange[] _flushDedupedBuffer = new SubjectPropertyChange[64];
+    private int _flushDedupedCount;
 
     // Reusable single-item buffer for the no-buffer (immediate) path
-    private readonly List<SubjectPropertyChange> _immediateChanges = new(1);
+    private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
 
     // Use ticks to avoid torn reads of DateTimeOffset across threads
-    private long _flushLastTicks = 0L;
+    private long _flushLastTicks;
 
     public SubjectSourceBackgroundService(
         ISubjectSource source,
         IInterceptorSubjectContext context,
         ILogger logger,
         TimeSpan? bufferTime = null,
-        TimeSpan? retryTime = null)
+        TimeSpan? retryTime = null,
+        int writeRetryQueueSize = 1000)
     {
         _source = source;
         _context = context;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
-        _updateBuffer = new SourceUpdateBuffer(source, logger);
+
+        if (writeRetryQueueSize > 0)
+        {
+            _writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger);
+        }
+
+        _propertyWriter = new SubjectPropertyWriter(
+            source,
+            _writeRetryQueue is not null ? ct => _writeRetryQueue.FlushAsync(source, ct) : null,
+            logger);
     }
 
     /// <inheritdoc />
@@ -55,11 +67,11 @@ public class SubjectSourceBackgroundService : BackgroundService
         {
             try
             {
-                _updateBuffer.StartBuffering();
-                var disposable = await _source.StartListeningAsync(_updateBuffer, stoppingToken).ConfigureAwait(false);
+                _propertyWriter.StartBuffering();
+                var disposable = await _source.StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
                 try
                 {
-                    await _updateBuffer.CompleteInitializationAsync(stoppingToken);
+                    await _propertyWriter.CompleteInitializationAsync(stoppingToken);
 
                     using var subscription = _context.CreatePropertyChangeQueueSubscription();
                     await ProcessPropertyChangesAsync(subscription, stoppingToken).ConfigureAwait(false);
@@ -109,15 +121,15 @@ public class SubjectSourceBackgroundService : BackgroundService
         try
         {
             // Ensure we don't block the startup process
-            await Task.Yield(); 
+            await Task.Yield();
 
             while (subscription.TryDequeue(out var item, linkedTokenSource.Token))
             {
                 if (item.Source == _source)
                 {
-                    continue; // Ignore changes originating from this source (avoid update loops)
+                    continue; // Ignore changes originating from this connector (avoid update loops)
                 }
-                
+
                 var registeredProperty = item.Property.TryGetRegisteredProperty();
                 if (registeredProperty is null || !_source.IsPropertyIncluded(registeredProperty))
                 {
@@ -127,16 +139,15 @@ public class SubjectSourceBackgroundService : BackgroundService
 
                 if (periodicTimer is null)
                 {
-                    // Immediate path: send the single change without buffering using a reusable list (no allocations)
-                    _immediateChanges.Add(item);
-                    await WriteToSourceAsync(_immediateChanges, linkedTokenSource.Token).ConfigureAwait(false);
-                    _immediateChanges.Clear();
+                    // Immediate path: send the single change without buffering (zero allocation)
+                    _immediateBuffer[0] = item;
+                    await WriteChangesAsync(_immediateBuffer, linkedTokenSource.Token).ConfigureAwait(false);
                 }
                 else
                 {
                     // Buffered path: enqueue lock-free; periodic timer handles flushing
                     _changes.Enqueue(item);
-                    
+
                     // Flush directly when needed (currently disabled in favor of periodic flush only)
                     // var lastTicks = Volatile.Read(ref _flushLastTicks);
                     // if (item.ChangedTimestamp.UtcTicks - lastTicks >= _bufferTime.Ticks)
@@ -198,11 +209,16 @@ public class SubjectSourceBackgroundService : BackgroundService
             Volatile.Write(ref _flushLastTicks, newFlushTicks);
 
             _flushTouchedChanges.Clear();
-            _flushDedupedChanges.Clear();
+            _flushDedupedCount = 0;
 
             // Pre-size to avoid resizes under bursts
             _flushTouchedChanges.EnsureCapacity(_flushChanges.Count);
-            _flushDedupedChanges.EnsureCapacity(_flushChanges.Count);
+
+            // Ensure buffer is large enough
+            if (_flushDedupedBuffer.Length < _flushChanges.Count)
+            {
+                _flushDedupedBuffer = new SubjectPropertyChange[Math.Max(_flushChanges.Count, _flushDedupedBuffer.Length * 2)];
+            }
 
             // Deduplicate by Property, keeping the last write, and preserve order of last occurrences
             for (var i = _flushChanges.Count - 1; i >= 0; i--)
@@ -210,38 +226,84 @@ public class SubjectSourceBackgroundService : BackgroundService
                 var change = _flushChanges[i];
                 if (_flushTouchedChanges.Add(change.Property))
                 {
-                    _flushDedupedChanges.Add(change);
+                    _flushDedupedBuffer[_flushDedupedCount++] = change;
                 }
             }
 
             // Reverse in place to keep ascending order of last occurrences without allocations
-            if (_flushDedupedChanges.Count > 1)
+            if (_flushDedupedCount > 1)
             {
-                _flushDedupedChanges.Reverse();
-            }
-            
-            if (_flushDedupedChanges.Count > 0)
-            {
-                await WriteToSourceAsync(_flushDedupedChanges, cancellationToken).ConfigureAwait(false);
+                Array.Reverse(_flushDedupedBuffer, 0, _flushDedupedCount);
             }
 
-            _flushChanges.Clear();
+            if (_flushDedupedCount > 0)
+            {
+                await WriteChangesAsync(new ReadOnlyMemory<SubjectPropertyChange>(_flushDedupedBuffer, 0, _flushDedupedCount), cancellationToken).ConfigureAwait(false);
+            }
         }
         finally
         {
+            // Clear buffers to allow GC of SubjectPropertyChange objects
+            _flushChanges.Clear();
+            _flushTouchedChanges.Clear();
+
+            // Null out references to allow GC (SubjectPropertyChange contains object refs)
+            for (var i = 0; i < _flushDedupedCount; i++)
+            {
+                _flushDedupedBuffer[i] = default;
+            }
+
+            // Shrink buffer if it grew too large (avoid holding memory after burst)
+            if (_flushDedupedBuffer.Length > 1024 && _flushDedupedCount < _flushDedupedBuffer.Length / 4)
+            {
+                _flushDedupedBuffer = new SubjectPropertyChange[Math.Max(64, _flushDedupedBuffer.Length / 2)];
+            }
+
             Volatile.Write(ref _flushGate, 0);
         }
     }
 
-    private async ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    protected async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
+        if (_writeRetryQueue is null)
+        {
+            // No retry queue - write directly
+            try
+            {
+                await _source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // Don't swallow cancellation
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Failed to write changes to source.");
+            }
+            return;
+        }
+
+        // First flush any queued changes
+        var succeeded = await _writeRetryQueue.FlushAsync(_source, cancellationToken).ConfigureAwait(false);
+        if (!succeeded)
+        {
+            _writeRetryQueue.Enqueue(changes);
+            return;
+        }
+
+        // Write current changes
         try
         {
-            await _source.WriteToSourceAsync(changes, cancellationToken).ConfigureAwait(false);
+            await _source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // Don't swallow cancellation
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Failed to write changes to source.");
+            _logger.LogWarning(e, "Failed to write {Count} changes to source, queuing for retry.", changes.Length);
+            _writeRetryQueue.Enqueue(changes);
         }
     }
 
@@ -250,7 +312,7 @@ public class SubjectSourceBackgroundService : BackgroundService
         _changes.Clear();
         _flushChanges.Clear();
         _flushTouchedChanges.Clear();
-        _flushDedupedChanges.Clear();
+        _flushDedupedCount = 0;
         Volatile.Write(ref _flushLastTicks, 0L);
         Volatile.Write(ref _flushGate, 0);
     }

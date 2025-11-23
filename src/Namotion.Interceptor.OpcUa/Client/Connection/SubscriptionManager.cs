@@ -16,8 +16,8 @@ internal class SubscriptionManager
     private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
         = new(() => new List<PropertyUpdate>(16));
 
-    private readonly OpcUaSubjectClientSource _source;
-    private readonly SourceUpdateBuffer? _updateBuffer;
+    private readonly OpcUaClientSource _connector;
+    private readonly SubjectPropertyWriter? _propertyWriter;
     private readonly PollingManager? _pollingManager;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
@@ -37,10 +37,10 @@ internal class SubscriptionManager
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
-    public SubscriptionManager(OpcUaSubjectClientSource source, SourceUpdateBuffer updateBuffer, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
+    public SubscriptionManager(OpcUaClientSource connector, SubjectPropertyWriter propertyWriter, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
     {
-        _source = source;
-        _updateBuffer = updateBuffer;
+        _connector = connector;
+        _propertyWriter = propertyWriter;
         _pollingManager = pollingManager;
         _configuration = configuration;
         _logger = logger;
@@ -108,8 +108,8 @@ internal class SubscriptionManager
     
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
-        var updateBuffer = _updateBuffer;
-        if (_shuttingDown || updateBuffer is null)
+        var propertyWriter = _propertyWriter;
+        if (_shuttingDown || propertyWriter is null)
         {
             return;
         }
@@ -141,15 +141,15 @@ internal class SubscriptionManager
         {
             // Pool item returned inside callback. Safe because ApplyUpdate never throws:
             // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
-            var state = (source: _source, subscription, receivedTimestamp, changes, logger: _logger);
-            updateBuffer.ApplyUpdate(state, static s =>
+            var state = (connector: _connector, subscription, receivedTimestamp, changes, logger: _logger);
+            propertyWriter.Write(state, static s =>
             {
                 for (var i = 0; i < s.changes.Count; i++)
                 {
                     var change = s.changes[i];
                     try
                     {
-                        change.Property.SetValueFromSource(s.source, change.Timestamp, s.receivedTimestamp, change.Value);
+                        change.Property.SetValueFromSource(s.connector, change.Timestamp, s.receivedTimestamp, change.Value);
                     }
                     catch (Exception e)
                     {
