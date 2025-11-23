@@ -47,7 +47,7 @@ public static class OpcUaSourceExtensions
         });
     }
 
-    public static IServiceCollection AddOpcUaClientSource(
+    public static IServiceCollection AddOpcUaSubjectClient(
         this IServiceCollection serviceCollection,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
         Func<IServiceProvider, OpcUaClientConfiguration> configurationProvider)
