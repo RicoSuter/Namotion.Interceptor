@@ -49,7 +49,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
     /// </summary>
     public IReadOnlyCollection<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
 
-    public SessionManager(OpcUaClientSource connector, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
+    public SessionManager(OpcUaClientSource source, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _propertyWriter = propertyWriter;
         _logger = logger;
@@ -59,13 +59,13 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         if (_configuration.EnablePollingFallback)
         {
             _pollingManager = new PollingManager(
-                connector, sessionManager: this,
+                source, sessionManager: this,
                 propertyWriter, _configuration, _logger);
 
             _pollingManager.Start();
         }
 
-        _subscriptionManager = new SubscriptionManager(connector, propertyWriter, _pollingManager, configuration, logger);
+        _subscriptionManager = new SubscriptionManager(source, propertyWriter, _pollingManager, configuration, logger);
     }
 
     /// <summary>

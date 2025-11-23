@@ -15,17 +15,17 @@ internal class OpcUaSubjectLoader
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly HashSet<PropertyReference> _propertiesWithOpcData;
-    private readonly OpcUaClientSource _connector;
+    private readonly OpcUaClientSource _source;
 
     public OpcUaSubjectLoader(
         OpcUaClientConfiguration configuration,
         HashSet<PropertyReference> propertiesWithOpcData,
-        OpcUaClientSource connector,
+        OpcUaClientSource source,
         ILogger logger)
     {
         _configuration = configuration;
         _propertiesWithOpcData = propertiesWithOpcData;
-        _connector = connector;
+        _source = source;
         _logger = logger;
     }
 
@@ -155,7 +155,7 @@ internal class OpcUaSubjectLoader
             var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
             newSubject.Context.AddFallbackContext(subject.Context);
             await LoadSubjectAsync(newSubject, nodeReference, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
-            property.SetValueFromSource(_connector, null, newSubject);
+            property.SetValueFromSource(_source, null, newSubject);
         }
     }
 
@@ -185,7 +185,7 @@ internal class OpcUaSubjectLoader
         var collection = DefaultSubjectFactory.Instance
             .CreateSubjectCollection(property.Type, children.Select(c => c.Subject));
 
-        property.SetValueFromSource(_connector, null, collection);
+        property.SetValueFromSource(_source, null, collection);
 
         foreach (var child in children)
         {
@@ -237,7 +237,7 @@ internal class OpcUaSubjectLoader
             Handle = property
         };
 
-        property.Reference.SetPropertyData(_connector.OpcUaNodeIdKey, nodeId);
+        property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
         _propertiesWithOpcData.Add(property.Reference);
         
         monitoredItems.Add(monitoredItem);
