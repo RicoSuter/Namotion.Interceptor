@@ -15,31 +15,31 @@ public class ChangeQueueProcessor
     private readonly IInterceptorSubjectContext _context;
     private readonly Func<RegisteredSubjectProperty, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
-    private readonly object? _sourceToIgnore;
+    private readonly object? _source;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChangeQueueProcessor"/> class.
     /// </summary>
+    /// <param name="source">Source to ignore (to prevent update loops).</param>
     /// <param name="context">The interceptor subject context.</param>
     /// <param name="propertyFilter">Filter to determine if a property should be included.</param>
     /// <param name="writeHandler">Handler to write batched changes.</param>
-    /// <param name="sourceToIgnore">Source to ignore (to prevent update loops).</param>
-    /// <param name="logger">The logger.</param>
     /// <param name="bufferTime">Time to buffer changes before flushing.</param>
+    /// <param name="logger">The logger.</param>
     public ChangeQueueProcessor(
+        object? source,
         IInterceptorSubjectContext context,
         Func<RegisteredSubjectProperty, bool> propertyFilter,
         Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
-        object? sourceToIgnore,
-        ILogger logger,
-        TimeSpan? bufferTime = null)
+        TimeSpan? bufferTime,
+        ILogger logger)
     {
+        _source = source;
         _context = context;
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
-        _sourceToIgnore = sourceToIgnore;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(100);
     }
@@ -80,7 +80,7 @@ public class ChangeQueueProcessor
 
             while (subscription.TryDequeue(out var change, linkedTokenSource.Token))
             {
-                if (change.Source == _sourceToIgnore)
+                if (change.Source == _source)
                 {
                     continue;
                 }

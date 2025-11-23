@@ -47,20 +47,16 @@ namespace Namotion.Interceptor.Mqtt
             _bufferTime = bufferTime;
         }
 
-        internal bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        private bool IsPropertyIncluded(RegisteredSubjectProperty property)
         {
             return _pathProvider.IsPropertyIncluded(property);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            var changeQueueProcessor = new ChangeQueueProcessor(
-                _context,
-                IsPropertyIncluded,
-                WriteChangesAsync,
-                sourceToIgnore: this,
-                _logger,
-                _bufferTime);
+            var changeQueueProcessor = new ChangeQueueProcessor(source: this,
+                context: _context, propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync, 
+                _bufferTime, _logger);
 
             _mqttServer = new MqttServerFactory()
                 .CreateMqttServer(new MqttServerOptions

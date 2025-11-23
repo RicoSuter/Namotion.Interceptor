@@ -73,13 +73,9 @@ internal class OpcUaServerBackgroundService : BackgroundService
     {
         _context.WithRegistry();
 
-        var changeQueueProcessor = new ChangeQueueProcessor(
-            _context,
-            IsPropertyIncluded,
-            WriteChangesAsync,
-            sourceToIgnore: this,
-            _logger,
-            _configuration.BufferTime);
+        var changeQueueProcessor = new ChangeQueueProcessor(source: this, 
+            context: _context,
+            propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync, bufferTime: _configuration.BufferTime, logger: _logger);
 
         while (!stoppingToken.IsCancellationRequested)
         {
