@@ -29,7 +29,7 @@ public class SubjectPropertyWriterTests
     }
 
     [Fact]
-    public async Task WhenCallbackProvided_ThenOrderIsInitialStateThenBufferedThenCallback()
+    public async Task WhenCallbackProvided_ThenOrderIsFlushThenInitialStateThenBuffered()
     {
         // Arrange
         var sourceMock = new Mock<ISubjectSource>();
@@ -39,13 +39,13 @@ public class SubjectPropertyWriterTests
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => { order.Add("InitialState"); });
 
-        var callbackInvoked = false;
+        var flushInvoked = false;
         var writer = new SubjectPropertyWriter(
             sourceMock.Object,
             ct =>
             {
-                order.Add("Callback");
-                callbackInvoked = true;
+                order.Add("Flush");
+                flushInvoked = true;
                 return ValueTask.FromResult(true);
             },
             NullLogger.Instance);
@@ -55,12 +55,12 @@ public class SubjectPropertyWriterTests
         writer.Write(order, o => o.Add("BufferedUpdate"));
         await writer.CompleteInitializationAsync(CancellationToken.None);
 
-        // Assert - order: initial state, buffered updates, then callback
-        Assert.True(callbackInvoked);
+        // Assert - order: flush first, then initial state, then buffered (avoids state toggle)
+        Assert.True(flushInvoked);
         Assert.Equal(3, order.Count);
-        Assert.Equal("InitialState", order[0]);
-        Assert.Equal("BufferedUpdate", order[1]);
-        Assert.Equal("Callback", order[2]);
+        Assert.Equal("Flush", order[0]);
+        Assert.Equal("InitialState", order[1]);
+        Assert.Equal("BufferedUpdate", order[2]);
     }
 
     [Fact]

@@ -16,7 +16,7 @@ public sealed class SubjectPropertyWriter
 {
     private readonly ISubjectSource _source;
     private readonly ILogger _logger;
-    private readonly Func<CancellationToken, ValueTask<bool>>? _onInitializationCompleted;
+    private readonly Func<CancellationToken, ValueTask<bool>>? _flushRetryQueueAsync;
     private readonly Lock _lock = new();
 
     private List<Action>? _updates = [];
@@ -25,13 +25,13 @@ public sealed class SubjectPropertyWriter
     /// Initializes a new instance of the <see cref="SubjectPropertyWriter"/> class.
     /// </summary>
     /// <param name="source">The source associated with this writer.</param>
-    /// <param name="onInitializationCompleted">Optional callback invoked after initialization completes (e.g., to flush pending outbound writes).</param>
+    /// <param name="flushRetryQueueAsync">Optional callback to flush pending outbound writes from the retry queue.</param>
     /// <param name="logger">The logger.</param>
-    public SubjectPropertyWriter(ISubjectSource source, Func<CancellationToken, ValueTask<bool>>? onInitializationCompleted, ILogger logger)
+    public SubjectPropertyWriter(ISubjectSource source, Func<CancellationToken, ValueTask<bool>>? flushRetryQueueAsync, ILogger logger)
     {
         _source = source;
         _logger = logger;
-        _onInitializationCompleted = onInitializationCompleted;
+        _flushRetryQueueAsync = flushRetryQueueAsync;
     }
 
     /// <summary>
@@ -48,18 +48,25 @@ public sealed class SubjectPropertyWriter
     }
 
     /// <summary>
-    /// Completes initialization by loading initial state from the source, replaying all buffered updates,
-    /// and invoking the initialization completed callback.
-    /// This ensures zero data loss during the initialization period.
+    /// Completes initialization by flushing pending writes, loading initial state from the source,
+    /// and replaying all buffered updates. This ensures zero data loss during the initialization period.
     /// </summary>
     /// <remarks>
-    /// If the callback fails, the exception propagates to signal initialization failure
+    /// The flush happens first so that the server has the latest local changes before we load state,
+    /// avoiding visible state toggles where the UI briefly shows old server values.
+    /// If the flush or load fails, the exception propagates to signal initialization failure
     /// and trigger reconnection.
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The task.</returns>
     public async Task CompleteInitializationAsync(CancellationToken cancellationToken)
     {
+        // Flush pending writes first (so server has latest before we load state)
+        if (_flushRetryQueueAsync is not null)
+        {
+            await _flushRetryQueueAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         var applyAction = await _source.LoadInitialStateAsync(cancellationToken).ConfigureAwait(false);
         lock (_lock)
         {
@@ -87,12 +94,6 @@ public sealed class SubjectPropertyWriter
                     _logger.LogError(e, "Failed to apply subject update.");
                 }
             }
-        }
-
-        // Invoke callback after initialization/reconnection completes
-        if (_onInitializationCompleted is not null)
-        {
-            await _onInitializationCompleted(cancellationToken).ConfigureAwait(false);
         }
     }
 

@@ -38,15 +38,21 @@ When you change a property value in code, the source writes it back to the exter
 Subject Property Changed → WriteChangesAsync() → Source → External System
 ```
 
-## Buffer-Load-Replay Pattern
+## Initialization Sequence
 
-Sources use a buffer-load-replay pattern during initialization to ensure eventual consistent state:
+Sources use a buffer-flush-load-replay pattern during initialization and reconnection to ensure eventual consistent state:
 
 1. **Buffer**: During `StartListeningAsync()`, inbound updates are buffered (not applied immediately)
-2. **Load**: `LoadInitialStateAsync()` fetches complete state from external system
-3. **Replay**: Buffered updates are replayed in order after initial state is applied
+2. **Flush**: Pending writes from the retry queue are flushed to the external system
+3. **Load**: `LoadInitialStateAsync()` fetches complete state from external system
+4. **Replay**: Buffered updates are replayed in order after initial state is applied
 
-This pattern ensures that updates received during initialization are not lost and are applied in the correct order relative to the initial state.
+This sequence ensures:
+- Updates received during initialization are not lost
+- Updates are applied in the correct order relative to the initial state
+- **No visible state toggle**: The flush happens first, so the server has the latest local changes before we load state - this avoids the UI briefly showing old server values before the local changes are applied
+
+The same sequence runs during reconnection after connection loss, ensuring pending writes that accumulated during disconnection are sent before loading fresh state.
 
 ### Inbound Update Error Handling
 
