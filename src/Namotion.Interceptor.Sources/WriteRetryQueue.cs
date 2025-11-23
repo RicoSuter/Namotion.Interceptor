@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Sources;
 /// Manages a write retry queue with ring buffer semantics for buffering writes during disconnection.
 /// When the queue is full, oldest writes are dropped to make room for new ones.
 /// </summary>
-internal sealed class WriteRetryQueue
+internal sealed class WriteRetryQueue : IDisposable
 {
     private readonly List<SubjectPropertyChange> _pendingWrites = [];
     private readonly SemaphoreSlim _flushSemaphore = new(1, 1);
@@ -63,11 +63,10 @@ internal sealed class WriteRetryQueue
             }
 
             // Ring buffer: Drop the oldest if over capacity
-            droppedCount = 0;
-            while (_pendingWrites.Count > _maxQueueSize)
+            droppedCount = _pendingWrites.Count - _maxQueueSize;
+            if (droppedCount > 0)
             {
-                _pendingWrites.RemoveAt(0);
-                droppedCount++;
+                _pendingWrites.RemoveRange(0, droppedCount);
             }
 
             Volatile.Write(ref _count, _pendingWrites.Count);
@@ -153,11 +152,7 @@ internal sealed class WriteRetryQueue
                     // Insert at front to preserve order
                     lock (_lock)
                     {
-                        var span = memory.Span;
-                        for (var i = span.Length - 1; i >= 0; i--)
-                        {
-                            _pendingWrites.Insert(0, span[i]);
-                        }
+                        _pendingWrites.InsertRange(0, memory.ToArray());
                         Volatile.Write(ref _count, _pendingWrites.Count);
                     }
 
@@ -179,5 +174,13 @@ internal sealed class WriteRetryQueue
         {
             try { _flushSemaphore.Release(); } catch { /* might be disposed already */ }
         }
+    }
+
+    /// <summary>
+    /// Disposes the write retry queue and releases resources.
+    /// </summary>
+    public void Dispose()
+    {
+        _flushSemaphore.Dispose();
     }
 }
