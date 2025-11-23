@@ -16,7 +16,7 @@ internal class SubscriptionManager
     private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
         = new(() => new List<PropertyUpdate>(16));
 
-    private readonly OpcUaClientSource _connector;
+    private readonly OpcUaClientSource _source;
     private readonly SubjectPropertyWriter? _propertyWriter;
     private readonly PollingManager? _pollingManager;
     private readonly OpcUaClientConfiguration _configuration;
@@ -37,9 +37,9 @@ internal class SubscriptionManager
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
-    public SubscriptionManager(OpcUaClientSource connector, SubjectPropertyWriter propertyWriter, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
+    public SubscriptionManager(OpcUaClientSource source, SubjectPropertyWriter propertyWriter, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
     {
-        _connector = connector;
+        _source = source;
         _propertyWriter = propertyWriter;
         _pollingManager = pollingManager;
         _configuration = configuration;
@@ -141,7 +141,7 @@ internal class SubscriptionManager
         {
             // Pool item returned inside callback. Safe because ApplyUpdate never throws:
             // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
-            var state = (connector: _connector, subscription, receivedTimestamp, changes, logger: _logger);
+            var state = (source: _source, subscription, receivedTimestamp, changes, logger: _logger);
             propertyWriter.Write(state, static s =>
             {
                 for (var i = 0; i < s.changes.Count; i++)
@@ -149,7 +149,7 @@ internal class SubscriptionManager
                     var change = s.changes[i];
                     try
                     {
-                        change.Property.SetValueFromSource(s.connector, change.Timestamp, s.receivedTimestamp, change.Value);
+                        change.Property.SetValueFromSource(s.source, change.Timestamp, s.receivedTimestamp, change.Value);
                     }
                     catch (Exception e)
                     {

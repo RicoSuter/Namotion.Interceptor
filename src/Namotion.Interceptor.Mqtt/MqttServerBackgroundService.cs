@@ -79,17 +79,22 @@ namespace Namotion.Interceptor.Mqtt
                     await _mqttServer.StartAsync();
                     IsListening = true;
 
-                    // Process change queue until cancellation
-                    await changeQueueProcessor.ProcessAsync(stoppingToken);
-
-                    await _mqttServer.StopAsync();
-                    IsListening = false;
+                    try
+                    {
+                        // Process change queue until cancellation
+                        await changeQueueProcessor.ProcessAsync(stoppingToken);
+                    }
+                    finally
+                    {
+                        await _mqttServer.StopAsync();
+                        IsListening = false;
+                    }
                 }
                 catch (Exception ex)
                 {
                     IsListening = false;
 
-                    if (ex is TaskCanceledException) return;
+                    if (ex is TaskCanceledException or OperationCanceledException) return;
 
                     _logger.LogError(ex, "Error in MQTT server.");
                     await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);

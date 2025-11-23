@@ -16,7 +16,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Polling;
 /// </summary>
 internal sealed class PollingManager : IDisposable
 {
-    private readonly OpcUaClientSource _connector;
+    private readonly OpcUaClientSource _source;
     private readonly ILogger _logger;
     private readonly SessionManager _sessionManager;
     private readonly SubjectPropertyWriter _propertyWriter;
@@ -33,7 +33,7 @@ internal sealed class PollingManager : IDisposable
     private ISession? _lastKnownSession;
     private int _disposed;
 
-    public PollingManager(OpcUaClientSource connector,
+    public PollingManager(OpcUaClientSource source,
         SessionManager sessionManager,
         SubjectPropertyWriter propertyWriter,
         OpcUaClientConfiguration configuration,
@@ -43,7 +43,7 @@ internal sealed class PollingManager : IDisposable
         ArgumentNullException.ThrowIfNull(sessionManager);
         ArgumentNullException.ThrowIfNull(propertyWriter);
 
-        _connector = connector;
+        _source = source;
         _logger = logger;
         _sessionManager = sessionManager;
         _propertyWriter = propertyWriter;
@@ -375,12 +375,12 @@ internal sealed class PollingManager : IDisposable
             };
 
             // Queue update using same pattern as subscriptions
-            var state = (connector: _connector, update, receivedTimestamp, logger: _logger);
+            var state = (source: _source, update, receivedTimestamp, logger: _logger);
             _propertyWriter.Write(state, static s =>
             {
                 try
                 {
-                    s.update.Property.SetValueFromSource(s.connector, s.update.Timestamp, s.receivedTimestamp, s.update.Value);
+                    s.update.Property.SetValueFromSource(s.source, s.update.Timestamp, s.receivedTimestamp, s.update.Value);
                 }
                 catch (Exception e)
                 {
