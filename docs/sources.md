@@ -16,7 +16,7 @@ Key characteristics:
 
 **Examples**: OPC UA client connecting to a PLC, database client, REST API consumer
 
-> **Note**: When the C# object IS the source of truth and you want to expose it to external systems (like an OPC UA server or MQTT broker), use standalone background services like `OpcUaServerBackgroundService` or `MqttServerBackgroundService`. These are not sources because they don't synchronize from an external system.
+> **Note**: When the C# object IS the source of truth and you want to expose it to external systems (like an OPC UA server or MQTT broker), use standalone background services like `OpcUaSubjectServerBackgroundService` or `MqttSubjectServerBackgroundService`. These are not sources because they don't synchronize from an external system.
 
 ## Data Flow
 
@@ -64,7 +64,7 @@ Sources are enabled through their specific extension methods:
 
 ```csharp
 // OPC UA Client Source
-builder.Services.AddOpcUaClientSource<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
+builder.Services.AddOpcUaSubjectClient<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 ```
 
 The Sources package builds on the Registry to discover properties and their source path mappings.
@@ -92,7 +92,7 @@ public partial class Sensor
 Connect to industrial automation systems as a client:
 
 ```csharp
-builder.Services.AddOpcUaClientSource<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
+builder.Services.AddOpcUaSubjectClient<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 ```
 
 Properties with `[SourcePath("opc", "NodeName")]` map to OPC UA nodes in the external server's address space.
