@@ -61,7 +61,6 @@ public sealed class SubjectPropertyWriter
     public async Task CompleteInitializationAsync(CancellationToken cancellationToken)
     {
         var applyAction = await _source.LoadInitialStateAsync(cancellationToken).ConfigureAwait(false);
-
         lock (_lock)
         {
             applyAction?.Invoke();
