@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -10,9 +9,9 @@ namespace Namotion.Interceptor.Sources;
 /// </summary>
 internal sealed class WriteRetryQueue
 {
-    private readonly ConcurrentQueue<SubjectPropertyChange> _pendingWrites = new();
+    private readonly List<SubjectPropertyChange> _pendingWrites = [];
     private readonly SemaphoreSlim _flushSemaphore = new(1, 1);
-    private readonly Lock _enqueueLock = new();
+    private readonly Lock _lock = new();
 
     // Reusable buffer to avoid allocation on each flush (capped at 1024 items, loops for larger queues)
     private const int MaxBatchSize = 1024;
@@ -20,16 +19,17 @@ internal sealed class WriteRetryQueue
 
     private readonly ILogger _logger;
     private readonly int _maxQueueSize;
+    private int _count;
 
     /// <summary>
     /// Gets a value indicating whether the write queue is empty.
     /// </summary>
-    public bool IsEmpty => _pendingWrites.IsEmpty;
+    public bool IsEmpty => Volatile.Read(ref _count) == 0;
 
     /// <summary>
     /// Gets the number of pending writes in the queue.
     /// </summary>
-    public int PendingWriteCount => _pendingWrites.Count;
+    public int PendingWriteCount => Volatile.Read(ref _count);
 
     public WriteRetryQueue(int maxQueueSize, ILogger logger)
     {
@@ -53,28 +53,24 @@ internal sealed class WriteRetryQueue
         }
 
         int droppedCount;
-        lock (_enqueueLock)
+        lock (_lock)
         {
-            // Add all new items first
+            // Add all new items
             var span = changes.Span;
             for (var i = 0; i < span.Length; i++)
             {
-                _pendingWrites.Enqueue(span[i]);
+                _pendingWrites.Add(span[i]);
             }
 
             // Ring buffer: Drop the oldest if over capacity
             droppedCount = 0;
             while (_pendingWrites.Count > _maxQueueSize)
             {
-                if (_pendingWrites.TryDequeue(out _))
-                {
-                    droppedCount++;
-                }
-                else
-                {
-                    break;
-                }
+                _pendingWrites.RemoveAt(0);
+                droppedCount++;
             }
+
+            Volatile.Write(ref _count, _pendingWrites.Count);
         }
 
         if (droppedCount > 0)
@@ -128,15 +124,21 @@ internal sealed class WriteRetryQueue
             while (true)
             {
                 // Dequeue up to buffer size
-                var count = 0;
-                while (count < _scratchBuffer.Length && _pendingWrites.TryDequeue(out var change))
+                int count;
+                lock (_lock)
                 {
-                    _scratchBuffer[count++] = change;
-                }
+                    count = Math.Min(_scratchBuffer.Length, _pendingWrites.Count);
+                    if (count == 0)
+                    {
+                        break;
+                    }
 
-                if (count == 0)
-                {
-                    break;
+                    for (var i = 0; i < count; i++)
+                    {
+                        _scratchBuffer[i] = _pendingWrites[i];
+                    }
+                    _pendingWrites.RemoveRange(0, count);
+                    Volatile.Write(ref _count, _pendingWrites.Count);
                 }
 
                 var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);
@@ -148,11 +150,15 @@ internal sealed class WriteRetryQueue
                 {
                     _logger.LogWarning(e, "Failed to flush {Count} queued writes to source, re-queuing.", count);
 
-                    // Re-queue without applying ring buffer drop (failed items get priority)
-                    var span = memory.Span;
-                    for (var i = 0; i < span.Length; i++)
+                    // Insert at front to preserve order
+                    lock (_lock)
                     {
-                        _pendingWrites.Enqueue(span[i]);
+                        var span = memory.Span;
+                        for (var i = span.Length - 1; i >= 0; i--)
+                        {
+                            _pendingWrites.Insert(0, span[i]);
+                        }
+                        Volatile.Write(ref _count, _pendingWrites.Count);
                     }
 
                     return false;

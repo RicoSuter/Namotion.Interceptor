@@ -253,11 +253,17 @@ public class SubjectSourceBackgroundService : BackgroundService
                 _flushDedupedBuffer[i] = default;
             }
 
+            // Shrink buffer if it grew too large (avoid holding memory after burst)
+            if (_flushDedupedBuffer.Length > 1024 && _flushDedupedCount < _flushDedupedBuffer.Length / 4)
+            {
+                _flushDedupedBuffer = new SubjectPropertyChange[Math.Max(64, _flushDedupedBuffer.Length / 2)];
+            }
+
             Volatile.Write(ref _flushGate, 0);
         }
     }
 
-    protected virtual async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    protected async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (_writeRetryQueue is null)
         {

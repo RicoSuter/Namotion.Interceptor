@@ -53,7 +53,6 @@ This pattern ensures that updates received during initialization are not lost an
 When applying inbound updates (writing data from the external system to the local subject model), if an individual update fails (the action throws an exception), the error is logged and **the update is dropped**. There is no retry mechanism for inbound updates.
 
 This is by design:
-- The external source is expected to send the value again if synchronization is needed
 - Individual update failures don't block other updates from being applied
 - Monitor logs for `Failed to apply subject update` errors to detect issues
 
