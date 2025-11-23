@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Hosting;
-using Namotion.Interceptor.OpcUa.SampleModel;
+using Namotion.Interceptor.SamplesModel;
 
 namespace Namotion.Interceptor.OpcUa.SampleClient;
 

@@ -1,8 +1,7 @@
-﻿
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Sources.Paths.Attributes;
 
-namespace Namotion.Interceptor.OpcUa.SampleModel;
+namespace Namotion.Interceptor.SamplesModel;
 
 [InterceptorSubject]
 public partial class Person
@@ -13,13 +12,16 @@ public partial class Person
     }
 
     [SourcePath("opc", "FirstName")]
+    [SourcePath("mqtt", "FirstName")]
     public partial string? FirstName { get; set; }
 
     [SourcePath("opc", "LastName")]
+    [SourcePath("mqtt", "LastName")]
     public partial string? LastName { get; set; }
-    
+
     [Derived]
     [SourcePath("opc", "FullName")]
+    [SourcePath("mqtt", "FullName")]
     public string FullName => $"{FirstName} {LastName}";
 
     public partial Person? Father { get; set; }
