@@ -5,8 +5,8 @@ using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Connectors.Paths;
+using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -24,8 +24,8 @@ public class OpcUaSubjectLoaderTests
         _baseConfiguration = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedConnectorPathProvider("opc", "."),
-            TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaClientConnector>.Instance),
+            PathProvider = new AttributeBasedSourcePathProvider("opc", "."),
+            TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaClientSource>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(new DefaultSubjectFactory()),
             ShouldAddDynamicProperty = static (_, _) => Task.FromResult(false) // Don't add dynamic properties
@@ -103,7 +103,7 @@ public class OpcUaSubjectLoaderTests
     public async Task LoadSubjectAsync_WithDynamicPropertiesEnabled_ShouldAddDynamicProperties()
     {
         // Arrange: override base configuration for this loader
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaClientConnector>.Instance);
+        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaClientSource>.Instance);
         mockTypeResolver
             .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(typeof(int));
@@ -156,7 +156,7 @@ public class OpcUaSubjectLoaderTests
     public async Task LoadSubjectAsync_WithObjectType_ShouldNotAddProperty()
     {
         // Arrange: override base configuration for this loader
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaClientConnector>.Instance);
+        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaClientSource>.Instance);
         mockTypeResolver
             .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Type?)null); // Simulate unresolved type (should return DynamicObject or similar when an expandable object is required)
@@ -230,8 +230,8 @@ public class OpcUaSubjectLoaderTests
         return new OpcUaSubjectLoader(
             config,
             _propertiesWithOpcData,
-            new OpcUaClientConnector(new DynamicSubject(), config, NullLogger<OpcUaClientConnector>.Instance),
-            NullLogger<OpcUaClientConnector>.Instance);
+            new OpcUaClientSource(new DynamicSubject(), config, NullLogger<OpcUaClientSource>.Instance),
+            NullLogger<OpcUaClientSource>.Instance);
     }
 
     private IInterceptorSubject CreateTestSubject()

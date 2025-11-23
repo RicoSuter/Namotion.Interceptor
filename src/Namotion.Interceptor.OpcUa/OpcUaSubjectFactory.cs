@@ -1,5 +1,5 @@
 ﻿using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Sources;
 using Opc.Ua;
 using Opc.Ua.Client;
 

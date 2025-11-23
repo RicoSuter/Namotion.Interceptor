@@ -24,7 +24,7 @@
       <ProjectReference Include="..\Namotion.Interceptor.Dynamic\Namotion.Interceptor.Dynamic.csproj" />
       <ProjectReference Include="..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
       <ProjectReference Include="..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
-      <ProjectReference Include="..\Namotion.Interceptor.Connectors\Namotion.Interceptor.Connectors.csproj" />
+      <ProjectReference Include="..\Namotion.Interceptor.Sources\Namotion.Interceptor.Sources.csproj" />
 	  <ProjectReference Include="..\Namotion.Interceptor.Validation\Namotion.Interceptor.Validation.csproj" />
 	</ItemGroup>
 </Project>

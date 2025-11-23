@@ -47,7 +47,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         Root = createRoot(context);
 
         builder.Services.AddSingleton(Root);
-        builder.Services.AddOpcUaClientConnector<TRoot>(serverUrl, "opc", rootName: "Root");
+        builder.Services.AddOpcUaClientSource<TRoot>(serverUrl, "opc", rootName: "Root");
 
         _host = builder.Build();
         await _host.StartAsync();

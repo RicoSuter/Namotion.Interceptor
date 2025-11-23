@@ -13,7 +13,7 @@ public static class SubjectChangeContextExtensions
     /// <param name="receivedTimestamp">The received timestamp.</param>
     /// <param name="valueFromConnector">The value.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void SetValueFromConnector(
+    public static void SetValueFromSource(
         this PropertyReference property, 
         object connector, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp, 
         object? valueFromConnector)

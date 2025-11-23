@@ -4,7 +4,7 @@ using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
-using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -16,7 +16,7 @@ internal class SubscriptionManager
     private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
         = new(() => new List<PropertyUpdate>(16));
 
-    private readonly OpcUaClientConnector _connector;
+    private readonly OpcUaClientSource _connector;
     private readonly SubjectPropertyWriter? _propertyWriter;
     private readonly PollingManager? _pollingManager;
     private readonly OpcUaClientConfiguration _configuration;
@@ -37,7 +37,7 @@ internal class SubscriptionManager
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
-    public SubscriptionManager(OpcUaClientConnector connector, SubjectPropertyWriter propertyWriter, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
+    public SubscriptionManager(OpcUaClientSource connector, SubjectPropertyWriter propertyWriter, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _connector = connector;
         _propertyWriter = propertyWriter;
@@ -149,7 +149,7 @@ internal class SubscriptionManager
                     var change = s.changes[i];
                     try
                     {
-                        change.Property.SetValueFromConnector(s.connector, change.Timestamp, s.receivedTimestamp, change.Value);
+                        change.Property.SetValueFromSource(s.connector, change.Timestamp, s.receivedTimestamp, change.Value);
                     }
                     catch (Exception e)
                     {
