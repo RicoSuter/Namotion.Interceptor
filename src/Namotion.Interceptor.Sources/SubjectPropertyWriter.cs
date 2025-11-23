@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Sources;
 
 /// <summary>
 /// Writes inbound property updates from sources to subjects.
-/// Implements the buffer-load-replay pattern to ensure zero data loss during connector initialization.
+/// Implements the buffer-load-replay pattern to ensure eventual consistency during source initialization.
 /// </summary>
 /// <remarks>
 /// During initialization, updates are buffered. Once <see cref="CompleteInitializationAsync"/> is called,

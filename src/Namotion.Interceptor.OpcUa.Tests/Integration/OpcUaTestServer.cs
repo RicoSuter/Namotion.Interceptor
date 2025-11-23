@@ -47,7 +47,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         initializeDefaults?.Invoke(_context, Root);
 
         builder.Services.AddSingleton(Root);
-        builder.Services.AddOpcUaServer<TRoot>("opc", rootName: "Root");
+        builder.Services.AddOpcUaSubjectServer<TRoot>("opc", rootName: "Root");
 
         _host = builder.Build();
         await _host.StartAsync();

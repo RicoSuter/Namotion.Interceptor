@@ -10,15 +10,15 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class MqttSourceExtensions
 {
-    public static IServiceCollection AddMqttServer<TSubject>(
-        this IServiceCollection serviceCollection, string connectorName, string? pathPrefix = null)
+    public static IServiceCollection AddMqttSubjectServer<TSubject>(
+        this IServiceCollection serviceCollection, string sourceName, string? pathPrefix = null)
         where TSubject : IInterceptorSubject
     {
-        return serviceCollection.AddMqttServer(sp => sp.GetRequiredService<TSubject>(), connectorName, pathPrefix);
+        return serviceCollection.AddMqttSubjectServer(sp => sp.GetRequiredService<TSubject>(), sourceName, pathPrefix);
     }
 
-    public static IServiceCollection AddMqttServer(this IServiceCollection serviceCollection,
-        Func<IServiceProvider, IInterceptorSubject> subjectSelector, string connectorName, string? pathPrefix = null)
+    public static IServiceCollection AddMqttSubjectServer(this IServiceCollection serviceCollection,
+        Func<IServiceProvider, IInterceptorSubject> subjectSelector, string sourceName, string? pathPrefix = null)
     {
         var key = Guid.NewGuid().ToString();
         return serviceCollection
@@ -26,9 +26,9 @@ public static class MqttSourceExtensions
             .AddKeyedSingleton(key, (sp, _) =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                var attributeBasedConnectorPathProvider = new AttributeBasedSourcePathProvider(connectorName, "/", pathPrefix);
+                var pathProvider = new AttributeBasedSourcePathProvider(sourceName, "/", pathPrefix);
                 return new MqttServerBackgroundService(
-                    subject, attributeBasedConnectorPathProvider, sp.GetRequiredService<ILogger<MqttServerBackgroundService>>());
+                    subject, pathProvider, sp.GetRequiredService<ILogger<MqttServerBackgroundService>>());
             })
             .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttServerBackgroundService>(key));
     }
