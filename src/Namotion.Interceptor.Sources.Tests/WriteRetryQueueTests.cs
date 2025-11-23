@@ -11,10 +11,10 @@ public class WriteRetryQueueTests
     {
         // Arrange
         var queue = new WriteRetryQueue(100, NullLogger.Instance);
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
 
         SubjectPropertyChange[]? writtenChanges = null;
-        connectorMock
+        sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
                 writtenChanges = changes.ToArray())
@@ -22,7 +22,7 @@ public class WriteRetryQueueTests
 
         // Act
         queue.Enqueue(CreateChanges(3));
-        var result = await queue.FlushAsync(connectorMock.Object, CancellationToken.None);
+        var result = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
         // Assert
         Assert.True(result);
@@ -36,14 +36,14 @@ public class WriteRetryQueueTests
     {
         // Arrange
         var queue = new WriteRetryQueue(100, NullLogger.Instance);
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
 
         // Act
-        var result = await queue.FlushAsync(connectorMock.Object, CancellationToken.None);
+        var result = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
         // Assert
         Assert.True(result);
-        connectorMock.Verify(
+        sourceMock.Verify(
             c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -53,10 +53,10 @@ public class WriteRetryQueueTests
     {
         // Arrange
         var queue = new WriteRetryQueue(5, NullLogger.Instance);
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
 
         SubjectPropertyChange[]? writtenChanges = null;
-        connectorMock
+        sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
                 writtenChanges = changes.ToArray())
@@ -70,7 +70,7 @@ public class WriteRetryQueueTests
         Assert.Equal(5, queue.PendingWriteCount);
 
         // Flush and verify the actual items (2, 10, 11, 12, 13)
-        await queue.FlushAsync(connectorMock.Object, CancellationToken.None);
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
         Assert.NotNull(writtenChanges);
         Assert.Equal(5, writtenChanges.Length);
@@ -86,15 +86,15 @@ public class WriteRetryQueueTests
     {
         // Arrange
         var queue = new WriteRetryQueue(100, NullLogger.Instance);
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
 
-        connectorMock
+        sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Connection failed"));
 
         // Act
         queue.Enqueue(CreateChanges(3));
-        var result = await queue.FlushAsync(connectorMock.Object, CancellationToken.None);
+        var result = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
         // Assert
         Assert.False(result);
@@ -106,15 +106,15 @@ public class WriteRetryQueueTests
     {
         // Arrange
         var queue = new WriteRetryQueue(5, NullLogger.Instance);
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
 
-        connectorMock
+        sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Connection failed"));
 
         // Act
         queue.Enqueue(CreateChanges(5)); // Fill to capacity
-        var result = await queue.FlushAsync(connectorMock.Object, CancellationToken.None);
+        var result = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
         // Assert
         Assert.False(result);
@@ -140,10 +140,10 @@ public class WriteRetryQueueTests
     {
         // Arrange
         var queue = new WriteRetryQueue(2000, NullLogger.Instance);
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
 
         var totalWritten = 0;
-        connectorMock
+        sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
                 totalWritten += changes.Length)
@@ -151,7 +151,7 @@ public class WriteRetryQueueTests
 
         // Act - enqueue more than MaxBatchSize (1024)
         queue.Enqueue(CreateChanges(1500));
-        var result = await queue.FlushAsync(connectorMock.Object, CancellationToken.None);
+        var result = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
         // Assert
         Assert.True(result);
@@ -159,7 +159,7 @@ public class WriteRetryQueueTests
         Assert.True(queue.IsEmpty);
 
         // Should have been called at least twice (1024 + 476)
-        connectorMock.Verify(
+        sourceMock.Verify(
             c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()),
             Times.AtLeast(2));
     }
@@ -169,14 +169,14 @@ public class WriteRetryQueueTests
     {
         // Arrange
         var queue = new WriteRetryQueue(100, NullLogger.Instance);
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
         var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
         queue.Enqueue(CreateChanges(3));
 
         // Act
-        var result = await queue.FlushAsync(connectorMock.Object, cts.Token);
+        var result = await queue.FlushAsync(sourceMock.Object, cts.Token);
 
         // Assert
         Assert.False(result);
@@ -187,12 +187,12 @@ public class WriteRetryQueueTests
     {
         // Arrange
         var queue = new WriteRetryQueue(100, NullLogger.Instance);
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
 
         var callCount = 0;
         var tcs = new TaskCompletionSource();
 
-        connectorMock
+        sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Returns(async (ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken ct) =>
             {
@@ -203,8 +203,8 @@ public class WriteRetryQueueTests
         queue.Enqueue(CreateChanges(3));
 
         // Act - start two flushes
-        var flush1 = queue.FlushAsync(connectorMock.Object, CancellationToken.None);
-        var flush2 = queue.FlushAsync(connectorMock.Object, CancellationToken.None);
+        var flush1 = queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        var flush2 = queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
         await Task.Delay(100); // Let them start
 
@@ -217,15 +217,15 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
-    public async Task WhenConnectorBatchSizeSet_ThenWriteChangesInBatchesRespectsBatchSize()
+    public async Task WhenSourceBatchSizeSet_ThenWriteChangesInBatchesRespectsBatchSize()
     {
         // Arrange
         var queue = new WriteRetryQueue(100, NullLogger.Instance);
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
 
         var batchSizes = new List<int>();
-        connectorMock.Setup(c => c.WriteBatchSize).Returns(2);
-        connectorMock
+        sourceMock.Setup(c => c.WriteBatchSize).Returns(2);
+        sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
                 batchSizes.Add(changes.Length))
@@ -233,7 +233,7 @@ public class WriteRetryQueueTests
 
         // Act
         queue.Enqueue(CreateChanges(5));
-        await queue.FlushAsync(connectorMock.Object, CancellationToken.None);
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
         // Assert - WriteChangesInBatchesAsync should split into batches of 2
         Assert.Equal(3, batchSizes.Count); // 2 + 2 + 1
@@ -267,15 +267,15 @@ public class WriteRetryQueueTests
     {
         // Arrange
         var queue = new WriteRetryQueue(100, NullLogger.Instance);
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
 
-        connectorMock
+        sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Returns(ValueTask.CompletedTask);
 
         // Act
         queue.Enqueue(CreateChanges(10));
-        await queue.FlushAsync(connectorMock.Object, CancellationToken.None);
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
         // Assert - queue should be empty after successful flush
         Assert.True(queue.IsEmpty);
@@ -287,10 +287,10 @@ public class WriteRetryQueueTests
     {
         // Arrange
         var queue = new WriteRetryQueue(2000, NullLogger.Instance);
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
 
         var totalWritten = 0;
-        connectorMock
+        sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
                 totalWritten += changes.Length)
@@ -298,7 +298,7 @@ public class WriteRetryQueueTests
 
         // Act - enqueue exactly MaxBatchSize (1024)
         queue.Enqueue(CreateChanges(1024));
-        await queue.FlushAsync(connectorMock.Object, CancellationToken.None);
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
         // Assert
         Assert.Equal(1024, totalWritten);

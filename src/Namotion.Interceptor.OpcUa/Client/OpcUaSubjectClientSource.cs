@@ -11,7 +11,7 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-internal sealed class OpcUaClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
+internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
 {
     private const int DefaultChunkSize = 512;
 
@@ -34,7 +34,7 @@ internal sealed class OpcUaClientSource : BackgroundService, ISubjectSource, IAs
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
 
-    public OpcUaClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger<OpcUaClientSource> logger)
+    public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger<OpcUaSubjectClientSource> logger)
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(configuration);

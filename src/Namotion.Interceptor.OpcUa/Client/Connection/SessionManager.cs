@@ -49,7 +49,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
     /// </summary>
     public IReadOnlyCollection<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
 
-    public SessionManager(OpcUaClientSource source, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
+    public SessionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _propertyWriter = propertyWriter;
         _logger = logger;

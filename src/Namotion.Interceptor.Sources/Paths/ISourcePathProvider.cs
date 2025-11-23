@@ -3,26 +3,26 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace Namotion.Interceptor.Sources.Paths;
 
 /// <summary>
-/// Interface to map between connector and subject paths.
+/// Interface to map between source and subject paths.
 /// </summary>
 public interface ISourcePathProvider
 {
     /// <summary>
-    /// Checks whether the property handled by the connector.
+    /// Checks whether the property handled by the source.
     /// </summary>
     /// <param name="property">The property.</param>
     /// <returns>The result.</returns>
     bool IsPropertyIncluded(RegisteredSubjectProperty property);
 
     /// <summary>
-    /// Gets the name of the property in the connector.
+    /// Gets the name of the property in the source.
     /// </summary>
     /// <param name="property">The property.</param>
     /// <returns>The property name.</returns>
     string? TryGetPropertySegment(RegisteredSubjectProperty property);
 
     /// <summary>
-    /// Gets the full path of the property in the connector.
+    /// Gets the full path of the property in the source.
     /// </summary>
     /// <param name="propertiesInPath">The properties in the path.</param>
     /// <returns>The full path.</returns>
@@ -36,7 +36,7 @@ public interface ISourcePathProvider
     IEnumerable<(string segment, object? index)> ParsePathSegments(string path);
 
     /// <summary>
-    /// Gets the attribute using the path segment name in the connector.
+    /// Gets the attribute using the path segment name in the source.
     /// </summary>
     /// <param name="property">The property with the attribute.</param>
     /// <param name="attributeSegment">The path segment name with the attribute name.</param>
@@ -45,7 +45,7 @@ public interface ISourcePathProvider
     // TODO: Use RegisteredSubjectAttribute instead of RegisteredSubjectProperty
 
     /// <summary>
-    /// Gets the property using the path segment name in the connector.
+    /// Gets the property using the path segment name in the source.
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="propertySegment">The path segment name with the property name.</param>

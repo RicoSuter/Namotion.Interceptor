@@ -15,12 +15,12 @@ internal class OpcUaSubjectLoader
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly HashSet<PropertyReference> _propertiesWithOpcData;
-    private readonly OpcUaClientSource _source;
+    private readonly OpcUaSubjectClientSource _source;
 
     public OpcUaSubjectLoader(
         OpcUaClientConfiguration configuration,
         HashSet<PropertyReference> propertiesWithOpcData,
-        OpcUaClientSource source,
+        OpcUaSubjectClientSource source,
         ILogger logger)
     {
         _configuration = configuration;

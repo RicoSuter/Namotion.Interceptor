@@ -16,7 +16,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt
 {
-    public class MqttServerBackgroundService : BackgroundService
+    public class MqttSubjectServerBackgroundService : BackgroundService
     {
         private readonly string _serverClientId = "Server_" + Guid.NewGuid().ToString("N");
 
@@ -35,9 +35,9 @@ namespace Namotion.Interceptor.Mqtt
 
         public int? NumberOfClients => _numberOfClients;
 
-        public MqttServerBackgroundService(IInterceptorSubject subject,
+        public MqttSubjectServerBackgroundService(IInterceptorSubject subject,
             ISourcePathProvider pathProvider,
-            ILogger<MqttServerBackgroundService> logger,
+            ILogger<MqttSubjectServerBackgroundService> logger,
             TimeSpan? bufferTime = null)
         {
             _subject = subject;

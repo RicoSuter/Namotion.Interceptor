@@ -8,10 +8,10 @@ internal class OpcUaSubjectServer : StandardServer
     private readonly ILogger _logger;
     private readonly CustomNodeManagerFactory _nodeManagerFactory;
 
-    public OpcUaSubjectServer(IInterceptorSubject subject, OpcUaServerBackgroundService connector, OpcUaServerConfiguration configuration, ILogger logger)
+    public OpcUaSubjectServer(IInterceptorSubject subject, OpcUaSubjectServerBackgroundService source, OpcUaServerConfiguration configuration, ILogger logger)
     {
         _logger = logger;
-        _nodeManagerFactory = new CustomNodeManagerFactory(subject, connector, configuration);
+        _nodeManagerFactory = new CustomNodeManagerFactory(subject, source, configuration);
         AddNodeManager(_nodeManagerFactory);
     }
 

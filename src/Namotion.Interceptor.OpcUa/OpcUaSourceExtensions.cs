@@ -59,18 +59,18 @@ public static class OpcUaSourceExtensions
             .AddKeyedSingleton(key, (sp, _) =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new OpcUaClientSource(
+                return new OpcUaSubjectClientSource(
                     subject,
                     sp.GetRequiredKeyedService<OpcUaClientConfiguration>(key),
-                    sp.GetRequiredService<ILogger<OpcUaClientSource>>());
+                    sp.GetRequiredService<ILogger<OpcUaSubjectClientSource>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaClientSource>(key))
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key))
             .AddSingleton<IHostedService>(sp =>
             {
                 var configuration = sp.GetRequiredKeyedService<OpcUaClientConfiguration>(key);
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 return new SubjectSourceBackgroundService(
-                    sp.GetRequiredKeyedService<OpcUaClientSource>(key),
+                    sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key),
                     subject.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
                     configuration.BufferTime,
@@ -120,11 +120,11 @@ public static class OpcUaSourceExtensions
             .AddKeyedSingleton(key, (sp, _) =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new OpcUaServerBackgroundService(
+                return new OpcUaSubjectServerBackgroundService(
                     subject,
                     sp.GetRequiredKeyedService<OpcUaServerConfiguration>(key),
-                    sp.GetRequiredService<ILogger<OpcUaServerBackgroundService>>());
+                    sp.GetRequiredService<ILogger<OpcUaSubjectServerBackgroundService>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaServerBackgroundService>(key));
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServerBackgroundService>(key));
     }
 }

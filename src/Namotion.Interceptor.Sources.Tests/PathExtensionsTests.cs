@@ -16,7 +16,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public async Task WhenRetrievingAllPaths_ThenListIsCorrect(string name, ISourcePathProvider connectorPathProvider)
+    public async Task WhenRetrievingAllPaths_ThenListIsCorrect(string name, ISourcePathProvider sourcePathProvider)
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -41,7 +41,7 @@ public class PathExtensionsTests
         var allPaths = person
             .TryGetRegisteredSubject()?
             .GetAllProperties()
-            .GetSourcePaths(connectorPathProvider, person)
+            .GetSourcePaths(sourcePathProvider, person)
             .ToArray() ?? [];
 
         // Assert
@@ -52,7 +52,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public async Task WhenApplyValuesFromSourceAndPaths_ThenSubjectAndChildrenShouldBeUpdated(string name, ISourcePathProvider connectorPathProvider)
+    public async Task WhenApplyValuesFromSourceAndPaths_ThenSubjectAndChildrenShouldBeUpdated(string name, ISourcePathProvider sourcePathProvider)
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -81,12 +81,12 @@ public class PathExtensionsTests
             { "FirstName", "NewPerson" },
             { "Children[0].FirstName", "NewChild1" },
             { "Children[2].FirstName", "NewChild3" }
-        }, timestamp, connectorPathProvider, null);
+        }, timestamp, sourcePathProvider, null);
 
         person.UpdatePropertyValuesFromSourcePaths(
-            ["LastName"], timestamp, (_, _) => "NewLn", connectorPathProvider, null);
+            ["LastName"], timestamp, (_, _) => "NewLn", sourcePathProvider, null);
         person.UpdatePropertyValueFromSourcePath(
-            "Father.FirstName", timestamp, "NewFather", connectorPathProvider, null);
+            "Father.FirstName", timestamp, "NewFather", sourcePathProvider, null);
         
         var completeUpdate = SubjectUpdate
             .CreateCompleteUpdate(person, [JsonCamelCasePathProcessor.Instance]);

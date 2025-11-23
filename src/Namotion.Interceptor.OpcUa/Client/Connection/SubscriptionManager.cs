@@ -16,7 +16,7 @@ internal class SubscriptionManager
     private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
         = new(() => new List<PropertyUpdate>(16));
 
-    private readonly OpcUaClientSource _source;
+    private readonly OpcUaSubjectClientSource _source;
     private readonly SubjectPropertyWriter? _propertyWriter;
     private readonly PollingManager? _pollingManager;
     private readonly OpcUaClientConfiguration _configuration;
@@ -37,7 +37,7 @@ internal class SubscriptionManager
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
-    public SubscriptionManager(OpcUaClientSource source, SubjectPropertyWriter propertyWriter, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
+    public SubscriptionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _source = source;
         _propertyWriter = propertyWriter;

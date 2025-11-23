@@ -147,12 +147,12 @@ public class SubjectUpdateExtensionsTests
     }
 
     [Fact]
-    public void WhenApplyingFromConnectorWithTransform_ThenTransformIsApplied()
+    public void WhenApplyingFromSourceWithTransform_ThenTransformIsApplied()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var person = new Person(context);
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
         var transformCalled = false;
 
         // Act
@@ -166,7 +166,7 @@ public class SubjectUpdateExtensionsTests
                     }
                 }
             }, 
-            connectorMock.Object, 
+            sourceMock.Object, 
             DefaultSubjectFactory.Instance,
             (_, update) =>
             {

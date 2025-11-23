@@ -48,7 +48,7 @@ public sealed class SubjectPropertyWriter
     }
 
     /// <summary>
-    /// Completes initialization by loading initial state from the connector, replaying all buffered updates,
+    /// Completes initialization by loading initial state from the source, replaying all buffered updates,
     /// and invoking the initialization completed callback.
     /// This ensures zero data loss during the initialization period.
     /// </summary>
