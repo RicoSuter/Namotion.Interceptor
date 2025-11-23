@@ -2,7 +2,7 @@
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Sources;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -15,12 +15,12 @@ internal class OpcUaSubjectLoader
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly HashSet<PropertyReference> _propertiesWithOpcData;
-    private readonly OpcUaClientConnector _connector;
+    private readonly OpcUaClientSource _connector;
 
     public OpcUaSubjectLoader(
         OpcUaClientConfiguration configuration,
         HashSet<PropertyReference> propertiesWithOpcData,
-        OpcUaClientConnector connector,
+        OpcUaClientSource connector,
         ILogger logger)
     {
         _configuration = configuration;
@@ -155,7 +155,7 @@ internal class OpcUaSubjectLoader
             var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
             newSubject.Context.AddFallbackContext(subject.Context);
             await LoadSubjectAsync(newSubject, nodeReference, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
-            property.SetValueFromConnector(_connector, null, newSubject);
+            property.SetValueFromSource(_connector, null, newSubject);
         }
     }
 
@@ -185,7 +185,7 @@ internal class OpcUaSubjectLoader
         var collection = DefaultSubjectFactory.Instance
             .CreateSubjectCollection(property.Type, children.Select(c => c.Subject));
 
-        property.SetValueFromConnector(_connector, null, collection);
+        property.SetValueFromSource(_connector, null, collection);
 
         foreach (var child in children)
         {

@@ -1,4 +1,4 @@
-﻿using Namotion.Interceptor.Connectors.Paths.Attributes;
+﻿using Namotion.Interceptor.Sources.Paths.Attributes;
 
 namespace Namotion.Interceptor.OpcUa.Attributes;
 

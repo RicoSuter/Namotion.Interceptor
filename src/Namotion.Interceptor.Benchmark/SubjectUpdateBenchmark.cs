@@ -1,8 +1,8 @@
 ﻿using System;
 using BenchmarkDotNet.Attributes;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Connectors.Paths;
-using Namotion.Interceptor.Connectors.Updates;
+using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Sources.Updates;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Benchmark;

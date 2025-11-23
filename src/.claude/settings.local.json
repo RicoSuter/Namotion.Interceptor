@@ -11,7 +11,14 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:patch-diff.githubusercontent.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(dotnet clean:*)",
+      "Bash(move \"C:\\Users\\rsute\\GitHub\\Namotion.Interceptor\\src\\Namotion.Interceptor.Connectors\" \"C:\\Users\\rsute\\GitHub\\Namotion.Interceptor\\src\\Namotion.Interceptor.Sources\")",
+      "Bash(move \"C:\\Users\\rsute\\GitHub\\Namotion.Interceptor\\src\\Namotion.Interceptor.Connectors.Tests\" \"C:\\Users\\rsute\\GitHub\\Namotion.Interceptor\\src\\Namotion.Interceptor.Sources.Tests\")",
+      "Bash(git mv:*)",
+      "Bash(for:*)",
+      "Bash(do git mv \"$f\" src/Namotion.Interceptor.Sources/)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

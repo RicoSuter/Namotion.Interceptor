@@ -1,4 +1,4 @@
-﻿using Namotion.Interceptor.Connectors.Paths;
+﻿using Namotion.Interceptor.Sources.Paths;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 
@@ -68,7 +68,7 @@ public class OpcUaClientConfiguration
     /// Gets the connector path provider used to map between OPC UA node browse names and C# property names.
     /// This provider determines which properties are included and how their names are translated.
     /// </summary>
-    public required IConnectorPathProvider PathProvider { get; init; }
+    public required ISourcePathProvider PathProvider { get; init; }
 
     /// <summary>
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.

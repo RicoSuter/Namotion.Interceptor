@@ -12,8 +12,8 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Namotion.Interceptor;
 using Namotion.Interceptor.AspNetCore.Extensions;
-using Namotion.Interceptor.Connectors.Paths;
-using Namotion.Interceptor.Connectors.Updates;
+using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Sources.Updates;
 using Namotion.Interceptor.Validation;
 
 // ReSharper disable once CheckNamespace
