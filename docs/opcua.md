@@ -114,7 +114,7 @@ ShouldAddDynamicProperty = async (node, ct) =>
 The server configuration requires minimal setup with source path provider and value converter. Additional options control the application name, namespace URI, certificate management, and performance tuning.
 
 ```csharp
-builder.Services.AddOpcUaServer(
+builder.Services.AddOpcUaSubjectServer(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaServerConfiguration
     {
@@ -328,7 +328,7 @@ Reference these types with `[OpcUaTypeDefinition]`.
 The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored. This feature is provided by the `SubjectSourceBackgroundService`.
 
 ```csharp
-builder.Services.AddOpcUaClientSource(
+builder.Services.AddOpcUaSubjectClient(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
@@ -351,7 +351,7 @@ machine.Speed = 100; // Queued if disconnected, written immediately if connected
 The library automatically falls back to periodic polling when OPC UA nodes don't support subscriptions. This ensures all properties remain synchronized even with legacy servers or special node types.
 
 ```csharp
-builder.Services.AddOpcUaClientSource(
+builder.Services.AddOpcUaSubjectClient(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
@@ -374,7 +374,7 @@ builder.Services.AddOpcUaClientSource(
 The library automatically retries failed subscription items that may succeed later, such as when server resources become available.
 
 ```csharp
-builder.Services.AddOpcUaClientSource(
+builder.Services.AddOpcUaSubjectClient(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
