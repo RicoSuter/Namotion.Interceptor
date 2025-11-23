@@ -114,7 +114,7 @@ namespace Namotion.Interceptor.SampleWeb
             // builder.Services.AddOpcUaSubjectClient<Car>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 
             // expose subject via MQTT
-            builder.Services.AddMqttSubjectServer<Car>("mqtt");
+            builder.Services.AddMqttSubjectServer<Car>("localhost", "mqtt");
             //builder.Services.AddMqttSubjectServer<Tire>(sp => sp.GetRequiredService<Car>().Tires[2], "mqtt");
 
             // expose subject via GraphQL

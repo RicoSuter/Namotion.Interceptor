@@ -3,8 +3,8 @@ using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa.SampleClient;
-using Namotion.Interceptor.OpcUa.SampleModel;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.SamplesModel;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 using Opc.Ua;
@@ -22,6 +22,7 @@ var context = InterceptorSubjectContext
 
 Utils.SetTraceMask(Utils.TraceMasks.All);
 
+// OPC UA client creates just the root - persons array will be loaded from server
 var root = new Root(context);
 context.AddService(root);
 
