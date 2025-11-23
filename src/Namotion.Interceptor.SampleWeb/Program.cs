@@ -111,7 +111,7 @@ namespace Namotion.Interceptor.SampleWeb
 
             // expose subject via OPC UA
             builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
-            // builder.Services.AddOpcUaClientSource<Car>("opc.tcp://localhost:4840", "opc", rootName: "Root");
+            // builder.Services.AddOpcUaSubjectClient<Car>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 
             // expose subject via MQTT
             builder.Services.AddMqttSubjectServer<Car>("mqtt");
