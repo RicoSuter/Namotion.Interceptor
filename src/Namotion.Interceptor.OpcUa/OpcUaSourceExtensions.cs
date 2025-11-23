@@ -12,7 +12,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class OpcUaSourceExtensions
 {
-    public static IServiceCollection AddOpcUaClientSource<TSubject>(
+    public static IServiceCollection AddOpcUaSubjectClient<TSubject>(
         this IServiceCollection serviceCollection,
         string serverUrl,
         string sourceName,
@@ -20,7 +20,7 @@ public static class OpcUaSourceExtensions
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
-        return serviceCollection.AddOpcUaClientSource(
+        return serviceCollection.AddOpcUaSubjectClient(
             serverUrl,
             sourceName,
             sp => sp.GetRequiredService<TSubject>(),
@@ -28,7 +28,7 @@ public static class OpcUaSourceExtensions
             rootName);
     }
 
-    public static IServiceCollection AddOpcUaClientSource(
+    public static IServiceCollection AddOpcUaSubjectClient(
         this IServiceCollection serviceCollection,
         string serverUrl,
         string sourceName,
@@ -36,7 +36,7 @@ public static class OpcUaSourceExtensions
         string? pathPrefix = null,
         string? rootName = null)
     {
-        return serviceCollection.AddOpcUaClientSource(subjectSelector, sp => new OpcUaClientConfiguration
+        return serviceCollection.AddOpcUaSubjectClient(subjectSelector, sp => new OpcUaClientConfiguration
         {
             ServerUrl = serverUrl,
             RootName = rootName,
@@ -79,28 +79,28 @@ public static class OpcUaSourceExtensions
             });
     }
 
-    public static IServiceCollection AddOpcUaServer<TSubject>(
+    public static IServiceCollection AddOpcUaSubjectServer<TSubject>(
         this IServiceCollection serviceCollection,
         string sourceName,
         string? pathPrefix = null,
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
-        return serviceCollection.AddOpcUaServer(
+        return serviceCollection.AddOpcUaSubjectServer(
             sourceName,
             sp => sp.GetRequiredService<TSubject>(),
             pathPrefix,
             rootName);
     }
 
-    public static IServiceCollection AddOpcUaServer(
+    public static IServiceCollection AddOpcUaSubjectServer(
         this IServiceCollection serviceCollection,
         string sourceName,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
         string? pathPrefix = null,
         string? rootName = null)
     {
-        return serviceCollection.AddOpcUaServer(subjectSelector, _ => new OpcUaServerConfiguration
+        return serviceCollection.AddOpcUaSubjectServer(subjectSelector, _ => new OpcUaServerConfiguration
         {
             RootName = rootName,
             PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
@@ -108,7 +108,7 @@ public static class OpcUaSourceExtensions
         });
     }
 
-    public static IServiceCollection AddOpcUaServer(
+    public static IServiceCollection AddOpcUaSubjectServer(
         this IServiceCollection serviceCollection,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
         Func<IServiceProvider, OpcUaServerConfiguration> configurationProvider)

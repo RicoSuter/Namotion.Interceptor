@@ -110,12 +110,12 @@ namespace Namotion.Interceptor.SampleWeb
             builder.Services.AddSingleton(context);
 
             // expose subject via OPC UA
-            builder.Services.AddOpcUaServer<Car>("opc", rootName: "Root");
+            builder.Services.AddOpcUaSubjectServer<Car>("opc", rootName: "Root");
             // builder.Services.AddOpcUaClientSource<Car>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 
             // expose subject via MQTT
-            builder.Services.AddMqttServer<Car>("mqtt");
-            //builder.Services.AddMqttServer<Tire>(sp => sp.GetRequiredService<Car>().Tires[2], "mqtt");
+            builder.Services.AddMqttSubjectServer<Car>("mqtt");
+            //builder.Services.AddMqttSubjectServer<Tire>(sp => sp.GetRequiredService<Car>().Tires[2], "mqtt");
 
             // expose subject via GraphQL
             builder.Services
