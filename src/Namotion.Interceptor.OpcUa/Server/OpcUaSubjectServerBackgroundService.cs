@@ -9,7 +9,7 @@ using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaServerBackgroundService : BackgroundService
+internal class OpcUaSubjectServerBackgroundService : BackgroundService
 {
     internal const string OpcVariableKey = "OpcVariable";
 
@@ -21,10 +21,10 @@ internal class OpcUaServerBackgroundService : BackgroundService
     private volatile OpcUaSubjectServer? _server;
     private int _consecutiveFailures;
 
-    public OpcUaServerBackgroundService(
+    public OpcUaSubjectServerBackgroundService(
         IInterceptorSubject subject,
         OpcUaServerConfiguration configuration,
-        ILogger<OpcUaServerBackgroundService> logger)
+        ILogger<OpcUaSubjectServerBackgroundService> logger)
     {
         _subject = subject;
         _context = subject.Context;

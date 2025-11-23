@@ -9,12 +9,12 @@ public class SubjectPropertyWriterTests
     public async Task WhenAfterInit_ThenUpdatesAreAppliedImmediately()
     {
         // Arrange
-        var connectorMock = new Mock<ISubjectSource>();
-        connectorMock
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((Action?)null);
 
-        var writer = new SubjectPropertyWriter(connectorMock.Object, null, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
         var updates = new List<string>();
 
         writer.StartBuffering();
@@ -32,16 +32,16 @@ public class SubjectPropertyWriterTests
     public async Task WhenCallbackProvided_ThenOrderIsInitialStateThenBufferedThenCallback()
     {
         // Arrange
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
         var order = new List<string>();
 
-        connectorMock
+        sourceMock
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => { order.Add("InitialState"); });
 
         var callbackInvoked = false;
         var writer = new SubjectPropertyWriter(
-            connectorMock.Object,
+            sourceMock.Object,
             ct =>
             {
                 order.Add("Callback");
@@ -67,12 +67,12 @@ public class SubjectPropertyWriterTests
     public async Task WhenUpdateThrows_ThenErrorIsLoggedAndOtherUpdatesApplied()
     {
         // Arrange
-        var connectorMock = new Mock<ISubjectSource>();
-        connectorMock
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((Action?)null);
 
-        var writer = new SubjectPropertyWriter(connectorMock.Object, null, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
         var updates = new List<string>();
 
         // Act
@@ -93,12 +93,12 @@ public class SubjectPropertyWriterTests
     public async Task WhenImmediateUpdateThrows_ThenErrorIsLoggedNotThrown()
     {
         // Arrange
-        var connectorMock = new Mock<ISubjectSource>();
-        connectorMock
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((Action?)null);
 
-        var writer = new SubjectPropertyWriter(connectorMock.Object, null, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
 
         writer.StartBuffering();
         await writer.CompleteInitializationAsync(CancellationToken.None);
@@ -111,12 +111,12 @@ public class SubjectPropertyWriterTests
     public async Task WhenStartBufferingCalledMultipleTimes_ThenOnlyLatestBufferIsReplayed()
     {
         // Arrange
-        var connectorMock = new Mock<ISubjectSource>();
-        connectorMock
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((Action?)null);
 
-        var writer = new SubjectPropertyWriter(connectorMock.Object, null, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
         var updates = new List<string>();
 
         // Act
@@ -137,15 +137,15 @@ public class SubjectPropertyWriterTests
     public async Task WhenCompleteInitCalledTwice_ThenSecondCallSkipsReplay()
     {
         // Arrange
-        var connectorMock = new Mock<ISubjectSource>();
+        var sourceMock = new Mock<ISubjectSource>();
         var loadCount = 0;
         var replayCount = 0;
 
-        connectorMock
+        sourceMock
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => { loadCount++; });
 
-        var writer = new SubjectPropertyWriter(connectorMock.Object, null, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
 
         // Act
         writer.StartBuffering();
@@ -160,11 +160,11 @@ public class SubjectPropertyWriterTests
     }
 
     [Fact]
-    public async Task WhenNotClientConnector_ThenNoInitialStateLoaded()
+    public async Task WhenNotClientSource_ThenNoInitialStateLoaded()
     {
         // Arrange - using ISubjectSource (not ISubjectSource)
-        var connectorMock = new Mock<ISubjectSource>();
-        var writer = new SubjectPropertyWriter(connectorMock.Object, null, NullLogger.Instance);
+        var sourceMock = new Mock<ISubjectSource>();
+        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
         var updates = new List<string>();
 
         // Act
@@ -181,8 +181,8 @@ public class SubjectPropertyWriterTests
     public void WhenNoStartBufferingCalled_ThenUpdatesAreBuffered()
     {
         // Arrange - _updates starts as empty list (buffering by default)
-        var connectorMock = new Mock<ISubjectSource>();
-        var writer = new SubjectPropertyWriter(connectorMock.Object, null, NullLogger.Instance);
+        var sourceMock = new Mock<ISubjectSource>();
+        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
         var updates = new List<string>();
 
         // Act

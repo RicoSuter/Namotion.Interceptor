@@ -25,7 +25,7 @@ public class OpcUaSubjectLoaderTests
         {
             ServerUrl = "opc.tcp://localhost:4840",
             PathProvider = new AttributeBasedSourcePathProvider("opc", "."),
-            TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaClientSource>.Instance),
+            TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaSubjectClientSource>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(new DefaultSubjectFactory()),
             ShouldAddDynamicProperty = static (_, _) => Task.FromResult(false) // Don't add dynamic properties
@@ -103,7 +103,7 @@ public class OpcUaSubjectLoaderTests
     public async Task LoadSubjectAsync_WithDynamicPropertiesEnabled_ShouldAddDynamicProperties()
     {
         // Arrange: override base configuration for this loader
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaClientSource>.Instance);
+        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
         mockTypeResolver
             .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(typeof(int));
@@ -156,7 +156,7 @@ public class OpcUaSubjectLoaderTests
     public async Task LoadSubjectAsync_WithObjectType_ShouldNotAddProperty()
     {
         // Arrange: override base configuration for this loader
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaClientSource>.Instance);
+        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
         mockTypeResolver
             .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Type?)null); // Simulate unresolved type (should return DynamicObject or similar when an expandable object is required)
@@ -230,8 +230,8 @@ public class OpcUaSubjectLoaderTests
         return new OpcUaSubjectLoader(
             config,
             _propertiesWithOpcData,
-            new OpcUaClientSource(new DynamicSubject(), config, NullLogger<OpcUaClientSource>.Instance),
-            NullLogger<OpcUaClientSource>.Instance);
+            new OpcUaSubjectClientSource(new DynamicSubject(), config, NullLogger<OpcUaSubjectClientSource>.Instance),
+            NullLogger<OpcUaSubjectClientSource>.Instance);
     }
 
     private IInterceptorSubject CreateTestSubject()

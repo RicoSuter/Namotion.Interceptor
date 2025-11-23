@@ -8,80 +8,80 @@ namespace Namotion.Interceptor.Sources.Paths;
 public static class PathExtensions
 {
     /// <summary>
-    /// Sets the value of the property and marks the assignment as applied by the specified connector (optional).
+    /// Sets the value of the property and marks the assignment as applied by the specified source (optional).
     /// </summary>
     /// <param name="subject">The subject.</param>
-    /// <param name="sourcePath">The path to the property from the connector's perspective.</param>
+    /// <param name="sourcePath">The path to the property from the source's perspective.</param>
     /// <param name="timestamp">The timestamp.</param>
     /// <param name="value">The value to set.</param>
-    /// <param name="connectorPathProvider">The connector path provider.</param>
-    /// <param name="source">The optional connector to mark the write as coming from this connector to avoid updates.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
     /// <returns>The result specifying whether the path could be found and the value has been applied.</returns>
-    public static bool UpdatePropertyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, DateTimeOffset timestamp, object? value, ISourcePathProvider connectorPathProvider, object? source)
+    public static bool UpdatePropertyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, DateTimeOffset timestamp, object? value, ISourcePathProvider sourcePathProvider, object? source)
     {
         return subject
-            .UpdatePropertyValueFromSourcePath(sourcePath, timestamp, (_, _) => value, connectorPathProvider, source);
+            .UpdatePropertyValueFromSourcePath(sourcePath, timestamp, (_, _) => value, sourcePathProvider, source);
     }
 
     /// <summary>
-    /// Sets the value of the property and marks the assignment as applied by the specified connector (optional).
+    /// Sets the value of the property and marks the assignment as applied by the specified source (optional).
     /// </summary>
     /// <param name="subject">The subject.</param>
-    /// <param name="sourcePath">The path to the property from the connector's perspective.</param>
+    /// <param name="sourcePath">The path to the property from the source's perspective.</param>
     /// <param name="timestamp">The timestamp.</param>
     /// <param name="getPropertyValue">The function to retrieve the property value to set.</param>
-    /// <param name="connectorPathProvider">The connector path provider.</param>
-    /// <param name="source">The optional connector to mark the write as coming from this connector to avoid updates.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
     /// <returns>The result specifying whether the path could be found and the value has been applied.</returns>
     public static bool UpdatePropertyValueFromSourcePath(this IInterceptorSubject subject,
         string sourcePath, DateTimeOffset timestamp,
         Func<RegisteredSubjectProperty, string, object?> getPropertyValue,
-        ISourcePathProvider connectorPathProvider, object? source)
+        ISourcePathProvider sourcePathProvider, object? source)
     {
         return subject
             .VisitPropertiesFromSourcePathsWithTimestamp([sourcePath], timestamp,
-                (property, path, _) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), connectorPathProvider)
+                (property, path, _) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), sourcePathProvider)
             .Count == 1;
     }
 
     /// <summary>
-    /// Sets the value of multiple properties and marks the assignment as applied by the specified connector (optional).
+    /// Sets the value of multiple properties and marks the assignment as applied by the specified source (optional).
     /// </summary>
     /// <param name="subject"></param>
-    /// <param name="sourcePaths">The paths to the properties from the connector's perspective.</param>
+    /// <param name="sourcePaths">The paths to the properties from the source's perspective.</param>
     /// <param name="timestamp">The timestamp.</param>
     /// <param name="getPropertyValue">The function to retrieve the property value.</param>
-    /// <param name="connectorPathProvider">The connector path provider.</param>
-    /// <param name="source">The optional connector to mark the write as coming from this connector to avoid updates.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
     /// <returns></returns>
-    public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider connectorPathProvider, object? source)
+    public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider, object? source)
     {
         return subject
-            .VisitPropertiesFromSourcePathsWithTimestamp(sourcePaths, timestamp, (property, path, _) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), connectorPathProvider);
+            .VisitPropertiesFromSourcePathsWithTimestamp(sourcePaths, timestamp, (property, path, _) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), sourcePathProvider);
     }
 
     /// <summary>
-    /// Sets the value of multiple properties and marks the assignment as applied by the specified connector (optional).
+    /// Sets the value of multiple properties and marks the assignment as applied by the specified source (optional).
     /// </summary>
     /// <param name="subject">The subject.</param>
-    /// <param name="pathsAndValues">The connector paths and values to apply.</param>
+    /// <param name="pathsAndValues">The source paths and values to apply.</param>
     /// <param name="timestamp">The timestamp.</param>
-    /// <param name="connectorPathProvider">The connector path provider.</param>
-    /// <param name="source">The optional connector to mark the write as coming from this connector to avoid updates.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
+    /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
     /// <returns>The list of visited paths.</returns>
-    public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, DateTimeOffset timestamp, ISourcePathProvider connectorPathProvider, object? source)
+    public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, DateTimeOffset timestamp, ISourcePathProvider sourcePathProvider, object? source)
     {
         return subject
-            .VisitPropertiesFromSourcePathsWithTimestamp(pathsAndValues.Keys, timestamp, (property, path, _) => SetPropertyValue(property, timestamp, pathsAndValues[path], source), connectorPathProvider);
+            .VisitPropertiesFromSourcePathsWithTimestamp(pathsAndValues.Keys, timestamp, (property, path, _) => SetPropertyValue(property, timestamp, pathsAndValues[path], source), sourcePathProvider);
     }
 
     private static IReadOnlyCollection<string> VisitPropertiesFromSourcePathsWithTimestamp(this IInterceptorSubject subject,
         IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Action<RegisteredSubjectProperty, string, object?> visitProperty,
-        ISourcePathProvider connectorPathProvider, ISubjectFactory? subjectFactory = null)
+        ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
         using (SubjectChangeContext.WithChangedTimestamp(timestamp))
         {
-            return VisitPropertiesFromSourcePaths(subject, sourcePaths, visitProperty, connectorPathProvider, subjectFactory);
+            return VisitPropertiesFromSourcePaths(subject, sourcePaths, visitProperty, sourcePathProvider, subjectFactory);
         }
     }
 
@@ -98,40 +98,40 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Gets the complete connector path of the given property.
+    /// Gets the complete source path of the given property.
     /// </summary>
     /// <param name="property">The property.</param>
-    /// <param name="connectorPathProvider">The connector path provider.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="rootSubject">The root subject or null.</param>
     /// <returns>The path.</returns>
-    public static string? TryGetSourcePath(this RegisteredSubjectProperty property, ISourcePathProvider connectorPathProvider, IInterceptorSubject? rootSubject)
+    public static string? TryGetSourcePath(this RegisteredSubjectProperty property, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
     {
         var propertiesInPath = property
             .GetPropertiesInPath(rootSubject)
             .ToArray();
 
         if (propertiesInPath.Length > 0 &&
-            connectorPathProvider.IsPropertyIncluded(propertiesInPath.Last().property))
+            sourcePathProvider.IsPropertyIncluded(propertiesInPath.Last().property))
         {
-            return connectorPathProvider.GetPropertyFullPath(propertiesInPath);
+            return sourcePathProvider.GetPropertyFullPath(propertiesInPath);
         }
 
         return null;
     }
 
     /// <summary>
-    /// Gets all complete connector paths of the given properties.
+    /// Gets all complete source paths of the given properties.
     /// </summary>
     /// <param name="properties">The properties.</param>
-    /// <param name="connectorPathProvider">The connector path provider.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="rootSubject">The root subject or null.</param>
     /// <returns>The paths.</returns>
     public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetSourcePaths(
-        this IEnumerable<RegisteredSubjectProperty> properties, ISourcePathProvider connectorPathProvider, IInterceptorSubject? rootSubject)
+        this IEnumerable<RegisteredSubjectProperty> properties, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
     {
         foreach (var property in properties)
         {
-            var path = property.TryGetSourcePath(connectorPathProvider, rootSubject);
+            var path = property.TryGetSourcePath(sourcePathProvider, rootSubject);
             if (path is not null)
             {
                 yield return (path, property);
@@ -140,21 +140,21 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Gets all complete connector paths of the given property changes.
+    /// Gets all complete source paths of the given property changes.
     /// </summary>
     /// <param name="changes">The changes.</param>
-    /// <param name="connectorPathProvider">The connector path provider.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="rootSubject">The root subject or null.</param>
     /// <returns>The paths.</returns>
     public static IEnumerable<(string path, SubjectPropertyChange change)> GetSourcePaths(
-        this IEnumerable<SubjectPropertyChange> changes, ISourcePathProvider connectorPathProvider, IInterceptorSubject? rootSubject)
+        this IEnumerable<SubjectPropertyChange> changes, ISourcePathProvider sourcePathProvider, IInterceptorSubject? rootSubject)
     {
         foreach (var change in changes)
         {
             var registeredProperty = change.Property.TryGetRegisteredProperty();
             if (registeredProperty is not null)
             {
-                var path = TryGetSourcePath(registeredProperty, connectorPathProvider, rootSubject);
+                var path = TryGetSourcePath(registeredProperty, sourcePathProvider, rootSubject);
                 if (path is not null)
                 {
                     yield return (path, change);
@@ -189,21 +189,21 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Visits all path leaf properties using connector paths and returns the paths which have been found and visited.
+    /// Visits all path leaf properties using source paths and returns the paths which have been found and visited.
     /// </summary>
     /// <param name="subject">The subject.</param>
-    /// <param name="sourcePaths">The connector paths to apply values.</param>
+    /// <param name="sourcePaths">The source paths to apply values.</param>
     /// <param name="visitProperty">The callback to visit a property.</param>
-    /// <param name="connectorPathProvider">The connector path provider.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
     /// <returns>The list of visited paths.</returns>
     public static IReadOnlyCollection<string> VisitPropertiesFromSourcePaths(this IInterceptorSubject subject,
         IEnumerable<string> sourcePaths, Action<RegisteredSubjectProperty, string, object?> visitProperty,
-        ISourcePathProvider connectorPathProvider, ISubjectFactory? subjectFactory = null)
+        ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
         var visitedPaths = new List<string>();
         foreach (var (path, property, index) in
-            GetPropertiesFromSourcePaths(subject, sourcePaths, connectorPathProvider, subjectFactory, useCache: false))
+            GetPropertiesFromSourcePaths(subject, sourcePaths, sourcePathProvider, subjectFactory, useCache: false))
         {
             if (property is not null)
             {
@@ -216,36 +216,36 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Tries to get a property from the connector path.
+    /// Tries to get a property from the source path.
     /// </summary>
     /// <param name="subject">The root subject.</param>
-    /// <param name="sourcePath">The connector path of the property to look up.</param>
-    /// <param name="connectorPathProvider">The connector path provider.</param>
+    /// <param name="sourcePath">The source path of the property to look up.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
     /// <returns>The found subject property or null if it is not found and factory was null.</returns>
     public static (RegisteredSubjectProperty? property, object? index) TryGetPropertyFromSourcePath(
-        this IInterceptorSubject subject, string sourcePath, ISourcePathProvider connectorPathProvider, ISubjectFactory? subjectFactory = null)
+        this IInterceptorSubject subject, string sourcePath, ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
         var (_, property, index) = subject
-            .GetPropertiesFromSourcePaths([sourcePath], connectorPathProvider, subjectFactory, useCache: false)
+            .GetPropertiesFromSourcePaths([sourcePath], sourcePathProvider, subjectFactory, useCache: false)
             .FirstOrDefault();
 
         return (property, index);
     }
 
     /// <summary>
-    /// Tries to get multiple properties from the connector paths.
+    /// Tries to get multiple properties from the source paths.
     /// </summary>
     /// <param name="rootSubject">The root subject.</param>
-    /// <param name="sourcePaths">The connector path of the property to look up.</param>
-    /// <param name="connectorPathProvider">The connector path provider.</param>
+    /// <param name="sourcePaths">The source path of the property to look up.</param>
+    /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
     /// <param name="useCache">Defines whether to use a method-scoped property path cache, only useful when passing multiple similar paths.</param>
     /// <returns>The found subject properties.</returns>
     public static IEnumerable<(string path, RegisteredSubjectProperty? property, object? index)> GetPropertiesFromSourcePaths(
         this IInterceptorSubject rootSubject,
         IEnumerable<string> sourcePaths,
-        ISourcePathProvider connectorPathProvider,
+        ISourcePathProvider sourcePathProvider,
         ISubjectFactory? subjectFactory = null,
         bool useCache = true)
     {
@@ -255,7 +255,7 @@ public static class PathExtensions
 
         foreach (var sourcePath in sourcePaths)
         {
-            var segments = connectorPathProvider.ParsePathSegments(sourcePath).ToArray();
+            var segments = sourcePathProvider.ParsePathSegments(sourcePath).ToArray();
             if (segments.Length == 0)
             {
                 continue;
@@ -302,11 +302,11 @@ public static class PathExtensions
                     }
 
                     property = parentProperty?.IsAttribute == true
-                        ? connectorPathProvider.TryGetAttributeFromSegment(parentProperty, segment)
-                        : connectorPathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
+                        ? sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment)
+                        : sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
 
                     if (property is null ||
-                        connectorPathProvider.IsPropertyIncluded(property) == false)
+                        sourcePathProvider.IsPropertyIncluded(property) == false)
                     {
                         yield return (sourcePath, null, null);
                         break;

@@ -5,13 +5,13 @@ public static class SubjectUpdatePathExtensions
     // public static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> ConvertToSourcePaths(
     //     this SubjectUpdate subjectUpdate,
     //     IInterceptorSubject subject,
-    //     ISourcePathProvider connectorPathProvider,
+    //     ISourcePathProvider sourcePathProvider,
     //     string pathPrefix = "")
     // {
     //     foreach (var property in subjectUpdate.Properties)
     //     {
     //         foreach (var (path, value, registeredProperty) in property.Value
-    //                      .ConvertToSourcePaths(subject, property.Key, connectorPathProvider, pathPrefix))
+    //                      .ConvertToSourcePaths(subject, property.Key, sourcePathProvider, pathPrefix))
     //         {
     //             yield return (path, value, registeredProperty);
     //         }
@@ -21,23 +21,23 @@ public static class SubjectUpdatePathExtensions
     // private static IEnumerable<(string path, object? value, RegisteredSubjectProperty property)> ConvertToSourcePaths(
     //     this SubjectPropertyChange propertyUpdate,
     //     IInterceptorSubject subject, string propertyName,
-    //     ISourcePathProvider connectorPathProvider,
+    //     ISourcePathProvider sourcePathProvider,
     //     string pathPrefix = "")
     // {
     //     var registeredProperty = subject.TryGetRegisteredProperty(propertyName) ?? throw new KeyNotFoundException(propertyName);
-    //     if (connectorPathProvider.IsPropertyIncluded(registeredProperty) == false)
+    //     if (sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
     //     {
     //         yield break;
     //     }
     //
-    //     var fullPath = connectorPathProvider.GetPropertyFullPath(pathPrefix, registeredProperty);
+    //     var fullPath = sourcePathProvider.GetPropertyFullPath(pathPrefix, registeredProperty);
     //     if (propertyUpdate.Attributes is not null)
     //     {
     //         foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
     //         {
     //             var registeredAttribute = subject.GetRegisteredAttribute(propertyName, attributeName);
     //             foreach (var (path, value, property) in attributeUpdate
-    //                          .ConvertToSourcePaths(subject, registeredAttribute.Property.Name, connectorPathProvider, fullPath))
+    //                          .ConvertToSourcePaths(subject, registeredAttribute.Property.Name, sourcePathProvider, fullPath))
     //             {
     //                 yield return (path, value, property);
     //             }
@@ -54,7 +54,7 @@ public static class SubjectUpdatePathExtensions
     //             if (registeredProperty.GetValue() is IInterceptorSubject currentItem)
     //             {
     //                 foreach (var (path, value, property) in propertyUpdate.Item!
-    //                              .ConvertToSourcePaths(currentItem, connectorPathProvider, fullPath))
+    //                              .ConvertToSourcePaths(currentItem, sourcePathProvider, fullPath))
     //                 {
     //                     yield return (path, value, property);
     //                 }
@@ -81,7 +81,7 @@ public static class SubjectUpdatePathExtensions
     //                 {
     //                     var itemPropertyPath = $"{fullPath}[{item.Index}]";
     //                     foreach (var (path, value, property) in item.Item
-    //                                  .ConvertToSourcePaths(currentCollectionItem, connectorPathProvider, itemPropertyPath))
+    //                                  .ConvertToSourcePaths(currentCollectionItem, sourcePathProvider, itemPropertyPath))
     //                     {
     //                         yield return (path, value, property);
     //                     }
@@ -102,15 +102,15 @@ public static class SubjectUpdatePathExtensions
     // /// <param name="subject">The subject.</param>
     // /// <param name="path">The path.</param>
     // /// <param name="value">The value.</param>
-    // /// <param name="connectorPathProvider">The connector path provider to resolve paths.</param>
+    // /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
     // /// <returns>The update.</returns>
     // public static SubjectUpdate CreateUpdateFromSourcePath(
     //     this IInterceptorSubject subject,
     //     string path,
     //     object? value,
-    //     ISourcePathProvider connectorPathProvider)
+    //     ISourcePathProvider sourcePathProvider)
     // {
-    //     return subject.CreateUpdateFromSourcePaths([path], connectorPathProvider,
+    //     return subject.CreateUpdateFromSourcePaths([path], sourcePathProvider,
     //         (_, _) => value);
     // }
     //
@@ -119,16 +119,16 @@ public static class SubjectUpdatePathExtensions
     // /// </summary>
     // /// <param name="subject">The subject.</param>
     // /// <param name="path">The path.</param>
-    // /// <param name="connectorPathProvider">The connector path provider to resolve paths.</param>
+    // /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
     // /// <param name="getPropertyValue">The function to resolve a property value, called per path.</param>
     // /// <returns>The update.</returns>
     // public static SubjectUpdate CreateUpdateFromSourcePath(
     //     this IInterceptorSubject subject,
     //     string path,
-    //     ISourcePathProvider connectorPathProvider,
+    //     ISourcePathProvider sourcePathProvider,
     //     Func<RegisteredSubjectProperty, string, object?> getPropertyValue)
     // {
-    //     return subject.CreateUpdateFromSourcePaths([path], connectorPathProvider, getPropertyValue);
+    //     return subject.CreateUpdateFromSourcePaths([path], sourcePathProvider, getPropertyValue);
     // }
     //
     // /// <summary>
@@ -136,14 +136,14 @@ public static class SubjectUpdatePathExtensions
     // /// </summary>
     // /// <param name="subject">The subject.</param>
     // /// <param name="pathsWithValues">The dictionary with paths and values.</param>
-    // /// <param name="connectorPathProvider">The connector path provider to resolve paths.</param>
+    // /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
     // /// <returns>The update.</returns>
     // public static SubjectUpdate CreateUpdateFromSourcePaths(
     //     this IInterceptorSubject subject,
     //     IReadOnlyDictionary<string, object?> pathsWithValues,
-    //     ISourcePathProvider connectorPathProvider)
+    //     ISourcePathProvider sourcePathProvider)
     // {
-    //     return subject.CreateUpdateFromSourcePaths(pathsWithValues.Keys, connectorPathProvider,
+    //     return subject.CreateUpdateFromSourcePaths(pathsWithValues.Keys, sourcePathProvider,
     //         (_, path) => pathsWithValues[path]);
     // }
     //
@@ -152,13 +152,13 @@ public static class SubjectUpdatePathExtensions
     // /// </summary>
     // /// <param name="subject">The subject.</param>
     // /// <param name="paths">The paths.</param>
-    // /// <param name="connectorPathProvider">The connector path provider to resolve paths.</param>
+    // /// <param name="sourcePathProvider">The source path provider to resolve paths.</param>
     // /// <param name="getPropertyValue">The function to resolve a property value, called per path.</param>
     // /// <returns>The update.</returns>
     // public static SubjectUpdate CreateUpdateFromSourcePaths(
     //     this IInterceptorSubject subject,
     //     IEnumerable<string> paths,
-    //     ISourcePathProvider connectorPathProvider,
+    //     ISourcePathProvider sourcePathProvider,
     //     Func<RegisteredSubjectProperty, string, object?> getPropertyValue)
     // {
     //     var update = new SubjectUpdate();
@@ -169,7 +169,7 @@ public static class SubjectUpdatePathExtensions
     //         var currentSubject = subject;
     //         var currentUpdate = update;
     //
-    //         var segments = connectorPathProvider
+    //         var segments = sourcePathProvider
     //             .ParsePathSegments(path)
     //             .ToArray();
     //
@@ -181,9 +181,9 @@ public static class SubjectUpdatePathExtensions
     //             var registry = currentSubject.Context.GetService<ISubjectRegistry>();
     //             var registeredSubject = registry.KnownSubjects[currentSubject];
     //
-    //             var registeredProperty = connectorPathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
+    //             var registeredProperty = sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
     //             if (registeredProperty is null ||
-    //                 connectorPathProvider.IsPropertyIncluded(registeredProperty) == false)
+    //                 sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
     //             {
     //                 break;
     //             }

@@ -13,21 +13,21 @@ internal class CustomNodeManager : CustomNodeManager2
     private const string PathDelimiter = ".";
 
     private readonly IInterceptorSubject _subject;
-    private readonly OpcUaServerBackgroundService _connector;
+    private readonly OpcUaSubjectServerBackgroundService _source;
     private readonly OpcUaServerConfiguration _configuration;
 
     private readonly ConcurrentDictionary<RegisteredSubject, NodeState> _subjects = new();
 
     public CustomNodeManager(
         IInterceptorSubject subject,
-        OpcUaServerBackgroundService connector,
+        OpcUaSubjectServerBackgroundService source,
         IServerInternal server,
         ApplicationConfiguration applicationConfiguration,
         OpcUaServerConfiguration configuration) :
         base(server, applicationConfiguration, configuration.GetNamespaceUris())
     {
         _subject = subject;
-        _connector = connector;
+        _source = source;
         _configuration = configuration;
     }
 
@@ -44,7 +44,7 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             if (node is BaseDataVariableState { Handle: PropertyReference property })
             {
-                property.RemovePropertyData(OpcUaServerBackgroundService.OpcVariableKey);
+                property.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
             }
         }
     }
@@ -198,11 +198,11 @@ internal class CustomNodeManager : CustomNodeManager2
                     nodeValue = variableNode.Value;
                 }
 
-                _connector.UpdateProperty(property.Reference, timestamp, nodeValue);
+                _source.UpdateProperty(property.Reference, timestamp, nodeValue);
             }
         };
 
-        property.Reference.SetPropertyData(OpcUaServerBackgroundService.OpcVariableKey, variableNode);
+        property.Reference.SetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, variableNode);
     }
 
     private NodeId GetNodeId(RegisteredSubjectProperty property, string fullPath)

@@ -27,9 +27,9 @@ public static class MqttSourceExtensions
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 var pathProvider = new AttributeBasedSourcePathProvider(sourceName, "/", pathPrefix);
-                return new MqttServerBackgroundService(
-                    subject, pathProvider, sp.GetRequiredService<ILogger<MqttServerBackgroundService>>());
+                return new MqttSubjectServerBackgroundService(
+                    subject, pathProvider, sp.GetRequiredService<ILogger<MqttSubjectServerBackgroundService>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttServerBackgroundService>(key));
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectServerBackgroundService>(key));
     }
 }

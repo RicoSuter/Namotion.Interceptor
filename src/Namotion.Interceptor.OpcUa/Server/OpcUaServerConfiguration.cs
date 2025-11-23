@@ -26,7 +26,7 @@ public class OpcUaServerConfiguration
     public string NamespaceUri { get; init; } = "http://namotion.com/Interceptor/";
     
     /// <summary>
-    /// Gets the connector path provider used to map between OPC UA node browse names and C# property names.
+    /// Gets the source path provider used to map between OPC UA node browse names and C# property names.
     /// This provider determines which properties are included and how their names are translated.
     /// </summary>
     public required ISourcePathProvider PathProvider { get; init; }

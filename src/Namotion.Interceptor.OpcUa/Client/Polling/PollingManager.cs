@@ -16,7 +16,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Polling;
 /// </summary>
 internal sealed class PollingManager : IDisposable
 {
-    private readonly OpcUaClientSource _source;
+    private readonly OpcUaSubjectClientSource _source;
     private readonly ILogger _logger;
     private readonly SessionManager _sessionManager;
     private readonly SubjectPropertyWriter _propertyWriter;
@@ -33,7 +33,7 @@ internal sealed class PollingManager : IDisposable
     private ISession? _lastKnownSession;
     private int _disposed;
 
-    public PollingManager(OpcUaClientSource source,
+    public PollingManager(OpcUaSubjectClientSource source,
         SessionManager sessionManager,
         SubjectPropertyWriter propertyWriter,
         OpcUaClientConfiguration configuration,
