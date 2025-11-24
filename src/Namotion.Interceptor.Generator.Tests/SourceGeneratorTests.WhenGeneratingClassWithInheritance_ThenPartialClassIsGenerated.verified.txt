@@ -179,7 +179,7 @@ namespace YourDefaultNamespace
                         isDynamic: false)
                 },
             }
-            .Concat(global::Person.DefaultProperties)
+            .Concat(global::YourDefaultNamespace.Person.DefaultProperties)
             .ToFrozenDictionary();
 
         public Teacher()
