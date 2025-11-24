@@ -66,7 +66,7 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
     public async Task MonitorConnectionAsync(CancellationToken cancellationToken)
     {
         var healthCheckInterval = _configuration.HealthCheckInterval;
-        var maxDelay = _configuration.MaxReconnectDelay;
+        var maxDelay = _configuration.MaximumReconnectDelay;
 
         while (!cancellationToken.IsCancellationRequested)
         {
