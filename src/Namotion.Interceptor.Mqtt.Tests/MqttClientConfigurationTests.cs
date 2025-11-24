@@ -110,7 +110,7 @@ public class MqttClientConfigurationTests
             BrokerPort = 1883,
             PathProvider = new AttributeBasedSourcePathProvider("test", "/", null),
             ReconnectDelay = TimeSpan.FromSeconds(10),
-            MaxReconnectDelay = TimeSpan.FromSeconds(5)
+            MaximumReconnectDelay = TimeSpan.FromSeconds(5)
         };
 
         // Act & Assert
@@ -133,8 +133,8 @@ public class MqttClientConfigurationTests
         Assert.True(config.CleanSession);
         Assert.Equal(TimeSpan.FromSeconds(15), config.KeepAliveInterval);
         Assert.Equal(TimeSpan.FromSeconds(10), config.ConnectTimeout);
-        Assert.Equal(TimeSpan.FromSeconds(5), config.ReconnectDelay);
-        Assert.Equal(TimeSpan.FromMinutes(1), config.MaxReconnectDelay);
+        Assert.Equal(TimeSpan.FromSeconds(2), config.ReconnectDelay);
+        Assert.Equal(TimeSpan.FromMinutes(1), config.MaximumReconnectDelay);
         Assert.NotNull(config.ValueConverter);
     }
 }
