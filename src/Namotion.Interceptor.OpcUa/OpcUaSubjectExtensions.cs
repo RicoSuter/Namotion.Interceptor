@@ -10,11 +10,7 @@ using Namotion.Interceptor.Sources.Paths;
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-<<<<<<<< HEAD:src/Namotion.Interceptor.OpcUa/OpcUaSourceExtensions.cs
-public static class OpcUaSourceExtensions
-========
 public static class OpcUaSubjectExtensions
->>>>>>>> master:src/Namotion.Interceptor.OpcUa/OpcUaSubjectExtensions.cs
 {
     public static IServiceCollection AddOpcUaSubjectClient<TSubject>(
         this IServiceCollection serviceCollection,
