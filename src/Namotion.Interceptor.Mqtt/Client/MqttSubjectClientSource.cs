@@ -1,11 +1,9 @@
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using Namotion.Interceptor.Registry;
@@ -19,7 +17,7 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// <summary>
 /// MQTT client source that subscribes to an MQTT broker and synchronizes properties.
 /// </summary>
-internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
+internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
 {
     private readonly IInterceptorSubject _subject;
     private readonly MqttClientConfiguration _configuration;
@@ -27,6 +25,8 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     private readonly ConcurrentDictionary<string, RegisteredSubjectProperty> _topicToProperty = new();
     private readonly ConcurrentDictionary<RegisteredSubjectProperty, string> _propertyToTopic = new();
+
+    private readonly CancellationTokenSource _shutdownCts = new();
 
     private IMqttClient? _client;
     private MqttClientFactory? _factory;
@@ -103,7 +103,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         // Retained messages are received through normal message handler
-        // No separate initial load needed
+        // No separate initial load needed/possible
         return Task.FromResult<Action?>(null);
     }
 
@@ -178,23 +178,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         {
             changesPool.Return(changesArray);
             messagesPool.Return(messages);
-        }
-    }
-
-    /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // Health monitoring loop
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                // Normal shutdown
-            }
         }
     }
 
@@ -306,7 +289,9 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     private async Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)
     {
-        if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
+        var cancellationToken = _shutdownCts.Token;
+
+        if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1 || cancellationToken.IsCancellationRequested)
         {
             return;
         }
@@ -325,12 +310,12 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             var delay = _configuration.ReconnectDelay;
             var maxDelay = _configuration.MaxReconnectDelay;
 
-            while (Interlocked.CompareExchange(ref _disposed, 0, 0) == 0)
+            while (Interlocked.CompareExchange(ref _disposed, 0, 0) == 0 && !cancellationToken.IsCancellationRequested)
             {
                 try
                 {
                     _logger.LogInformation("Attempting to reconnect to MQTT broker in {Delay}...", delay);
-                    await Task.Delay(delay).ConfigureAwait(false);
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
 
                     if (_client is not null)
                     {
@@ -351,21 +336,26 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                             options.WithCredentials(_configuration.Username, _configuration.Password);
                         }
 
-                        await _client.ConnectAsync(options.Build()).ConfigureAwait(false);
+                        await _client.ConnectAsync(options.Build(), cancellationToken).ConfigureAwait(false);
 
                         _logger.LogInformation("Reconnected to MQTT broker successfully.");
 
                         // Resubscribe to topics
-                        await SubscribeToPropertiesAsync(CancellationToken.None).ConfigureAwait(false);
+                        await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
 
                         // Complete initialization to flush retry queue
                         if (_propertyWriter is not null)
                         {
-                            await _propertyWriter.CompleteInitializationAsync(CancellationToken.None).ConfigureAwait(false);
+                            await _propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
                         }
 
                         break;
                     }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogInformation("Reconnection cancelled due to shutdown.");
+                    break;
                 }
                 catch (Exception ex)
                 {
@@ -386,6 +376,16 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return;
+        }
+
+        // Cancel any pending reconnection attempts
+        try
+        {
+            await _shutdownCts.CancelAsync();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already disposed
         }
 
         var client = _client;
@@ -410,7 +410,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             _client = null;
         }
 
-        Dispose();
+        _shutdownCts.Dispose();
     }
 
     private sealed class AsyncDisposable : IDisposable, IAsyncDisposable

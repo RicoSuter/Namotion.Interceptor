@@ -9,8 +9,6 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// </summary>
 public class MqttClientConfiguration
 {
-    // Connection settings
-
     /// <summary>
     /// Gets or sets the MQTT broker hostname or IP address.
     /// </summary>

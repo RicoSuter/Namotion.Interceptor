@@ -2,7 +2,6 @@ using System;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Mqtt;
 using Namotion.Interceptor.Mqtt.Client;
 using Namotion.Interceptor.Mqtt.Server;
 using Namotion.Interceptor.Sources;
@@ -26,7 +25,7 @@ public static class MqttSubjectExtensions
     {
         return serviceCollection.AddMqttSubjectClient(
             sp => sp.GetRequiredService<TSubject>(),
-            sp => new MqttClientConfiguration
+            _ => new MqttClientConfiguration
             {
                 BrokerHost = brokerHost,
                 BrokerPort = brokerPort,
@@ -55,7 +54,6 @@ public static class MqttSubjectExtensions
                     sp.GetRequiredKeyedService<MqttClientConfiguration>(key),
                     sp.GetRequiredService<ILogger<MqttSubjectClientSource>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectClientSource>(key))
             .AddSingleton<IHostedService>(sp =>
             {
                 var configuration = sp.GetRequiredKeyedService<MqttClientConfiguration>(key);
