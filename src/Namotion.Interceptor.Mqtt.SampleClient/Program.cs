@@ -11,8 +11,6 @@ using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 
-const int personCount = 10_000;
-
 var builder = Host.CreateApplicationBuilder(args);
 
 var context = InterceptorSubjectContext
@@ -24,7 +22,7 @@ var context = InterceptorSubjectContext
     .WithDataAnnotationValidation()
     .WithHostedServices(builder.Services);
 
-var root = Root.CreateWithPersons(context, personCount);
+var root = Root.CreateWithPersons(context);
 context.AddService(root);
 
 builder.Services.AddSingleton(root);

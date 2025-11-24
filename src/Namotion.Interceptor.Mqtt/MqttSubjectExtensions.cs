@@ -30,7 +30,7 @@ public static class MqttSubjectExtensions
                 BrokerHost = brokerHost,
                 BrokerPort = brokerPort,
                 TopicPrefix = topicPrefix,
-                PathProvider = new AttributeBasedSourcePathProvider(sourceName, "/", null)
+                PathProvider = new AttributeBasedSourcePathProvider(sourceName, "/")
             });
     }
 
@@ -54,6 +54,7 @@ public static class MqttSubjectExtensions
                     sp.GetRequiredKeyedService<MqttClientConfiguration>(key),
                     sp.GetRequiredService<ILogger<MqttSubjectClientSource>>());
             })
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectClientSource>(key))
             .AddSingleton<IHostedService>(sp =>
             {
                 var configuration = sp.GetRequiredKeyedService<MqttClientConfiguration>(key);
@@ -81,12 +82,12 @@ public static class MqttSubjectExtensions
     {
         return serviceCollection.AddMqttSubjectServer(
             sp => sp.GetRequiredService<TSubject>(),
-            sp => new MqttServerConfiguration
+            _ => new MqttServerConfiguration
             {
                 BrokerHost = brokerHost,
                 BrokerPort = brokerPort,
                 TopicPrefix = topicPrefix,
-                PathProvider = new AttributeBasedSourcePathProvider(sourceName, "/", null)
+                PathProvider = new AttributeBasedSourcePathProvider(sourceName, "/")
             });
     }
 
