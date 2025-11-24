@@ -5,10 +5,10 @@
 		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 	</PropertyGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\..\..\MQTTnet\Source\MQTTnet\MQTTnet.csproj" />
-		<ProjectReference Include="..\..\..\MQTTnet\Source\MQTTnet.Server\MQTTnet.Server.csproj" />
-<!--		<PackageReference Include="MQTTnet" Version="5.0.1.1416" />-->
-<!--		<PackageReference Include="MQTTnet.Server" Version="5.0.1.1416" />-->
+<!--		<ProjectReference Include="..\..\..\MQTTnet\Source\MQTTnet\MQTTnet.csproj" />-->
+<!--		<ProjectReference Include="..\..\..\MQTTnet\Source\MQTTnet.Server\MQTTnet.Server.csproj" />-->
+		<PackageReference Include="MQTTnet" Version="5.0.1.1416" />
+		<PackageReference Include="MQTTnet.Server" Version="5.0.1.1416" />
 	</ItemGroup>
 	<ItemGroup>
 	  <ProjectReference Include="..\Namotion.Interceptor.Sources\Namotion.Interceptor.Sources.csproj" />
