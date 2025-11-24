@@ -21,7 +21,6 @@ namespace Namotion.Interceptor.Mqtt
         private readonly string _serverClientId = "Server_" + Guid.NewGuid().ToString("N");
 
         private readonly IInterceptorSubject _subject;
-        private readonly IInterceptorSubjectContext _context;
         private readonly ISourcePathProvider _pathProvider;
         private readonly ILogger _logger;
         private readonly TimeSpan? _bufferTime;
@@ -41,7 +40,6 @@ namespace Namotion.Interceptor.Mqtt
             TimeSpan? bufferTime = null)
         {
             _subject = subject;
-            _context = subject.Context;
             _pathProvider = pathProvider;
             _logger = logger;
             _bufferTime = bufferTime;
@@ -55,7 +53,7 @@ namespace Namotion.Interceptor.Mqtt
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             var changeQueueProcessor = new ChangeQueueProcessor(
-                source: this, _context, 
+                source: this, _subject.Context, 
                 propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync, 
                 _bufferTime, _logger);
 

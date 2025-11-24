@@ -8,7 +8,7 @@ using Namotion.Interceptor.Sources.Paths;
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class MqttSourceExtensions
+public static class MqttSubjectExtensions
 {
     public static IServiceCollection AddMqttSubjectServer<TSubject>(
         this IServiceCollection serviceCollection, string sourceName, string? pathPrefix = null)
