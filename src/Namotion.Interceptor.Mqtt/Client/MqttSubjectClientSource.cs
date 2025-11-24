@@ -23,8 +23,8 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
     private readonly MqttClientConfiguration _configuration;
     private readonly ILogger _logger;
 
-    private readonly ConcurrentDictionary<string, RegisteredSubjectProperty> _topicToProperty = new();
-    private readonly ConcurrentDictionary<RegisteredSubjectProperty, string> _propertyToTopic = new();
+    private readonly ConcurrentDictionary<string, PropertyReference> _topicToProperty = new();
+    private readonly ConcurrentDictionary<PropertyReference, string> _propertyToTopic = new();
 
     private readonly CancellationTokenSource _shutdownCts = new();
 
@@ -142,7 +142,7 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
                     continue;
                 }
 
-                var topic = GetCachedTopic(property);
+                var topic = GetCachedTopic(change.Property, property);
                 if (topic is null) continue;
 
                 byte[] payload;
@@ -204,10 +204,10 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
 
         foreach (var property in properties)
         {
-            var topic = GetCachedTopic(property);
+            var topic = GetCachedTopic(property.Reference, property);
             if (topic is null) continue;
 
-            _topicToProperty[topic] = property;
+            _topicToProperty[topic] = property.Reference;
             subscribeOptionsBuilder.WithTopicFilter(f => f
                 .WithTopic(topic)
                 .WithQualityOfServiceLevel(_configuration.DefaultQualityOfService));
@@ -218,25 +218,30 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
         _logger.LogInformation("Subscribed to {Count} MQTT topics.", properties.Count);
     }
 
-    private string? GetCachedTopic(RegisteredSubjectProperty property)
+    private string? GetCachedTopic(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
-        return _propertyToTopic.GetOrAdd(property, static (p, state) =>
+        return _propertyToTopic.GetOrAdd(propertyReference, static (_, state) =>
         {
-            var (pathProvider, subject, topicPrefix) = state;
+            var (p, pathProvider, subject, topicPrefix) = state;
             var path = p.TryGetSourcePath(pathProvider, subject);
             if (path is null) return null!;
 
             return topicPrefix is null
                 ? path
                 : string.Concat(topicPrefix, "/", path);
-        }, (_configuration.PathProvider, _subject, _configuration.TopicPrefix))!;
+        }, (property, _configuration.PathProvider, _subject, _configuration.TopicPrefix))!;
     }
 
     private Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
     {
         var topic = e.ApplicationMessage.Topic;
+        if (!_topicToProperty.TryGetValue(topic, out var propertyReference))
+        {
+            return Task.CompletedTask;
+        }
 
-        if (!_topicToProperty.TryGetValue(topic, out var property))
+        var registeredProperty = propertyReference.TryGetRegisteredProperty();
+        if (registeredProperty is null)
         {
             return Task.CompletedTask;
         }
@@ -245,7 +250,7 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
         try
         {
             var payload = e.ApplicationMessage.Payload;
-            value = _configuration.ValueConverter.Deserialize(payload, property.Type);
+            value = _configuration.ValueConverter.Deserialize(payload, registeredProperty.Type);
         }
         catch (Exception ex)
         {
@@ -281,8 +286,8 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
 
         // Use static delegate to avoid allocations on hot path
         propertyWriter.Write(
-            (property, value, this, sourceTimestamp, receivedTimestamp),
-            static state => state.property.Reference.SetValueFromSource(state.Item3, state.sourceTimestamp, state.receivedTimestamp, state.value));
+            (propertyReference, value, this, sourceTimestamp, receivedTimestamp),
+            static state => state.propertyReference.SetValueFromSource(state.Item3, state.sourceTimestamp, state.receivedTimestamp, state.value));
 
         return Task.CompletedTask;
     }

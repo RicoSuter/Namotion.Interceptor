@@ -33,8 +33,8 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     private readonly MqttServerConfiguration _configuration;
     private readonly ILogger _logger;
 
-    // Topic cache to avoid string allocations on hot path
-    private readonly ConcurrentDictionary<RegisteredSubjectProperty, string> _topicCache = new();
+    private readonly ConcurrentDictionary<PropertyReference, string> _propertyToTopic = new();
+    private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
 
     private int _numberOfClients;
     private int _disposed;
@@ -159,7 +159,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                     continue;
                 }
 
-                var topic = GetCachedTopic(registeredProperty);
+                var topic = GetCachedTopic(change.Property, registeredProperty);
                 if (topic is null) continue;
 
                 byte[] payload;
@@ -227,18 +227,18 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         }
     }
 
-    private string? GetCachedTopic(RegisteredSubjectProperty property)
+    private string? GetCachedTopic(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
-        return _topicCache.GetOrAdd(property, static (p, state) =>
+        return _propertyToTopic.GetOrAdd(propertyReference, static (_, state) =>
         {
-            var (pathProvider, subject, topicPrefix) = state;
+            var (p, pathProvider, subject, topicPrefix) = state;
             var path = p.TryGetSourcePath(pathProvider, subject);
             if (path is null) return null!;
 
             return topicPrefix is null
                 ? path
                 : string.Concat(topicPrefix, "/", path);
-        }, (_configuration.PathProvider, _subject, _configuration.TopicPrefix))!;
+        }, (property, _configuration.PathProvider, _subject, _configuration.TopicPrefix))!;
     }
 
     private Task ClientConnectedAsync(ClientConnectedEventArgs arg)
@@ -314,16 +314,30 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             path = topic.Substring(_configuration.TopicPrefix.Length + 1);
         }
 
+        // Get property from cache or resolve it
+        var cachedProperty = _pathToProperty.GetOrAdd(path, static (p, state) =>
+        {
+            var (subject, pathProvider) = state;
+            var (property, _) = subject.TryGetPropertyFromSourcePath(p, pathProvider);
+            return property?.Reference;
+        }, (_subject, _configuration.PathProvider));
+
+        if (cachedProperty is not { } propertyReference)
+        {
+            return Task.CompletedTask;
+        }
+
+        var registeredProperty = propertyReference.TryGetRegisteredProperty();
+        if (registeredProperty is null)
+        {
+            return Task.CompletedTask;
+        }
+
         try
         {
             var payload = args.ApplicationMessage.Payload;
-            var converter = _configuration.ValueConverter;
-            _subject.UpdatePropertyValueFromSourcePath(
-                path,
-                DateTimeOffset.UtcNow,
-                (property, _) => converter.Deserialize(payload, property.Type),
-                _configuration.PathProvider,
-                this);
+            var value = _configuration.ValueConverter.Deserialize(payload, registeredProperty.Type);
+            propertyReference.SetValueFromSource(this, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, value);
         }
         catch (Exception ex)
         {
