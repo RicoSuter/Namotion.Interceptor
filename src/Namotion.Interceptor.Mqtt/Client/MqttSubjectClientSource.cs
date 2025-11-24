@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
+using MQTTnet.Packets;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
@@ -23,8 +24,9 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
     private readonly MqttClientConfiguration _configuration;
     private readonly ILogger _logger;
 
+    // TODO(memory): Might lead to memory leaks
     private readonly ConcurrentDictionary<string, PropertyReference> _topicToProperty = new();
-    private readonly ConcurrentDictionary<PropertyReference, string> _propertyToTopic = new();
+    private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
 
     private readonly CancellationTokenSource _shutdownCts = new();
 
@@ -159,13 +161,25 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
                 }
 
                 // Create message directly without builder to reduce allocations
-                messages[messageCount++] = new MqttApplicationMessage
+                var message = new MqttApplicationMessage
                 {
                     Topic = topic,
                     PayloadSegment = new ArraySegment<byte>(payload),
                     QualityOfServiceLevel = _configuration.DefaultQualityOfService,
                     Retain = _configuration.UseRetainedMessages
                 };
+
+                if (_configuration.SourceTimestampPropertyName is not null)
+                {
+                    message.UserProperties =
+                    [
+                        new MqttUserProperty(
+                            _configuration.SourceTimestampPropertyName,
+                            change.ChangedTimestamp.ToUnixTimeMilliseconds().ToString())
+                    ];
+                }
+
+                messages[messageCount++] = message;
             }
 
             // Publish messages sequentially (less async overhead than Task.WhenAll)
@@ -224,12 +238,8 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
         {
             var (p, pathProvider, subject, topicPrefix) = state;
             var path = p.TryGetSourcePath(pathProvider, subject);
-            if (path is null) return null!;
-
-            return topicPrefix is null
-                ? path
-                : string.Concat(topicPrefix, "/", path);
-        }, (property, _configuration.PathProvider, _subject, _configuration.TopicPrefix))!;
+            return path is null ? null : MqttHelper.BuildTopic(path, topicPrefix);
+        }, (property, _configuration.PathProvider, _subject, _configuration.TopicPrefix));
     }
 
     private Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
@@ -264,25 +274,11 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
             return Task.CompletedTask;
         }
 
-        // Extract source timestamp from user property (MQTT 5.0)
+        // Extract timestamps
         var receivedTimestamp = DateTimeOffset.UtcNow;
-        var sourceTimestamp = receivedTimestamp;
-        var timestampPropertyName = _configuration.SourceTimestampPropertyName;
-        if (timestampPropertyName is not null)
-        {
-            var userProperties = e.ApplicationMessage.UserProperties;
-            if (userProperties is not null)
-            {
-                foreach (var prop in userProperties)
-                {
-                    if (prop.Name == timestampPropertyName && long.TryParse(prop.Value, out var unixMs))
-                    {
-                        sourceTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(unixMs);
-                        break;
-                    }
-                }
-            }
-        }
+        var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
+            e.ApplicationMessage.UserProperties,
+            _configuration.SourceTimestampPropertyName) ?? receivedTimestamp;
 
         // Use static delegate to avoid allocations on hot path
         propertyWriter.Write(

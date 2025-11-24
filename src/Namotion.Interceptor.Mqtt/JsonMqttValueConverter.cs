@@ -10,6 +10,9 @@ namespace Namotion.Interceptor.Mqtt;
 /// </summary>
 public sealed class JsonMqttValueConverter : IMqttValueConverter
 {
+    [ThreadStatic]
+    private static ArrayBufferWriter<byte>? _bufferWriter;
+
     private readonly JsonSerializerOptions _options;
 
     /// <summary>
@@ -32,7 +35,14 @@ public sealed class JsonMqttValueConverter : IMqttValueConverter
     /// <inheritdoc />
     public byte[] Serialize(object? value, Type type)
     {
-        return JsonSerializer.SerializeToUtf8Bytes(value, type, _options);
+        // Reuse thread-local buffer writer to avoid allocations
+        var bufferWriter = _bufferWriter ??= new ArrayBufferWriter<byte>(256);
+        bufferWriter.Clear();
+
+        using var writer = new Utf8JsonWriter(bufferWriter);
+        JsonSerializer.Serialize(writer, value, type, _options);
+
+        return bufferWriter.WrittenSpan.ToArray();
     }
 
     /// <inheritdoc />

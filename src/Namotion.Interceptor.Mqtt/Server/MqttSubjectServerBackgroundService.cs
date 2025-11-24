@@ -33,7 +33,8 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     private readonly MqttServerConfiguration _configuration;
     private readonly ILogger _logger;
 
-    private readonly ConcurrentDictionary<PropertyReference, string> _propertyToTopic = new();
+    // TODO(memory): Might lead to memory leaks
+    private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
     private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
 
     private int _numberOfClients;
@@ -201,11 +202,18 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                 };
             }
 
-            // Publish messages sequentially (less async overhead than Task.WhenAll)
-            for (var i = 0; i < messageCount; i++)
+            // Use batch API for better performance
+            if (messageCount > 0)
             {
-                await server.InjectApplicationMessage(messages[i], cancellationToken).ConfigureAwait(false);
+                await server.InjectApplicationMessages(
+                    new ArraySegment<InjectedMqttApplicationMessage>(messages, 0, messageCount),
+                    cancellationToken).ConfigureAwait(false);
             }
+            
+            // for (var i = 0; i < messageCount; i++)
+            // {
+            //     await server.InjectApplicationMessage(messages[i], cancellationToken).ConfigureAwait(false);
+            // }
         }
         finally
         {
@@ -233,11 +241,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         {
             var (p, pathProvider, subject, topicPrefix) = state;
             var path = p.TryGetSourcePath(pathProvider, subject);
-            if (path is null) return null!;
-
-            return topicPrefix is null
-                ? path
-                : string.Concat(topicPrefix, "/", path);
+            return path is null ? null : MqttHelper.BuildTopic(path, topicPrefix);
         }, (property, _configuration.PathProvider, _subject, _configuration.TopicPrefix))!;
     }
 
@@ -271,21 +275,20 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
             foreach (var (path, property) in properties)
             {
-                var topic = _configuration.TopicPrefix is null
-                    ? path
-                    : string.Concat(_configuration.TopicPrefix, "/", path);
+                var topic = MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
 
                 var payload = _configuration.ValueConverter.Serialize(
                     property.GetValue(),
                     property.Type);
 
-                var message = new MqttApplicationMessageBuilder()
-                    .WithTopic(topic)
-                    .WithPayload(payload)
-                    .WithContentType("application/json")
-                    .WithQualityOfServiceLevel(_configuration.DefaultQualityOfService)
-                    .WithRetainFlag(_configuration.UseRetainedMessages)
-                    .Build();
+                var message = new MqttApplicationMessage
+                {
+                    Topic = topic,
+                    PayloadSegment = new ArraySegment<byte>(payload),
+                    ContentType = "application/json",
+                    QualityOfServiceLevel = _configuration.DefaultQualityOfService,
+                    Retain = _configuration.UseRetainedMessages
+                };
 
                 await server.InjectApplicationMessage(
                     new InjectedMqttApplicationMessage(message) { SenderClientId = _serverClientId },
@@ -300,19 +303,14 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private Task InterceptingPublishAsync(InterceptingPublishEventArgs args)
     {
-        if (args.ClientId == _serverClientId)
+        // Skip messages from this server (injected messages may have null/empty ClientId)
+        if (string.IsNullOrEmpty(args.ClientId) || args.ClientId == _serverClientId)
         {
             return Task.CompletedTask;
         }
 
         var topic = args.ApplicationMessage.Topic;
-
-        // Strip topic prefix if present
-        var path = topic;
-        if (_configuration.TopicPrefix is not null && topic.StartsWith(_configuration.TopicPrefix + "/", StringComparison.Ordinal))
-        {
-            path = topic.Substring(_configuration.TopicPrefix.Length + 1);
-        }
+        var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
 
         // Get property from cache or resolve it
         var cachedProperty = _pathToProperty.GetOrAdd(path, static (p, state) =>
@@ -337,7 +335,14 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         {
             var payload = args.ApplicationMessage.Payload;
             var value = _configuration.ValueConverter.Deserialize(payload, registeredProperty.Type);
-            propertyReference.SetValueFromSource(this, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, value);
+
+            // Extract timestamps
+            var receivedTimestamp = DateTimeOffset.UtcNow;
+            var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
+                args.ApplicationMessage.UserProperties,
+                _configuration.SourceTimestampPropertyName) ?? receivedTimestamp;
+
+            propertyReference.SetValueFromSource(this, sourceTimestamp, receivedTimestamp, value);
         }
         catch (Exception ex)
         {
