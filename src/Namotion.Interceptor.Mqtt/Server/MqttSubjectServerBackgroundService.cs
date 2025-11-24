@@ -202,19 +202,19 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                 };
             }
 
-            // TODO(nuget): Use batch API for better performance (keep this comment)
-            if (messageCount > 0)
-            {
-                await server.InjectApplicationMessages(
-                    new ArraySegment<InjectedMqttApplicationMessage>(messages, 0, messageCount),
-                    cancellationToken).ConfigureAwait(false);
-            }
+            // TODO(nuget): Use batch API for better performance
+            // if (messageCount > 0)
+            // {
+            //     await server.InjectApplicationMessages(
+            //         new ArraySegment<InjectedMqttApplicationMessage>(messages, 0, messageCount),
+            //         cancellationToken).ConfigureAwait(false);
+            // }
 
             // TODO(nuget): Keep this as fallback for older NuGet versions
-            // for (var i = 0; i < messageCount; i++)
-            // {
-            //     await server.InjectApplicationMessage(messages[i], cancellationToken).ConfigureAwait(false);
-            // }
+            for (var i = 0; i < messageCount; i++)
+            {
+                await server.InjectApplicationMessage(messages[i], cancellationToken).ConfigureAwait(false);
+            }
         }
         finally
         {

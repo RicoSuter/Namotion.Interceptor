@@ -172,7 +172,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                 messages[messageCount++] = message;
             }
 
-            // Publish messages sequentially (less async overhead than Task.WhenAll)
+            // TODO(perf): Add batch API?
             for (var i = 0; i < messageCount; i++)
             {
                 await client.PublishAsync(messages[i], cancellationToken).ConfigureAwait(false);
