@@ -81,7 +81,7 @@ public class MqttClientConfiguration
     /// <summary>
     /// Gets or sets the maximum delay between reconnection attempts (for exponential backoff). Default is 60 seconds.
     /// </summary>
-    public TimeSpan MaxReconnectDelay { get; init; } = TimeSpan.FromSeconds(60);
+    public TimeSpan MaximumReconnectDelay { get; init; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Gets or sets the keep-alive interval. Default is 15 seconds.
@@ -152,9 +152,9 @@ public class MqttClientConfiguration
             throw new ArgumentException($"ReconnectDelay must be positive, got: {ReconnectDelay}", nameof(ReconnectDelay));
         }
 
-        if (MaxReconnectDelay < ReconnectDelay)
+        if (MaximumReconnectDelay < ReconnectDelay)
         {
-            throw new ArgumentException($"MaxReconnectDelay must be >= ReconnectDelay, got: {MaxReconnectDelay}", nameof(MaxReconnectDelay));
+            throw new ArgumentException($"MaxReconnectDelay must be >= ReconnectDelay, got: {MaximumReconnectDelay}", nameof(MaximumReconnectDelay));
         }
 
         if (WriteRetryQueueSize < 0)
