@@ -22,7 +22,7 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// <summary>
 /// Background service that hosts an MQTT broker and publishes property changes.
 /// </summary>
-public class MqttSubjectServerBackgroundService : BackgroundService
+public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDisposable
 {
     private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool
         = new(() => new List<MqttUserProperty>(1));
@@ -37,6 +37,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService
     private readonly ConcurrentDictionary<RegisteredSubjectProperty, string> _topicCache = new();
 
     private int _numberOfClients;
+    private int _disposed;
     private MqttServer? _mqttServer;
 
     /// <summary>
@@ -337,5 +338,40 @@ public class MqttSubjectServerBackgroundService : BackgroundService
         Interlocked.Decrement(ref _numberOfClients);
         _logger.LogInformation("Client {ClientId} disconnected. Total clients: {Count}", arg.ClientId, _numberOfClients);
         return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
+
+        var server = _mqttServer;
+        if (server is not null)
+        {
+            server.ClientConnectedAsync -= ClientConnectedAsync;
+            server.ClientDisconnectedAsync -= ClientDisconnectedAsync;
+            server.InterceptingPublishAsync -= InterceptingPublishAsync;
+
+            if (IsListening)
+            {
+                try
+                {
+                    await server.StopAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error stopping MQTT server.");
+                }
+            }
+
+            server.Dispose();
+            _mqttServer = null;
+        }
+
+        IsListening = false;
+        Dispose();
     }
 }
