@@ -34,12 +34,12 @@ public class OpcUaClientConfiguration
     public int MaximumItemsPerSubscription { get; init; } = 1000;
 
     /// <summary>
-    /// Gets the maximum number of write operations to buffer when disconnected. Default is 1000.
+    /// Gets the maximum number of write operations to queue for retry when disconnected. Default is 1000.
     /// When the session is disconnected, write operations are queued up to this limit.
     /// Once reconnected, queued writes are flushed to the server in order (FIFO).
-    /// Set to 0 to disable write buffering (writes will be dropped when disconnected).
+    /// Set to 0 to disable write retry queue (writes will be dropped when disconnected).
     /// </summary>
-    public int WriteQueueSize { get; init; } = 1000;
+    public int WriteRetryQueueSize { get; init; } = 1000;
 
     /// <summary>
     /// Gets a value indicating whether to enable automatic healing of failed monitored items. Default is true.
@@ -68,7 +68,7 @@ public class OpcUaClientConfiguration
     /// Gets the source path provider used to map between OPC UA node browse names and C# property names.
     /// This provider determines which properties are included and how their names are translated.
     /// </summary>
-    public required ISourcePathProvider SourcePathProvider { get; init; }
+    public required ISourcePathProvider PathProvider { get; init; }
 
     /// <summary>
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
@@ -278,16 +278,16 @@ public class OpcUaClientConfiguration
     public void Validate()
     {
         ArgumentNullException.ThrowIfNull(ServerUrl);
-        ArgumentNullException.ThrowIfNull(SourcePathProvider);
+        ArgumentNullException.ThrowIfNull(PathProvider);
         ArgumentNullException.ThrowIfNull(TypeResolver);
         ArgumentNullException.ThrowIfNull(ValueConverter);
         ArgumentNullException.ThrowIfNull(SubjectFactory);
 
-        if (WriteQueueSize < 0)
+        if (WriteRetryQueueSize < 0)
         {
             throw new ArgumentException(
-                $"WriteQueueSize must be non-negative, got: {WriteQueueSize}",
-                nameof(WriteQueueSize));
+                $"WriteRetryQueueSize must be non-negative, got: {WriteRetryQueueSize}",
+                nameof(WriteRetryQueueSize));
         }
 
         if (EnableAutoHealing)

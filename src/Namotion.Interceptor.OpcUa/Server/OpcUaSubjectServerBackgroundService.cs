@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -9,45 +9,35 @@ using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
+internal class OpcUaSubjectServerBackgroundService : BackgroundService
 {
     internal const string OpcVariableKey = "OpcVariable";
 
     private readonly IInterceptorSubject _subject;
+    private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly OpcUaServerConfiguration _configuration;
 
     private volatile OpcUaSubjectServer? _server;
-    private volatile SourceUpdateBuffer? _updateBuffer;
     private int _consecutiveFailures;
-    
-    public OpcUaSubjectServerSource(
+
+    public OpcUaSubjectServerBackgroundService(
         IInterceptorSubject subject,
         OpcUaServerConfiguration configuration,
-        ILogger<OpcUaSubjectServerSource> logger)
+        ILogger<OpcUaSubjectServerBackgroundService> logger)
     {
         _subject = subject;
+        _context = subject.Context;
         _logger = logger;
         _configuration = configuration;
     }
 
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
+    internal bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return _configuration.SourcePathProvider.IsPropertyIncluded(property);
+        return _configuration.PathProvider.IsPropertyIncluded(property);
     }
 
-    public Task<IDisposable?> StartListeningAsync(SourceUpdateBuffer updateBuffer, CancellationToken cancellationToken)
-    {
-        _updateBuffer = updateBuffer;
-        return Task.FromResult<IDisposable?>(null);
-    }
-
-    public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
-    {
-        return Task.FromResult<Action?>(null);
-    }
-
-    public ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    private ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         var currentInstance = _server?.CurrentInstance;
         if (currentInstance == null)
@@ -55,10 +45,10 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
             return ValueTask.CompletedTask;
         }
 
-        var count = changes.Count;
-        for (var i = 0; i < count; i++)
+        var span = changes.Span;
+        for (var i = 0; i < span.Length; i++)
         {
-            var change = changes[i];
+            var change = span[i];
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
                 data is BaseDataVariableState node &&
                 change.Property.TryGetRegisteredProperty() is { } registeredProperty)
@@ -81,7 +71,12 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _subject.Context.WithRegistry();
+        _context.WithRegistry();
+
+        var changeQueueProcessor = new ChangeQueueProcessor(
+            source: this, _context,
+            propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync, 
+            _configuration.BufferTime, _logger);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -102,8 +97,7 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
                     await application.CheckApplicationInstanceCertificates(true);
                     await application.Start(server);
 
-                    await Task.Delay(-1, stoppingToken);
-
+                    await changeQueueProcessor.ProcessAsync(stoppingToken);
                     _consecutiveFailures = 0;
                 }
                 finally
@@ -182,10 +176,14 @@ internal class OpcUaSubjectServerSource : BackgroundService, ISubjectSource
         {
             var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, registeredProperty);
 
-            var state = (source: this, property, changedTimestamp, receivedTimestamp, value: convertedValue);
-            _updateBuffer?.ApplyUpdate(state,
-                static s => s.property.SetValueFromSource(
-                    s.source, s.changedTimestamp, s.receivedTimestamp, s.value));
+            try
+            {
+                property.SetValueFromSource(this, changedTimestamp, receivedTimestamp, convertedValue);
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Failed to apply property update from OPC UA client.");
+            }
         }
     }
 }

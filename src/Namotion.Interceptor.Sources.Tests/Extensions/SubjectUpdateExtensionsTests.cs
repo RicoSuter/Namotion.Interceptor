@@ -1,8 +1,8 @@
+using Moq;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Sources.Updates;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Tests.Extensions;
 
@@ -144,5 +144,38 @@ public class SubjectUpdateExtensionsTests
         // Assert
         Assert.Equal("John", person.Children.First().FirstName);
         Assert.Equal("Anna", person.Children.Last().FirstName);
+    }
+
+    [Fact]
+    public void WhenApplyingFromSourceWithTransform_ThenTransformIsApplied()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var person = new Person(context);
+        var sourceMock = new Mock<ISubjectSource>();
+        var transformCalled = false;
+
+        // Act
+        person.ApplySubjectUpdateFromSource(
+            new SubjectUpdate
+            {
+                Properties = new Dictionary<string, SubjectPropertyUpdate>
+                {
+                    {
+                        nameof(Person.FirstName), SubjectPropertyUpdate.Create("John")
+                    }
+                }
+            }, 
+            sourceMock.Object, 
+            DefaultSubjectFactory.Instance,
+            (_, update) =>
+            {
+                transformCalled = true;
+                update.Value = "Transformed";
+            });
+
+        // Assert
+        Assert.True(transformCalled);
+        Assert.Equal("Transformed", person.FirstName);
     }
 }

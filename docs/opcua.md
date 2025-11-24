@@ -77,7 +77,7 @@ builder.Services.AddOpcUaSubjectClient(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://localhost:4840",
-        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
         TypeResolver = new OpcUaTypeResolver(logger),
         ValueConverter = new OpcUaValueConverter(),
         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -118,7 +118,7 @@ builder.Services.AddOpcUaSubjectServer(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaServerConfiguration
     {
-        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
         ValueConverter = new OpcUaValueConverter(),
 
         // Optional
@@ -323,9 +323,9 @@ Reference these types with `[OpcUaTypeDefinition]`.
 
 ## Resilience Features
 
-### Write Queue During Disconnection
+### Write Retry Queue During Disconnection
 
-The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored.
+The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored. This feature is provided by the `SubjectSourceBackgroundService`.
 
 ```csharp
 builder.Services.AddOpcUaSubjectClient(
@@ -333,8 +333,8 @@ builder.Services.AddOpcUaSubjectClient(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
-        WriteQueueSize = 1000 // Buffer up to 1000 writes (default)
+        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default)
     });
 
 // Writes are automatically queued during disconnection
@@ -342,9 +342,9 @@ machine.Speed = 100; // Queued if disconnected, written immediately if connected
 ```
 
 **Configuration:**
-- `WriteQueueSize`: Maximum writes to buffer (default: 1000, set to 0 to disable, no maximum limit)
+- `WriteRetryQueueSize`: Maximum writes to buffer (default: 1000, set to 0 to disable)
 - Ring buffer semantics: drops oldest when full, keeps latest values
-- Batched flush: processes 100 items per batch to avoid memory spikes
+- Automatic flush after reconnection
 
 ### Polling Fallback for Unsupported Nodes
 
@@ -356,7 +356,7 @@ builder.Services.AddOpcUaSubjectClient(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
         EnablePollingFallback = true, // Default
         PollingInterval = TimeSpan.FromSeconds(1), // Default: 1 second
         PollingBatchSize = 100 // Default: 100 items per batch
@@ -379,7 +379,7 @@ builder.Services.AddOpcUaSubjectClient(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        SourcePathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
         EnableAutoHealing = true, // Default
         SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10) // Default: 10 seconds
     });

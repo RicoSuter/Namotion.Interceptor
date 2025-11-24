@@ -1,15 +1,14 @@
-﻿using System;
+using System;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mqtt;
-using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class MqttSubjectServerSourceExtensions
+public static class MqttSubjectExtensions
 {
     public static IServiceCollection AddMqttSubjectServer<TSubject>(
         this IServiceCollection serviceCollection, string sourceName, string? pathPrefix = null)
@@ -27,18 +26,10 @@ public static class MqttSubjectServerSourceExtensions
             .AddKeyedSingleton(key, (sp, _) =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                var attributeBasedSourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, "/", pathPrefix);
-                return new MqttSubjectServerSource(
-                    subject, attributeBasedSourcePathProvider, sp.GetRequiredService<ILogger<MqttSubjectServerSource>>());
+                var pathProvider = new AttributeBasedSourcePathProvider(sourceName, "/", pathPrefix);
+                return new MqttSubjectServerBackgroundService(
+                    subject, pathProvider, sp.GetRequiredService<ILogger<MqttSubjectServerBackgroundService>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectServerSource>(key))
-            .AddSingleton<IHostedService>(sp =>
-            {
-                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new SubjectSourceBackgroundService(
-                    sp.GetRequiredKeyedService<MqttSubjectServerSource>(key),
-                    subject.Context,
-                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>());
-            });
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectServerBackgroundService>(key));
     }
 }
