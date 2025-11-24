@@ -27,7 +27,7 @@ public partial class Root
     /// <summary>
     /// Creates a Root with pre-instantiated persons for testing.
     /// </summary>
-    public static Root CreateWithPersons(IInterceptorSubjectContext context, int count)
+    public static Root CreateWithPersons(IInterceptorSubjectContext context, int count = 20_000)
     {
         var root = new Root(context);
         var persons = new Person[count];

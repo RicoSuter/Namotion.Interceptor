@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Packets;
@@ -18,23 +19,24 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// <summary>
 /// MQTT client source that subscribes to an MQTT broker and synchronizes properties.
 /// </summary>
-internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
+internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
 {
     private readonly IInterceptorSubject _subject;
     private readonly MqttClientConfiguration _configuration;
     private readonly ILogger _logger;
 
+    private readonly MqttClientFactory _factory;
+
     // TODO(memory): Might lead to memory leaks
     private readonly ConcurrentDictionary<string, PropertyReference> _topicToProperty = new();
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
 
-    private readonly CancellationTokenSource _shutdownCts = new();
-
     private IMqttClient? _client;
-    private MqttClientFactory? _factory;
     private SubjectPropertyWriter? _propertyWriter;
+    private MqttConnectionMonitor? _connectionMonitor;
+
     private int _disposed;
-    private int _isReconnecting;
+    private volatile bool _isStarted;
 
     public MqttSubjectClientSource(
         IInterceptorSubject subject,
@@ -44,6 +46,8 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
         _subject = subject ?? throw new ArgumentNullException(nameof(subject));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        _factory = new MqttClientFactory();
 
         configuration.Validate();
     }
@@ -59,40 +63,32 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
     public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
         _propertyWriter = propertyWriter;
-
         _logger.LogInformation("Connecting to MQTT broker at {Host}:{Port}.", _configuration.BrokerHost, _configuration.BrokerPort);
 
-        _factory = new MqttClientFactory();
         _client = _factory.CreateMqttClient();
-
         _client.ApplicationMessageReceivedAsync += OnMessageReceivedAsync;
         _client.DisconnectedAsync += OnDisconnectedAsync;
 
-        var options = new MqttClientOptionsBuilder()
-            .WithTcpServer(_configuration.BrokerHost, _configuration.BrokerPort)
-            .WithClientId(_configuration.ClientId)
-            .WithCleanSession(_configuration.CleanSession)
-            .WithKeepAlivePeriod(_configuration.KeepAliveInterval)
-            .WithTimeout(_configuration.ConnectTimeout);
-
-        if (_configuration.UseTls)
-        {
-            options.WithTlsOptions(o => o.UseTls());
-        }
-
-        if (_configuration.Username is not null)
-        {
-            options.WithCredentials(_configuration.Username, _configuration.Password);
-        }
-
-        await _client.ConnectAsync(options.Build(), cancellationToken).ConfigureAwait(false);
-
+        await _client.ConnectAsync(BuildClientOptions(), cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Connected to MQTT broker successfully.");
 
-        // Subscribe to all property topics
         await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
 
-        return new AsyncDisposable(async () =>
+        _connectionMonitor = new MqttConnectionMonitor(
+            _client,
+            _configuration,
+            _logger,
+            BuildClientOptions,
+            async ct => await OnReconnectedAsync(ct).ConfigureAwait(false),
+            async () =>
+            {
+                _propertyWriter?.StartBuffering();
+                await Task.CompletedTask;
+            });
+
+        _isStarted = true;
+
+        return new MqttConnection(async () =>
         {
             if (_client?.IsConnected == true)
             {
@@ -104,8 +100,7 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
     /// <inheritdoc />
     public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
-        // Retained messages are received through normal message handler
-        // No separate initial load needed/possible
+        // Retained messages are received through the normal message handler: No separate initial load needed/possible
         return Task.FromResult<Action?>(null);
     }
 
@@ -121,23 +116,19 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
         var length = changes.Length;
         if (length == 0) return;
 
-        // Rent arrays from pool to avoid allocations
-        var changesPool = ArrayPool<SubjectPropertyChange>.Shared;
+        // Rent array from pool for messages
         var messagesPool = ArrayPool<MqttApplicationMessage>.Shared;
-
-        var changesArray = changesPool.Rent(length);
         var messages = messagesPool.Rent(length);
         var messageCount = 0;
 
         try
         {
-            // Copy changes to rented array
-            changes.Span.CopyTo(changesArray);
+            var changesSpan = changes.Span;
 
             // Build all messages first
             for (var i = 0; i < length; i++)
             {
-                var change = changesArray[i];
+                var change = changesSpan[i];
                 var property = change.Property.TryGetRegisteredProperty();
                 if (property is null || property.HasChildSubjects)
                 {
@@ -160,7 +151,6 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
                     continue;
                 }
 
-                // Create message directly without builder to reduce allocations
                 var message = new MqttApplicationMessage
                 {
                     Topic = topic,
@@ -190,7 +180,6 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
         }
         finally
         {
-            changesPool.Return(changesArray);
             messagesPool.Return(messages);
         }
     }
@@ -288,87 +277,68 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    private async Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)
+    /// <inheritdoc />
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var cancellationToken = _shutdownCts.Token;
-
-        if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1 || cancellationToken.IsCancellationRequested)
+        // Wait until StartListeningAsync has been called
+        while (!_isStarted && !stoppingToken.IsCancellationRequested)
         {
-            return;
+            await Task.Delay(100, stoppingToken).ConfigureAwait(false);
+        }
+
+        if (_connectionMonitor is not null)
+        {
+            await _connectionMonitor.MonitorConnectionAsync(stoppingToken).ConfigureAwait(false);
+        }
+    }
+
+    private Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)
+    {
+        if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
+        {
+            return Task.CompletedTask;
         }
 
         _logger.LogWarning(e.Exception, "MQTT client disconnected. Reason: {Reason}", e.Reason);
 
-        _propertyWriter?.StartBuffering();
+        // Signal the connection monitor (hybrid approach)
+        _connectionMonitor?.SignalReconnectNeeded();
 
-        if (Interlocked.Exchange(ref _isReconnecting, 1) == 1)
+        return Task.CompletedTask;
+    }
+
+    private async Task OnReconnectedAsync(CancellationToken cancellationToken)
+    {
+        // Resubscribe to topics
+        await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
+
+        // Complete initialization to flush retry queue
+        if (_propertyWriter is not null)
         {
-            return; // Already reconnecting
+            await _propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private MqttClientOptions BuildClientOptions()
+    {
+        var options = new MqttClientOptionsBuilder()
+            .WithTcpServer(_configuration.BrokerHost, _configuration.BrokerPort)
+            .WithClientId(_configuration.ClientId)
+            .WithCleanSession(_configuration.CleanSession)
+            .WithKeepAlivePeriod(_configuration.KeepAliveInterval)
+            .WithTimeout(_configuration.ConnectTimeout);
+
+        if (_configuration.UseTls)
+        {
+            options.WithTlsOptions(o => o.UseTls());
         }
 
-        try
+        if (_configuration.Username is not null)
         {
-            var delay = _configuration.ReconnectDelay;
-            var maxDelay = _configuration.MaxReconnectDelay;
-
-            while (Interlocked.CompareExchange(ref _disposed, 0, 0) == 0 && !cancellationToken.IsCancellationRequested)
-            {
-                try
-                {
-                    _logger.LogInformation("Attempting to reconnect to MQTT broker in {Delay}...", delay);
-                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-
-                    if (_client is not null)
-                    {
-                        var options = new MqttClientOptionsBuilder()
-                            .WithTcpServer(_configuration.BrokerHost, _configuration.BrokerPort)
-                            .WithClientId(_configuration.ClientId)
-                            .WithCleanSession(_configuration.CleanSession)
-                            .WithKeepAlivePeriod(_configuration.KeepAliveInterval)
-                            .WithTimeout(_configuration.ConnectTimeout);
-
-                        if (_configuration.UseTls)
-                        {
-                            options.WithTlsOptions(o => o.UseTls());
-                        }
-
-                        if (_configuration.Username is not null)
-                        {
-                            options.WithCredentials(_configuration.Username, _configuration.Password);
-                        }
-
-                        await _client.ConnectAsync(options.Build(), cancellationToken).ConfigureAwait(false);
-
-                        _logger.LogInformation("Reconnected to MQTT broker successfully.");
-
-                        // Resubscribe to topics
-                        await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
-
-                        // Complete initialization to flush retry queue
-                        if (_propertyWriter is not null)
-                        {
-                            await _propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
-                        }
-
-                        break;
-                    }
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    _logger.LogInformation("Reconnection cancelled due to shutdown.");
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to reconnect to MQTT broker.");
-                    delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, maxDelay.TotalMilliseconds));
-                }
-            }
+            options.WithCredentials(_configuration.Username, _configuration.Password);
         }
-        finally
-        {
-            Interlocked.Exchange(ref _isReconnecting, 0);
-        }
+
+        return options.Build();
     }
 
     /// <inheritdoc />
@@ -379,14 +349,10 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
             return;
         }
 
-        // Cancel any pending reconnection attempts
-        try
+        // Dispose connection monitor
+        if (_connectionMonitor is not null)
         {
-            await _shutdownCts.CancelAsync();
-        }
-        catch (ObjectDisposedException)
-        {
-            // Already disposed
+            await _connectionMonitor.DisposeAsync().ConfigureAwait(false);
         }
 
         var client = _client;
@@ -411,33 +377,7 @@ internal sealed class MqttSubjectClientSource : ISubjectSource, IAsyncDisposable
             _client = null;
         }
 
-        _shutdownCts.Dispose();
-    }
-
-    private sealed class AsyncDisposable : IDisposable, IAsyncDisposable
-    {
-        private readonly Func<ValueTask> _disposeAsync;
-        private int _disposed;
-
-        public AsyncDisposable(Func<ValueTask> disposeAsync)
-        {
-            _disposeAsync = disposeAsync;
-        }
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 0)
-            {
-                _disposeAsync().GetAwaiter().GetResult();
-            }
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 0)
-            {
-                await _disposeAsync().ConfigureAwait(false);
-            }
-        }
+        // Dispose base BackgroundService
+        Dispose();
     }
 }
