@@ -20,16 +20,6 @@ public class MqttServerConfiguration
     public int BrokerPort { get; init; } = 1883;
 
     /// <summary>
-    /// Gets or sets the username for broker authentication.
-    /// </summary>
-    public string? Username { get; init; }
-
-    /// <summary>
-    /// Gets or sets the password for broker authentication.
-    /// </summary>
-    public string? Password { get; init; }
-
-    /// <summary>
     /// Gets or sets the client identifier.
     /// </summary>
     public string ClientId { get; init; } = $"Namotion_{Guid.NewGuid():N}";

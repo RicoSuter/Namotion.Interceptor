@@ -4,12 +4,12 @@ using System.Threading.Tasks;
 
 namespace Namotion.Interceptor.Mqtt.Client;
 
-internal sealed class MqttConnection : IDisposable, IAsyncDisposable
+internal sealed class MqttConnectionLifetime : IDisposable, IAsyncDisposable
 {
     private readonly Func<ValueTask> _disposeAsync;
     private int _disposed;
 
-    public MqttConnection(Func<ValueTask> disposeAsync)
+    public MqttConnectionLifetime(Func<ValueTask> disposeAsync)
     {
         _disposeAsync = disposeAsync;
     }
