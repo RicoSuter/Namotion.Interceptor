@@ -17,7 +17,7 @@ public static class PathExtensions
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
     /// <returns>The result specifying whether the path could be found and the value has been applied.</returns>
-    public static bool UpdatePropertyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, DateTimeOffset timestamp, object? value, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    public static bool UpdatePropertyValueFromSourcePath(this IInterceptorSubject subject, string sourcePath, DateTimeOffset timestamp, object? value, ISourcePathProvider sourcePathProvider, object? source)
     {
         return subject
             .UpdatePropertyValueFromSourcePath(sourcePath, timestamp, (_, _) => value, sourcePathProvider, source);
@@ -36,10 +36,10 @@ public static class PathExtensions
     public static bool UpdatePropertyValueFromSourcePath(this IInterceptorSubject subject,
         string sourcePath, DateTimeOffset timestamp,
         Func<RegisteredSubjectProperty, string, object?> getPropertyValue,
-        ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+        ISourcePathProvider sourcePathProvider, object? source)
     {
         return subject
-            .VisitPropertiesFromSourcePathsWithTimestamp([sourcePath], timestamp, 
+            .VisitPropertiesFromSourcePathsWithTimestamp([sourcePath], timestamp,
                 (property, path, _) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), sourcePathProvider)
             .Count == 1;
     }
@@ -54,7 +54,7 @@ public static class PathExtensions
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
     /// <returns></returns>
-    public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IEnumerable<string> sourcePaths, DateTimeOffset timestamp, Func<RegisteredSubjectProperty, string, object?> getPropertyValue, ISourcePathProvider sourcePathProvider, object? source)
     {
         return subject
             .VisitPropertiesFromSourcePathsWithTimestamp(sourcePaths, timestamp, (property, path, _) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), sourcePathProvider);
@@ -69,7 +69,7 @@ public static class PathExtensions
     /// <param name="sourcePathProvider">The source path provider.</param>
     /// <param name="source">The optional source to mark the write as coming from this source to avoid updates.</param>
     /// <returns>The list of visited paths.</returns>
-    public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, DateTimeOffset timestamp, ISourcePathProvider sourcePathProvider, ISubjectSource? source)
+    public static IEnumerable<string> UpdatePropertyValuesFromSourcePaths(this IInterceptorSubject subject, IReadOnlyDictionary<string, object?> pathsAndValues, DateTimeOffset timestamp, ISourcePathProvider sourcePathProvider, object? source)
     {
         return subject
             .VisitPropertiesFromSourcePathsWithTimestamp(pathsAndValues.Keys, timestamp, (property, path, _) => SetPropertyValue(property, timestamp, pathsAndValues[path], source), sourcePathProvider);
@@ -85,7 +85,7 @@ public static class PathExtensions
         }
     }
 
-    private static void SetPropertyValue(RegisteredSubjectProperty property, DateTimeOffset timestamp, object? value, ISubjectSource? source)
+    private static void SetPropertyValue(RegisteredSubjectProperty property, DateTimeOffset timestamp, object? value, object? source)
     {
         if (source is not null)
         {
@@ -202,7 +202,7 @@ public static class PathExtensions
         ISourcePathProvider sourcePathProvider, ISubjectFactory? subjectFactory = null)
     {
         var visitedPaths = new List<string>();
-        foreach (var (path, property, index) in 
+        foreach (var (path, property, index) in
             GetPropertiesFromSourcePaths(subject, sourcePaths, sourcePathProvider, subjectFactory, useCache: false))
         {
             if (property is not null)
@@ -246,11 +246,11 @@ public static class PathExtensions
         this IInterceptorSubject rootSubject,
         IEnumerable<string> sourcePaths,
         ISourcePathProvider sourcePathProvider,
-        ISubjectFactory? subjectFactory = null, 
+        ISubjectFactory? subjectFactory = null,
         bool useCache = true)
     {
-        var pathValueCache = useCache 
-            ? new Dictionary<string, (RegisteredSubjectProperty property, IInterceptorSubject? subject)>() 
+        var pathValueCache = useCache
+            ? new Dictionary<string, (RegisteredSubjectProperty property, IInterceptorSubject? subject)>()
             : null;
 
         foreach (var sourcePath in sourcePaths)
@@ -302,16 +302,16 @@ public static class PathExtensions
                     }
 
                     property = parentProperty?.IsAttribute == true
-                        ? sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment) 
+                        ? sourcePathProvider.TryGetAttributeFromSegment(parentProperty, segment)
                         : sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
 
-                    if (property is null || 
+                    if (property is null ||
                         sourcePathProvider.IsPropertyIncluded(property) == false)
                     {
                         yield return (sourcePath, null, null);
                         break;
                     }
-                    
+
                     if (!isLastSegment)
                     {
                         nextSubject = TryGetPropertySubjectOrCreate(property, index, subjectFactory);
@@ -349,7 +349,7 @@ public static class PathExtensions
         if (index is not null)
         {
             // TODO: Move to common value handle extension methods
-            // nextSubject = index is not int 
+            // nextSubject = index is not int
             //     ? (registeredProperty.GetValue() as IDictionary)?[index] as IInterceptorSubject
             //     : (registeredProperty.GetValue() as IList)?[(int)index] as IInterceptorSubject;
 

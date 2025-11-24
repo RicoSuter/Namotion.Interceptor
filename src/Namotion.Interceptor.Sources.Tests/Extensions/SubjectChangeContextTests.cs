@@ -1,8 +1,6 @@
-using System.Collections.Concurrent;
 using System.Reactive.Concurrency;
 using Moq;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;

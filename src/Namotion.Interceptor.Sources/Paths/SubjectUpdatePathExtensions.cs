@@ -1,7 +1,3 @@
-using System.Collections;
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
-
 namespace Namotion.Interceptor.Sources.Paths;
 
 public static class SubjectUpdatePathExtensions
@@ -114,7 +110,7 @@ public static class SubjectUpdatePathExtensions
     //     object? value,
     //     ISourcePathProvider sourcePathProvider)
     // {
-    //     return subject.CreateUpdateFromSourcePaths([path], sourcePathProvider, 
+    //     return subject.CreateUpdateFromSourcePaths([path], sourcePathProvider,
     //         (_, _) => value);
     // }
     //
@@ -147,7 +143,7 @@ public static class SubjectUpdatePathExtensions
     //     IReadOnlyDictionary<string, object?> pathsWithValues,
     //     ISourcePathProvider sourcePathProvider)
     // {
-    //     return subject.CreateUpdateFromSourcePaths(pathsWithValues.Keys, sourcePathProvider, 
+    //     return subject.CreateUpdateFromSourcePaths(pathsWithValues.Keys, sourcePathProvider,
     //         (_, path) => pathsWithValues[path]);
     // }
     //
@@ -172,7 +168,7 @@ public static class SubjectUpdatePathExtensions
     //     {
     //         var currentSubject = subject;
     //         var currentUpdate = update;
-    //         
+    //
     //         var segments = sourcePathProvider
     //             .ParsePathSegments(path)
     //             .ToArray();
@@ -181,12 +177,12 @@ public static class SubjectUpdatePathExtensions
     //         {
     //             var (segment, index) = segments[i];
     //             var isLastSegment = i == segments.Length - 1;
-    //             
+    //
     //             var registry = currentSubject.Context.GetService<ISubjectRegistry>();
     //             var registeredSubject = registry.KnownSubjects[currentSubject];
     //
     //             var registeredProperty = sourcePathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
-    //             if (registeredProperty is null || 
+    //             if (registeredProperty is null ||
     //                 sourcePathProvider.IsPropertyIncluded(registeredProperty) == false)
     //             {
     //                 break;
@@ -202,10 +198,10 @@ public static class SubjectUpdatePathExtensions
     //                 currentUpdate = collectionProperty?.Collection?
     //                         .Single(u => Equals(u.Index, index)).Item!
     //                     ?? throw new InvalidOperationException("Collection item could not be found.");
-    //                 
+    //
     //                 currentSubject = item.Subject;
     //             }
-    //             else if (!isLastSegment && 
+    //             else if (!isLastSegment &&
     //                      registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
     //             {
     //                 // handle item update
@@ -214,7 +210,7 @@ public static class SubjectUpdatePathExtensions
     //                 currentUpdate = itemProperty?.Item ?? throw new InvalidOperationException("Item could not be found.");
     //                 currentSubject = item.Subject;
     //             }
-    //             else 
+    //             else
     //             {
     //                 // handle value update
     //                 currentUpdate.Properties[propertyName] = new SubjectPropertyChange
@@ -228,7 +224,7 @@ public static class SubjectUpdatePathExtensions
     //             previousProperty = registeredProperty;
     //         }
     //     }
-    //     
+    //
     //     return update;
     // }
     //
@@ -242,7 +238,7 @@ public static class SubjectUpdatePathExtensions
     //             Kind = SubjectPropertyUpdateKind.Item,
     //             Item = new SubjectUpdate()
     //         };
-    //                     
+    //
     //         currentUpdate.Properties[propertyName] = itemProperty;
     //     }
     //
@@ -268,7 +264,7 @@ public static class SubjectUpdatePathExtensions
     //             Kind = SubjectPropertyUpdateKind.Collection,
     //             Collection = childUpdates
     //         };
-    //                     
+    //
     //         currentUpdate.Properties[propertyName] = collectionProperty;
     //     }
     //

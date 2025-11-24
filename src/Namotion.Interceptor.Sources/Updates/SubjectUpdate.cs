@@ -75,7 +75,7 @@ public class SubjectUpdate
     internal static SubjectUpdate GetOrCreateCompleteUpdate(IInterceptorSubject subject,
         bool createReferenceUpdate,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
-        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates, 
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
         if (createReferenceUpdate && knownSubjectUpdates.TryGetValue(subject, out var u))
@@ -127,7 +127,7 @@ public class SubjectUpdate
     /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <returns>The update.</returns>
     public static SubjectUpdate CreatePartialUpdateFromChanges(
-        IInterceptorSubject subject, 
+        IInterceptorSubject subject,
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
         ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
@@ -140,7 +140,7 @@ public class SubjectUpdate
             for (var index = 0; index < propertyChanges.Length; index++)
             {
                 var change = propertyChanges[index];
-                
+
                 var subjectUpdate = GetOrCreateSubjectUpdate(change.Property.Subject, knownSubjectUpdates);
                 var registeredProperty = change.Property.TryGetRegisteredProperty();
                 if (registeredProperty is null)
@@ -157,11 +157,11 @@ public class SubjectUpdate
                 {
                     // handle property changes
                     var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredProperty, knownSubjectUpdates, propertyUpdates);
-                
+
                     propertyUpdate.ApplyValue(
-                        registeredProperty, change.ChangedTimestamp, change.GetNewValue<object?>(), 
+                        registeredProperty, change.ChangedTimestamp, change.GetNewValue<object?>(),
                         createReferenceUpdate: false, processors, knownSubjectUpdates, propertyUpdates);
-                    
+
                     subjectUpdate.Properties[registeredProperty.Name] = propertyUpdate;
                 }
                 else
@@ -255,33 +255,33 @@ public class SubjectUpdate
         {
             rootProperty = rootProperty.GetAttributedProperty();
         }
-        
+
         // Get or create the root property update (this already calls TryAdd)
         var rootPropertyUpdate = GetOrCreateSubjectPropertyUpdate(
-            rootProperty.Parent.Subject.TryGetRegisteredProperty(rootProperty.Name)!, 
+            rootProperty.Parent.Subject.TryGetRegisteredProperty(rootProperty.Name)!,
             knownSubjectUpdates, propertyUpdates);
-        
+
         // Build the attribute chain from root down to the target attribute
         var currentUpdate = rootPropertyUpdate;
-        
+
         if (property.IsAttribute)
         {
             // Recursive helper to build the chain without allocations
             currentUpdate = BuildAttributeChainRecursive(property, rootPropertyUpdate, propertyUpdates);
         }
-        
+
         // Create the final attribute update
         var finalAttributeUpdate = GetOrCreateSubjectAttributeUpdate(currentUpdate, attributeName);
-        
+
         // Track final attribute update in propertyUpdates for transformation (exactly once)
-        propertyUpdates?.TryAdd(finalAttributeUpdate, 
+        propertyUpdates?.TryAdd(finalAttributeUpdate,
             new SubjectPropertyUpdateReference(changeProperty ?? property, currentUpdate.Attributes!));
 
         // Apply value if needed
         if (changeProperty is not null && change.HasValue)
         {
             finalAttributeUpdate.ApplyValue(
-                changeProperty, change.Value.ChangedTimestamp, change.Value.GetNewValue<object?>(), 
+                changeProperty, change.Value.ChangedTimestamp, change.Value.GetNewValue<object?>(),
                 createReferenceUpdate: false, processors, knownSubjectUpdates, propertyUpdates: propertyUpdates);
         }
 
@@ -300,10 +300,10 @@ public class SubjectUpdate
 
         var parentProperty = property.GetAttributedProperty();
         var parentUpdate = BuildAttributeChainRecursive(parentProperty, rootUpdate, propertyUpdates);
-        
+
         var attrName = property.AttributeMetadata.AttributeName;
         var attributeUpdate = GetOrCreateSubjectAttributeUpdate(parentUpdate, attrName);
-        
+
         propertyUpdates?.TryAdd(attributeUpdate, new SubjectPropertyUpdateReference(property, parentUpdate.Attributes!));
         return attributeUpdate;
     }

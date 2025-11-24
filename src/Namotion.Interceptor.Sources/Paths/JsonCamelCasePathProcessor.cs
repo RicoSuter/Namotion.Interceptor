@@ -28,7 +28,7 @@ public class JsonCamelCasePathProcessor : ISubjectUpdateProcessor
         {
             TransformDictionaryKeys(update.Attributes);
         }
-        
+
         return update;
     }
 

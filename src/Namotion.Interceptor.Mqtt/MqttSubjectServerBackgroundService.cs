@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -17,18 +16,17 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt
 {
-    public class MqttSubjectServerSource : BackgroundService, ISubjectSource
+    public class MqttSubjectServerBackgroundService : BackgroundService
     {
         private readonly string _serverClientId = "Server_" + Guid.NewGuid().ToString("N");
 
         private readonly IInterceptorSubject _subject;
-        private readonly ISourcePathProvider _sourcePathProvider;
+        private readonly ISourcePathProvider _pathProvider;
         private readonly ILogger _logger;
+        private readonly TimeSpan? _bufferTime;
 
-        private int _numberOfClients = 0;
+        private int _numberOfClients;
         private MqttServer? _mqttServer;
-
-        private SourceUpdateBuffer? _updateBuffer;
 
         public int Port { get; set; } = 1883;
 
@@ -36,17 +34,29 @@ namespace Namotion.Interceptor.Mqtt
 
         public int? NumberOfClients => _numberOfClients;
 
-        public MqttSubjectServerSource(IInterceptorSubject subject,
-            ISourcePathProvider sourcePathProvider,
-            ILogger<MqttSubjectServerSource> logger)
+        public MqttSubjectServerBackgroundService(IInterceptorSubject subject,
+            ISourcePathProvider pathProvider,
+            ILogger<MqttSubjectServerBackgroundService> logger,
+            TimeSpan? bufferTime = null)
         {
             _subject = subject;
-            _sourcePathProvider = sourcePathProvider;
+            _pathProvider = pathProvider;
             _logger = logger;
+            _bufferTime = bufferTime;
+        }
+
+        private bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        {
+            return _pathProvider.IsPropertyIncluded(property);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            var changeQueueProcessor = new ChangeQueueProcessor(
+                source: this, _subject.Context, 
+                propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync, 
+                _bufferTime, _logger);
+
             _mqttServer = new MqttServerFactory()
                 .CreateMqttServer(new MqttServerOptions
                 {
@@ -67,17 +77,22 @@ namespace Namotion.Interceptor.Mqtt
                 {
                     await _mqttServer.StartAsync();
                     IsListening = true;
-
-                    await Task.Delay(Timeout.Infinite, stoppingToken);
-                    await _mqttServer.StopAsync();
-
-                    IsListening = false;
+                    
+                    try
+                    {
+                        await changeQueueProcessor.ProcessAsync(stoppingToken);
+                    }
+                    finally
+                    {
+                        await _mqttServer.StopAsync();
+                        IsListening = false;
+                    }
                 }
                 catch (Exception ex)
                 {
                     IsListening = false;
 
-                    if (ex is TaskCanceledException) return;
+                    if (ex is TaskCanceledException or OperationCanceledException) return;
 
                     _logger.LogError(ex, "Error in MQTT server.");
                     await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
@@ -85,35 +100,28 @@ namespace Namotion.Interceptor.Mqtt
             }
         }
 
-        public bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        private async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
-            return _sourcePathProvider.IsPropertyIncluded(property);
-        }
-
-        public Task<IDisposable?> StartListeningAsync(SourceUpdateBuffer updateBuffer, CancellationToken cancellationToken)
-        {
-            _updateBuffer = updateBuffer;
-            return Task.FromResult<IDisposable?>(null);
-        }
-
-        public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
-        {
-            return Task.FromResult<Action?>(null);
-        }
-
-        public async ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-        {
-            foreach (var (path, change) in changes
-                .Where(c => c.Property.TryGetRegisteredProperty() is { HasChildSubjects: false })
-                .GetSourcePaths(_sourcePathProvider, _subject))
+            for (var i = 0; i < changes.Length; i++)
             {
-                await PublishPropertyValueAsync(path, change.GetNewValue<object?>(), cancellationToken);
+                var change = changes.Span[i];
+                var registeredProperty = change.Property.TryGetRegisteredProperty();
+                if (registeredProperty is not { HasChildSubjects: false })
+                {
+                    continue;
+                }
+
+                var path = registeredProperty.TryGetSourcePath(_pathProvider, _subject);
+                if (path is not null)
+                {
+                    await PublishPropertyValueAsync(path, change.GetNewValue<object?>(), cancellationToken);
+                }
             }
         }
 
         private Task ClientConnectedAsync(ClientConnectedEventArgs arg)
         {
-            _numberOfClients++;
+            Interlocked.Increment(ref _numberOfClients);
 
             Task.Run(async () =>
             {
@@ -122,7 +130,7 @@ namespace Namotion.Interceptor.Mqtt
                     .TryGetRegisteredSubject()?
                     .GetAllProperties()
                     .Where(p => !p.HasChildSubjects)
-                    .GetSourcePaths(_sourcePathProvider, _subject) ?? [])
+                    .GetSourcePaths(_pathProvider, _subject) ?? [])
                 {
                     // TODO: Send only to new client
                     await PublishPropertyValueAsync(path, property.GetValue(), CancellationToken.None);
@@ -141,7 +149,7 @@ namespace Namotion.Interceptor.Mqtt
                         Topic = path,
                         ContentType = "application/json",
                         PayloadSegment = new ArraySegment<byte>(
-                            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))),
+                            JsonSerializer.SerializeToUtf8Bytes(value)),
                     })
                 {
                     SenderClientId = _serverClientId
@@ -158,29 +166,25 @@ namespace Namotion.Interceptor.Mqtt
             var path = args.ApplicationMessage.Topic;
             var payload = Encoding.UTF8.GetString(args.ApplicationMessage.Payload);
 
-            var state = (source: this, path, payload);
-            _updateBuffer?.ApplyUpdate(state, static s =>
+            try
             {
-                try
-                {
-                    var document = JsonDocument.Parse(s.payload);
-                    s.source._subject.UpdatePropertyValueFromSourcePath(s.path,
-                        DateTimeOffset.UtcNow, // TODO: What timestamp to use here?
-                        (property, _) => document.Deserialize(property.Type),
-                        s.source._sourcePathProvider, s.source);
-                }
-                catch (Exception ex)
-                {
-                    s.source._logger.LogError(ex, "Failed to deserialize MQTT payload.");
-                }
-            });
-            
+                var document = JsonDocument.Parse(payload);
+                _subject.UpdatePropertyValueFromSourcePath(path,
+                    DateTimeOffset.UtcNow, // TODO: What timestamp to use here?
+                    (property, _) => document.Deserialize(property.Type),
+                    _pathProvider, this);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to deserialize MQTT payload.");
+            }
+
             return Task.CompletedTask;
         }
 
         private Task ClientDisconnectedAsync(ClientDisconnectedEventArgs arg)
         {
-            _numberOfClients--;
+            Interlocked.Decrement(ref _numberOfClients);
             return Task.CompletedTask;
         }
     }

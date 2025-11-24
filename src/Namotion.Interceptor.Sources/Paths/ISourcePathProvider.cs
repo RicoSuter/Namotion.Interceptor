@@ -1,4 +1,4 @@
-﻿using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Sources.Paths;
 
@@ -13,14 +13,14 @@ public interface ISourcePathProvider
     /// <param name="property">The property.</param>
     /// <returns>The result.</returns>
     bool IsPropertyIncluded(RegisteredSubjectProperty property);
-    
+
     /// <summary>
     /// Gets the name of the property in the source.
     /// </summary>
     /// <param name="property">The property.</param>
     /// <returns>The property name.</returns>
     string? TryGetPropertySegment(RegisteredSubjectProperty property);
-    
+
     /// <summary>
     /// Gets the full path of the property in the source.
     /// </summary>
@@ -43,7 +43,7 @@ public interface ISourcePathProvider
     /// <returns>The attribute property.</returns>
     RegisteredSubjectProperty? TryGetAttributeFromSegment(RegisteredSubjectProperty property, string attributeSegment);
     // TODO: Use RegisteredSubjectAttribute instead of RegisteredSubjectProperty
-    
+
     /// <summary>
     /// Gets the property using the path segment name in the source.
     /// </summary>

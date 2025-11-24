@@ -1,5 +1,3 @@
-using Namotion.Interceptor.Registry.Abstractions;
-
 namespace Namotion.Interceptor.Sources;
 
 /// <summary>
