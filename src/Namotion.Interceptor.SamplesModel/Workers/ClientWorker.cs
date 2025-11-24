@@ -1,13 +1,12 @@
 using Microsoft.Extensions.Hosting;
-using Namotion.Interceptor.SamplesModel;
 
-namespace Namotion.Interceptor.OpcUa.SampleClient;
+namespace Namotion.Interceptor.SamplesModel.Workers;
 
-public class Worker : BackgroundService
+public class ClientWorker : BackgroundService
 {
     private readonly Root _root;
 
-    public Worker(Root root)
+    public ClientWorker(Root root)
     {
         _root = root;
     }

@@ -1,14 +1,13 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
-using Namotion.Interceptor.SamplesModel;
 
-namespace Namotion.Interceptor.OpcUa.SampleServer;
+namespace Namotion.Interceptor.SamplesModel.Workers;
 
-public class Worker : BackgroundService
+public class ServerWorker : BackgroundService
 {
     private readonly Root _root;
 
-    public Worker(Root root)
+    public ServerWorker(Root root)
     {
         _root = root;
     }
@@ -30,8 +29,6 @@ public class Worker : BackgroundService
                 for (var index = 0; index < _root.Persons.Length; index++)
                 {
                     var person = _root.Persons[index];
-                    
-                    // Triggers 2 changes: FirstName and FullName
                     person.FirstName = Stopwatch.GetTimestamp().ToString();
 
                     if (index % mod == 0) // distribute updates over approx. 0.5s

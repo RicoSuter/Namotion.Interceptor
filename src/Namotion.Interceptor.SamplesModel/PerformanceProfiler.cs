@@ -115,6 +115,9 @@ public class PerformanceProfiler : IDisposable
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(change =>
             {
+                if (change.Source == null)
+                    return;
+                
                 var now = DateTimeOffset.UtcNow;
                 lock (syncLock)
                 {

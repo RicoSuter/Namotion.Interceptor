@@ -20,8 +20,6 @@ public partial class Person
     public partial string? LastName { get; set; }
 
     [Derived]
-    [SourcePath("opc", "FullName")]
-    [SourcePath("mqtt", "FullName")]
     public string FullName => $"{FirstName} {LastName}";
 
     public partial Person? Father { get; set; }
