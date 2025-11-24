@@ -77,18 +77,17 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _connectionMonitor = new MqttConnectionMonitor(
             _client,
             _configuration,
-            _logger,
             BuildClientOptions,
             async ct => await OnReconnectedAsync(ct).ConfigureAwait(false),
             async () =>
             {
                 _propertyWriter?.StartBuffering();
                 await Task.CompletedTask;
-            });
+            }, _logger);
 
         _isStarted = true;
 
-        return new MqttConnection(async () =>
+        return new MqttConnectionLifetime(async () =>
         {
             if (_client?.IsConnected == true)
             {
@@ -120,7 +119,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         var messagesPool = ArrayPool<MqttApplicationMessage>.Shared;
         var messages = messagesPool.Rent(length);
         var messageCount = 0;
-
         try
         {
             var changesSpan = changes.Span;
@@ -300,8 +298,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         }
 
         _logger.LogWarning(e.Exception, "MQTT client disconnected. Reason: {Reason}", e.Reason);
-
-        // Signal the connection monitor (hybrid approach)
         _connectionMonitor?.SignalReconnectNeeded();
 
         return Task.CompletedTask;
@@ -309,10 +305,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     private async Task OnReconnectedAsync(CancellationToken cancellationToken)
     {
-        // Resubscribe to topics
         await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
-
-        // Complete initialization to flush retry queue
         if (_propertyWriter is not null)
         {
             await _propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
@@ -349,7 +342,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             return;
         }
 
-        // Dispose connection monitor
         if (_connectionMonitor is not null)
         {
             await _connectionMonitor.DisposeAsync().ConfigureAwait(false);
@@ -376,8 +368,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             client.Dispose();
             _client = null;
         }
-
-        // Dispose base BackgroundService
+        
         Dispose();
     }
 }

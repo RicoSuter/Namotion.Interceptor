@@ -45,8 +45,6 @@ public class MqttClientConfiguration
     /// </summary>
     public bool CleanSession { get; init; } = true;
 
-    // Topic settings
-
     /// <summary>
     /// Gets or sets the optional topic prefix. When set, all topics are prefixed with this value.
     /// </summary>
@@ -69,23 +67,16 @@ public class MqttClientConfiguration
     /// Retained messages enable initial state loading.
     /// </summary>
     public bool UseRetainedMessages { get; init; } = true;
-
-    // Timeout settings
-
+    
     /// <summary>
     /// Gets or sets the connection timeout. Default is 10 seconds.
     /// </summary>
     public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Gets or sets the timeout for waiting for retained messages during initial load. Default is 2 seconds.
+    /// Gets or sets the initial delay before attempting to reconnect. Default is 2 seconds.
     /// </summary>
-    public TimeSpan RetainedMessageTimeout { get; init; } = TimeSpan.FromSeconds(2);
-
-    /// <summary>
-    /// Gets or sets the initial delay before attempting to reconnect. Default is 5 seconds.
-    /// </summary>
-    public TimeSpan ReconnectDelay { get; init; } = TimeSpan.FromSeconds(5);
+    public TimeSpan ReconnectDelay { get; init; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
     /// Gets or sets the maximum delay between reconnection attempts (for exponential backoff). Default is 60 seconds.
@@ -97,8 +88,12 @@ public class MqttClientConfiguration
     /// </summary>
     public TimeSpan KeepAliveInterval { get; init; } = TimeSpan.FromSeconds(15);
 
-    // Buffering and retry settings
-
+    /// <summary>
+    /// Gets or sets the interval for connection health checks. Default is 30 seconds.
+    /// Health checks use TryPingAsync to verify the connection is still alive.
+    /// </summary>
+    public TimeSpan HealthCheckInterval { get; init; } = TimeSpan.FromSeconds(30);
+    
     /// <summary>
     /// Gets or sets the time to buffer property changes before sending. Default is 8ms.
     /// </summary>
@@ -114,16 +109,12 @@ public class MqttClientConfiguration
     /// Set to 0 to disable write buffering.
     /// </summary>
     public int WriteRetryQueueSize { get; init; } = 1000;
-
-    // Value conversion
-
+    
     /// <summary>
     /// Gets or sets the value converter for serialization/deserialization. Default is JSON.
     /// </summary>
     public IMqttValueConverter ValueConverter { get; init; } = new JsonMqttValueConverter();
-
-    // Timestamp settings
-
+    
     /// <summary>
     /// Gets or sets the MQTT user property name for the source timestamp. Default is "ts".
     /// Set to null to disable timestamp extraction.

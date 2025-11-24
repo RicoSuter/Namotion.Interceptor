@@ -304,7 +304,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private Task InterceptingPublishAsync(InterceptingPublishEventArgs args)
     {
-        // Skip messages from this server (injected messages may have null/empty ClientId)
+        // Skip messages published by this server (injected messages may have null/empty ClientId)
         if (string.IsNullOrEmpty(args.ClientId) || args.ClientId == _serverClientId)
         {
             return Task.CompletedTask;
@@ -313,7 +313,6 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         var topic = args.ApplicationMessage.Topic;
         var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
 
-        // Get property from cache or resolve it
         var cachedProperty = _pathToProperty.GetOrAdd(path, static (p, state) =>
         {
             var (subject, pathProvider) = state;
@@ -337,7 +336,6 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             var payload = args.ApplicationMessage.Payload;
             var value = _configuration.ValueConverter.Deserialize(payload, registeredProperty.Type);
 
-            // Extract timestamps
             var receivedTimestamp = DateTimeOffset.UtcNow;
             var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
                 args.ApplicationMessage.UserProperties,

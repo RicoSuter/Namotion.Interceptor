@@ -15,21 +15,23 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
     private readonly IMqttClient _client;
     private readonly MqttClientConfiguration _configuration;
     private readonly ILogger _logger;
+
     private readonly Func<MqttClientOptions> _optionsBuilder;
     private readonly Func<CancellationToken, Task> _onReconnected;
     private readonly Func<Task> _onDisconnected;
 
     private readonly SemaphoreSlim _reconnectSignal = new(0, 1);
+
     private int _isReconnecting;
     private int _disposed;
 
     public MqttConnectionMonitor(
         IMqttClient client,
         MqttClientConfiguration configuration,
-        ILogger logger,
         Func<MqttClientOptions> optionsBuilder,
         Func<CancellationToken, Task> onReconnected,
-        Func<Task> onDisconnected)
+        Func<Task> onDisconnected,
+        ILogger logger)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
@@ -40,7 +42,7 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
     }
 
     /// <summary>
-    /// Signals that a reconnection is needed (called by DisconnectedAsync event handler).
+    /// Signals that a reconnection is needed (called by DisconnectedAsync event handler in MqttSubjectClientSource).
     /// </summary>
     public void SignalReconnectNeeded()
     {
@@ -57,22 +59,21 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
 
     /// <summary>
     /// Monitors connection health and performs reconnection with exponential backoff.
-    /// This is a blocking method that runs until cancellation is requested.
-    /// Uses hybrid approach: waits for disconnect event OR periodic health check.
+    /// This is a blocking method that runs until a cancellation is requested.
+    /// Uses hybrid approach: Waits for disconnect event OR periodic health check.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token to stop monitoring.</param>
     public async Task MonitorConnectionAsync(CancellationToken cancellationToken)
     {
-        var delay = _configuration.ReconnectDelay;
+        var healthCheckInterval = _configuration.HealthCheckInterval;
         var maxDelay = _configuration.MaxReconnectDelay;
 
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                // Wait for either: disconnect event signal OR periodic health check timeout
-                var signaled = await _reconnectSignal.WaitAsync(delay, cancellationToken).ConfigureAwait(false);
-
+                // Wait for either: Disconnect event signal OR periodic health check timeout
+                var signaled = await _reconnectSignal.WaitAsync(healthCheckInterval, cancellationToken).ConfigureAwait(false);
                 if (signaled)
                 {
                     _logger.LogWarning("MQTT disconnect event received.");
@@ -80,7 +81,7 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
                 }
                 else
                 {
-                    // Periodic health check - use TryPingAsync (recommended by MQTTnet)
+                    // Periodic health check: Use TryPingAsync (recommended by MQTTnet)
                     var isHealthy = _client.IsConnected && await _client.TryPingAsync(cancellationToken).ConfigureAwait(false);
                     if (isHealthy)
                     {
@@ -90,10 +91,7 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
                     _logger.LogWarning("MQTT health check failed.");
                 }
 
-                // At this point, we need to reconnect (either event fired or health check failed)
-                var isConnected = false;
-
-                if (!isConnected || !_client.IsConnected)
+                if (!_client.IsConnected)
                 {
                     if (Interlocked.Exchange(ref _isReconnecting, 1) == 1)
                     {
@@ -102,21 +100,7 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
 
                     try
                     {
-                        // Perform clean disconnect before reconnecting
-                        if (_client.IsConnected)
-                        {
-                            try
-                            {
-                                await _client.DisconnectAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Error during clean disconnect before reconnect.");
-                            }
-                        }
-
                         var reconnectDelay = _configuration.ReconnectDelay;
-
                         while (!cancellationToken.IsCancellationRequested)
                         {
                             try
@@ -129,8 +113,6 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
 
                                 _logger.LogInformation("Reconnected to MQTT broker successfully.");
                                 await _onReconnected(cancellationToken).ConfigureAwait(false);
-
-                                delay = _configuration.ReconnectDelay;
                                 break;
                             }
                             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -141,7 +123,7 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
                             catch (Exception ex)
                             {
                                 _logger.LogError(ex, "Failed to reconnect to MQTT broker.");
-                              
+
                                 // Exponential backoff with jitter
                                 var jitter = Random.Shared.NextDouble() * 0.1 + 0.95; // 0.95 to 1.05
                                 reconnectDelay = TimeSpan.FromMilliseconds(
@@ -167,14 +149,14 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _reconnectSignal.Dispose();
-        await ValueTask.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }
