@@ -93,7 +93,28 @@ public class MqttClientConfiguration
     /// Health checks use TryPingAsync to verify the connection is still alive.
     /// </summary>
     public TimeSpan HealthCheckInterval { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Gets or sets the maximum number of health check iterations while reconnecting before forcing a reset.
+    /// Default is 10 iterations. Combined with HealthCheckInterval, this provides a stall timeout.
+    /// Example: 10 iterations × 30s = 5 minutes timeout for hung reconnection attempts.
+    /// Set to 0 to disable stall detection.
+    /// </summary>
+    public int ReconnectStallThreshold { get; init; } = 10;
     
+    /// <summary>
+    /// Gets or sets the number of consecutive connection failures before the circuit breaker opens.
+    /// Default is 5 failures. When open, reconnection attempts are paused for the cooldown period.
+    /// Set to 0 to disable circuit breaker.
+    /// </summary>
+    public int CircuitBreakerFailureThreshold { get; init; } = 5;
+
+    /// <summary>
+    /// Gets or sets the cooldown period after the circuit breaker opens. Default is 60 seconds.
+    /// During cooldown, no reconnection attempts are made. After cooldown, one retry is allowed.
+    /// </summary>
+    public TimeSpan CircuitBreakerCooldown { get; init; } = TimeSpan.FromSeconds(60);
+
     /// <summary>
     /// Gets or sets the time to buffer property changes before sending. Default is 8ms.
     /// </summary>
@@ -165,6 +186,21 @@ public class MqttClientConfiguration
         if (ValueConverter is null)
         {
             throw new ArgumentException("ValueConverter must be specified.", nameof(ValueConverter));
+        }
+
+        if (ReconnectStallThreshold < 0)
+        {
+            throw new ArgumentException($"ReconnectStallThreshold must be non-negative, got: {ReconnectStallThreshold}", nameof(ReconnectStallThreshold));
+        }
+
+        if (CircuitBreakerFailureThreshold < 0)
+        {
+            throw new ArgumentException($"CircuitBreakerFailureThreshold must be non-negative, got: {CircuitBreakerFailureThreshold}", nameof(CircuitBreakerFailureThreshold));
+        }
+
+        if (CircuitBreakerCooldown <= TimeSpan.Zero && CircuitBreakerFailureThreshold > 0)
+        {
+            throw new ArgumentException($"CircuitBreakerCooldown must be positive when circuit breaker is enabled, got: {CircuitBreakerCooldown}", nameof(CircuitBreakerCooldown));
         }
     }
 }
