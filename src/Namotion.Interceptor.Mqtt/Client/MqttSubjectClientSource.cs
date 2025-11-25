@@ -368,7 +368,11 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             client.Dispose();
             _client = null;
         }
-        
+
+        // Clear caches to allow GC of subject references
+        _topicToProperty.Clear();
+        _propertyToTopic.Clear();
+
         Dispose();
     }
 }
