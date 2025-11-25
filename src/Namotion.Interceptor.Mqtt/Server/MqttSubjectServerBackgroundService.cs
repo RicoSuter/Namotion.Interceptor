@@ -36,15 +36,17 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     // TODO(memory): Might lead to memory leaks
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
     private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
+    private readonly ConcurrentBag<Task> _runningInitialStateTasks = new();
 
     private int _numberOfClients;
     private int _disposed;
+    private int _isListening;
     private MqttServer? _mqttServer;
 
     /// <summary>
     /// Gets whether the MQTT server is listening.
     /// </summary>
-    public bool IsListening { get; private set; }
+    public bool IsListening => Volatile.Read(ref _isListening) == 1;
 
     /// <summary>
     /// Gets the number of connected clients.
@@ -96,7 +98,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             try
             {
                 await _mqttServer.StartAsync().ConfigureAwait(false);
-                IsListening = true;
+                Volatile.Write(ref _isListening, 1);
 
                 _logger.LogInformation("MQTT server started on port {Port}.", _configuration.BrokerPort);
 
@@ -107,12 +109,12 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                 finally
                 {
                     await _mqttServer.StopAsync().ConfigureAwait(false);
-                    IsListening = false;
+                    Volatile.Write(ref _isListening, 0);
                 }
             }
             catch (Exception ex)
             {
-                IsListening = false;
+                Volatile.Write(ref _isListening, 0);
 
                 if (ex is TaskCanceledException or OperationCanceledException)
                 {
@@ -252,7 +254,22 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         _logger.LogInformation("Client {ClientId} connected. Total clients: {Count}", arg.ClientId, _numberOfClients);
 
         // Publish all current property values to new client
-        _ = PublishInitialStateAsync();
+        var task = Task.Run(async () =>
+        {
+            try
+            {
+                if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 0)
+                {
+                    await PublishInitialStateAsync().ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to publish initial state to client {ClientId}", arg.ClientId);
+            }
+        });
+
+        _runningInitialStateTasks.Add(task);
 
         return Task.CompletedTask;
     }
@@ -373,6 +390,16 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             server.ClientDisconnectedAsync -= ClientDisconnectedAsync;
             server.InterceptingPublishAsync -= InterceptingPublishAsync;
 
+            // Wait for all running initial state tasks to complete
+            try
+            {
+                await Task.WhenAll(_runningInitialStateTasks.ToArray()).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error waiting for initial state tasks to complete.");
+            }
+
             if (IsListening)
             {
                 try
@@ -389,7 +416,11 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             _mqttServer = null;
         }
 
-        IsListening = false;
+        // Clear caches to allow GC of subject references
+        _propertyToTopic.Clear();
+        _pathToProperty.Clear();
+
+        Volatile.Write(ref _isListening, 0);
         Dispose();
     }
 }
