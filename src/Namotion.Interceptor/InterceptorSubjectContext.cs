@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
@@ -8,28 +8,40 @@ namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
+    // PERFORMANCE: Group hot-path fields together for cache-line locality
+    // These fields are accessed on EVERY property read/write operation
     private ConcurrentDictionary<Type, Delegate>? _readInterceptorFunction;
     private ConcurrentDictionary<Type, Delegate>? _writeInterceptorFunction;
-    private Delegate? _methodInvocationFunction;
-
-    private HashSet<object>? _services;
     private ConcurrentDictionary<Type, IEnumerable>? _serviceCache;
-    private HashSet<InterceptorSubjectContext>? _usedByContexts;
 
-    private InterceptorSubjectContext? _noServicesSingleFallbackContext;
+    // PERFORMANCE: Not volatile - we use proper locking instead of memory barriers
+    // volatile would force memory barrier on every read, killing performance
+    private Delegate? _methodInvocationFunction;
+    private IInterceptorSubjectContext? _noServicesSingleFallbackContext;
+
+    // PERFORMANCE: HashSet for collections modified only under lock(this)
+    private readonly HashSet<object> _services = [];
     private readonly HashSet<InterceptorSubjectContext> _fallbackContexts = [];
-    
+
+    // PERFORMANCE: ConcurrentDictionary for _usedByContexts because it's modified from
+    // "outside" when another context calls AddFallbackContext(this) - avoids nested locks
+    private readonly ConcurrentDictionary<InterceptorSubjectContext, byte> _usedByContexts = [];
+
     public static InterceptorSubjectContext Create()
     {
         return new InterceptorSubjectContext();
     }
 
+    /// <summary>
+    /// HOT PATH: Called on every property access after interceptor functions are cached.
+    /// Optimization priority: minimize branches, memory barriers, and allocations.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public IEnumerable<TInterface> GetServices<TInterface>()
     {
-        // When there is only a fallback context and no services then we do not
-        // need to create an own cache and waste time creating and maintaining it.
-        // We can just redirect the call to the fallback context.
+        // PERFORMANCE: Fast-path delegation to single fallback context
+        // This optimization avoids cache creation for contexts that only delegate
+        // Load to local variable to avoid multiple volatile reads
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
         {
@@ -37,30 +49,43 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         EnsureInitialized();
+
+        // PERFORMANCE: Fast path - check cache without entering GetOrAdd factory
+        // TryGetValue is faster than GetOrAdd when cache hit rate is high
         if (!_serviceCache!.TryGetValue(typeof(TInterface), out var services))
         {
+            // PERFORMANCE: Only lock when cache miss occurs (rare after warm-up)
+            // Lock is inside GetOrAdd factory to ensure only one thread builds cache per type
             services = _serviceCache!.GetOrAdd(typeof(TInterface), _ =>
             {
                 lock (this)
                 {
-                    return GetServicesWithoutCacheAndLock<TInterface>().ToArray();
+                    // PERFORMANCE: ToArray() materializes LINQ chain immediately
+                    // This prevents repeated enumeration and captures snapshot under lock
+                    return GetServicesWithoutCache<TInterface>().ToArray();
                 }
             });
         }
-        
+
         return (TInterface[])services;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void EnsureInitialized()
     {
+        // PERFORMANCE: Single null check for initialization
+        // After initialization, this is just a cheap null check (no memory barrier)
         if (_serviceCache is null)
         {
             lock (this)
             {
-                _serviceCache = new ConcurrentDictionary<Type, IEnumerable>();
-                _readInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
-                _writeInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
+                // PERFORMANCE: Double-check pattern to ensure single initialization
+                if (_serviceCache is null)
+                {
+                    _serviceCache = new ConcurrentDictionary<Type, IEnumerable>();
+                    _readInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
+                    _writeInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
+                }
             }
         }
     }
@@ -72,11 +97,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (_fallbackContexts.Add(contextImpl))
             {
-                lock (contextImpl)
-                {
-                    contextImpl._usedByContexts ??= [];
-                    contextImpl._usedByContexts.Add(this);
-                }
+                // No lock needed - _usedByContexts is ConcurrentDictionary
+                contextImpl._usedByContexts.TryAdd(this, 0);
                 OnContextChanged();
                 return true;
             }
@@ -88,7 +110,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     protected bool HasFallbackContext(IInterceptorSubjectContext context)
     {
         lock (this)
-            return _fallbackContexts.Contains(context);
+        {
+            return context is InterceptorSubjectContext ctx && _fallbackContexts.Contains(ctx);
+        }
     }
 
     public virtual bool RemoveFallbackContext(IInterceptorSubjectContext context)
@@ -98,11 +122,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (_fallbackContexts.Remove(contextImpl))
             {
-                lock (contextImpl)
-                {
-                    contextImpl._usedByContexts?.Remove(this);
-                }
-
+                // No lock needed - _usedByContexts is ConcurrentDictionary
+                contextImpl._usedByContexts.TryRemove(this, out _);
                 OnContextChanged();
                 return true;
             }
@@ -115,12 +136,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     {
         lock (this)
         {
-            if (GetServicesWithoutCacheAndLock<TService>().Any(exists))
+            if (GetServicesWithoutCache<TService>().Any(exists))
             {
                 return false;
             }
 
-            AddService(factory());
+            _services.Add(factory()!);
+            OnContextChanged();
         }
 
         return true;
@@ -130,7 +152,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     {
         lock (this)
         {
-            _services ??= [];
             _services.Add(service!);
             OnContextChanged();
         }
@@ -148,9 +169,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         };
     }
 
+    /// <summary>
+    /// HOT PATH: Called on EVERY property read.
+    /// Critical to inline and minimize overhead.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> readValue)
     {
+        // PERFORMANCE: Fast-path delegation
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
         {
@@ -162,16 +188,21 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return func(ref context, readValue);
     }
 
+    /// <summary>
+    /// HOT PATH: Called on EVERY property write.
+    /// Critical to inline and minimize overhead.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
     {
+        // PERFORMANCE: Fast-path delegation
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
         {
             noServicesSingleFallbackContext.ExecuteInterceptedWrite(ref context, writeValue);
             return;
         }
-        
+
         EnsureInitialized();
         var action = GetWriteInterceptorFunction<TProperty>();
         action(ref context, writeValue);
@@ -180,25 +211,29 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public object? ExecuteInterceptedInvoke(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {
+        // PERFORMANCE: Fast-path delegation
         var noServicesSingleFallbackContext = _noServicesSingleFallbackContext;
         if (noServicesSingleFallbackContext is not null)
         {
             return noServicesSingleFallbackContext.ExecuteInterceptedInvoke(ref context, invokeMethod);
         }
-        
+
         EnsureInitialized();
         var func = GetMethodInvocationFunction();
         return func(ref context, invokeMethod);
     }
-    
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadFunc<TProperty> GetReadInterceptorFunction<TProperty>()
     {
+        // PERFORMANCE: Fast path - check cache first
         if (_readInterceptorFunction!.TryGetValue(typeof(TProperty), out var cached))
         {
             return (ReadFunc<TProperty>)cached;
         }
 
+        // PERFORMANCE: Cache miss - build and store interceptor chain
+        // This happens once per property type, then cached forever
         var readInterceptors = GetServices<IReadInterceptor>();
         var func = ReadInterceptorFactory<TProperty>.Create(readInterceptors);
         _readInterceptorFunction.TryAdd(typeof(TProperty), func);
@@ -208,31 +243,37 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private WriteAction<TProperty> GetWriteInterceptorFunction<TProperty>()
     {
+        // PERFORMANCE: Fast path - check cache first
         if (_writeInterceptorFunction!.TryGetValue(typeof(TProperty), out var cached))
         {
             return (WriteAction<TProperty>)cached;
         }
 
+        // PERFORMANCE: Cache miss - build and store interceptor chain
         var writeInterceptors = GetServices<IWriteInterceptor>();
         var action = WriteInterceptorFactory<TProperty>.Create(writeInterceptors);
         _writeInterceptorFunction.TryAdd(typeof(TProperty), action);
         return action;
     }
 
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private InvokeFunc GetMethodInvocationFunction()
     {
-        if (_methodInvocationFunction is not null)
+        // PERFORMANCE: Local variable avoids multiple field reads
+        var methodInvocationFunction = _methodInvocationFunction;
+        if (methodInvocationFunction is not null)
         {
-            return (InvokeFunc)_methodInvocationFunction;
+            return (InvokeFunc)methodInvocationFunction;
         }
 
+        // PERFORMANCE: Double-check locking pattern
+        // Lock only on cache miss (rare)
         lock (this)
         {
-            if (_methodInvocationFunction is not null)
+            methodInvocationFunction = _methodInvocationFunction;
+            if (methodInvocationFunction is not null)
             {
-                return (InvokeFunc)_methodInvocationFunction;
+                return (InvokeFunc)methodInvocationFunction;
             }
 
             var methodInterceptors = GetServices<IMethodInterceptor>();
@@ -242,15 +283,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
     }
 
-    private IEnumerable<TInterface> GetServicesWithoutCacheAndLock<TInterface>()
+    /// <summary>
+    /// PERFORMANCE: This method is called only on cache misses (under lock).
+    /// After warm-up, this is rarely executed.
+    /// </summary>
+    private IEnumerable<TInterface> GetServicesWithoutCache<TInterface>()
     {
-        if (_services is null)
-        {
-            return _fallbackContexts
-                .SelectMany(c => c.GetServices<TInterface>())
-                .Distinct();
-        }
-
+        // PERFORMANCE: Direct HashSet enumeration (no .Key property access like ConcurrentDictionary)
+        // Distinct() removes duplicates from fallback chains
         return _services
             .OfType<TInterface>()
             .Concat(_fallbackContexts.SelectMany(c => c.GetServices<TInterface>()))
@@ -265,16 +305,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         _writeInterceptorFunction?.Clear();
         _methodInvocationFunction = null;
 
-        _noServicesSingleFallbackContext = (_services is null || _services.Count == 0) && _fallbackContexts.Count == 1 
+        _noServicesSingleFallbackContext = _services.Count == 0 && _fallbackContexts.Count == 1
             ? _fallbackContexts.Single() : null;
 
-        var usedByContexts = _usedByContexts;
-        if (usedByContexts is not null)
+        // ConcurrentDictionary enumeration is thread-safe (snapshot semantics)
+        foreach (var parent in _usedByContexts)
         {
-            foreach (var parent in usedByContexts)
-            {
-                parent.OnContextChanged();
-            }
+            parent.Key.OnContextChanged();
         }
     }
 }
