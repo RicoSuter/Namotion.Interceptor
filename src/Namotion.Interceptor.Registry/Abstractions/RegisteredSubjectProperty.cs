@@ -312,11 +312,10 @@ public class RegisteredSubjectProperty
     {
         lock (_children)
         {
-            if (!_children.Contains(child))
-            {
-                _children.Add(child);
-                _childrenCache = default; // invalidate cache
-            }
+            // No Contains check needed - LifecycleInterceptor already guarantees
+            // no duplicates via HashSet<PropertyReference?> in _attachedSubjects
+            _children.Add(child);
+            _childrenCache = default;
         }
     }
 
