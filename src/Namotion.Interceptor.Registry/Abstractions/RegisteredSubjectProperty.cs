@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -13,7 +14,8 @@ public class RegisteredSubjectProperty
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
-    private readonly List<SubjectPropertyChild> _children = [];
+    private readonly Lock _childrenLock = new();
+    private ImmutableArray<SubjectPropertyChild> _children = [];
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name, 
@@ -153,15 +155,14 @@ public class RegisteredSubjectProperty
 
     /// <summary>
     /// Gets the collection or dictionary items of the property.
+    /// Thread-safe: Lock ensures atomic struct copy during read.
     /// </summary>
-    public ICollection<SubjectPropertyChild> Children
+    public ImmutableArray<SubjectPropertyChild> Children
     {
         get
         {
-            lock (_children)
-            {
-                return _children.ToArray();
-            }
+            lock (_childrenLock)
+                return _children;
         }
     }
     
@@ -300,36 +301,41 @@ public class RegisteredSubjectProperty
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void AddChild(SubjectPropertyChild child)
     {
-        lock (_children)
+        lock (_childrenLock)
         {
-            if (!_children.Contains(child))
-            {
-                _children.Add(child);
-            }
+            ImmutableInterlocked.Update(ref _children,
+                static (children, toAdd) => children.Contains(toAdd) ? children : children.Add(toAdd),
+                child);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void RemoveChild(SubjectPropertyChild parent)
+    internal void RemoveChild(SubjectPropertyChild child)
     {
-        lock (_children)
+        lock (_childrenLock)
         {
-            var index = _children.IndexOf(parent);
-            if (index == -1)
-            {
-                return;
-            }
-
-            _children.RemoveAt(index);
-
-            if (IsSubjectCollection && index < _children.Count)
-            {
-                for (int i = index; i < _children.Count; i++)
+            ImmutableInterlocked.Update(ref _children,
+                static (children, state) =>
                 {
-                    var child = _children[i];
-                    _children[i] = child with { Index = i };
-                }
-            }
+                    var index = children.IndexOf(state.child);
+                    if (index == -1)
+                        return children;
+
+                    var result = children.RemoveAt(index);
+
+                    if (state.isCollection && index < result.Length)
+                    {
+                        var builder = result.ToBuilder();
+                        for (int i = index; i < builder.Count; i++)
+                        {
+                            builder[i] = builder[i] with { Index = i };
+                        }
+                        result = builder.ToImmutable();
+                    }
+
+                    return result;
+                },
+                (child, isCollection: IsSubjectCollection));
         }
     }
 }
