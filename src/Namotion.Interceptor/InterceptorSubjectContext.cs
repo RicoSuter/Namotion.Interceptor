@@ -10,14 +10,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
     private ConcurrentDictionary<Type, Delegate>? _readInterceptorFunction;
     private ConcurrentDictionary<Type, Delegate>? _writeInterceptorFunction;
-    private ConcurrentDictionary<Type, IEnumerable>? _serviceCache;
     private Delegate? _methodInvocationFunction;
 
-    private readonly HashSet<object> _services = []; // TODO(perf): Keep null initially?
-    private readonly HashSet<InterceptorSubjectContext> _usedByContexts = [];
-    private readonly HashSet<InterceptorSubjectContext> _fallbackContexts = [];
+    private HashSet<object>? _services;
+    private ConcurrentDictionary<Type, IEnumerable>? _serviceCache;
+    private HashSet<InterceptorSubjectContext>? _usedByContexts;
 
     private InterceptorSubjectContext? _noServicesSingleFallbackContext;
+    private readonly HashSet<InterceptorSubjectContext> _fallbackContexts = [];
     
     public static InterceptorSubjectContext Create()
     {
@@ -43,7 +43,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             {
                 lock (this)
                 {
-                    return GetServicesWithoutCache<TInterface>().ToArray();
+                    return GetServicesWithoutCacheAndLock<TInterface>().ToArray();
                 }
             });
         }
@@ -72,7 +72,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (_fallbackContexts.Add(contextImpl))
             {
-                contextImpl._usedByContexts.Add(this);
+                lock (contextImpl)
+                {
+                    contextImpl._usedByContexts ??= [];
+                    contextImpl._usedByContexts.Add(this);
+                }
                 OnContextChanged();
                 return true;
             }
@@ -94,7 +98,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (_fallbackContexts.Remove(contextImpl))
             {
-                contextImpl._usedByContexts.Remove(this);
+                lock (contextImpl)
+                {
+                    contextImpl._usedByContexts?.Remove(this);
+                }
+
                 OnContextChanged();
                 return true;
             }
@@ -107,7 +115,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     {
         lock (this)
         {
-            if (GetServicesWithoutCache<TService>().Any(exists))
+            if (GetServicesWithoutCacheAndLock<TService>().Any(exists))
             {
                 return false;
             }
@@ -122,6 +130,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     {
         lock (this)
         {
+            _services ??= [];
             _services.Add(service!);
             OnContextChanged();
         }
@@ -233,8 +242,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
     }
 
-    private IEnumerable<TInterface> GetServicesWithoutCache<TInterface>()
+    private IEnumerable<TInterface> GetServicesWithoutCacheAndLock<TInterface>()
     {
+        if (_services is null)
+        {
+            return _fallbackContexts
+                .SelectMany(c => c.GetServices<TInterface>())
+                .Distinct();
+        }
+
         return _services
             .OfType<TInterface>()
             .Concat(_fallbackContexts.SelectMany(c => c.GetServices<TInterface>()))
@@ -249,12 +265,16 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         _writeInterceptorFunction?.Clear();
         _methodInvocationFunction = null;
 
-        _noServicesSingleFallbackContext = _services.Count == 0 && _fallbackContexts.Count == 1 
+        _noServicesSingleFallbackContext = (_services is null || _services.Count == 0) && _fallbackContexts.Count == 1 
             ? _fallbackContexts.Single() : null;
 
-        foreach (var parent in _usedByContexts)
+        var usedByContexts = _usedByContexts;
+        if (usedByContexts is not null)
         {
-            parent.OnContextChanged();
+            foreach (var parent in usedByContexts)
+            {
+                parent.OnContextChanged();
+            }
         }
     }
 }
