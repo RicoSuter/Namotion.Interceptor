@@ -14,9 +14,12 @@ public class RegisteredSubjectProperty
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
-    private readonly Lock _childrenLock = new();
-    private ImmutableArray<SubjectPropertyChild> _children = [];
+    // Performance: Using List<T> + ImmutableArray caching pattern for optimal write/read tradeoff
+    private readonly List<SubjectPropertyChild> _children = [];
+    private ImmutableArray<SubjectPropertyChild> _childrenCache;
+
     private readonly PropertyAttributeAttribute? _attributeMetadata;
+    internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name, 
         Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
@@ -155,14 +158,22 @@ public class RegisteredSubjectProperty
 
     /// <summary>
     /// Gets the collection or dictionary items of the property.
-    /// Thread-safe: Lock ensures atomic struct copy during read.
+    /// Thread-safe: Lock on List ensures thread-safe access.
+    /// Performance: Returns cached ImmutableArray - only rebuilds when invalidated.
     /// </summary>
     public ImmutableArray<SubjectPropertyChild> Children
     {
         get
         {
-            lock (_childrenLock)
-                return _children;
+            lock (_children)
+            {
+                if (_childrenCache.IsDefault)
+                {
+                    _childrenCache = [.. _children];
+                }
+
+                return _childrenCache;
+            }
         }
     }
     
@@ -266,8 +277,6 @@ public class RegisteredSubjectProperty
         get => AttributesCache = (AttributesCache ?? Parent.GetPropertyAttributes(Name).ToArray());
     }
     
-    internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
-
     /// <summary>
     /// Gets a property attribute by name.
     /// </summary>
@@ -301,41 +310,38 @@ public class RegisteredSubjectProperty
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void AddChild(SubjectPropertyChild child)
     {
-        lock (_childrenLock)
+        lock (_children)
         {
-            ImmutableInterlocked.Update(ref _children,
-                static (children, toAdd) => children.Contains(toAdd) ? children : children.Add(toAdd),
-                child);
+            if (!_children.Contains(child))
+            {
+                _children.Add(child);
+                _childrenCache = default; // invalidate cache
+            }
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void RemoveChild(SubjectPropertyChild child)
     {
-        lock (_childrenLock)
+        lock (_children)
         {
-            ImmutableInterlocked.Update(ref _children,
-                static (children, state) =>
+            var index = _children.IndexOf(child);
+            if (index == -1)
+                return;
+
+            _children.RemoveAt(index);
+
+            // Handle collection index reordering after removal
+            // For subject collections, update all further indices
+            if (IsSubjectCollection && index < _children.Count)
+            {
+                for (int i = index; i < _children.Count; i++)
                 {
-                    var index = children.IndexOf(state.child);
-                    if (index == -1)
-                        return children;
+                    _children[i] = _children[i] with { Index = i };
+                }
+            }
 
-                    var result = children.RemoveAt(index);
-
-                    if (state.isCollection && index < result.Length)
-                    {
-                        var builder = result.ToBuilder();
-                        for (int i = index; i < builder.Count; i++)
-                        {
-                            builder[i] = builder[i] with { Index = i };
-                        }
-                        result = builder.ToImmutable();
-                    }
-
-                    return result;
-                },
-                (child, isCollection: IsSubjectCollection));
+            _childrenCache = default; // invalidate cache
         }
     }
 }
