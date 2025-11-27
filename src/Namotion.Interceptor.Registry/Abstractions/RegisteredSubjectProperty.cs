@@ -14,14 +14,13 @@ public class RegisteredSubjectProperty
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
-    private readonly Lock _childrenLock = new();
     private readonly List<SubjectPropertyChild> _children = [];
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
     internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
-    public RegisteredSubjectProperty(RegisteredSubject parent, string name, 
+    public RegisteredSubjectProperty(RegisteredSubject parent, string name,
         Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
     {
         Parent = parent;
@@ -29,7 +28,14 @@ public class RegisteredSubjectProperty
         ReflectionAttributes = reflectionAttributes;
         Reference = new PropertyReference(parent.Subject, name);
 
-        _attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
+        foreach (var attribute in reflectionAttributes)
+        {
+            if (attribute is PropertyAttributeAttribute paa)
+            {
+                _attributeMetadata = paa;
+                break;
+            }
+        }
     }
 
     /// <summary>
@@ -158,14 +164,14 @@ public class RegisteredSubjectProperty
 
     /// <summary>
     /// Gets the collection or dictionary items of the property.
-    /// Thread-safe: Dedicated lock ensures thread-safe access.
+    /// Thread-safe: Lock on private readonly List ensures thread-safe access.
     /// Performance: Returns cached ImmutableArray - only rebuilds when invalidated.
     /// </summary>
     public ImmutableArray<SubjectPropertyChild> Children
     {
         get
         {
-            lock (_childrenLock)
+            lock (_children)
             {
                 if (_childrenCache.IsDefault)
                 {
@@ -310,7 +316,7 @@ public class RegisteredSubjectProperty
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void AddChild(SubjectPropertyChild child)
     {
-        lock (_childrenLock)
+        lock (_children)
         {
             // No Contains check needed - LifecycleInterceptor already guarantees
             // no duplicates via HashSet<PropertyReference?> in _attachedSubjects
@@ -322,7 +328,7 @@ public class RegisteredSubjectProperty
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void RemoveChild(SubjectPropertyChild child)
     {
-        lock (_childrenLock)
+        lock (_children)
         {
             var index = _children.IndexOf(child);
             if (index == -1)
