@@ -188,7 +188,7 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
                                 else
                                 {
                                     _logger.LogError(ex,
-                                        "Failed to reconnect to MQTT broker: {Description}",
+                                        "Failed to reconnect to MQTT broker: {Description}.",
                                         description);
                                 }
 
