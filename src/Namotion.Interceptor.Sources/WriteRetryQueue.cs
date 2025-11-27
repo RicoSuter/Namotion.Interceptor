@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -85,6 +86,7 @@ internal sealed class WriteRetryQueue : IDisposable
     /// Flushes pending writes from the queue to the source.
     /// Returns true if flush succeeded (or queue was empty), false if flush failed.
     /// </summary>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     public async ValueTask<bool> FlushAsync(ISubjectSource source, CancellationToken cancellationToken)
     {
         if (IsEmpty)

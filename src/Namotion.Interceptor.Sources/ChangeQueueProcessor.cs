@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -13,6 +15,9 @@ namespace Namotion.Interceptor.Sources;
 /// </summary>
 public class ChangeQueueProcessor
 {
+    private const int FlushDedupedBufferMinSize = 256;
+    private const int FlushDedupedBufferMaxSize = 1024;
+
     private readonly IInterceptorSubjectContext _context;
     private readonly Func<RegisteredSubjectProperty, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
@@ -28,8 +33,8 @@ public class ChangeQueueProcessor
     private readonly List<SubjectPropertyChange> _flushChanges = [];
     private readonly HashSet<PropertyReference> _flushTouchedChanges = new(PropertyReference.Comparer);
 
-    // Reusable buffer for deduped changes (avoids allocation on each flush)
-    private SubjectPropertyChange[] _flushDedupedBuffer = new SubjectPropertyChange[64];
+    // Reusable buffer for deduped changes (rented from ArrayPool to avoid allocations on resize)
+    private SubjectPropertyChange[] _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(FlushDedupedBufferMinSize);
     private int _flushDedupedCount;
 
     // Reusable single-item buffer for the no-buffer (immediate) path
@@ -137,7 +142,8 @@ public class ChangeQueueProcessor
         }
     }
 
-    private async Task TryFlushAsync(CancellationToken cancellationToken)
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
+    private async ValueTask TryFlushAsync(CancellationToken cancellationToken)
     {
         // Fast, allocation-free try-enter
         if (Interlocked.Exchange(ref _flushGate, 1) == 1)
@@ -165,10 +171,11 @@ public class ChangeQueueProcessor
             // Pre-size to avoid resizes under bursts
             _flushTouchedChanges.EnsureCapacity(_flushChanges.Count);
 
-            // Ensure buffer is large enough
+            // Ensure the buffer is large enough (rent from pool to avoid allocations)
             if (_flushDedupedBuffer.Length < _flushChanges.Count)
             {
-                _flushDedupedBuffer = new SubjectPropertyChange[Math.Max(_flushChanges.Count, _flushDedupedBuffer.Length * 2)];
+                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+                _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(_flushChanges.Count);
             }
 
             // Deduplicate by Property, keeping the last write, and preserve order of last occurrences
@@ -181,7 +188,7 @@ public class ChangeQueueProcessor
                 }
             }
 
-            // Reverse in place to keep ascending order of last occurrences without allocations
+            // Reverse in place to keep the ascending order of last occurrences without allocations
             if (_flushDedupedCount > 1)
             {
                 Array.Reverse(_flushDedupedBuffer, 0, _flushDedupedCount);
@@ -215,10 +222,11 @@ public class ChangeQueueProcessor
                 _flushDedupedBuffer[i] = default;
             }
 
-            // Shrink buffer if it grew too large (avoid holding memory after burst)
-            if (_flushDedupedBuffer.Length > 1024 && _flushDedupedCount < _flushDedupedBuffer.Length / 4)
+            // Shrink buffer if it grew too large (return to pool and rent smaller)
+            if (_flushDedupedBuffer.Length >= FlushDedupedBufferMaxSize && _flushDedupedCount < _flushDedupedBuffer.Length / 4)
             {
-                _flushDedupedBuffer = new SubjectPropertyChange[Math.Max(64, _flushDedupedBuffer.Length / 2)];
+                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+                _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(FlushDedupedBufferMinSize);
             }
 
             Volatile.Write(ref _flushGate, 0);
