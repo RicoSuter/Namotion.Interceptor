@@ -52,11 +52,6 @@ namespace Namotion.Interceptor.Mqtt
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            var changeQueueProcessor = new ChangeQueueProcessor(
-                source: this, _subject.Context, 
-                propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync, 
-                _bufferTime, _logger);
-
             _mqttServer = new MqttServerFactory()
                 .CreateMqttServer(new MqttServerOptions
                 {
@@ -77,9 +72,14 @@ namespace Namotion.Interceptor.Mqtt
                 {
                     await _mqttServer.StartAsync();
                     IsListening = true;
-                    
+
                     try
                     {
+                        await using var changeQueueProcessor = new ChangeQueueProcessor(
+                            source: this, _subject.Context,
+                            propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
+                            _bufferTime, _logger);
+
                         await changeQueueProcessor.ProcessAsync(stoppingToken);
                     }
                     finally

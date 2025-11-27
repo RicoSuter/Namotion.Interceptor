@@ -92,9 +92,7 @@ public class RegisteredSubject
     {
         lock (_parentsLock)
         {
-            ImmutableInterlocked.Update(ref _parents,
-                static (parents, toAdd) => parents.Add(toAdd),
-                new SubjectPropertyParent { Property = parent, Index = index });
+            _parents = _parents.Add(new SubjectPropertyParent { Property = parent, Index = index });
         }
     }
 
@@ -102,9 +100,7 @@ public class RegisteredSubject
     {
         lock (_parentsLock)
         {
-            ImmutableInterlocked.Update(ref _parents,
-                static (parents, toRemove) => parents.Remove(toRemove),
-                new SubjectPropertyParent { Property = parent, Index = index });
+            _parents = _parents.Remove(new SubjectPropertyParent { Property = parent, Index = index });
         }
     }
 
