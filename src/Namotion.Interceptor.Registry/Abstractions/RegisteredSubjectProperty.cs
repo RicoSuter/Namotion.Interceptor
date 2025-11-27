@@ -14,6 +14,7 @@ public class RegisteredSubjectProperty
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
+    private readonly Lock _childrenLock = new();
     private readonly List<SubjectPropertyChild> _children = [];
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
 
@@ -157,14 +158,14 @@ public class RegisteredSubjectProperty
 
     /// <summary>
     /// Gets the collection or dictionary items of the property.
-    /// Thread-safe: Lock on List ensures thread-safe access.
+    /// Thread-safe: Dedicated lock ensures thread-safe access.
     /// Performance: Returns cached ImmutableArray - only rebuilds when invalidated.
     /// </summary>
     public ImmutableArray<SubjectPropertyChild> Children
     {
         get
         {
-            lock (_children)
+            lock (_childrenLock)
             {
                 if (_childrenCache.IsDefault)
                 {
@@ -309,7 +310,7 @@ public class RegisteredSubjectProperty
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void AddChild(SubjectPropertyChild child)
     {
-        lock (_children)
+        lock (_childrenLock)
         {
             // No Contains check needed - LifecycleInterceptor already guarantees
             // no duplicates via HashSet<PropertyReference?> in _attachedSubjects
@@ -321,7 +322,7 @@ public class RegisteredSubjectProperty
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void RemoveChild(SubjectPropertyChild child)
     {
-        lock (_children)
+        lock (_childrenLock)
         {
             var index = _children.IndexOf(child);
             if (index == -1)

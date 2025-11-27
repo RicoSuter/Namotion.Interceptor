@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.Sources;
 /// Processes property changes from a queue, buffering and deduplicating them before writing.
 /// Used by both client sources and server background services.
 /// </summary>
-public class ChangeQueueProcessor
+public class ChangeQueueProcessor : IAsyncDisposable
 {
     private const int FlushDedupedBufferMinSize = 256;
     private const int FlushDedupedBufferMaxSize = 1024;
@@ -28,6 +28,7 @@ public class ChangeQueueProcessor
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
     private int _flushGate; // 0 = free, 1 = flushing
+    private bool _disposed;
 
     // Scratch buffers used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
@@ -216,11 +217,9 @@ public class ChangeQueueProcessor
             _flushChanges.Clear();
             _flushTouchedChanges.Clear();
 
-            // Null out references to allow GC (SubjectPropertyChange contains object refs)
-            for (var i = 0; i < _flushDedupedCount; i++)
-            {
-                _flushDedupedBuffer[i] = default;
-            }
+            // Clear entire rented array before potential return to pool.
+            // SubjectPropertyChange contains object references (Source, boxed values) that must be released.
+            Array.Clear(_flushDedupedBuffer, 0, _flushDedupedBuffer.Length);
 
             // Shrink buffer if it grew too large (return to pool and rent smaller)
             if (_flushDedupedBuffer.Length >= FlushDedupedBufferMaxSize && _flushDedupedCount < _flushDedupedBuffer.Length / 4)
@@ -231,5 +230,39 @@ public class ChangeQueueProcessor
 
             Volatile.Write(ref _flushGate, 0);
         }
+    }
+
+    /// <summary>
+    /// Disposes the processor and returns the rented buffer to the pool.
+    /// </summary>
+    public ValueTask DisposeAsync()
+    {
+        if (_disposed)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        _disposed = true;
+
+        // Wait for any in-progress flush to complete
+        SpinWait spinWait = default;
+        while (Interlocked.CompareExchange(ref _flushGate, 1, 0) == 1)
+        {
+            spinWait.SpinOnce();
+        }
+
+        try
+        {
+            // Clear and return the buffer to the pool
+            Array.Clear(_flushDedupedBuffer, 0, _flushDedupedBuffer.Length);
+            ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+            _flushDedupedBuffer = null!;
+        }
+        finally
+        {
+            Volatile.Write(ref _flushGate, 0);
+        }
+
+        return ValueTask.CompletedTask;
     }
 }

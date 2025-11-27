@@ -53,7 +53,7 @@ public class SubjectSourceBackgroundService : BackgroundService
                 {
                     await _propertyWriter.CompleteInitializationAsync(stoppingToken);
 
-                    var processor = new ChangeQueueProcessor(
+                    await using var processor = new ChangeQueueProcessor(
                         _source,
                         _context,
                         prop => _source.IsPropertyIncluded(prop),
@@ -89,7 +89,7 @@ public class SubjectSourceBackgroundService : BackgroundService
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
-    protected async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    private async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (_writeRetryQueue is null)
         {
