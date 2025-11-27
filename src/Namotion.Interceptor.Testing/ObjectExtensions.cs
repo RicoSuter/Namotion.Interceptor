@@ -1,8 +1,10 @@
-﻿namespace Namotion.Interceptor.Testing;
+﻿using System.Collections.Immutable;
+
+namespace Namotion.Interceptor.Testing;
 
 public static class ObjectExtensions
 {
-    public static IEnumerable<TInterface> GetServices<TInterface>(this object obj)
+    public static ImmutableArray<TInterface> GetServices<TInterface>(this object obj)
     {
         return ((IInterceptorSubject)obj).Context.GetServices<TInterface>();
     }
