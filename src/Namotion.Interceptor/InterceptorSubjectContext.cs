@@ -1,5 +1,5 @@
-﻿using System.Collections;
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
 using Namotion.Interceptor.Interceptors;
@@ -10,7 +10,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
     private ConcurrentDictionary<Type, Delegate>? _readInterceptorFunction;
     private ConcurrentDictionary<Type, Delegate>? _writeInterceptorFunction;
-    private ConcurrentDictionary<Type, IEnumerable>? _serviceCache;
+    private ConcurrentDictionary<Type, object>? _serviceCache; // stores ImmutableArray<T> boxed
     private Delegate? _methodInvocationFunction;
 
     private readonly HashSet<object> _services = []; // TODO(perf): Keep null initially?
@@ -25,7 +25,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public IEnumerable<TInterface> GetServices<TInterface>()
+    public ImmutableArray<TInterface> GetServices<TInterface>()
     {
         // When there is only a fallback context and no services then we do not
         // need to create an own cache and waste time creating and maintaining it.
@@ -43,12 +43,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             {
                 lock (this)
                 {
-                    return GetServicesWithoutCache<TInterface>().ToArray();
+                    return GetServicesWithoutCache<TInterface>().ToImmutableArray();
                 }
             });
         }
-        
-        return (TInterface[])services;
+
+        return (ImmutableArray<TInterface>)services;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -58,7 +58,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             lock (this)
             {
-                _serviceCache = new ConcurrentDictionary<Type, IEnumerable>();
+                _serviceCache = new ConcurrentDictionary<Type, object>();
                 _readInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
                 _writeInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
             }
@@ -129,9 +129,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     public TInterface? TryGetService<TInterface>()
     {
-        var services = (TInterface[])GetServices<TInterface>();
-        var length = services.Length;
-        return length switch
+        var services = GetServices<TInterface>();
+        return services.Length switch
         {
             1 => services[0],
             0 => default,
