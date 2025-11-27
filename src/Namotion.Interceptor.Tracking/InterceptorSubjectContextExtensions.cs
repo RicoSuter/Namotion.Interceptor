@@ -4,13 +4,14 @@ using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Recorder;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking;
 
 public static class InterceptorSubjectContextExtensions
 {
     /// <summary>
-    /// Registers full property tracking including equality checks, context inheritance, derived property change detection, and property changed observable.
+    /// Registers full property tracking including equality checks, context inheritance, derived property change detection, transactions, and property changed observable.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
@@ -19,11 +20,24 @@ public static class InterceptorSubjectContextExtensions
         return context
             .WithEqualityCheck()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeObservable()
+            .WithTransactions()               // Before notifications - captures writes
+            .WithPropertyChangeObservable()   // Notifications suppressed for captured writes
             .WithPropertyChangeQueue()
             .WithContextInheritance();
     }
-    
+
+    /// <summary>
+    /// Enables transaction support for the context.
+    /// Should be registered before PropertyChangeObservable/Queue to suppress notifications during capture.
+    /// </summary>
+    /// <param name="context">The context.</param>
+    /// <returns>The context.</returns>
+    public static IInterceptorSubjectContext WithTransactions(this IInterceptorSubjectContext context)
+    {
+        context.TryAddService(() => new SubjectTransactionInterceptor(), _ => true);
+        return context;
+    }
+
     /// <summary>
     /// Registers an interceptor that checks if the new value is different from the current value and only calls inner interceptors when the property has changed.
     /// Uses EqualityComparer.Default for value types or strings and does nothing for reference types.

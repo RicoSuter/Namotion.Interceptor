@@ -5,6 +5,7 @@ using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Sources.Transactions;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -474,6 +475,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         foreach (var property in _propertiesWithOpcData)
         {
             property.RemovePropertyData(OpcUaNodeIdKey);
+            property.RemoveSource();
         }
 
         _propertiesWithOpcData.Clear();
