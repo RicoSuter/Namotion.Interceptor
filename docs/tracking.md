@@ -14,10 +14,11 @@ var context = InterceptorSubjectContext
 
 This is a convenience method that registers:
 - Equality checking to prevent unnecessary change notifications
-- Context inheritance for child subjects
 - Derived property change detection
+- Transaction support for atomic commits
 - Property changed observable (Rx-based)
 - Property changed queue (high performance)
+- Context inheritance for child subjects
 
 You can also enable features individually for more granular control.
 
@@ -108,6 +109,41 @@ person.Name = "John"; // No change triggered (same value)
 ```
 
 Uses `EqualityComparer<T>.Default` for value types and strings, and reference equality for reference types.
+
+## Transactions
+
+Transactions allow you to batch property changes and commit them atomically. Changes are captured during the transaction and applied together on commit, with change notifications fired after all changes are applied.
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking(); // Includes WithTransactions()
+
+var person = new Person(context);
+
+using (var transaction = SubjectTransaction.BeginTransaction())
+{
+    person.FirstName = "John";
+    person.LastName = "Doe";
+
+    // Changes captured but not applied yet
+    // Reading returns pending values (read-your-writes)
+    Console.WriteLine(person.FullName); // Output: John Doe
+
+    await transaction.CommitAsync();
+    // All changes applied, notifications fired
+}
+```
+
+Key features:
+- **Atomic commits**: All changes applied together
+- **Read-your-writes**: Reading returns pending values inside the transaction
+- **Notification suppression**: Change notifications fired after commit, not during capture
+- **Rollback on dispose**: Uncommitted changes discarded if transaction not committed
+
+For external source integration (OPC UA, MQTT, etc.), use `WithSourceTransactions()` from the Sources package to write changes to external sources before applying them to the in-process model.
+
+See [Transactions](tracking-transactions.md) for detailed documentation.
 
 ## Derived Property Change Detection
 

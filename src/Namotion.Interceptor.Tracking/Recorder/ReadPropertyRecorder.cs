@@ -21,6 +21,7 @@ public class ReadPropertyRecorder : IReadInterceptor
         return scope;
     }
     
+    /// <inheritdoc />
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
         var scopes = Scopes.Value;

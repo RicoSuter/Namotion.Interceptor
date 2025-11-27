@@ -3,6 +3,7 @@ using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Sources.Transactions;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -227,7 +228,7 @@ internal class OpcUaSubjectLoader
             AttributeId = Opc.Ua.Attributes.Value,
 
             MonitoringMode = MonitoringMode.Reporting,
-           
+
             SamplingInterval = opcUaNodeAttribute?.SamplingInterval ?? _configuration.DefaultSamplingInterval,
             QueueSize = opcUaNodeAttribute?.QueueSize ?? _configuration.DefaultQueueSize,
             DiscardOldest = opcUaNodeAttribute?.DiscardOldest ?? _configuration.DefaultDiscardOldest,
@@ -238,8 +239,9 @@ internal class OpcUaSubjectLoader
         };
 
         property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
+        property.Reference.SetSource(_source);
         _propertiesWithOpcData.Add(property.Reference);
-        
+
         monitoredItems.Add(monitoredItem);
     }
 
