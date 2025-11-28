@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Registry;
@@ -219,10 +220,10 @@ public class SubjectUpdate
             var parentSubjectPropertyUpdate = GetOrCreateSubjectPropertyUpdate(parentProperty, knownSubjectUpdates, propertyUpdates);
             var children = parentRegisteredSubject.TryGetProperty(parentProperty.Name)?.Children;
 
-            if (children is not null && HasIndexedChildren(children))
+            if (children is { } childrenValue && HasIndexedChildren(childrenValue))
             {
-                var collectionUpdates = new List<SubjectPropertyCollectionUpdate>(children.Count);
-                foreach (var child in children)
+                var collectionUpdates = new List<SubjectPropertyCollectionUpdate>(childrenValue.Length);
+                foreach (var child in childrenValue)
                 {
                     collectionUpdates.Add(new SubjectPropertyCollectionUpdate { Item = GetOrCreateSubjectUpdate(child.Subject, knownSubjectUpdates), Index = child.Index ?? throw new InvalidOperationException("Index must not be null.") });
                 }
@@ -401,7 +402,7 @@ public class SubjectUpdate
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool HasIndexedChildren(ICollection<SubjectPropertyChild> children)
+    private static bool HasIndexedChildren(ImmutableArray<SubjectPropertyChild> children)
     {
         foreach (var child in children)
         {
