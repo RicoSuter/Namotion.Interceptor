@@ -51,7 +51,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     /// <summary>
     /// Gets the number of connected clients.
     /// </summary>
-    public int NumberOfClients => _numberOfClients;
+    public int NumberOfClients => Volatile.Read(ref _numberOfClients);
 
     public MqttSubjectServerBackgroundService(
         IInterceptorSubject subject,
@@ -73,14 +73,6 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var changeQueueProcessor = new ChangeQueueProcessor(
-            source: this,
-            _context,
-            propertyFilter: IsPropertyIncluded,
-            writeHandler: WriteChangesAsync,
-            _configuration.BufferTime,
-            _logger);
-
         var options = new MqttServerOptionsBuilder()
             .WithDefaultEndpoint()
             .WithDefaultEndpointPort(_configuration.BrokerPort)
@@ -104,6 +96,14 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
                 try
                 {
+                    using var changeQueueProcessor = new ChangeQueueProcessor(
+                        source: this,
+                        _context,
+                        propertyFilter: IsPropertyIncluded,
+                        writeHandler: WriteChangesAsync,
+                        _configuration.BufferTime,
+                        _logger);
+
                     await changeQueueProcessor.ProcessAsync(stoppingToken).ConfigureAwait(false);
                 }
                 finally
@@ -142,7 +142,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
         var changesArray = changesPool.Rent(length);
         var messages = messagesPool.Rent(length);
-        var userPropsArray = _configuration.SourceTimestampPropertyName is not null
+        var userPropertiesArray = _configuration.SourceTimestampPropertyName is not null
             ? userPropsArrayPool.Rent(length)
             : null;
         var messageCount = 0;
@@ -162,7 +162,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                     continue;
                 }
 
-                var topic = GetCachedTopic(change.Property, registeredProperty);
+                var topic = TryGetTopicForProperty(change.Property, registeredProperty);
                 if (topic is null) continue;
 
                 byte[] payload;
@@ -187,15 +187,15 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                     Retain = _configuration.UseRetainedMessages
                 };
 
-                if (userPropsArray is not null)
+                if (userPropertiesArray is not null)
                 {
                     var userProps = UserPropertiesPool.Rent();
                     userProps.Clear();
                     userProps.Add(new MqttUserProperty(
                         _configuration.SourceTimestampPropertyName!,
-                        change.ChangedTimestamp.ToUnixTimeMilliseconds().ToString()));
+                        _configuration.SourceTimestampConverter(change.ChangedTimestamp)));
                     message.UserProperties = userProps;
-                    userPropsArray[messageCount] = userProps;
+                    userPropertiesArray[messageCount] = userProps;
                 }
 
                 messages[messageCount++] = new InjectedMqttApplicationMessage(message)
@@ -221,16 +221,16 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         finally
         {
             // Return user property lists to pool
-            if (userPropsArray is not null)
+            if (userPropertiesArray is not null)
             {
                 for (var i = 0; i < messageCount; i++)
                 {
-                    if (userPropsArray[i] is { } list)
+                    if (userPropertiesArray[i] is { } list)
                     {
                         UserPropertiesPool.Return(list);
                     }
                 }
-                userPropsArrayPool.Return(userPropsArray);
+                userPropsArrayPool.Return(userPropertiesArray);
             }
 
             changesPool.Return(changesArray);
@@ -238,7 +238,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         }
     }
 
-    private string? GetCachedTopic(PropertyReference propertyReference, RegisteredSubjectProperty property)
+    private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
         return _propertyToTopic.GetOrAdd(propertyReference, static (_, state) =>
         {
@@ -248,10 +248,20 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         }, (property, _configuration.PathProvider, _subject, _configuration.TopicPrefix))!;
     }
 
+    private PropertyReference? TryGetPropertyForTopic(string path)
+    {
+        return _pathToProperty.GetOrAdd(path, static (p, state) =>
+        {
+            var (subject, pathProvider) = state;
+            var (property, _) = subject.TryGetPropertyFromSourcePath(p, pathProvider);
+            return property?.Reference;
+        }, (_subject, _configuration.PathProvider));
+    }
+
     private Task ClientConnectedAsync(ClientConnectedEventArgs arg)
     {
-        Interlocked.Increment(ref _numberOfClients);
-        _logger.LogInformation("Client {ClientId} connected. Total clients: {Count}", arg.ClientId, _numberOfClients);
+        var count = Interlocked.Increment(ref _numberOfClients);
+        _logger.LogInformation("Client {ClientId} connected. Total clients: {Count}.", arg.ClientId, count);
 
         // Publish all current property values to new client
         var task = Task.Run(async () =>
@@ -265,7 +275,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to publish initial state to client {ClientId}", arg.ClientId);
+                _logger.LogError(ex, "Failed to publish initial state to client {ClientId}.", arg.ClientId);
             }
         });
 
@@ -278,6 +288,8 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     {
         try
         {
+            // Wait briefly to allow the client to complete subscription setup
+            // before sending initial property values, ensuring no messages are lost.
             await Task.Delay(500).ConfigureAwait(false);
 
             var properties = _subject
@@ -330,14 +342,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         var topic = args.ApplicationMessage.Topic;
         var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
 
-        var cachedProperty = _pathToProperty.GetOrAdd(path, static (p, state) =>
-        {
-            var (subject, pathProvider) = state;
-            var (property, _) = subject.TryGetPropertyFromSourcePath(p, pathProvider);
-            return property?.Reference;
-        }, (_subject, _configuration.PathProvider));
-
-        if (cachedProperty is not { } propertyReference)
+        if (TryGetPropertyForTopic(path) is not { } propertyReference)
         {
             return Task.CompletedTask;
         }
@@ -370,8 +375,8 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private Task ClientDisconnectedAsync(ClientDisconnectedEventArgs arg)
     {
-        Interlocked.Decrement(ref _numberOfClients);
-        _logger.LogInformation("Client {ClientId} disconnected. Total clients: {Count}", arg.ClientId, _numberOfClients);
+        var count = Interlocked.Decrement(ref _numberOfClients);
+        _logger.LogInformation("Client {ClientId} disconnected. Total clients: {Count}.", arg.ClientId, count);
         return Task.CompletedTask;
     }
 

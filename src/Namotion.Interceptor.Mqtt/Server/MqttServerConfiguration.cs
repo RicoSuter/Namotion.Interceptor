@@ -67,6 +67,13 @@ public class MqttServerConfiguration
     public string? SourceTimestampPropertyName { get; init; } = "ts";
 
     /// <summary>
+    /// Gets or sets the converter function for serializing timestamps to strings.
+    /// Default converts to Unix milliseconds.
+    /// </summary>
+    public Func<DateTimeOffset, string> SourceTimestampConverter { get; init; } =
+        static timestamp => timestamp.ToUnixTimeMilliseconds().ToString();
+
+    /// <summary>
     /// Validates the configuration.
     /// </summary>
     public void Validate()

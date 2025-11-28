@@ -28,7 +28,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     private readonly MqttClientFactory _factory;
 
     // TODO(memory): Might lead to memory leaks
-    private readonly ConcurrentDictionary<string, PropertyReference> _topicToProperty = new();
+    private readonly ConcurrentDictionary<string, PropertyReference?> _topicToProperty = new();
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
 
     private IMqttClient? _client;
@@ -69,7 +69,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _client.ApplicationMessageReceivedAsync += OnMessageReceivedAsync;
         _client.DisconnectedAsync += OnDisconnectedAsync;
 
-        await _client.ConnectAsync(BuildClientOptions(), cancellationToken).ConfigureAwait(false);
+        await _client.ConnectAsync(GetClientOptions(), cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Connected to MQTT broker successfully.");
 
         await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
@@ -77,7 +77,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _connectionMonitor = new MqttConnectionMonitor(
             _client,
             _configuration,
-            BuildClientOptions,
+            GetClientOptions,
             async ct => await OnReconnectedAsync(ct).ConfigureAwait(false),
             async () =>
             {
@@ -133,7 +133,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                     continue;
                 }
 
-                var topic = GetCachedTopic(change.Property, property);
+                var topic = TryGetTopicForProperty(change.Property, property);
                 if (topic is null) continue;
 
                 byte[] payload;
@@ -163,7 +163,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                     [
                         new MqttUserProperty(
                             _configuration.SourceTimestampPropertyName,
-                            change.ChangedTimestamp.ToUnixTimeMilliseconds().ToString())
+                            _configuration.SourceTimestampConverter(change.ChangedTimestamp))
                     ];
                 }
 
@@ -205,7 +205,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
         foreach (var property in properties)
         {
-            var topic = GetCachedTopic(property.Reference, property);
+            var topic = TryGetTopicForProperty(property.Reference, property);
             if (topic is null) continue;
 
             _topicToProperty[topic] = property.Reference;
@@ -219,7 +219,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _logger.LogInformation("Subscribed to {Count} MQTT topics.", properties.Count);
     }
 
-    private string? GetCachedTopic(PropertyReference propertyReference, RegisteredSubjectProperty property)
+    private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
         return _propertyToTopic.GetOrAdd(propertyReference, static (_, state) =>
         {
@@ -229,10 +229,21 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         }, (property, _configuration.PathProvider, _subject, _configuration.TopicPrefix));
     }
 
+    private PropertyReference? TryGetPropertyForTopic(string topic)
+    {
+        return _topicToProperty.GetOrAdd(topic, static (t, state) =>
+        {
+            var (subject, pathProvider, topicPrefix) = state;
+            var path = MqttHelper.StripTopicPrefix(t, topicPrefix);
+            var (property, _) = subject.TryGetPropertyFromSourcePath(path, pathProvider);
+            return property?.Reference;
+        }, (_subject, _configuration.PathProvider, _configuration.TopicPrefix));
+    }
+
     private Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
     {
         var topic = e.ApplicationMessage.Topic;
-        if (!_topicToProperty.TryGetValue(topic, out var propertyReference))
+        if (TryGetPropertyForTopic(topic) is not { } propertyReference)
         {
             return Task.CompletedTask;
         }
@@ -297,7 +308,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             return Task.CompletedTask;
         }
 
-        _logger.LogWarning(e.Exception, "MQTT client disconnected. Reason: {Reason}", e.Reason);
+        _logger.LogWarning(e.Exception, "MQTT client disconnected. Reason: {Reason}.", e.Reason);
         _connectionMonitor?.SignalReconnectNeeded();
 
         return Task.CompletedTask;
@@ -312,7 +323,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         }
     }
 
-    private MqttClientOptions BuildClientOptions()
+    private MqttClientOptions GetClientOptions()
     {
         var options = new MqttClientOptionsBuilder()
             .WithTcpServer(_configuration.BrokerHost, _configuration.BrokerPort)

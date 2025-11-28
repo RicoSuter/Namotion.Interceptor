@@ -5,38 +5,38 @@ using MQTTnet.Exceptions;
 namespace Namotion.Interceptor.Mqtt.Client;
 
 /// <summary>
-/// Classifies MQTT exceptions as permanent (configuration/design-time errors) or transient (retryable).
+/// Classifies MQTT exceptions as transient (retryable) or permanent (configuration/design-time errors).
 /// </summary>
 internal static class MqttExceptionClassifier
 {
     /// <summary>
-    /// Determines if an exception represents a permanent failure that should not be retried.
-    /// Returns true for permanent errors (bad credentials, invalid configuration),
-    /// false for transient errors (network issues, broker temporarily unavailable).
+    /// Determines if an exception represents a transient failure that can be retried.
+    /// Returns true for transient errors (network issues, broker temporarily unavailable),
+    /// false for permanent errors (bad credentials, invalid configuration).
     /// </summary>
-    public static bool IsPermanentFailure(Exception exception)
+    public static bool IsTransient(Exception exception)
     {
         return exception switch
         {
             // Authentication failures - permanent
-            MqttCommunicationException { InnerException: SocketException { SocketErrorCode: SocketError.ConnectionRefused } } => true,
+            MqttCommunicationException { InnerException: SocketException { SocketErrorCode: SocketError.ConnectionRefused } } => false,
 
             // Invalid configuration - permanent
-            ArgumentNullException => true,
-            ArgumentException => true,
-            InvalidOperationException ex when ex.Message.Contains("not allowed to connect", StringComparison.OrdinalIgnoreCase) => true,
+            ArgumentNullException => false,
+            ArgumentException => false,
+            InvalidOperationException ex when ex.Message.Contains("not allowed to connect", StringComparison.OrdinalIgnoreCase) => false,
 
             // DNS resolution failures - permanent (invalid hostname)
-            SocketException { SocketErrorCode: SocketError.HostNotFound } => true,
-            SocketException { SocketErrorCode: SocketError.NoData } => true,
+            SocketException { SocketErrorCode: SocketError.HostNotFound } => false,
+            SocketException { SocketErrorCode: SocketError.NoData } => false,
 
             // TLS/Certificate failures - potentially permanent (depends on configuration)
-            MqttCommunicationException ex when ex.Message.Contains("TLS", StringComparison.OrdinalIgnoreCase) => true,
-            MqttCommunicationException ex when ex.Message.Contains("certificate", StringComparison.OrdinalIgnoreCase) => true,
-            MqttCommunicationException ex when ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase) => true,
+            MqttCommunicationException ex when ex.Message.Contains("TLS", StringComparison.OrdinalIgnoreCase) => false,
+            MqttCommunicationException ex when ex.Message.Contains("certificate", StringComparison.OrdinalIgnoreCase) => false,
+            MqttCommunicationException ex when ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase) => false,
 
             // All other exceptions are considered transient (network issues, timeout, etc.)
-            _ => false
+            _ => true
         };
     }
 
