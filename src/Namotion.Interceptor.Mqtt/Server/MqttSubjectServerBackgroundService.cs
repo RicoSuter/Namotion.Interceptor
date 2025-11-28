@@ -16,6 +16,7 @@ using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Mqtt.Server;
 
@@ -33,7 +34,6 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     private readonly MqttServerConfiguration _configuration;
     private readonly ILogger _logger;
 
-    // TODO(memory): Might lead to memory leaks
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
     private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
     private readonly ConcurrentBag<Task> _runningInitialStateTasks = new();
@@ -42,6 +42,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     private int _disposed;
     private int _isListening;
     private MqttServer? _mqttServer;
+    private LifecycleInterceptor? _lifecycleInterceptor;
 
     /// <summary>
     /// Gets whether the MQTT server is listening.
@@ -84,6 +85,12 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         _mqttServer.ClientConnectedAsync += ClientConnectedAsync;
         _mqttServer.ClientDisconnectedAsync += ClientDisconnectedAsync;
         _mqttServer.InterceptingPublishAsync += InterceptingPublishAsync;
+
+        _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -236,6 +243,13 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
+        // Check if subject is still attached before cache lookup
+        var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
+        if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+        {
+            return null;
+        }
+
         return _propertyToTopic.GetOrAdd(propertyReference, static (_, state) =>
         {
             var (p, pathProvider, subject, topicPrefix) = state;
@@ -246,12 +260,24 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private PropertyReference? TryGetPropertyForTopic(string path)
     {
-        return _pathToProperty.GetOrAdd(path, static (p, state) =>
+        var propertyReference = _pathToProperty.GetOrAdd(path, static (p, state) =>
         {
             var (subject, pathProvider) = state;
             var (property, _) = subject.TryGetPropertyFromSourcePath(p, pathProvider);
             return property?.Reference;
         }, (_subject, _configuration.PathProvider));
+
+        // Check if subject is still attached after cache lookup
+        if (propertyReference is not null)
+        {
+            var registeredSubject = propertyReference.Value.Subject.TryGetRegisteredSubject();
+            if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+            {
+                return null;
+            }
+        }
+
+        return propertyReference;
     }
 
     private Task ClientConnectedAsync(ClientConnectedEventArgs arg)
@@ -382,12 +408,37 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         return Task.CompletedTask;
     }
 
+    private void OnSubjectDetached(SubjectLifecycleChange change)
+    {
+        // Clean up cache entries for detached subject
+        var subject = change.Subject;
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            return;
+        }
+
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (_propertyToTopic.TryRemove(property.Reference, out var topic) && topic is not null)
+            {
+                var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
+                _pathToProperty.TryRemove(path, out _);
+            }
+        }
+    }
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return;
+        }
+
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
         }
 
         var server = _mqttServer;
