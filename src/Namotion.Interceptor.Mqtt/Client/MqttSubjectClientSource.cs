@@ -187,6 +187,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         var registeredSubject = _subject.TryGetRegisteredSubject();
         if (registeredSubject is null)
         {
+            _logger.LogWarning("Subject is not registered. No MQTT subscriptions will be created.");
             return;
         }
 

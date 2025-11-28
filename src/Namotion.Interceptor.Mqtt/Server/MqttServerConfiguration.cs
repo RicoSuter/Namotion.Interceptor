@@ -56,6 +56,14 @@ public class MqttServerConfiguration
     public TimeSpan BufferTime { get; init; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
+    /// Gets or sets the delay before publishing the initial state to a newly connected client.
+    /// This allows time for the client to complete its subscription setup.
+    /// Set to zero to disable initial state publishing (relies on retained messages only).
+    /// Default is 500ms.
+    /// </summary>
+    public TimeSpan InitialStateDelay { get; init; } = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>
     /// Gets or sets the value converter. Default is JSON.
     /// </summary>
     public IMqttValueConverter ValueConverter { get; init; } = new JsonMqttValueConverter();
