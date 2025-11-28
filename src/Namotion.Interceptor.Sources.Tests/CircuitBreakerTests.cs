@@ -1,21 +1,21 @@
-using Namotion.Interceptor.OpcUa.Client.Polling;
+using Namotion.Interceptor.Sources.Resilience;
 
-namespace Namotion.Interceptor.OpcUa.Tests.Client.Polling;
+namespace Namotion.Interceptor.Sources.Tests;
 
 /// <summary>
-/// Tests for PollingCircuitBreaker focusing on thread-safety and correctness.
+/// Tests for CircuitBreaker focusing on thread-safety and correctness.
 /// Verifies that the circuit breaker handles concurrent access correctly and prevents race conditions.
 /// </summary>
-public class PollingCircuitBreakerTests
+public class CircuitBreakerTests
 {
     [Fact]
     public void Constructor_WithInvalidThreshold_ThrowsArgumentOutOfRangeException()
     {
         // Act & Assert
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new PollingCircuitBreaker(failureThreshold: 0, cooldownPeriod: TimeSpan.FromSeconds(5)));
+            new CircuitBreaker(failureThreshold: 0, cooldownPeriod: TimeSpan.FromSeconds(5)));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new PollingCircuitBreaker(failureThreshold: -1, cooldownPeriod: TimeSpan.FromSeconds(5)));
+            new CircuitBreaker(failureThreshold: -1, cooldownPeriod: TimeSpan.FromSeconds(5)));
     }
 
     [Fact]
@@ -23,16 +23,16 @@ public class PollingCircuitBreakerTests
     {
         // Act & Assert
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new PollingCircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.Zero));
+            new CircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.Zero));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new PollingCircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(-1)));
+            new CircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(-1)));
     }
 
     [Fact]
     public void ShouldAttempt_InitialState_ReturnsTrue()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(5));
+        var breaker = new CircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(5));
 
         // Act
         var result = breaker.ShouldAttempt();
@@ -46,7 +46,7 @@ public class PollingCircuitBreakerTests
     public void RecordFailure_BelowThreshold_DoesNotOpenCircuit()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(5));
+        var breaker = new CircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(5));
 
         // Act
         var tripped1 = breaker.RecordFailure();
@@ -63,7 +63,7 @@ public class PollingCircuitBreakerTests
     public void RecordFailure_AtThreshold_OpensCircuit()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(5));
+        var breaker = new CircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(5));
 
         // Act
         breaker.RecordFailure();
@@ -81,7 +81,7 @@ public class PollingCircuitBreakerTests
     public void RecordSuccess_ResetsFailureCount()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(5));
+        var breaker = new CircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(5));
 
         // Act - Record some failures, then success
         breaker.RecordFailure();
@@ -99,7 +99,7 @@ public class PollingCircuitBreakerTests
     public void RecordSuccess_ClosesOpenCircuit()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 2, cooldownPeriod: TimeSpan.FromSeconds(5));
+        var breaker = new CircuitBreaker(failureThreshold: 2, cooldownPeriod: TimeSpan.FromSeconds(5));
         breaker.RecordFailure();
         breaker.RecordFailure(); // Trip circuit
         Assert.True(breaker.IsOpen);
@@ -116,7 +116,7 @@ public class PollingCircuitBreakerTests
     public void ShouldAttempt_DuringCooldown_ReturnsFalse()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromSeconds(10));
+        var breaker = new CircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromSeconds(10));
         breaker.RecordFailure(); // Trip circuit
 
         // Act & Assert
@@ -128,7 +128,7 @@ public class PollingCircuitBreakerTests
     public async Task ShouldAttempt_AfterCooldown_ReturnsTrue()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromMilliseconds(100));
+        var breaker = new CircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromMilliseconds(100));
         breaker.RecordFailure(); // Trip circuit
         Assert.True(breaker.IsOpen);
 
@@ -144,7 +144,7 @@ public class PollingCircuitBreakerTests
     public async Task ShouldAttempt_AfterCooldown_ClosesOnSuccess()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromMilliseconds(100));
+        var breaker = new CircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromMilliseconds(100));
         breaker.RecordFailure(); // Trip circuit
         await Task.Delay(150); // Wait for cooldown
 
@@ -160,7 +160,7 @@ public class PollingCircuitBreakerTests
     public void GetCooldownRemaining_WhenClosed_ReturnsZero()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(5));
+        var breaker = new CircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(5));
 
         // Act
         var remaining = breaker.GetCooldownRemaining();
@@ -173,7 +173,7 @@ public class PollingCircuitBreakerTests
     public void GetCooldownRemaining_WhenOpen_ReturnsPositiveValue()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromSeconds(10));
+        var breaker = new CircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromSeconds(10));
         breaker.RecordFailure(); // Trip circuit
 
         // Act
@@ -188,7 +188,7 @@ public class PollingCircuitBreakerTests
     public void Reset_ClearsStateAndClosesCircuit()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromSeconds(10));
+        var breaker = new CircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromSeconds(10));
         breaker.RecordFailure(); // Trip circuit
         Assert.True(breaker.IsOpen);
 
@@ -205,7 +205,7 @@ public class PollingCircuitBreakerTests
     public void RecordFailure_MultipleTrips_IncrementsTripCount()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromSeconds(1));
+        var breaker = new CircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromSeconds(1));
 
         // Act - Trip multiple times
         breaker.RecordFailure(); // Trip 1
@@ -226,7 +226,7 @@ public class PollingCircuitBreakerTests
     public async Task ConcurrentShouldAttempt_AfterCooldown_IsThreadSafe()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromMilliseconds(100));
+        var breaker = new CircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromMilliseconds(100));
         breaker.RecordFailure(); // Trip circuit
         await Task.Delay(150); // Wait for cooldown
 
@@ -248,7 +248,7 @@ public class PollingCircuitBreakerTests
     public async Task ConcurrentRecordFailure_OnlyTripsOnce()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(5));
+        var breaker = new CircuitBreaker(failureThreshold: 3, cooldownPeriod: TimeSpan.FromSeconds(5));
 
         // Act - Multiple threads record failures concurrently
         var tasks = Enumerable.Range(0, 10)
@@ -266,7 +266,7 @@ public class PollingCircuitBreakerTests
     public async Task ConcurrentRecordSuccessAndFailure_IsThreadSafe()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 100, cooldownPeriod: TimeSpan.FromSeconds(5));
+        var breaker = new CircuitBreaker(failureThreshold: 100, cooldownPeriod: TimeSpan.FromSeconds(5));
         var random = new Random();
 
         // Act - Mix of concurrent successes and failures
@@ -298,7 +298,7 @@ public class PollingCircuitBreakerTests
     public async Task RecordFailure_WhenAlreadyOpen_DoesNotIncrementTripCount()
     {
         // Arrange
-        var breaker = new PollingCircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromMilliseconds(50));
+        var breaker = new CircuitBreaker(failureThreshold: 1, cooldownPeriod: TimeSpan.FromMilliseconds(50));
 
         // Act
         var tripped1 = breaker.RecordFailure(); // First trip
