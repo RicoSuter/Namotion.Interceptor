@@ -73,11 +73,6 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
     {
         _context.WithRegistry();
 
-        var changeQueueProcessor = new ChangeQueueProcessor(
-            source: this, _context,
-            propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync, 
-            _configuration.BufferTime, _logger);
-
         while (!stoppingToken.IsCancellationRequested)
         {
             var application = _configuration.CreateApplicationInstance();
@@ -96,6 +91,11 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
 
                     await application.CheckApplicationInstanceCertificates(true);
                     await application.Start(server);
+
+                    using var changeQueueProcessor = new ChangeQueueProcessor(
+                        source: this, _context,
+                        propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
+                        _configuration.BufferTime, _logger);
 
                     await changeQueueProcessor.ProcessAsync(stoppingToken);
                     _consecutiveFailures = 0;
