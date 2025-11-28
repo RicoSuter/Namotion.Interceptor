@@ -75,7 +75,7 @@ namespace Namotion.Interceptor.Mqtt
 
                     try
                     {
-                        await using var changeQueueProcessor = new ChangeQueueProcessor(
+                        using var changeQueueProcessor = new ChangeQueueProcessor(
                             source: this, _subject.Context,
                             propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
                             _bufferTime, _logger);

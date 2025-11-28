@@ -53,7 +53,7 @@ public class SubjectSourceBackgroundService : BackgroundService
                 {
                     await _propertyWriter.CompleteInitializationAsync(stoppingToken);
 
-                    await using var processor = new ChangeQueueProcessor(
+                    using var processor = new ChangeQueueProcessor(
                         _source,
                         _context,
                         prop => _source.IsPropertyIncluded(prop),

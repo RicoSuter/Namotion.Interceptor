@@ -92,7 +92,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                     await application.CheckApplicationInstanceCertificates(true);
                     await application.Start(server);
 
-                    await using var changeQueueProcessor = new ChangeQueueProcessor(
+                    using var changeQueueProcessor = new ChangeQueueProcessor(
                         source: this, _context,
                         propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
                         _configuration.BufferTime, _logger);
