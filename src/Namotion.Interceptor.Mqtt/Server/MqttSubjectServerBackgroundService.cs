@@ -284,9 +284,15 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     {
         try
         {
-            // Wait briefly to allow the client to complete subscription setup
-            // before sending initial property values, ensuring no messages are lost.
-            await Task.Delay(500).ConfigureAwait(false);
+            // Wait for the client to complete subscription setup before sending initial values.
+            // This delay is configurable; set to zero to rely on retained messages only.
+            var delay = _configuration.InitialStateDelay;
+            if (delay <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            await Task.Delay(delay).ConfigureAwait(false);
 
             var properties = _subject
                 .TryGetRegisteredSubject()?
