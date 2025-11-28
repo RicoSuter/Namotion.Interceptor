@@ -136,11 +136,9 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         if (server is null) return;
 
         // Rent arrays from pool to avoid allocations
-        var changesPool = ArrayPool<SubjectPropertyChange>.Shared;
         var messagesPool = ArrayPool<InjectedMqttApplicationMessage>.Shared;
         var userPropsArrayPool = ArrayPool<List<MqttUserProperty>?>.Shared;
 
-        var changesArray = changesPool.Rent(length);
         var messages = messagesPool.Rent(length);
         var userPropertiesArray = _configuration.SourceTimestampPropertyName is not null
             ? userPropsArrayPool.Rent(length)
@@ -149,13 +147,12 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
         try
         {
-            // Copy changes to rented array
-            changes.Span.CopyTo(changesArray);
+            var changesSpan = changes.Span;
 
             // Build all messages first
             for (var i = 0; i < length; i++)
             {
-                var change = changesArray[i];
+                var change = changesSpan[i];
                 var registeredProperty = change.Property.TryGetRegisteredProperty();
                 if (registeredProperty is not { HasChildSubjects: false })
                 {
@@ -233,7 +230,6 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                 userPropsArrayPool.Return(userPropertiesArray);
             }
 
-            changesPool.Return(changesArray);
             messagesPool.Return(messages);
         }
     }
@@ -245,7 +241,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             var (p, pathProvider, subject, topicPrefix) = state;
             var path = p.TryGetSourcePath(pathProvider, subject);
             return path is null ? null : MqttHelper.BuildTopic(path, topicPrefix);
-        }, (property, _configuration.PathProvider, _subject, _configuration.TopicPrefix))!;
+        }, (property, _configuration.PathProvider, _subject, _configuration.TopicPrefix));
     }
 
     private PropertyReference? TryGetPropertyForTopic(string path)
