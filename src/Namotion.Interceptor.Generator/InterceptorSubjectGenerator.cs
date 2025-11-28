@@ -148,11 +148,33 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                     
                     var baseClass = cls.ClassNode.BaseList?.Types
                         .Select(t => semanticModel.GetTypeInfo(t.Type).Type as INamedTypeSymbol)
-                        .FirstOrDefault(t => t != null && 
+                        .FirstOrDefault(t => t != null &&
                             (HasInterceptorSubjectAttribute(t) || // <= needed when partial class with IInterceptorSubject is not yet generated
                              ImplementsInterface(t, "Namotion.Interceptor.IInterceptorSubject")));
-                    
-                    var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+                    // Get the base class fully qualified name by resolving its namespace from syntax
+                    string? baseClassTypeName = null;
+                    if (baseClass is not null)
+                    {
+                        var baseClassSyntax = baseClass.DeclaringSyntaxReferences
+                            .Select(r => r.GetSyntax())
+                            .OfType<ClassDeclarationSyntax>()
+                            .FirstOrDefault();
+
+                        if (baseClassSyntax is not null)
+                        {
+                            // Get namespace from syntax using same logic as current class
+                            var baseClassNamespace = (baseClassSyntax.Parent as NamespaceDeclarationSyntax)?.Name.ToString() ??
+                                                     (baseClassSyntax.Parent as FileScopedNamespaceDeclarationSyntax)?.Name.ToString()
+                                                     ?? "YourDefaultNamespace";
+                            baseClassTypeName = $"global::{baseClassNamespace}.{baseClass.Name}";
+                        }
+                        else
+                        {
+                            // Fallback for external types
+                            baseClassTypeName = baseClass.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                        }
+                    }
 
 
                     var defaultPropertiesNewModifier = baseClass is not null ? "new " : string.Empty;
