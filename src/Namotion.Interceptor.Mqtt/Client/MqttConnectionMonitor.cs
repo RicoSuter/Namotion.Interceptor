@@ -175,20 +175,20 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
                             }
                             catch (Exception ex)
                             {
-                                var isPermanent = MqttExceptionClassifier.IsPermanentFailure(ex);
+                                var isTransient = MqttExceptionClassifier.IsTransient(ex);
                                 var description = MqttExceptionClassifier.GetFailureDescription(ex);
 
-                                if (isPermanent)
+                                if (isTransient)
                                 {
                                     _logger.LogError(ex,
-                                        "Permanent connection failure detected: {Description}. " +
-                                        "Reconnection will be retried, but this likely requires configuration changes.",
+                                        "Failed to reconnect to MQTT broker: {Description}.",
                                         description);
                                 }
                                 else
                                 {
                                     _logger.LogError(ex,
-                                        "Failed to reconnect to MQTT broker: {Description}.",
+                                        "Permanent connection failure detected: {Description}. " +
+                                        "Reconnection will be retried, but this likely requires configuration changes.",
                                         description);
                                 }
 
