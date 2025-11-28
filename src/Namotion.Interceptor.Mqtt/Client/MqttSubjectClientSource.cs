@@ -13,6 +13,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Mqtt.Client;
 
@@ -27,13 +28,13 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     private readonly MqttClientFactory _factory;
 
-    // TODO(memory): Might lead to memory leaks
     private readonly ConcurrentDictionary<string, PropertyReference?> _topicToProperty = new();
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
 
     private IMqttClient? _client;
     private SubjectPropertyWriter? _propertyWriter;
     private MqttConnectionMonitor? _connectionMonitor;
+    private LifecycleInterceptor? _lifecycleInterceptor;
 
     private int _disposed;
     private volatile bool _isStarted;
@@ -84,6 +85,12 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                 _propertyWriter?.StartBuffering();
                 await Task.CompletedTask;
             }, _logger);
+
+        _lifecycleInterceptor = _subject.Context.TryGetLifecycleInterceptor();
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
+        }
 
         _isStarted = true;
 
@@ -222,6 +229,13 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
+        // Check if subject is still attached before cache lookup
+        var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
+        if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+        {
+            return null;
+        }
+
         return _propertyToTopic.GetOrAdd(propertyReference, static (_, state) =>
         {
             var (p, pathProvider, subject, topicPrefix) = state;
@@ -232,13 +246,25 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     private PropertyReference? TryGetPropertyForTopic(string topic)
     {
-        return _topicToProperty.GetOrAdd(topic, static (t, state) =>
+        var propertyReference = _topicToProperty.GetOrAdd(topic, static (t, state) =>
         {
             var (subject, pathProvider, topicPrefix) = state;
             var path = MqttHelper.StripTopicPrefix(t, topicPrefix);
             var (property, _) = subject.TryGetPropertyFromSourcePath(path, pathProvider);
             return property?.Reference;
         }, (_subject, _configuration.PathProvider, _configuration.TopicPrefix));
+
+        // Check if subject is still attached after cache lookup
+        if (propertyReference is not null)
+        {
+            var registeredSubject = propertyReference.Value.Subject.TryGetRegisteredSubject();
+            if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+            {
+                return null;
+            }
+        }
+
+        return propertyReference;
     }
 
     private Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
@@ -315,6 +341,25 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         return Task.CompletedTask;
     }
 
+    private void OnSubjectDetached(SubjectLifecycleChange change)
+    {
+        // Clean up cache entries for detached subject
+        var subject = change.Subject;
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            return;
+        }
+
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (_propertyToTopic.TryRemove(property.Reference, out var topic) && topic is not null)
+            {
+                _topicToProperty.TryRemove(topic, out _);
+            }
+        }
+    }
+
     private async Task OnReconnectedAsync(CancellationToken cancellationToken)
     {
         await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
@@ -357,6 +402,11 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         if (_connectionMonitor is not null)
         {
             await _connectionMonitor.DisposeAsync().ConfigureAwait(false);
+        }
+
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
         }
 
         var client = _client;

@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
-    private const string ReferenceCountKey = "Namotion.Interceptor.Tracking.ReferenceCount";
+    internal const string ReferenceCountKey = "Namotion.Interceptor.Tracking.ReferenceCount";
 
     private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference?>> _attachedSubjects = [];
 
@@ -17,9 +17,25 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [ThreadStatic]
     private static Stack<HashSet<IInterceptorSubject>>? _hashSetPool;
 
+    [ThreadStatic]
+    private static Stack<List<SubjectLifecycleChange>>? _changePool;
+
+    /// <summary>
+    /// Raised when a subject is attached to the object graph (fired outside lock).
+    /// Handlers must be exception-free.
+    /// </summary>
+    public event Action<SubjectLifecycleChange>? SubjectAttached;
+
+    /// <summary>
+    /// Raised when a subject is detached from the object graph (fired outside lock).
+    /// Handlers must be exception-free.
+    /// </summary>
+    public event Action<SubjectLifecycleChange>? SubjectDetached;
+
     public void AttachTo(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
+        var attachChanges = SubjectAttached != null ? GetChangeList() : null;
         try
         {
             lock (_attachedSubjects)
@@ -28,34 +44,45 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                 foreach (var child in collectedSubjects)
                 {
-                    AttachTo(child.subject, subject.Context, child.property, child.index);
+                    AttachTo(child.subject, subject.Context, child.property, child.index, attachChanges);
                 }
 
                 if (!_attachedSubjects.ContainsKey(subject))
                 {
-                    AttachTo(subject, subject.Context, null, null);
+                    AttachTo(subject, subject.Context, null, null, attachChanges);
                 }
             }
         }
         finally
         {
             ReturnList(collectedSubjects);
+        }
+
+        // Fire events outside lock
+        if (attachChanges != null)
+        {
+            foreach (var change in attachChanges)
+            {
+                SubjectAttached?.Invoke(change);
+            }
+            ReturnChangeList(attachChanges);
         }
     }
 
     public void DetachFrom(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
+        var detachChanges = SubjectDetached != null ? GetChangeList() : null;
         try
         {
             lock (_attachedSubjects)
             {
                 FindSubjectsInProperties(subject, collectedSubjects, null);
 
-                DetachFrom(subject, subject.Context, null, null);
+                DetachFrom(subject, subject.Context, null, null, detachChanges);
                 foreach (var child in collectedSubjects)
                 {
-                    DetachFrom(child.subject, subject.Context, child.property, child.index);
+                    DetachFrom(child.subject, subject.Context, child.property, child.index, detachChanges);
                 }
             }
         }
@@ -63,9 +90,20 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             ReturnList(collectedSubjects);
         }
+
+        // Fire events outside lock
+        if (detachChanges != null)
+        {
+            foreach (var change in detachChanges)
+            {
+                SubjectDetached?.Invoke(change);
+            }
+            ReturnChangeList(detachChanges);
+        }
     }
 
-    private void AttachTo(IInterceptorSubject subject, IInterceptorSubjectContext context, PropertyReference? property, object? index)
+    private void AttachTo(IInterceptorSubject subject, IInterceptorSubjectContext context,
+        PropertyReference? property, object? index, List<SubjectLifecycleChange>? attachChanges)
     {
         var firstAttach = _attachedSubjects.TryAdd(subject, []);
         if (_attachedSubjects[subject].Add(property))
@@ -85,6 +123,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 lifecycleHandler.AttachSubject(registryContext);
             }
 
+            // Collect for event firing outside lock
+            attachChanges?.Add(registryContext);
+
             if (firstAttach)
             {
                 foreach (var propertyName in properties)
@@ -95,7 +136,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
-    private void DetachFrom(IInterceptorSubject subject, IInterceptorSubjectContext context, PropertyReference? property, object? index)
+    private void DetachFrom(IInterceptorSubject subject, IInterceptorSubjectContext context,
+        PropertyReference? property, object? index, List<SubjectLifecycleChange>? detachChanges)
     {
         if (_attachedSubjects.TryGetValue(subject, out var set) && set.Remove(property))
         {
@@ -109,10 +151,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
             }
 
-            var count = subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, 
+            var count = subject.Data.AddOrUpdate((null, ReferenceCountKey), 0,
                 (_, count) => (int)count! - 1) as int?;
-            
-            var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
+
+            var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 0);
             if (subject is ILifecycleHandler lifecycleHandler)
             {
                 lifecycleHandler.DetachSubject(registryContext);
@@ -122,6 +164,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             {
                 handler.DetachSubject(registryContext);
             }
+
+            // Collect for event firing outside lock
+            detachChanges?.Add(registryContext);
         }
     }
 
@@ -148,6 +193,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         var newCollectedSubjects = GetList();
         var oldTouchedSubjects = GetHashSet();
         var newTouchedSubjects = GetHashSet();
+        var attachChanges = SubjectAttached != null ? GetChangeList() : null;
+        var detachChanges = SubjectDetached != null ? GetChangeList() : null;
 
         try
         {
@@ -161,7 +208,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     var d = oldCollectedSubjects[i];
                     if (!newTouchedSubjects.Contains(d.subject))
                     {
-                        DetachFrom(d.subject, context.Property.Subject.Context, d.property, d.index);
+                        DetachFrom(d.subject, context.Property.Subject.Context, d.property, d.index, detachChanges);
                     }
                 }
 
@@ -170,7 +217,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     var d = newCollectedSubjects[i];
                     if (!oldTouchedSubjects.Contains(d.subject))
                     {
-                        AttachTo(d.subject, context.Property.Subject.Context, d.property, d.index);
+                        AttachTo(d.subject, context.Property.Subject.Context, d.property, d.index, attachChanges);
                     }
                 }
             }
@@ -181,6 +228,25 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             ReturnList(newCollectedSubjects);
             ReturnHashSet(oldTouchedSubjects);
             ReturnHashSet(newTouchedSubjects);
+        }
+
+        // Fire events outside lock
+        if (detachChanges != null)
+        {
+            foreach (var change in detachChanges)
+            {
+                SubjectDetached?.Invoke(change);
+            }
+            ReturnChangeList(detachChanges);
+        }
+
+        if (attachChanges != null)
+        {
+            foreach (var change in attachChanges)
+            {
+                SubjectAttached?.Invoke(change);
+            }
+            ReturnChangeList(attachChanges);
         }
     }
 
@@ -251,7 +317,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     }
 
     #region  Performance
-    
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static List<(IInterceptorSubject subject, PropertyReference property, object? index)> GetList()
     {
@@ -267,6 +333,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static List<SubjectLifecycleChange> GetChangeList()
+    {
+        _changePool ??= new Stack<List<SubjectLifecycleChange>>();
+        return _changePool.Count > 0 ? _changePool.Pop() : [];
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ReturnList(List<(IInterceptorSubject, PropertyReference, object?)> list)
     {
         list.Clear();
@@ -278,6 +351,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         hashSet.Clear();
         _hashSetPool!.Push(hashSet);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ReturnChangeList(List<SubjectLifecycleChange> list)
+    {
+        list.Clear();
+        _changePool!.Push(list);
     }
 
     #endregion
