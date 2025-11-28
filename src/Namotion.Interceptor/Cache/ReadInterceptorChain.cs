@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
 
@@ -9,7 +10,7 @@ internal sealed class ReadInterceptorChain<TInterceptor, TProperty>
 
     public delegate TProperty ReadInterceptionFunc(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> terminal);
 
-    private readonly TInterceptor[] _interceptors;
+    private readonly ImmutableArray<TInterceptor> _interceptors;
     private readonly ExecuteInterceptorFunc _executeInterceptor;
     private readonly ReadInterceptionFunc _executeTerminal;
     private readonly ContinuationNode[] _continuations;
@@ -19,7 +20,7 @@ internal sealed class ReadInterceptorChain<TInterceptor, TProperty>
     private static Func<IInterceptorSubject, TProperty>? _threadLocalTerminal;
 
     public ReadInterceptorChain(
-        TInterceptor[] interceptors,
+        ImmutableArray<TInterceptor> interceptors,
         ExecuteInterceptorFunc executeInterceptor,
         ReadInterceptionFunc executeTerminal)
     {

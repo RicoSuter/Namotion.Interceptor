@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -11,8 +13,11 @@ namespace Namotion.Interceptor.Sources;
 /// Processes property changes from a queue, buffering and deduplicating them before writing.
 /// Used by both client sources and server background services.
 /// </summary>
-public class ChangeQueueProcessor
+public class ChangeQueueProcessor : IDisposable
 {
+    private const int FlushDedupedBufferMinSize = 256;
+    private const int FlushDedupedBufferMaxSize = 1024;
+
     private readonly IInterceptorSubjectContext _context;
     private readonly Func<RegisteredSubjectProperty, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
@@ -23,13 +28,14 @@ public class ChangeQueueProcessor
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
     private int _flushGate; // 0 = free, 1 = flushing
+    private bool _disposed;
 
     // Scratch buffers used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
     private readonly HashSet<PropertyReference> _flushTouchedChanges = new(PropertyReference.Comparer);
 
-    // Reusable buffer for deduped changes (avoids allocation on each flush)
-    private SubjectPropertyChange[] _flushDedupedBuffer = new SubjectPropertyChange[64];
+    // Reusable buffer for deduped changes (rented from ArrayPool to avoid allocations on resize)
+    private SubjectPropertyChange[] _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(FlushDedupedBufferMinSize);
     private int _flushDedupedCount;
 
     // Reusable single-item buffer for the no-buffer (immediate) path
@@ -137,7 +143,8 @@ public class ChangeQueueProcessor
         }
     }
 
-    private async Task TryFlushAsync(CancellationToken cancellationToken)
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
+    private async ValueTask TryFlushAsync(CancellationToken cancellationToken)
     {
         // Fast, allocation-free try-enter
         if (Interlocked.Exchange(ref _flushGate, 1) == 1)
@@ -165,10 +172,11 @@ public class ChangeQueueProcessor
             // Pre-size to avoid resizes under bursts
             _flushTouchedChanges.EnsureCapacity(_flushChanges.Count);
 
-            // Ensure buffer is large enough
+            // Ensure the buffer is large enough (rent from pool to avoid allocations)
             if (_flushDedupedBuffer.Length < _flushChanges.Count)
             {
-                _flushDedupedBuffer = new SubjectPropertyChange[Math.Max(_flushChanges.Count, _flushDedupedBuffer.Length * 2)];
+                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+                _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(_flushChanges.Count);
             }
 
             // Deduplicate by Property, keeping the last write, and preserve order of last occurrences
@@ -181,7 +189,7 @@ public class ChangeQueueProcessor
                 }
             }
 
-            // Reverse in place to keep ascending order of last occurrences without allocations
+            // Reverse in place to keep the ascending order of last occurrences without allocations
             if (_flushDedupedCount > 1)
             {
                 Array.Reverse(_flushDedupedBuffer, 0, _flushDedupedCount);
@@ -209,19 +217,54 @@ public class ChangeQueueProcessor
             _flushChanges.Clear();
             _flushTouchedChanges.Clear();
 
-            // Null out references to allow GC (SubjectPropertyChange contains object refs)
-            for (var i = 0; i < _flushDedupedCount; i++)
-            {
-                _flushDedupedBuffer[i] = default;
-            }
+            // Clear entire rented array before potential return to pool.
+            // SubjectPropertyChange contains object references (Source, boxed values) that must be released.
+            Array.Clear(_flushDedupedBuffer, 0, _flushDedupedBuffer.Length);
 
-            // Shrink buffer if it grew too large (avoid holding memory after burst)
-            if (_flushDedupedBuffer.Length > 1024 && _flushDedupedCount < _flushDedupedBuffer.Length / 4)
+            if (_disposed)
             {
-                _flushDedupedBuffer = new SubjectPropertyChange[Math.Max(64, _flushDedupedBuffer.Length / 2)];
+                // Disposed while flushing - return buffer to pool now
+                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+                _flushDedupedBuffer = null!;
+            }
+            else if (_flushDedupedBuffer.Length >= FlushDedupedBufferMaxSize &&
+                     _flushDedupedCount < _flushDedupedBuffer.Length / 4)
+            {
+                // Shrink buffer if it grew too large (return to pool and rent smaller)
+                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+                _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(FlushDedupedBufferMinSize);
             }
 
             Volatile.Write(ref _flushGate, 0);
+        }
+    }
+
+    /// <summary>
+    /// Disposes the processor and returns the rented buffer to the pool.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        // Try to acquire gate once - if flush is in progress, it will handle cleanup when it sees _disposed
+        if (Interlocked.CompareExchange(ref _flushGate, 1, 0) == 0)
+        {
+            try
+            {
+                // Clear and return the buffer to the pool
+                Array.Clear(_flushDedupedBuffer, 0, _flushDedupedBuffer.Length);
+                ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+                _flushDedupedBuffer = null!;
+            }
+            finally
+            {
+                Volatile.Write(ref _flushGate, 0);
+            }
         }
     }
 }

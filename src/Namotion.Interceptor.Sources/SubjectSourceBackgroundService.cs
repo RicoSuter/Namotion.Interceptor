@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking.Change;
@@ -52,7 +53,7 @@ public class SubjectSourceBackgroundService : BackgroundService
                 {
                     await _propertyWriter.CompleteInitializationAsync(stoppingToken);
 
-                    var processor = new ChangeQueueProcessor(
+                    using var processor = new ChangeQueueProcessor(
                         _source,
                         _context,
                         prop => _source.IsPropertyIncluded(prop),
@@ -87,7 +88,8 @@ public class SubjectSourceBackgroundService : BackgroundService
         }
     }
 
-    protected async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
+    private async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (_writeRetryQueue is null)
         {

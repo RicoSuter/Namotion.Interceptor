@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources;
@@ -10,6 +11,7 @@ public static class SubjectSourceExtensions
     /// up to (but not including) the failed batch are counted as successful.
     /// </summary>
     /// <returns>The number of items successfully written to the source.</returns>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     public static async ValueTask<int> WriteChangesInBatchesAsync(this ISubjectSource source, ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         var count = changes.Length;
