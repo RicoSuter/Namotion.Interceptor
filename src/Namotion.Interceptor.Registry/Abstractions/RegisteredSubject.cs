@@ -10,12 +10,25 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubject
 {
+    private readonly Lock _parentsLock = new();
+
     private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
     private ImmutableArray<SubjectPropertyParent> _parents = [];
 
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
-    public ImmutableArray<SubjectPropertyParent> Parents => _parents;
+    /// <summary>
+    /// Gets the properties which reference this subject.
+    /// Thread-safe: Lock ensures atomic struct copy during read.
+    /// </summary>
+    public ImmutableArray<SubjectPropertyParent> Parents
+    {
+        get
+        {
+            lock (_parentsLock)
+                return _parents;
+        }
+    }
 
     public ImmutableArray<RegisteredSubjectProperty> Properties => _properties.Values;
 
@@ -77,16 +90,18 @@ public class RegisteredSubject
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
     {
-        ImmutableInterlocked.Update(ref _parents, 
-            static (parents, toAdd) => parents.Add(toAdd),
-            new SubjectPropertyParent { Property = parent, Index = index });
+        lock (_parentsLock)
+        {
+            _parents = _parents.Add(new SubjectPropertyParent { Property = parent, Index = index });
+        }
     }
 
     internal void RemoveParent(RegisteredSubjectProperty parent, object? index)
     {
-        ImmutableInterlocked.Update(ref _parents, 
-            static (parents, toRemove) => parents.Remove(toRemove), 
-            new SubjectPropertyParent { Property = parent, Index = index });
+        lock (_parentsLock)
+        {
+            _parents = _parents.Remove(new SubjectPropertyParent { Property = parent, Index = index });
+        }
     }
 
     /// <summary>
