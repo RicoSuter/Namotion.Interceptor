@@ -2,12 +2,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
+using Namotion.Interceptor.Mqtt.Server;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.SamplesModel;
 using Namotion.Interceptor.SamplesModel.Workers;
+using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
-using Opc.Ua;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -20,16 +21,20 @@ var context = InterceptorSubjectContext
     .WithDataAnnotationValidation()
     .WithHostedServices(builder.Services);
 
-Utils.SetTraceMask(Utils.TraceMasks.All);
-
-// OPC UA client creates just the root - persons array will be loaded from server
-var root = new Root(context);
+var root = Root.CreateWithPersons(context);
 context.AddService(root);
 
 builder.Services.AddSingleton(root);
-builder.Services.AddHostedService<ClientWorker>();
-builder.Services.AddOpcUaSubjectClient<Root>("opc.tcp://localhost:4840", "opc", rootName: "Root");
+builder.Services.AddHostedService<ServerWorker>();
+builder.Services.AddMqttSubjectServer(
+    _ => root,
+    _ => new MqttServerConfiguration
+    {
+        BrokerHost = "localhost",
+        BrokerPort = 1883,
+        PathProvider = new AttributeBasedSourcePathProvider("mqtt", "/")
+    });
 
-using var performanceProfiler = new PerformanceProfiler(context, "Client");
+using var performanceProfiler = new PerformanceProfiler(context, "Server");
 var host = builder.Build();
 host.Run();

@@ -3,7 +3,7 @@ using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking;
 
-namespace Namotion.Interceptor.OpcUa.SampleModel;
+namespace Namotion.Interceptor.SamplesModel;
 
 public class PerformanceProfiler : IDisposable
 {
@@ -21,7 +21,7 @@ public class PerformanceProfiler : IDisposable
 
         var windowStartTime = startTime;
         var lastAllThroughputTime = startTime;
-        long windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true); // track allocation baseline per window
+        long windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true);
 
         static double Percentile(IReadOnlyList<double> sortedAsc, double p)
         {
@@ -46,7 +46,6 @@ public class PerformanceProfiler : IDisposable
 
         void PrintStats(string title, DateTimeOffset windowStartTimeCopy, List<double> changedLatencyData, List<double> receivedLatencyData, List<double> throughputData)
         {
-            // Memory metrics
             var proc = Process.GetCurrentProcess();
             var workingSetMb = proc.WorkingSet64 / (1024.0 * 1024.0);
             var totalMemoryMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
@@ -66,7 +65,6 @@ public class PerformanceProfiler : IDisposable
             Console.WriteLine($"Avg allocations over last {elapsedSec}s:   {Math.Round(allocRateMbPerSec, 2)} MB/s");
             Console.WriteLine();
 
-            // Single compact table for all metrics
             Console.WriteLine($"{"Metric",-29} {"Avg",10} {"P50",10} {"P90",10} {"P95",10} {"P99",10} {"P99.9",10} {"Max",10} {"Min",10} {"StdDev",10} {"Count",10}");
             Console.WriteLine(new string('-', 139));
 
@@ -82,13 +80,11 @@ public class PerformanceProfiler : IDisposable
                 var p99Throughput = Percentile(sortedTp, 0.99);
                 var p999Throughput = Percentile(sortedTp, 0.999);
                 var stdThroughput = StdDev(sortedTp, avgThroughput);
-                
+
                 Console.WriteLine($"{"Modifications (changes/s)",-29} {avgThroughput,10:F2} {p50Throughput,10:F2} {p90Throughput,10:F2} {p95Throughput,10:F2} {p99Throughput,10:F2} {p999Throughput,10:F2} {maxThroughput,10:F2} {minThroughput,10:F2} {stdThroughput,10:F2} {"-",10}");
             }
 
-            // Processing latency: Time from receiving change to applying it locally
             PrintLatency("Processing latency (ms)", receivedLatencyData);
-            // End-to-end latency: Time from source change to local application
             PrintLatency("End-to-end latency (ms)", changedLatencyData);
         }
 
@@ -119,6 +115,9 @@ public class PerformanceProfiler : IDisposable
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(change =>
             {
+                if (change.Source == null)
+                    return;
+                
                 var now = DateTimeOffset.UtcNow;
                 lock (syncLock)
                 {
@@ -134,7 +133,7 @@ public class PerformanceProfiler : IDisposable
                         var receivedLatencyMs = (now - receivedTimestamp).TotalMilliseconds;
                         allReceivedLatencies.Add(receivedLatencyMs);
                     }
-                    
+
                     var timeSinceLastAllSample = (now - lastAllThroughputTime).TotalSeconds;
                     if (timeSinceLastAllSample >= 1.0)
                     {
@@ -171,7 +170,7 @@ public class PerformanceProfiler : IDisposable
                     windowStartTime = startTime + TimeSpan.FromSeconds(10) + index * TimeSpan.FromSeconds(60);
                     lastAllThroughputTime = windowStartTime;
                 }
-                
+
                 if (index == 0)
                 {
                     PrintStats("Benchmark - Intermediate (10 seconds)", windowStartTimeCopy, allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy);
@@ -181,7 +180,7 @@ public class PerformanceProfiler : IDisposable
                     PrintStats("Benchmark - 1 minute", windowStartTimeCopy, allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy);
                 }
 
-                windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true); // reset baseline for next window
+                windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true);
             });
     }
 
