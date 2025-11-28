@@ -36,7 +36,9 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     // TODO(memory): Might lead to memory leaks
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
     private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
-    private readonly ConcurrentBag<Task> _runningInitialStateTasks = new();
+    
+    private readonly List<Task> _runningInitialStateTasks = [];
+    private readonly Lock _initialStateTasksLock = new();
 
     private int _numberOfClients;
     private int _disposed;
@@ -275,7 +277,12 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             }
         });
 
-        _runningInitialStateTasks.Add(task);
+        lock (_initialStateTasksLock)
+        {
+            // Clean up completed tasks to prevent memory leak
+            _runningInitialStateTasks.RemoveAll(t => t.IsCompleted);
+            _runningInitialStateTasks.Add(task);
+        }
 
         return Task.CompletedTask;
     }
@@ -400,7 +407,12 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             // Wait for all running initial state tasks to complete
             try
             {
-                await Task.WhenAll(_runningInitialStateTasks.ToArray()).ConfigureAwait(false);
+                Task[] tasksSnapshot;
+                lock (_initialStateTasksLock)
+                {
+                    tasksSnapshot = _runningInitialStateTasks.ToArray();
+                }
+                await Task.WhenAll(tasksSnapshot).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
