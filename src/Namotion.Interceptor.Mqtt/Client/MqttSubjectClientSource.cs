@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using MQTTnet;
 using MQTTnet.Packets;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
@@ -21,13 +23,20 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// </summary>
 internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
 {
+    // Pool for UserProperties lists to avoid allocations on hot path
+    private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool
+        = new(() => new List<MqttUserProperty>(1));
+
     private readonly IInterceptorSubject _subject;
     private readonly MqttClientConfiguration _configuration;
     private readonly ILogger _logger;
 
     private readonly MqttClientFactory _factory;
 
-    // TODO(memory): Might lead to memory leaks
+    // TODO(memory): Might lead to memory leaks (will be fixed in follow-up PR)
+    // Note: These caches grow with the number of unique topics/properties.
+    // For static object graphs (typical MQTT scenarios), this is bounded.
+    // Cleared on dispose. For dynamic graphs, consider periodic cleanup.
     private readonly ConcurrentDictionary<string, PropertyReference?> _topicToProperty = new();
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
 
@@ -115,10 +124,15 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         var length = changes.Length;
         if (length == 0) return;
 
-        // Rent array from pool for messages
         var messagesPool = ArrayPool<MqttApplicationMessage>.Shared;
+        var userPropsArrayPool = ArrayPool<List<MqttUserProperty>?>.Shared;
+
         var messages = messagesPool.Rent(length);
+        var userPropertiesArray = _configuration.SourceTimestampPropertyName is not null
+            ? userPropsArrayPool.Rent(length)
+            : null;
         var messageCount = 0;
+
         try
         {
             var changesSpan = changes.Span;
@@ -157,27 +171,48 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                     Retain = _configuration.UseRetainedMessages
                 };
 
-                if (_configuration.SourceTimestampPropertyName is not null)
+                if (userPropertiesArray is not null)
                 {
-                    message.UserProperties =
-                    [
-                        new MqttUserProperty(
-                            _configuration.SourceTimestampPropertyName,
-                            _configuration.SourceTimestampConverter(change.ChangedTimestamp))
-                    ];
+                    var userProps = UserPropertiesPool.Rent();
+                    userProps.Clear();
+                    userProps.Add(new MqttUserProperty(
+                        _configuration.SourceTimestampPropertyName!,
+                        _configuration.SourceTimestampConverter(change.ChangedTimestamp)));
+                    message.UserProperties = userProps;
+                    userPropertiesArray[messageCount] = userProps;
                 }
 
                 messages[messageCount++] = message;
             }
 
-            // TODO(perf): Add batch API?
-            for (var i = 0; i < messageCount; i++)
+            if (messageCount > 0)
             {
-                await client.PublishAsync(messages[i], cancellationToken).ConfigureAwait(false);
+#if USE_LOCAL_MQTTNET
+                await client.PublishManyAsync(
+                    new ArraySegment<MqttApplicationMessage>(messages, 0, messageCount),
+                    cancellationToken).ConfigureAwait(false);
+#else
+                for (var i = 0; i < messageCount; i++)
+                {
+                    await client.PublishAsync(messages[i], cancellationToken).ConfigureAwait(false);
+                }
+#endif
             }
         }
         finally
         {
+            if (userPropertiesArray is not null)
+            {
+                for (var i = 0; i < messageCount; i++)
+                {
+                    if (userPropertiesArray[i] is { } list)
+                    {
+                        UserPropertiesPool.Return(list);
+                    }
+                }
+                userPropsArrayPool.Return(userPropertiesArray);
+            }
+
             messagesPool.Return(messages);
         }
     }
