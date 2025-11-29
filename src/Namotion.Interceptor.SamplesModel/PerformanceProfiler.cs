@@ -44,7 +44,7 @@ public class PerformanceProfiler : IDisposable
             return Math.Sqrt(sumSq / values.Count);
         }
 
-        void PrintStats(string title, DateTimeOffset windowStartTimeCopy, List<double> changedLatencyData, List<double> receivedLatencyData, List<double> throughputData)
+        void PrintStats(string title, DateTimeOffset windowStartTimeCopy, List<double> changedLatencyData, List<double> receivedLatencyData, List<double> throughputData, int publishedCount)
         {
             var proc = Process.GetCurrentProcess();
             var workingSetMb = proc.WorkingSet64 / (1024.0 * 1024.0);
@@ -60,7 +60,8 @@ public class PerformanceProfiler : IDisposable
             Console.WriteLine(new string('=', 139));
             Console.WriteLine($"{_roleTitle} {title} - [{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss.fff}]");
             Console.WriteLine();
-            Console.WriteLine($"Total processed changes:         {changedLatencyData.Count}");
+            Console.WriteLine($"Total received changes:          {changedLatencyData.Count}");
+            Console.WriteLine($"Total published changes:         {publishedCount}");
             Console.WriteLine($"Process memory:                  {Math.Round(workingSetMb, 2)} MB ({Math.Round(totalMemoryMb, 2)} MB in .NET heap)");
             Console.WriteLine($"Avg allocations over last {elapsedSec}s:   {Math.Round(allocRateMbPerSec, 2)} MB/s");
             Console.WriteLine();
@@ -81,7 +82,7 @@ public class PerformanceProfiler : IDisposable
                 var p999Throughput = Percentile(sortedTp, 0.999);
                 var stdThroughput = StdDev(sortedTp, avgThroughput);
 
-                Console.WriteLine($"{"Modifications (changes/s)",-29} {avgThroughput,10:F2} {p50Throughput,10:F2} {p90Throughput,10:F2} {p95Throughput,10:F2} {p99Throughput,10:F2} {p999Throughput,10:F2} {maxThroughput,10:F2} {minThroughput,10:F2} {stdThroughput,10:F2} {"-",10}");
+                Console.WriteLine($"{"Received (changes/s)",-29} {avgThroughput,10:F2} {p50Throughput,10:F2} {p90Throughput,10:F2} {p95Throughput,10:F2} {p99Throughput,10:F2} {p999Throughput,10:F2} {maxThroughput,10:F2} {minThroughput,10:F2} {stdThroughput,10:F2} {"-",10}");
             }
 
             PrintLatency("Processing latency (ms)", receivedLatencyData);
@@ -110,17 +111,26 @@ public class PerformanceProfiler : IDisposable
         var allChangedLatencies = new List<double>();
         var allReceivedLatencies = new List<double>();
         var allThroughputSamples = new List<double>();
+        var totalPublishedChanges = 0;
 
         _change = context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(change =>
             {
-                if (change.Source == null)
-                    return;
-                
                 var now = DateTimeOffset.UtcNow;
                 lock (syncLock)
                 {
+                    if (change.Source == null)
+                    {
+                        // Only count FirstName/LastName to exclude derived properties like FullName
+                        var propertyName = change.Property.Name;
+                        if (propertyName == "FirstName" || propertyName == "LastName")
+                        {
+                            totalPublishedChanges++;
+                        }
+                        return;
+                    }
+
                     allUpdatesSinceLastSample++;
 
                     var changedTimestamp = change.ChangedTimestamp;
@@ -154,6 +164,7 @@ public class PerformanceProfiler : IDisposable
                 List<double> allReceivedLatenciesCopy;
                 List<double> allThroughputSamplesCopy;
                 DateTimeOffset windowStartTimeCopy;
+                int totalPublishedChangesCopy;
 
                 lock (syncLock)
                 {
@@ -161,11 +172,13 @@ public class PerformanceProfiler : IDisposable
                     allReceivedLatenciesCopy = [..allReceivedLatencies];
                     allThroughputSamplesCopy = [..allThroughputSamples];
                     windowStartTimeCopy = windowStartTime;
+                    totalPublishedChangesCopy = totalPublishedChanges;
 
                     allChangedLatencies.Clear();
                     allReceivedLatencies.Clear();
                     allThroughputSamples.Clear();
                     allUpdatesSinceLastSample = 0;
+                    totalPublishedChanges = 0;
 
                     windowStartTime = startTime + TimeSpan.FromSeconds(10) + index * TimeSpan.FromSeconds(60);
                     lastAllThroughputTime = windowStartTime;
@@ -173,11 +186,11 @@ public class PerformanceProfiler : IDisposable
 
                 if (index == 0)
                 {
-                    PrintStats("Benchmark - Intermediate (10 seconds)", windowStartTimeCopy, allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy);
+                    PrintStats("Benchmark - Intermediate (10 seconds)", windowStartTimeCopy, allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy, totalPublishedChangesCopy);
                 }
                 else
                 {
-                    PrintStats("Benchmark - 1 minute", windowStartTimeCopy, allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy);
+                    PrintStats("Benchmark - 1 minute", windowStartTimeCopy, allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy, totalPublishedChangesCopy);
                 }
 
                 windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true);
