@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
 
@@ -9,7 +10,7 @@ internal sealed class WriteInterceptorChain<TInterceptor, TProperty>
 
     public delegate void ExecuteInterceptorAction(TInterceptor interceptor, ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> @delegate);
 
-    private readonly TInterceptor[] _interceptors;
+    private readonly ImmutableArray<TInterceptor> _interceptors;
     private readonly ExecuteInterceptorAction _executeInterceptor;
     private readonly ExecuteTerminalFunc _executeTerminal;
     private readonly WriteContinuationNode[] _continuations;
@@ -21,7 +22,7 @@ internal sealed class WriteInterceptorChain<TInterceptor, TProperty>
     private static Action<IInterceptorSubject, TProperty>? _threadLocalTerminal;
 
     public WriteInterceptorChain(
-        TInterceptor[] interceptors,
+        ImmutableArray<TInterceptor> interceptors,
         ExecuteInterceptorAction executeInterceptor,
         ExecuteTerminalFunc executeTerminal)
     {

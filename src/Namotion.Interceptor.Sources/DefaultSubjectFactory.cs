@@ -1,6 +1,5 @@
 using System.Collections;
 using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Sources;
 
@@ -18,7 +17,7 @@ public class DefaultSubjectFactory : ISubjectFactory
                ? ActivatorUtilities.CreateInstance(serviceProvider, itemType) as IInterceptorSubject
                : Activator.CreateInstance(itemType) as IInterceptorSubject)
            ?? throw new InvalidOperationException("Could not create subject.");
-        
+
         return item;
     }
 
@@ -37,7 +36,7 @@ public class DefaultSubjectFactory : ISubjectFactory
 
             return (IInterceptorSubject?[])array;
         }
-        
+
         var itemType = propertyType.GenericTypeArguments[0];
         var collectionType = typeof(List<>).MakeGenericType(itemType);
 

@@ -4,6 +4,7 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <PackageLicenseExpression>GPL-2.0-only</PackageLicenseExpression>
   </PropertyGroup>
 
   <ItemGroup>

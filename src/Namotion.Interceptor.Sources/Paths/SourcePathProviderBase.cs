@@ -19,7 +19,7 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
     /// <inheritdoc />
     public virtual string GetPropertyFullPath(IEnumerable<(RegisteredSubjectProperty property, object? index)> propertiesInPath)
     {
-        return propertiesInPath.Aggregate("", 
+        return propertiesInPath.Aggregate("",
             (path, tuple) => (string.IsNullOrEmpty(path) ? "" : path + ".") + tuple.property.BrowseName + (tuple.index is not null ? $"[{tuple.index}]" : ""));
     }
 
@@ -32,8 +32,8 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
             .Select((ss, i) =>
             {
                 var segmentParts = ss.Split('[', ']');
-                object? index = segmentParts.Length >= 2 ? 
-                    (int.TryParse(segmentParts[1], out var intIndex) ? 
+                object? index = segmentParts.Length >= 2 ?
+                    (int.TryParse(segmentParts[1], out var intIndex) ?
                         intIndex : segmentParts[1]) : null;
                 return (segmentParts[0], index);
             });
@@ -44,10 +44,10 @@ public abstract class SourcePathProviderBase : ISourcePathProvider
     {
         return property.Parent.Properties
             .Where(p => p.IsAttribute)
-            .SingleOrDefault(p => p.AttributeMetadata.PropertyName == property.Name && 
+            .SingleOrDefault(p => p.AttributeMetadata.PropertyName == property.Name &&
                                   p.AttributeMetadata.AttributeName == attributeSegment);
     }
-    
+
     /// <inheritdoc />
     public virtual RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string propertySegment)
     {
