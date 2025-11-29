@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -28,7 +27,7 @@ public class SubjectSourceBenchmark
 
     private readonly AutoResetEvent _signal = new(false);
     private Action<object?>[] _updates;
-    private SourceUpdateBuffer _updateBuffer;
+    private SubjectPropertyWriter _propertyWriter;
 
     [GlobalSetup]
     public async Task Setup()
@@ -61,9 +60,9 @@ public class SubjectSourceBenchmark
 
         _cts = new CancellationTokenSource();
         await _service.StartAsync(_cts.Token);
-        
-        _updateBuffer = _source.UpdateBuffer;
-        await _updateBuffer.CompleteInitializationAsync(_cts.Token);
+
+        _propertyWriter = _source.PropertyWriter;
+        await _propertyWriter.CompleteInitializationAsync(_cts.Token);
 
         _updates = Enumerable
             .Range(1, 1000000)
@@ -81,7 +80,7 @@ public class SubjectSourceBenchmark
     {
         for (var i = 0; i < _updates.Length; i++)
         {
-            _updateBuffer.ApplyUpdate(null, _updates[i]);
+            _propertyWriter.Write(null, _updates[i]);
         }
 
         _signal.WaitOne();
@@ -96,13 +95,13 @@ public class SubjectSourceBenchmark
         for (var i = 0; i < _propertyNames.Length; i++)
         {
             var context = new PropertyWriteContext<int>(
-                new PropertyReference(_car, _propertyNames[i]), 
-                0, 
+                new PropertyReference(_car, _propertyNames[i]),
+                0,
                 i);
 
             queue.WriteProperty(ref context, (ref PropertyWriteContext<int> _) => {});
         }
-        
+
         _source.Wait();
     }
 
@@ -120,8 +119,8 @@ public class SubjectSourceBenchmark
         private int _count;
         private readonly int _targetCount;
         private readonly AutoResetEvent _signal = new(false);
-        
-        public SourceUpdateBuffer UpdateBuffer { get; private set; }
+
+        public SubjectPropertyWriter PropertyWriter { get; private set; }
 
         public TestSubjectSource(int targetCount)
         {
@@ -132,28 +131,30 @@ public class SubjectSourceBenchmark
         {
             _count = 0;
         }
-        
+
         public void Wait()
         {
             _signal.WaitOne();
         }
-        
+
         public bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
 
-        public Task<IDisposable?> StartListeningAsync(SourceUpdateBuffer updateBuffer, CancellationToken cancellationToken)
+        public Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
         {
-            UpdateBuffer = updateBuffer;
+            PropertyWriter = propertyWriter;
             return Task.FromResult<IDisposable?>(null);
         }
 
-        public Task<Action?> LoadCompleteSourceStateAsync(CancellationToken cancellationToken)
+        public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
         {
             return Task.FromResult<Action?>(null);
         }
 
-        public ValueTask WriteToSourceAsync(IReadOnlyList<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public int WriteBatchSize => int.MaxValue;
+
+        public ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
-            _count += changes.Count;
+            _count += changes.Length;
 
             if (_count >= _targetCount)
             {

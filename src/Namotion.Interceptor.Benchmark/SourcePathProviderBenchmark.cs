@@ -34,27 +34,27 @@ public class SourcePathProviderBenchmark
             throw new InvalidOperationException();
         }
     }
-    
+
     [Benchmark]
     public void VisitPropertiesFromSourcePaths()
     {
         RegisteredSubjectProperty? property = null;
         _car.VisitPropertiesFromSourcePaths(
             [
-                "Tires[1].Pressure", 
+                "Tires[1].Pressure",
                 "Tires[3].Pressure"
-            ], 
+            ],
             (p, _, _) =>
             {
                 property = p;
             }, DefaultSourcePathProvider.Instance);
-       
+
         if (property is null)
         {
             throw new InvalidOperationException();
         }
     }
-    
+
     [Benchmark]
     public void TryGetPropertyFromSegment()
     {
@@ -62,7 +62,7 @@ public class SourcePathProviderBenchmark
         var property = DefaultSourcePathProvider
             .Instance
             .TryGetPropertyFromSegment(subject ?? throw new InvalidOperationException(), "Name");
-        
+
         if (property is null)
         {
             throw new InvalidOperationException();

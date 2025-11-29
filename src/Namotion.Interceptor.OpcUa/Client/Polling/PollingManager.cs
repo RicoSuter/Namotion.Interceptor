@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Sources.Resilience;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -19,9 +20,9 @@ internal sealed class PollingManager : IDisposable
     private readonly OpcUaSubjectClientSource _source;
     private readonly ILogger _logger;
     private readonly SessionManager _sessionManager;
-    private readonly SourceUpdateBuffer _updateBuffer;
+    private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
-    private readonly PollingCircuitBreaker _circuitBreaker;
+    private readonly CircuitBreaker _circuitBreaker;
     private readonly PollingMetrics _metrics = new();
 
     private readonly ConcurrentDictionary<string, PollingItem> _pollingItems = new();
@@ -35,21 +36,21 @@ internal sealed class PollingManager : IDisposable
 
     public PollingManager(OpcUaSubjectClientSource source,
         SessionManager sessionManager,
-        SourceUpdateBuffer updateBuffer,
+        SubjectPropertyWriter propertyWriter,
         OpcUaClientConfiguration configuration,
         ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(sessionManager);
-        ArgumentNullException.ThrowIfNull(updateBuffer);
+        ArgumentNullException.ThrowIfNull(propertyWriter);
 
         _source = source;
         _logger = logger;
         _sessionManager = sessionManager;
-        _updateBuffer = updateBuffer;
+        _propertyWriter = propertyWriter;
         _configuration = configuration;
 
-        _circuitBreaker = new PollingCircuitBreaker(configuration.PollingCircuitBreakerThreshold, configuration.PollingCircuitBreakerCooldown);
+        _circuitBreaker = new CircuitBreaker(configuration.PollingCircuitBreakerThreshold, configuration.PollingCircuitBreakerCooldown);
         _timer = new PeriodicTimer(configuration.PollingInterval);
     }
 
@@ -376,7 +377,7 @@ internal sealed class PollingManager : IDisposable
 
             // Queue update using same pattern as subscriptions
             var state = (source: _source, update, receivedTimestamp, logger: _logger);
-            _updateBuffer.ApplyUpdate(state, static s =>
+            _propertyWriter.Write(state, static s =>
             {
                 try
                 {

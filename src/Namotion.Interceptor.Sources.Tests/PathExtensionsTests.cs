@@ -1,5 +1,4 @@
 ﻿using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Sources.Tests.Models;
 using Namotion.Interceptor.Sources.Updates;
@@ -83,7 +82,7 @@ public class PathExtensionsTests
             { "Children[0].FirstName", "NewChild1" },
             { "Children[2].FirstName", "NewChild3" }
         }, timestamp, sourcePathProvider, null);
-        
+
         person.UpdatePropertyValuesFromSourcePaths(
             ["LastName"], timestamp, (_, _) => "NewLn", sourcePathProvider, null);
         person.UpdatePropertyValueFromSourcePath(

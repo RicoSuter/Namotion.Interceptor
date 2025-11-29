@@ -14,8 +14,8 @@ public static class SubjectChangeContextExtensions
     /// <param name="valueFromSource">The value.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void SetValueFromSource(
-        this PropertyReference property, 
-        object source, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp, 
+        this PropertyReference property,
+        object source, DateTimeOffset? changedTimestamp, DateTimeOffset? receivedTimestamp,
         object? valueFromSource)
     {
         using (SubjectChangeContext.WithState(source, changedTimestamp, receivedTimestamp))

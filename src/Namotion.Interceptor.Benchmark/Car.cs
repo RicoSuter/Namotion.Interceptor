@@ -1,5 +1,4 @@
-﻿using System.Linq;
-using Namotion.Interceptor.Attributes;
+﻿using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Benchmark

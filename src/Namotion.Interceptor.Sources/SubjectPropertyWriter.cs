@@ -4,20 +4,34 @@ using Microsoft.Extensions.Logging;
 namespace Namotion.Interceptor.Sources;
 
 /// <summary>
-/// Buffers updates from a source during initialization and replays them after loading complete state.
-/// Implements the queue-read-replay pattern to ensure zero data loss during source initialization.
+/// Writes inbound property updates from sources to subjects.
+/// Implements the buffer-load-replay pattern to ensure eventual consistency during source initialization.
 /// </summary>
-public sealed class SourceUpdateBuffer
+/// <remarks>
+/// During initialization, updates are buffered. Once <see cref="CompleteInitializationAsync"/> is called,
+/// the initial state is loaded, buffered updates are replayed, and subsequent writes are applied immediately.
+/// This buffering behavior is transparent to sources - they simply call <see cref="Write{TState}"/>.
+/// </remarks>
+public sealed class SubjectPropertyWriter
 {
     private readonly ISubjectSource _source;
     private readonly ILogger _logger;
+    private readonly Func<CancellationToken, ValueTask<bool>>? _flushRetryQueueAsync;
     private readonly Lock _lock = new();
+
     private List<Action>? _updates = [];
 
-    public SourceUpdateBuffer(ISubjectSource source, ILogger logger)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SubjectPropertyWriter"/> class.
+    /// </summary>
+    /// <param name="source">The source associated with this writer.</param>
+    /// <param name="flushRetryQueueAsync">Optional callback to flush pending outbound writes from the retry queue.</param>
+    /// <param name="logger">The logger.</param>
+    public SubjectPropertyWriter(ISubjectSource source, Func<CancellationToken, ValueTask<bool>>? flushRetryQueueAsync, ILogger logger)
     {
         _source = source;
         _logger = logger;
+        _flushRetryQueueAsync = flushRetryQueueAsync;
     }
 
     /// <summary>
@@ -34,14 +48,26 @@ public sealed class SourceUpdateBuffer
     }
 
     /// <summary>
-    /// Completes initialization by loading complete state from the source and replaying all buffered updates.
-    /// This ensures zero data loss during the initialization period.
+    /// Completes initialization by flushing pending writes, loading initial state from the source,
+    /// and replaying all buffered updates. This ensures zero data loss during the initialization period.
     /// </summary>
+    /// <remarks>
+    /// The flush happens first so that the server has the latest local changes before we load state,
+    /// avoiding visible state toggles where the UI briefly shows old server values.
+    /// If the flush or load fails, the exception propagates to signal initialization failure
+    /// and trigger reconnection.
+    /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The task.</returns>
     public async Task CompleteInitializationAsync(CancellationToken cancellationToken)
     {
-        var applyAction = await _source.LoadCompleteSourceStateAsync(cancellationToken).ConfigureAwait(false);
+        // Flush pending writes first (so server has latest before we load state)
+        if (_flushRetryQueueAsync is not null)
+        {
+            await _flushRetryQueueAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var applyAction = await _source.LoadInitialStateAsync(cancellationToken).ConfigureAwait(false);
         lock (_lock)
         {
             applyAction?.Invoke();
@@ -72,13 +98,16 @@ public sealed class SourceUpdateBuffer
     }
 
     /// <summary>
-    /// Applies an update by either buffering it during initialization or executing it immediately.
-    /// The buffering behavior is transparent to the caller - updates are always eventually applied.
+    /// Writes a property update to the subject. During initialization, the update is buffered;
+    /// otherwise it is applied immediately. This buffering is transparent to the caller.
     /// </summary>
-    /// <param name="state">The state provided to the action (avoid delegate allocations by allowing action to be static).</param>
-    /// <param name="update">The update action to apply.</param>
-    public void ApplyUpdate<TState>(TState state, Action<TState> update)
+    /// <param name="state">The state provided to the action (allows static delegates to avoid allocations).</param>
+    /// <param name="update">The update action to apply to the subject.</param>
+    public void Write<TState>(TState state, Action<TState> update)
     {
+        // Hot path optimization: plain read (no volatile read) is fastest.
+        // Changes to _updates are rare (only during initialization/reconnection).
+        // If we see stale non-null during transition, we take lock and re-check - still correct.
         var updates = _updates;
         if (updates is not null)
         {

@@ -1,4 +1,4 @@
-﻿using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Paths.Attributes;
 
 namespace Namotion.Interceptor.Sources.Paths;
@@ -40,7 +40,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
 
         return false;
     }
-    
+
     public override IEnumerable<(string segment, object? index)> ParsePathSegments(string path)
     {
         // remove prefix
@@ -54,7 +54,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
 
             path = path[_pathPrefix.Length..];
         }
-        
+
         return path
             .Split(_propertyPathDelimiter)
             .Where(p => !string.IsNullOrEmpty(p))
@@ -90,7 +90,7 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
             var attributedProperty = property.GetAttributedProperty();
             return GetAttributeBasedSourcePropertyPath(attributedProperty) + _attributePathDelimiter + TryGetPropertySegment(property);
         }
-        
+
         var sourcePath = TryGetSourcePathAttribute(property)?.Path;
         var prefix = TryGetAttributeBasedSourcePathPrefix(property);
         return (prefix is not null ? prefix + _propertyPathDelimiter : "") + sourcePath;
