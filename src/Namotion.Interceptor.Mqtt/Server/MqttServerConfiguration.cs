@@ -47,10 +47,10 @@ public class MqttServerConfiguration
     public bool UseRetainedMessages { get; init; } = true;
 
     /// <summary>
-    /// Gets or sets the maximum pending messages per client. Default is 10000.
+    /// Gets or sets the maximum pending messages per client. Default is 25000.
     /// Messages are dropped when the queue exceeds this limit.
     /// </summary>
-    public int MaxPendingMessagesPerClient { get; init; } = 10000;
+    public int MaxPendingMessagesPerClient { get; init; } = 25000;
 
     /// <summary>
     /// Gets or sets the time to buffer property changes before sending. Default is 8ms.
