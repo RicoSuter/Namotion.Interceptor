@@ -12,7 +12,6 @@ using MQTTnet.Packets;
 using MQTTnet.Server;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
@@ -24,8 +23,9 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// </summary>
 public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDisposable
 {
-    private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool
-        = new(() => new List<MqttUserProperty>(1));
+    // NOTE: We cannot pool UserProperties here because InjectApplicationMessages queues messages
+    // asynchronously. The server may still be serializing packets after this method returns,
+    // which would cause a race condition if we returned the lists to a pool.
 
     private readonly string _serverClientId;
     private readonly IInterceptorSubject _subject;
@@ -137,19 +137,14 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         var server = _mqttServer;
         if (server is null) return;
 
-        // Rent arrays from pool to avoid allocations
         var messagesPool = ArrayPool<InjectedMqttApplicationMessage>.Shared;
-        var userPropsArrayPool = ArrayPool<List<MqttUserProperty>?>.Shared;
-
         var messages = messagesPool.Rent(length);
-        var userPropertiesArray = _configuration.SourceTimestampPropertyName is not null
-            ? userPropsArrayPool.Rent(length)
-            : null;
         var messageCount = 0;
 
         try
         {
             var changesSpan = changes.Span;
+            var timestampPropertyName = _configuration.SourceTimestampPropertyName;
 
             // Build all messages first
             for (var i = 0; i < length; i++)
@@ -186,15 +181,15 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                     Retain = _configuration.UseRetainedMessages
                 };
 
-                if (userPropertiesArray is not null)
+                // Create new list for each message - cannot pool because server queues messages asynchronously
+                if (timestampPropertyName is not null)
                 {
-                    var userProps = UserPropertiesPool.Rent();
-                    userProps.Clear();
-                    userProps.Add(new MqttUserProperty(
-                        _configuration.SourceTimestampPropertyName!,
-                        _configuration.SourceTimestampConverter(change.ChangedTimestamp)));
-                    message.UserProperties = userProps;
-                    userPropertiesArray[messageCount] = userProps;
+                    message.UserProperties =
+                    [
+                        new MqttUserProperty(
+                            timestampPropertyName,
+                            _configuration.SourceTimestampConverter(change.ChangedTimestamp))
+                    ];
                 }
 
                 messages[messageCount++] = new InjectedMqttApplicationMessage(message)
@@ -203,35 +198,22 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                 };
             }
 
-            // TODO(nuget): Use batch API for better performance
-            // if (messageCount > 0)
-            // {
-            //     await server.InjectApplicationMessages(
-            //         new ArraySegment<InjectedMqttApplicationMessage>(messages, 0, messageCount),
-            //         cancellationToken).ConfigureAwait(false);
-            // }
-
-            // TODO(nuget): Keep this as fallback for older NuGet versions
-            for (var i = 0; i < messageCount; i++)
+            if (messageCount > 0)
             {
-                await server.InjectApplicationMessage(messages[i], cancellationToken).ConfigureAwait(false);
+#if USE_LOCAL_MQTTNET
+                await server.InjectApplicationMessages(
+                    new ArraySegment<InjectedMqttApplicationMessage>(messages, 0, messageCount),
+                    cancellationToken).ConfigureAwait(false);
+#else
+                for (var i = 0; i < messageCount; i++)
+                {
+                    await server.InjectApplicationMessage(messages[i], cancellationToken).ConfigureAwait(false);
+                }
+#endif
             }
         }
         finally
         {
-            // Return user property lists to pool
-            if (userPropertiesArray is not null)
-            {
-                for (var i = 0; i < messageCount; i++)
-                {
-                    if (userPropertiesArray[i] is { } list)
-                    {
-                        UserPropertiesPool.Return(list);
-                    }
-                }
-                userPropsArrayPool.Return(userPropertiesArray);
-            }
-
             messagesPool.Return(messages);
         }
     }

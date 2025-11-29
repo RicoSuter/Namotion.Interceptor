@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using MQTTnet.Protocol;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Mqtt;
@@ -33,7 +34,9 @@ builder.Services.AddMqttSubjectClient(
     {
         BrokerHost = "localhost",
         BrokerPort = 1883,
-        PathProvider = new AttributeBasedSourcePathProvider("mqtt", "/", null)
+        PathProvider = new AttributeBasedSourcePathProvider("mqtt", "/", null),
+        DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
+        UseRetainedMessages = true
     });
 
 using var performanceProfiler = new PerformanceProfiler(context, "Client");

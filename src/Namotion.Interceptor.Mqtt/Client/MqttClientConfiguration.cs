@@ -58,13 +58,14 @@ public class MqttClientConfiguration
     // QoS settings
 
     /// <summary>
-    /// Gets or sets the default QoS level for publish/subscribe operations. Default is AtMostOnce (0) for high throughput.
+    /// Gets or sets the default QoS level for publish/subscribe operations. Default is AtLeastOnce (1) for guaranteed delivery.
+    /// Use AtMostOnce (0) only when message loss is acceptable and lowest latency is required.
     /// </summary>
-    public MqttQualityOfServiceLevel DefaultQualityOfService { get; init; } = MqttQualityOfServiceLevel.AtMostOnce;
+    public MqttQualityOfServiceLevel DefaultQualityOfService { get; init; } = MqttQualityOfServiceLevel.AtLeastOnce;
 
     /// <summary>
-    /// Gets or sets whether to use retained messages. Default is true.
-    /// Retained messages enable initial state loading.
+    /// Gets or sets whether to use retained messages. Default is true so new subscribers receive
+    /// the last known value. Disable for slightly better throughput if not needed.
     /// </summary>
     public bool UseRetainedMessages { get; init; } = true;
     
@@ -117,6 +118,7 @@ public class MqttClientConfiguration
 
     /// <summary>
     /// Gets or sets the time to buffer property changes before sending. Default is 8ms.
+    /// Higher values create larger batches for better throughput, lower values reduce latency.
     /// </summary>
     public TimeSpan BufferTime { get; init; } = TimeSpan.FromMilliseconds(8);
 
