@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,10 +11,10 @@ using MQTTnet;
 using MQTTnet.Packets;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Mqtt.Client;
 
@@ -22,19 +23,26 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// </summary>
 internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
 {
+    // Pool for UserProperties lists to avoid allocations on hot path
+    private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool
+        = new(() => new List<MqttUserProperty>(1));
+
     private readonly IInterceptorSubject _subject;
     private readonly MqttClientConfiguration _configuration;
     private readonly ILogger _logger;
 
     private readonly MqttClientFactory _factory;
 
+    // TODO(memory): Might lead to memory leaks (will be fixed in follow-up PR)
+    // Note: These caches grow with the number of unique topics/properties.
+    // For static object graphs (typical MQTT scenarios), this is bounded.
+    // Cleared on dispose. For dynamic graphs, consider periodic cleanup.
     private readonly ConcurrentDictionary<string, PropertyReference?> _topicToProperty = new();
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
 
     private IMqttClient? _client;
     private SubjectPropertyWriter? _propertyWriter;
     private MqttConnectionMonitor? _connectionMonitor;
-    private LifecycleInterceptor? _lifecycleInterceptor;
 
     private int _disposed;
     private volatile bool _isStarted;
@@ -86,12 +94,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                 await Task.CompletedTask;
             }, _logger);
 
-        _lifecycleInterceptor = _subject.Context.TryGetLifecycleInterceptor();
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
-        }
-
         _isStarted = true;
 
         return new MqttConnectionLifetime(async () =>
@@ -122,10 +124,15 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         var length = changes.Length;
         if (length == 0) return;
 
-        // Rent array from pool for messages
         var messagesPool = ArrayPool<MqttApplicationMessage>.Shared;
+        var userPropsArrayPool = ArrayPool<List<MqttUserProperty>?>.Shared;
+
         var messages = messagesPool.Rent(length);
+        var userPropertiesArray = _configuration.SourceTimestampPropertyName is not null
+            ? userPropsArrayPool.Rent(length)
+            : null;
         var messageCount = 0;
+
         try
         {
             var changesSpan = changes.Span;
@@ -164,27 +171,48 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                     Retain = _configuration.UseRetainedMessages
                 };
 
-                if (_configuration.SourceTimestampPropertyName is not null)
+                if (userPropertiesArray is not null)
                 {
-                    message.UserProperties =
-                    [
-                        new MqttUserProperty(
-                            _configuration.SourceTimestampPropertyName,
-                            _configuration.SourceTimestampConverter(change.ChangedTimestamp))
-                    ];
+                    var userProps = UserPropertiesPool.Rent();
+                    userProps.Clear();
+                    userProps.Add(new MqttUserProperty(
+                        _configuration.SourceTimestampPropertyName!,
+                        _configuration.SourceTimestampConverter(change.ChangedTimestamp)));
+                    message.UserProperties = userProps;
+                    userPropertiesArray[messageCount] = userProps;
                 }
 
                 messages[messageCount++] = message;
             }
 
-            // TODO(perf): Add batch API?
-            for (var i = 0; i < messageCount; i++)
+            if (messageCount > 0)
             {
-                await client.PublishAsync(messages[i], cancellationToken).ConfigureAwait(false);
+#if USE_LOCAL_MQTTNET
+                await client.PublishManyAsync(
+                    new ArraySegment<MqttApplicationMessage>(messages, 0, messageCount),
+                    cancellationToken).ConfigureAwait(false);
+#else
+                for (var i = 0; i < messageCount; i++)
+                {
+                    await client.PublishAsync(messages[i], cancellationToken).ConfigureAwait(false);
+                }
+#endif
             }
         }
         finally
         {
+            if (userPropertiesArray is not null)
+            {
+                for (var i = 0; i < messageCount; i++)
+                {
+                    if (userPropertiesArray[i] is { } list)
+                    {
+                        UserPropertiesPool.Return(list);
+                    }
+                }
+                userPropsArrayPool.Return(userPropertiesArray);
+            }
+
             messagesPool.Return(messages);
         }
     }
@@ -229,13 +257,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
-        // Check if subject is still attached before cache lookup
-        var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
-        if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
-        {
-            return null;
-        }
-
         return _propertyToTopic.GetOrAdd(propertyReference, static (_, state) =>
         {
             var (p, pathProvider, subject, topicPrefix) = state;
@@ -246,25 +267,13 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     private PropertyReference? TryGetPropertyForTopic(string topic)
     {
-        var propertyReference = _topicToProperty.GetOrAdd(topic, static (t, state) =>
+        return _topicToProperty.GetOrAdd(topic, static (t, state) =>
         {
             var (subject, pathProvider, topicPrefix) = state;
             var path = MqttHelper.StripTopicPrefix(t, topicPrefix);
             var (property, _) = subject.TryGetPropertyFromSourcePath(path, pathProvider);
             return property?.Reference;
         }, (_subject, _configuration.PathProvider, _configuration.TopicPrefix));
-
-        // Check if subject is still attached after cache lookup
-        if (propertyReference is not null)
-        {
-            var registeredSubject = propertyReference.Value.Subject.TryGetRegisteredSubject();
-            if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
-            {
-                return null;
-            }
-        }
-
-        return propertyReference;
     }
 
     private Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
@@ -341,25 +350,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         return Task.CompletedTask;
     }
 
-    private void OnSubjectDetached(SubjectLifecycleChange change)
-    {
-        // Clean up cache entries for detached subject
-        var subject = change.Subject;
-        var registeredSubject = subject.TryGetRegisteredSubject();
-        if (registeredSubject is null)
-        {
-            return;
-        }
-
-        foreach (var property in registeredSubject.Properties)
-        {
-            if (_propertyToTopic.TryRemove(property.Reference, out var topic) && topic is not null)
-            {
-                _topicToProperty.TryRemove(topic, out _);
-            }
-        }
-    }
-
     private async Task OnReconnectedAsync(CancellationToken cancellationToken)
     {
         await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
@@ -402,11 +392,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         if (_connectionMonitor is not null)
         {
             await _connectionMonitor.DisposeAsync().ConfigureAwait(false);
-        }
-
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
         }
 
         var client = _client;

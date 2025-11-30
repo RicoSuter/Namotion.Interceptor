@@ -12,11 +12,9 @@ using MQTTnet.Packets;
 using MQTTnet.Server;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Mqtt.Server;
 
@@ -25,8 +23,9 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// </summary>
 public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDisposable
 {
-    private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool
-        = new(() => new List<MqttUserProperty>(1));
+    // NOTE: We cannot pool UserProperties here because InjectApplicationMessages queues messages
+    // asynchronously. The server may still be serializing packets after this method returns,
+    // which would cause a race condition if we returned the lists to a pool.
 
     private readonly string _serverClientId;
     private readonly IInterceptorSubject _subject;
@@ -34,15 +33,17 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     private readonly MqttServerConfiguration _configuration;
     private readonly ILogger _logger;
 
+    // TODO(memory): Might lead to memory leaks
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
     private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
-    private readonly ConcurrentBag<Task> _runningInitialStateTasks = new();
+    
+    private readonly List<Task> _runningInitialStateTasks = [];
+    private readonly Lock _initialStateTasksLock = new();
 
     private int _numberOfClients;
     private int _disposed;
     private int _isListening;
     private MqttServer? _mqttServer;
-    private LifecycleInterceptor? _lifecycleInterceptor;
 
     /// <summary>
     /// Gets whether the MQTT server is listening.
@@ -85,12 +86,6 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         _mqttServer.ClientConnectedAsync += ClientConnectedAsync;
         _mqttServer.ClientDisconnectedAsync += ClientDisconnectedAsync;
         _mqttServer.InterceptingPublishAsync += InterceptingPublishAsync;
-
-        _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
-        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -142,19 +137,14 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         var server = _mqttServer;
         if (server is null) return;
 
-        // Rent arrays from pool to avoid allocations
         var messagesPool = ArrayPool<InjectedMqttApplicationMessage>.Shared;
-        var userPropsArrayPool = ArrayPool<List<MqttUserProperty>?>.Shared;
-
         var messages = messagesPool.Rent(length);
-        var userPropertiesArray = _configuration.SourceTimestampPropertyName is not null
-            ? userPropsArrayPool.Rent(length)
-            : null;
         var messageCount = 0;
 
         try
         {
             var changesSpan = changes.Span;
+            var timestampPropertyName = _configuration.SourceTimestampPropertyName;
 
             // Build all messages first
             for (var i = 0; i < length; i++)
@@ -191,15 +181,15 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                     Retain = _configuration.UseRetainedMessages
                 };
 
-                if (userPropertiesArray is not null)
+                // Create new list for each message - cannot pool because server queues messages asynchronously
+                if (timestampPropertyName is not null)
                 {
-                    var userProps = UserPropertiesPool.Rent();
-                    userProps.Clear();
-                    userProps.Add(new MqttUserProperty(
-                        _configuration.SourceTimestampPropertyName!,
-                        _configuration.SourceTimestampConverter(change.ChangedTimestamp)));
-                    message.UserProperties = userProps;
-                    userPropertiesArray[messageCount] = userProps;
+                    message.UserProperties =
+                    [
+                        new MqttUserProperty(
+                            timestampPropertyName,
+                            _configuration.SourceTimestampConverter(change.ChangedTimestamp))
+                    ];
                 }
 
                 messages[messageCount++] = new InjectedMqttApplicationMessage(message)
@@ -208,48 +198,28 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                 };
             }
 
-            // TODO(nuget): Use batch API for better performance
-            // if (messageCount > 0)
-            // {
-            //     await server.InjectApplicationMessages(
-            //         new ArraySegment<InjectedMqttApplicationMessage>(messages, 0, messageCount),
-            //         cancellationToken).ConfigureAwait(false);
-            // }
-
-            // TODO(nuget): Keep this as fallback for older NuGet versions
-            for (var i = 0; i < messageCount; i++)
+            if (messageCount > 0)
             {
-                await server.InjectApplicationMessage(messages[i], cancellationToken).ConfigureAwait(false);
+#if USE_LOCAL_MQTTNET
+                await server.InjectApplicationMessages(
+                    new ArraySegment<InjectedMqttApplicationMessage>(messages, 0, messageCount),
+                    cancellationToken).ConfigureAwait(false);
+#else
+                for (var i = 0; i < messageCount; i++)
+                {
+                    await server.InjectApplicationMessage(messages[i], cancellationToken).ConfigureAwait(false);
+                }
+#endif
             }
         }
         finally
         {
-            // Return user property lists to pool
-            if (userPropertiesArray is not null)
-            {
-                for (var i = 0; i < messageCount; i++)
-                {
-                    if (userPropertiesArray[i] is { } list)
-                    {
-                        UserPropertiesPool.Return(list);
-                    }
-                }
-                userPropsArrayPool.Return(userPropertiesArray);
-            }
-
             messagesPool.Return(messages);
         }
     }
 
     private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
-        // Check if subject is still attached before cache lookup
-        var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
-        if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
-        {
-            return null;
-        }
-
         return _propertyToTopic.GetOrAdd(propertyReference, static (_, state) =>
         {
             var (p, pathProvider, subject, topicPrefix) = state;
@@ -260,24 +230,12 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private PropertyReference? TryGetPropertyForTopic(string path)
     {
-        var propertyReference = _pathToProperty.GetOrAdd(path, static (p, state) =>
+        return _pathToProperty.GetOrAdd(path, static (p, state) =>
         {
             var (subject, pathProvider) = state;
             var (property, _) = subject.TryGetPropertyFromSourcePath(p, pathProvider);
             return property?.Reference;
         }, (_subject, _configuration.PathProvider));
-
-        // Check if subject is still attached after cache lookup
-        if (propertyReference is not null)
-        {
-            var registeredSubject = propertyReference.Value.Subject.TryGetRegisteredSubject();
-            if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
-            {
-                return null;
-            }
-        }
-
-        return propertyReference;
     }
 
     private Task ClientConnectedAsync(ClientConnectedEventArgs arg)
@@ -301,7 +259,12 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             }
         });
 
-        _runningInitialStateTasks.Add(task);
+        lock (_initialStateTasksLock)
+        {
+            // Clean up completed tasks to prevent memory leak
+            _runningInitialStateTasks.RemoveAll(t => t.IsCompleted);
+            _runningInitialStateTasks.Add(task);
+        }
 
         return Task.CompletedTask;
     }
@@ -408,37 +371,12 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         return Task.CompletedTask;
     }
 
-    private void OnSubjectDetached(SubjectLifecycleChange change)
-    {
-        // Clean up cache entries for detached subject
-        var subject = change.Subject;
-        var registeredSubject = subject.TryGetRegisteredSubject();
-        if (registeredSubject is null)
-        {
-            return;
-        }
-
-        foreach (var property in registeredSubject.Properties)
-        {
-            if (_propertyToTopic.TryRemove(property.Reference, out var topic) && topic is not null)
-            {
-                var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
-                _pathToProperty.TryRemove(path, out _);
-            }
-        }
-    }
-
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return;
-        }
-
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
         }
 
         var server = _mqttServer;
@@ -451,7 +389,12 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             // Wait for all running initial state tasks to complete
             try
             {
-                await Task.WhenAll(_runningInitialStateTasks.ToArray()).ConfigureAwait(false);
+                Task[] tasksSnapshot;
+                lock (_initialStateTasksLock)
+                {
+                    tasksSnapshot = _runningInitialStateTasks.ToArray();
+                }
+                await Task.WhenAll(tasksSnapshot).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

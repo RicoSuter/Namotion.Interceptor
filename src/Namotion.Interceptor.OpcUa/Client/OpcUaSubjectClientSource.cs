@@ -110,7 +110,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var batchSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
         batchSize = batchSize is 0 ? int.MaxValue : batchSize;
 
-        var result = new Dictionary<RegisteredSubjectProperty, DataValue>();
+        var result = new Dictionary<RegisteredSubjectProperty, DataValue>(itemCount);
         for (var offset = 0; offset < itemCount; offset += batchSize)
         {
             var take = Math.Min(batchSize, itemCount - offset);

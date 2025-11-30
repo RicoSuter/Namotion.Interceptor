@@ -66,6 +66,10 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
         {
             // Already signaled, ignore
         }
+        catch (ObjectDisposedException)
+        {
+            // Monitor is being disposed, ignore (race between disconnect event and disposal)
+        }
     }
 
     /// <summary>
