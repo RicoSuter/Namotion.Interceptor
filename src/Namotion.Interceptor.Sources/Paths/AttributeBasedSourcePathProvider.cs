@@ -117,11 +117,11 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
     private SourcePathAttribute? TryGetSourcePathAttribute(RegisteredSubjectProperty property)
     {
         var attributes = property.ReflectionAttributes;
-        if (attributes is Attribute[] attrArray)
+        if (attributes is Attribute[] attributeArray)
         {
-            for (var i = 0; i < attrArray.Length; i++)
+            for (var i = 0; i < attributeArray.Length; i++)
             {
-                if (attrArray[i] is SourcePathAttribute spa && spa.SourceName == _sourceName)
+                if (attributeArray[i] is SourcePathAttribute spa && spa.SourceName == _sourceName)
                 {
                     return spa;
                 }
@@ -129,9 +129,9 @@ public class AttributeBasedSourcePathProvider : SourcePathProviderBase
             return null;
         }
 
-        foreach (var attr in attributes)
+        foreach (var attribute in attributes)
         {
-            if (attr is SourcePathAttribute spa && spa.SourceName == _sourceName)
+            if (attribute is SourcePathAttribute spa && spa.SourceName == _sourceName)
             {
                 return spa;
             }
