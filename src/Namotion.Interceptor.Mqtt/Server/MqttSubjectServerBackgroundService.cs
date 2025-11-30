@@ -228,22 +228,23 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
-        // Get or add to cache (may add stale entry if subject is being detached - that's OK)
-        var topic = _propertyToTopic.GetOrAdd(propertyReference, static (_, state) =>
+        if (_propertyToTopic.TryGetValue(propertyReference, out var cachedTopic))
         {
-            var (p, pathProvider, subject, topicPrefix) = state;
-            var path = p.TryGetSourcePath(pathProvider, subject);
-            return path is null ? null : MqttHelper.BuildTopic(path, topicPrefix);
-        }, (property, _configuration.PathProvider, _subject, _configuration.TopicPrefix));
+            return cachedTopic;
+        }
 
-        // Check AFTER: validate subject is still attached before using cached value
-        // This ensures we never return stale data even with concurrent detach
-        var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
-        if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+        // Slow path: compute topic and add to cache
+        var path = property.TryGetSourcePath(_configuration.PathProvider, _subject);
+        var topic = path is null ? null : MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
+
+        // Add first, then validate (guarantees no memory leak)
+        if (_propertyToTopic.TryAdd(propertyReference, topic))
         {
-            // Remove stale entry to prevent memory leak
-            _propertyToTopic.TryRemove(propertyReference, out _);
-            return null;
+            var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
+            if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+            {
+                _propertyToTopic.TryRemove(propertyReference, out _);
+            }
         }
 
         return topic;
@@ -251,22 +252,27 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private PropertyReference? TryGetPropertyForTopic(string path)
     {
-        var propertyReference = _pathToProperty.GetOrAdd(path, static (p, state) =>
+        // Fast path: return cached value immediately (single lookup)
+        if (_pathToProperty.TryGetValue(path, out var cachedProperty))
         {
-            var (subject, pathProvider) = state;
-            var (property, _) = subject.TryGetPropertyFromSourcePath(p, pathProvider);
-            return property?.Reference;
-        }, (_subject, _configuration.PathProvider));
+            return cachedProperty;
+        }
 
-        // Check if subject is still attached after cache lookup
-        if (propertyReference is { } propRef)
+        // Slow path: compute property reference and add to cache
+        var (property, _) = _subject.TryGetPropertyFromSourcePath(path, _configuration.PathProvider);
+        var propertyReference = property?.Reference;
+
+        // Add first, then validate (guarantees no memory leak)
+        if (_pathToProperty.TryAdd(path, propertyReference))
         {
-            var registeredSubject = propRef.Subject.TryGetRegisteredSubject();
-            if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+            if (propertyReference is { } propRef)
             {
-                // Remove stale entry to prevent memory leak
-                _pathToProperty.TryRemove(path, out _);
-                return null;
+                var registeredSubject = propRef.Subject.TryGetRegisteredSubject();
+                if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+                {
+                    // Subject detached - remove the entry we just added
+                    _pathToProperty.TryRemove(path, out _);
+                }
             }
         }
 

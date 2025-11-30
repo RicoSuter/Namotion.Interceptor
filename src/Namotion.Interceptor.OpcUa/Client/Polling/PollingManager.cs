@@ -161,6 +161,20 @@ internal sealed class PollingManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// Removes polling items for a detached subject. Idempotent.
+    /// </summary>
+    public void RemoveItemsForSubject(IInterceptorSubject subject)
+    {
+        foreach (var kvp in _pollingItems)
+        {
+            if (kvp.Value.Property.Reference.Subject == subject)
+            {
+                _pollingItems.TryRemove(kvp.Key, out _);
+            }
+        }
+    }
+
     private async Task PollLoopAsync(CancellationToken cancellationToken)
     {
         try

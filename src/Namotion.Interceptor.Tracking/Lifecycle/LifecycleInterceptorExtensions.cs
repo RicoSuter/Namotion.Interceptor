@@ -31,7 +31,7 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     internal static int IncrementReferenceCount(this IInterceptorSubject subject)
     {
-        return (int)(subject.Data.AddOrUpdate((null, ReferenceCountKey), 1, (_, count) => (int)count! + 1) ?? 1);
+        return (int)(subject.Data.AddOrUpdate((null, ReferenceCountKey), 1, (_, count) => (int)(count ?? 0) + 1) ?? 1);
     }
 
     /// <summary>
@@ -39,7 +39,7 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     internal static int DecrementReferenceCount(this IInterceptorSubject subject)
     {
-        return (int)(subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, (_, count) => (int)count! - 1) ?? 0);
+        return (int)(subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, (_, count) => Math.Max(0, (int)(count ?? 0) - 1)) ?? 0);
     }
 
     public static void AttachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)
