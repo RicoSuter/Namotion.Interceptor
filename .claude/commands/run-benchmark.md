@@ -48,7 +48,11 @@ cd "C:\Users\rsute\GitHub\Namotion.Interceptor\src\Namotion.Interceptor.Mqtt.Sam
 ### 5. Wait for Results
 **IMPORTANT:** Always wait at least 2-3 minutes (until you see the 3rd "1 minute" result) before reporting results. The first 1-2 minutes include warmup and initialization overhead.
 
-Check both server and client outputs periodically (every 30-60 seconds) using BashOutput.
+Wait at least 60 seconds between checking outputs to avoid excessive polling. Only check outputs 2-3 times total:
+1. After ~90 seconds - verify processes started correctly
+2. After ~180 seconds - collect the 3rd minute results for final reporting
+
+Do NOT poll outputs frequently or use ping commands for waiting.
 
 ### 6. Report Key Metrics
 After collecting stable results (3rd minute or later), report these key metrics in a summary table:
