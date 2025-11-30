@@ -15,6 +15,7 @@ using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Mqtt.Client;
 
@@ -33,12 +34,10 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     private readonly MqttClientFactory _factory;
 
-    // TODO(memory): Might lead to memory leaks (will be fixed in follow-up PR)
-    // Note: These caches grow with the number of unique topics/properties.
-    // For static object graphs (typical MQTT scenarios), this is bounded.
-    // Cleared on dispose. For dynamic graphs, consider periodic cleanup.
     private readonly ConcurrentDictionary<string, PropertyReference?> _topicToProperty = new();
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
+
+    private LifecycleInterceptor? _lifecycleInterceptor;
 
     private IMqttClient? _client;
     private SubjectPropertyWriter? _propertyWriter;
@@ -73,6 +72,12 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     {
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to MQTT broker at {Host}:{Port}.", _configuration.BrokerHost, _configuration.BrokerPort);
+
+        _lifecycleInterceptor = _subject.Context.TryGetLifecycleInterceptor();
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
+        }
 
         _client = _factory.CreateMqttClient();
         _client.ApplicationMessageReceivedAsync += OnMessageReceivedAsync;
@@ -257,23 +262,50 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
-        return _propertyToTopic.GetOrAdd(propertyReference, static (_, state) =>
+        // Get or add to cache (may add stale entry if subject is being detached - that's OK)
+        var topic = _propertyToTopic.GetOrAdd(propertyReference, static (_, state) =>
         {
             var (p, pathProvider, subject, topicPrefix) = state;
             var path = p.TryGetSourcePath(pathProvider, subject);
             return path is null ? null : MqttHelper.BuildTopic(path, topicPrefix);
         }, (property, _configuration.PathProvider, _subject, _configuration.TopicPrefix));
+
+        // Check AFTER: validate subject is still attached before using cached value
+        // This ensures we never return stale data even with concurrent detach
+        var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
+        if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+        {
+            // Remove stale entry to prevent memory leak
+            _propertyToTopic.TryRemove(propertyReference, out _);
+            return null;
+        }
+
+        return topic;
     }
 
     private PropertyReference? TryGetPropertyForTopic(string topic)
     {
-        return _topicToProperty.GetOrAdd(topic, static (t, state) =>
+        var propertyReference = _topicToProperty.GetOrAdd(topic, static (t, state) =>
         {
             var (subject, pathProvider, topicPrefix) = state;
             var path = MqttHelper.StripTopicPrefix(t, topicPrefix);
             var (property, _) = subject.TryGetPropertyFromSourcePath(path, pathProvider);
             return property?.Reference;
         }, (_subject, _configuration.PathProvider, _configuration.TopicPrefix));
+
+        // Check if subject is still attached after cache lookup
+        if (propertyReference is { } propRef)
+        {
+            var registeredSubject = propRef.Subject.TryGetRegisteredSubject();
+            if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+            {
+                // Remove stale entry to prevent memory leak
+                _topicToProperty.TryRemove(topic, out _);
+                return null;
+            }
+        }
+
+        return propertyReference;
     }
 
     private Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
@@ -359,6 +391,26 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         }
     }
 
+    private void OnSubjectDetached(SubjectLifecycleChange change)
+    {
+        // Clean up cache entries for detached subjects
+        foreach (var kvp in _propertyToTopic)
+        {
+            if (kvp.Key.Subject == change.Subject)
+            {
+                _propertyToTopic.TryRemove(kvp.Key, out _);
+            }
+        }
+
+        foreach (var kvp in _topicToProperty)
+        {
+            if (kvp.Value?.Subject == change.Subject)
+            {
+                _topicToProperty.TryRemove(kvp.Key, out _);
+            }
+        }
+    }
+
     private MqttClientOptions GetClientOptions()
     {
         var options = new MqttClientOptionsBuilder()
@@ -387,6 +439,11 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return;
+        }
+
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
         }
 
         if (_connectionMonitor is not null)

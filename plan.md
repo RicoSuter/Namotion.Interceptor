@@ -4,13 +4,19 @@
 
 ### COMPLETED
 - [x] Step 1: Add events to LifecycleInterceptor (SubjectAttached/SubjectDetached, fire outside lock)
-- [x] Step 2: Make ReferenceCountKey internal in LifecycleInterceptor
+- [x] Step 2: ~~Make ReferenceCountKey internal~~ → Changed to private (implementation detail)
 - [x] Step 3: Expose ReferenceCount on RegisteredSubject (via GetReferenceCount extension method)
 - [x] Step 4: Add TryGetLifecycleInterceptor extension method
 - [x] Step 5: Update MqttSubjectClientSource with lifecycle events
 - [x] Step 6: Update MqttSubjectServerBackgroundService with lifecycle events
 - [x] Remove TODO(memory) comments from MQTT sources
 - [x] Build and test - all tests pass
+
+### POST-REVIEW FIXES (PR #111 Review)
+- [x] Fix race condition in cache methods (check AFTER GetOrAdd, not BEFORE)
+- [x] Add IncrementReferenceCount/DecrementReferenceCount extension methods (avoid key duplication)
+- [x] Remove stale cache entries when detecting detached subjects (memory cleanup)
+- [x] Move events inside lock (same semantics as ILifecycleHandler, eliminates collector lists)
 
 ### REMAINING (Optional)
 - [ ] Step 7: Add unit tests for cache invalidation
@@ -67,37 +73,53 @@ Add `SubjectAttached` and `SubjectDetached` events to `LifecycleInterceptor` tha
 - Sources are "dynamic" - created/disposed at runtime based on configuration
 - Events are better suited for dynamic subscribers that come and go
 
-### Events Fire Outside Lock
+### Events Fire Inside Lock
 
-**Decision**: Collect events inside lock, invoke outside lock.
+**Decision**: Events fire inside the lock, same as `ILifecycleHandler` methods.
 
 **Rationale**:
-- `ILifecycleHandler` methods stay inside lock (existing behavior, handlers are fast)
-- Event invocation moves outside lock to avoid increasing lock hold time
-- Handlers iterate properties and do dictionary operations - microseconds, not nanoseconds
-- Lock hold time must stay < 1μs for high-throughput industrial scenarios
+- Consistent semantics with `ILifecycleHandler` - both invoked inside lock
+- Strong ordering guarantees - no race between attach/detach events
+- Simpler code - no collector lists, no delegate capture, no post-lock iteration
+- Event handlers are expected to be fast (dictionary operations - microseconds)
 
-**Implementation**: Uses thread-static pooling for change lists to avoid allocations.
+**Contract**: Event handlers must be exception-free and fast (invoked inside lock).
 
 ### Consumer-Side Attachment Check
 
-**Problem**: Race condition where cache is repopulated after subject detachment.
+**Problem**: Race condition where cache is populated during/after subject detachment.
 
-**Solution**: Sources check if subject is still attached BEFORE cache lookup (never cache detachment state).
+**Initial Approach (FLAWED)**: Check BEFORE cache lookup.
+- Race: Thread A checks ReferenceCount > 0, Thread B detaches subject, Thread A adds to cache
+- Result: Stale entry in cache that won't be cleaned (OnSubjectDetached already ran)
+
+**Solution**: Check AFTER cache lookup (not before).
+- Even if a stale entry is cached, we won't USE it
+- The value is validated before being returned
+- OnSubjectDetached provides best-effort cleanup
+- Stale entries are harmless (unused until GC or next cleanup)
 
 ```csharp
 private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
 {
-    // Always resolve fresh - don't cache detachment state
+    // Get or add to cache (may add stale entry - that's OK)
+    var topic = _propertyToTopic.GetOrAdd(propertyReference, ...);
+
+    // Check AFTER: validate subject is still attached before using cached value
     var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
     if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
     {
-        return null;  // Don't touch cache for detached subjects
+        // Remove stale entry to prevent memory leak
+        _propertyToTopic.TryRemove(propertyReference, out _);
+        return null;  // Don't use cached value for detached subjects
     }
 
-    return _propertyToTopic.GetOrAdd(propertyReference, ...);
+    return topic;
 }
 ```
+
+**Thread-Safety Guarantee**: Even with concurrent attach/detach, we never return stale data.
+**Memory Cleanup**: Stale entries are removed immediately when detected, supplementing the OnSubjectDetached handler.
 
 ### No Exception Handling in LifecycleInterceptor
 
@@ -113,12 +135,16 @@ The `LifecycleInterceptor` does NOT wrap handler/event invocations in try-catch:
 
 **LifecycleInterceptor.cs:**
 - Added `SubjectAttached` and `SubjectDetached` events
-- Events fire outside lock using thread-static pooled change lists
-- `ReferenceCountKey` changed to `internal`
+- Events fire inside lock (same semantics as `ILifecycleHandler`)
+- Removed `ReferenceCountKey` constant (moved to extension methods)
+- Uses `IncrementReferenceCount()`/`DecrementReferenceCount()` extension methods
+- Simplified: no collector lists, no delegate capture, direct `?.Invoke()` inside lock
 
 **LifecycleInterceptorExtensions.cs:**
 - Added `TryGetLifecycleInterceptor(this IInterceptorSubjectContext)` extension
 - Added `GetReferenceCount(this IInterceptorSubject)` extension
+- Added `IncrementReferenceCount(this IInterceptorSubject)` internal extension (avoids key duplication)
+- Added `DecrementReferenceCount(this IInterceptorSubject)` internal extension (avoids key duplication)
 
 ### Namotion.Interceptor.Registry
 
@@ -130,9 +156,9 @@ The `LifecycleInterceptor` does NOT wrap handler/event invocations in try-catch:
 **MqttSubjectClientSource.cs:**
 - Added `_lifecycleInterceptor` field
 - Subscribe to `SubjectDetached` event in `StartListeningAsync`
-- `TryGetTopicForProperty` checks `ReferenceCount` BEFORE cache lookup
-- `TryGetPropertyForTopic` checks `ReferenceCount` AFTER cache lookup
-- Added `OnSubjectDetached` handler to clean up caches
+- `TryGetTopicForProperty` checks `ReferenceCount` AFTER cache lookup + removes stale entries (race-free)
+- `TryGetPropertyForTopic` checks `ReferenceCount` AFTER cache lookup + removes stale entries (race-free)
+- Added `OnSubjectDetached` handler to clean up caches (best-effort cleanup)
 - Unsubscribe in `DisposeAsync`
 - Removed `// TODO(memory)` comment
 
@@ -140,6 +166,6 @@ The `LifecycleInterceptor` does NOT wrap handler/event invocations in try-catch:
 - Same pattern as client source
 - Added `_lifecycleInterceptor` field
 - Subscribe/unsubscribe to lifecycle events
-- `TryGetTopicForProperty` and `TryGetPropertyForTopic` check `ReferenceCount`
-- Added `OnSubjectDetached` handler to clean up caches
+- Both cache methods check `ReferenceCount` AFTER cache lookup + remove stale entries (race-free)
+- Added `OnSubjectDetached` handler to clean up caches (best-effort cleanup)
 - Removed `// TODO(memory)` comment
