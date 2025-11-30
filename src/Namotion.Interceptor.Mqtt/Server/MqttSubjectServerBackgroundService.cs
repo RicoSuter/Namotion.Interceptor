@@ -233,7 +233,6 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             return cachedTopic;
         }
 
-        // Slow path: compute topic and add to cache
         var path = property.TryGetSourcePath(_configuration.PathProvider, _subject);
         var topic = path is null ? null : MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
 
@@ -252,13 +251,11 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private PropertyReference? TryGetPropertyForTopic(string path)
     {
-        // Fast path: return cached value immediately (single lookup)
         if (_pathToProperty.TryGetValue(path, out var cachedProperty))
         {
             return cachedProperty;
         }
 
-        // Slow path: compute property reference and add to cache
         var (property, _) = _subject.TryGetPropertyFromSourcePath(path, _configuration.PathProvider);
         var propertyReference = property?.Reference;
 
@@ -270,7 +267,6 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                 var registeredSubject = propRef.Subject.TryGetRegisteredSubject();
                 if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
                 {
-                    // Subject detached - remove the entry we just added
                     _pathToProperty.TryRemove(path, out _);
                 }
             }
@@ -414,7 +410,6 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private void OnSubjectDetached(SubjectLifecycleChange change)
     {
-        // Clean up cache entries for detached subjects
         foreach (var kvp in _propertyToTopic)
         {
             if (kvp.Key.Subject == change.Subject)

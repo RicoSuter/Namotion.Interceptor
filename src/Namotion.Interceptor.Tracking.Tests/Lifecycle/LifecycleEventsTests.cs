@@ -200,11 +200,6 @@ public class LifecycleEventsTests
     public void GetReferenceCount_ReturnsZero_ForUnattachedSubject()
     {
         // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithLifecycle();
-
-        var person = new Person(context) { FirstName = "Person" };
         var child = new Person { FirstName = "Child" };
 
         // Act
@@ -364,17 +359,15 @@ public class LifecycleEventsTests
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
         Assert.NotNull(lifecycleInterceptor);
 
-        var attachedEvents = new List<SubjectLifecycleChange>();
-        var detachedEvents = new List<SubjectLifecycleChange>();
-
-        lifecycleInterceptor.SubjectAttached += change => attachedEvents.Add(change);
-        lifecycleInterceptor.SubjectDetached += change => detachedEvents.Add(change);
-
         var person = new Person(context) { FirstName = "Person" };
         var child = new Person { FirstName = "Child" };
 
         person.Father = child;
-        attachedEvents.Clear(); // Clear initial attach event
+
+        var attachedEvents = new List<SubjectLifecycleChange>();
+        var detachedEvents = new List<SubjectLifecycleChange>();
+        lifecycleInterceptor.SubjectAttached += change => attachedEvents.Add(change);
+        lifecycleInterceptor.SubjectDetached += change => detachedEvents.Add(change);
 
         // Act - Set to same value
         person.Father = child;
@@ -396,19 +389,16 @@ public class LifecycleEventsTests
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
         Assert.NotNull(lifecycleInterceptor);
 
-        var events = new List<(string type, IInterceptorSubject subject, int count)>();
+        var person = new Person(context) { FirstName = "Person" };
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
+        person.Father = child1;
 
+        var events = new List<(string type, IInterceptorSubject subject, int count)>();
         lifecycleInterceptor.SubjectAttached += change =>
             events.Add(("Attached", change.Subject, change.ReferenceCount));
         lifecycleInterceptor.SubjectDetached += change =>
             events.Add(("Detached", change.Subject, change.ReferenceCount));
-
-        var person = new Person(context) { FirstName = "Person" };
-        var child1 = new Person { FirstName = "Child1" };
-        var child2 = new Person { FirstName = "Child2" };
-
-        person.Father = child1;
-        events.Clear();
 
         // Act - Replace child1 with child2
         person.Father = child2;

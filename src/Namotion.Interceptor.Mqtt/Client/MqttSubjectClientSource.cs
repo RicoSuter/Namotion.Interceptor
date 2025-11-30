@@ -395,7 +395,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     private void OnSubjectDetached(SubjectLifecycleChange change)
     {
-        // Clean up cache entries for detached subjects
         foreach (var kvp in _propertyToTopic)
         {
             if (kvp.Key.Subject == change.Subject)
