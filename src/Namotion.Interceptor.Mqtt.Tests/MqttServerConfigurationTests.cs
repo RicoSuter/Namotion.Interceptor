@@ -63,7 +63,7 @@ public class MqttServerConfigurationTests
 
         // Assert
         Assert.Equal(1883, config.BrokerPort);
-        Assert.Equal(10000, config.MaxPendingMessagesPerClient);
+        Assert.Equal(25000, config.MaxPendingMessagesPerClient);
         Assert.NotNull(config.ValueConverter);
     }
 }
