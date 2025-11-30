@@ -55,10 +55,10 @@ public class OpcUaServerConfiguration
 
     /// <summary>
     /// Gets or sets the telemetry context for OPC UA operations.
-    /// Defaults to a telemetry context with trace-based logging via Utils.LoggingProvider.
+    /// Defaults to NullTelemetryContext for minimal overhead.
     /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
     /// </summary>
-    public ITelemetryContext TelemetryContext { get; init; } = DefaultTelemetry.Create(_ => { });
+    public ITelemetryContext TelemetryContext { get; init; } = NullTelemetryContext.Instance;
 
     public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
