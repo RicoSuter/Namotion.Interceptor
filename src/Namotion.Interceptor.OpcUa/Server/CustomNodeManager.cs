@@ -70,6 +70,22 @@ internal class CustomNodeManager : CustomNodeManager2
         }
     }
 
+    /// <summary>
+    /// Removes nodes for a detached subject. Idempotent - safe to call multiple times.
+    /// Note: Node stays in address space until server restart.
+    /// We just clean up local tracking to avoid memory leaks.
+    /// </summary>
+    public void RemoveSubjectNodes(IInterceptorSubject subject)
+    {
+        foreach (var kvp in _subjects)
+        {
+            if (kvp.Key.Subject == subject)
+            {
+                _subjects.TryRemove(kvp.Key, out _);
+            }
+        }
+    }
+
     private void CreateObjectNode(NodeId parentNodeId, RegisteredSubject subject, string prefix)
     {
         foreach (var property in subject.Properties)

@@ -281,6 +281,6 @@ var context = InterceptorSubjectContext
 
 **Namotion.Interceptor.GraphQL** - GraphQL integration with subscription support for real-time updates
 
-**Namotion.Interceptor.Mqtt** - MQTT client/server integration for IoT scenarios
+**[Namotion.Interceptor.Mqtt](docs/mqtt.md)** - MQTT client/server integration for IoT scenarios
 
 **[Namotion.Interceptor.OpcUa](docs/opcua.md)** - OPC UA client/server integration for industrial automation

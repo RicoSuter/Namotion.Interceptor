@@ -6,6 +6,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -23,6 +24,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
 
+    private LifecycleInterceptor? _lifecycleInterceptor;
     private SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
 
@@ -59,6 +61,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
+
+        _lifecycleInterceptor = _subject.Context.TryGetLifecycleInterceptor();
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
+        }
 
         _sessionManager = new SessionManager(this, propertyWriter, _configuration, _logger);
 
@@ -455,6 +463,11 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             return; // Already disposed
         }
 
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
+        }
+
         var sessionManager = _sessionManager;
         if (sessionManager is not null)
         {
@@ -477,5 +490,32 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
 
         _propertiesWithOpcData.Clear();
+    }
+
+    private void OnSubjectDetached(SubjectLifecycleChange change)
+    {
+        // Skip cleanup during reconnection (subscriptions being transferred)
+        if (_sessionManager?.IsReconnecting == true)
+        {
+            return;
+        }
+
+        _sessionManager?.SubscriptionManager.RemoveItemsForSubject(change.Subject);
+        _sessionManager?.PollingManager?.RemoveItemsForSubject(change.Subject);
+        
+        CleanupPropertyDataForSubject(change.Subject);
+    }
+
+    private void CleanupPropertyDataForSubject(IInterceptorSubject subject)
+    {
+        var toRemove = _propertiesWithOpcData
+            .Where(p => p.Subject == subject)
+            .ToList();
+
+        foreach (var property in toRemove)
+        {
+            property.RemovePropertyData(OpcUaNodeIdKey);
+            _propertiesWithOpcData.Remove(property);
+        }
     }
 }

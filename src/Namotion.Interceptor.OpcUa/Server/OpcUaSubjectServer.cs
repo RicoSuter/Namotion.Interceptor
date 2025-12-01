@@ -24,6 +24,11 @@ internal class OpcUaSubjectServer : StandardServer
         _nodeManagerFactory.NodeManager?.ClearPropertyData();
     }
 
+    public void RemoveSubjectNodes(IInterceptorSubject subject)
+    {
+        _nodeManagerFactory.NodeManager?.RemoveSubjectNodes(subject);
+    }
+
     protected override void OnServerStarted(IServerInternal server)
     {
         _server = server;
