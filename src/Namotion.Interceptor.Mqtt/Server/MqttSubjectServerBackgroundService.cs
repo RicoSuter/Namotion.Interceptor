@@ -417,6 +417,9 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private void OnSubjectDetached(SubjectLifecycleChange change)
     {
+        // TODO(perf): O(n) scan over all cached entries per detached subject.
+        // Consider adding a reverse index (Dictionary<IInterceptorSubject, List<PropertyReference>>) for O(1) cleanup
+        // if profiling shows this as a bottleneck with large object graphs and frequent attach/detach cycles.
         foreach (var kvp in _propertyToTopic)
         {
             if (kvp.Key.Subject == change.Subject)
