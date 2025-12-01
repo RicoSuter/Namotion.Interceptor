@@ -380,7 +380,6 @@ builder.Services.AddOpcUaSubjectClient(
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
         PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
-        EnableAutoHealing = true, // Default
         SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10) // Default: 10 seconds
     });
 ```
@@ -410,3 +409,33 @@ using (SubjectChangeContext.WithSource(opcUaSource))
     subject.Temperature = newValue;
 }
 ```
+
+## Lifecycle Management
+
+### Automatic Cleanup on Subject Detach
+
+When subjects are detached from the object graph (removed from collections, set to null, etc.), the OPC UA client and server automatically clean up their internal tracking structures to prevent memory leaks.
+
+**Server behavior:**
+- When a subject is detached, its corresponding entries in `CustomNodeManager._subjects` are removed
+- The OPC UA node remains in the address space until server restart (OPC UA SDK limitation)
+- Local tracking is cleaned up immediately to prevent memory leaks
+
+**Client behavior:**
+- When a subject is detached, monitored items in `SubscriptionManager._monitoredItems` are removed
+- Polling items in `PollingManager._pollingItems` are also cleaned up
+- Property data (OPC UA node IDs) associated with the subject is cleared
+- OPC UA subscription items remain on the server until session ends
+- Cleanup is skipped during reconnection to avoid interfering with subscription transfer
+
+**Thread safety:**
+- Cleanup handlers are invoked inside the lifecycle interceptor's lock
+- Handlers use `ConcurrentDictionary.TryRemove` for safe concurrent modification
+- Event handlers are designed to be fast and exception-free
+
+**What this does NOT do:**
+- Does NOT dynamically add new subjects to OPC UA after initialization
+- Does NOT update the OPC UA address space when subjects are attached
+- New subjects added after startup require a restart to appear in OPC UA
+
+This minimal lifecycle integration prevents memory leaks in long-running services with dynamic object graphs.

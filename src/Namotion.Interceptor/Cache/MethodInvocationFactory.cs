@@ -1,19 +1,19 @@
+using System.Collections.Immutable;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Cache;
 
 internal static class MethodInvocationFactory
 {
-    public static InvokeFunc Create(IEnumerable<IMethodInterceptor> interceptors)
+    public static InvokeFunc Create(ImmutableArray<IMethodInterceptor> interceptors)
     {
-        var interceptorArray = interceptors.ToArray();
-        if (interceptorArray.Length == 0)
+        if (interceptors.Length == 0)
         {
             return static (ref context, innerInvokeMethod) => innerInvokeMethod(context.Subject, context.Parameters);
         }
 
         var chain = new MethodInvocationChain<IMethodInterceptor>(
-            interceptorArray,
+            interceptors,
             static (interceptor, context, next) => interceptor.InvokeMethod(context, next),
             static (ref context, innerInvokeMethod) => innerInvokeMethod(context.Subject, context.Parameters)
         );

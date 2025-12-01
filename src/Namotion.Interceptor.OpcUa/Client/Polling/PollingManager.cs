@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Sources.Resilience;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -21,7 +22,7 @@ internal sealed class PollingManager : IDisposable
     private readonly SessionManager _sessionManager;
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
-    private readonly PollingCircuitBreaker _circuitBreaker;
+    private readonly CircuitBreaker _circuitBreaker;
     private readonly PollingMetrics _metrics = new();
 
     private readonly ConcurrentDictionary<string, PollingItem> _pollingItems = new();
@@ -49,7 +50,7 @@ internal sealed class PollingManager : IDisposable
         _propertyWriter = propertyWriter;
         _configuration = configuration;
 
-        _circuitBreaker = new PollingCircuitBreaker(configuration.PollingCircuitBreakerThreshold, configuration.PollingCircuitBreakerCooldown);
+        _circuitBreaker = new CircuitBreaker(configuration.PollingCircuitBreakerThreshold, configuration.PollingCircuitBreakerCooldown);
         _timer = new PeriodicTimer(configuration.PollingInterval);
     }
 
@@ -157,6 +158,20 @@ internal sealed class PollingManager : IDisposable
         if (_pollingItems.TryRemove(key, out _))
         {
             _logger.LogDebug("Removed node {NodeId} from polling", key);
+        }
+    }
+
+    /// <summary>
+    /// Removes polling items for a detached subject. Idempotent.
+    /// </summary>
+    public void RemoveItemsForSubject(IInterceptorSubject subject)
+    {
+        foreach (var kvp in _pollingItems)
+        {
+            if (kvp.Value.Property.Reference.Subject == subject)
+            {
+                _pollingItems.TryRemove(kvp.Key, out _);
+            }
         }
     }
 

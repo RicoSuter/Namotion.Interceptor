@@ -280,7 +280,7 @@ internal class OpcUaSubjectLoader
             while (continuationPoint is { Length: > 0 })
             {
                 var nextResponse = await session.BrowseNextAsync(
-                    null, false, 
+                    null, false,
                     [continuationPoint], cancellationToken).ConfigureAwait(false);
 
                 if (nextResponse.Results.Count > 0)

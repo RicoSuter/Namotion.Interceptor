@@ -8,6 +8,10 @@ internal class OpcUaSubjectServer : StandardServer
     private readonly ILogger _logger;
     private readonly CustomNodeManagerFactory _nodeManagerFactory;
 
+    private IServerInternal? _server;
+    private SessionEventHandler? _sessionCreatedHandler;
+    private SessionEventHandler? _sessionClosingHandler;
+
     public OpcUaSubjectServer(IInterceptorSubject subject, OpcUaSubjectServerBackgroundService source, OpcUaServerConfiguration configuration, ILogger logger)
     {
         _logger = logger;
@@ -20,16 +24,46 @@ internal class OpcUaSubjectServer : StandardServer
         _nodeManagerFactory.NodeManager?.ClearPropertyData();
     }
 
+    public void RemoveSubjectNodes(IInterceptorSubject subject)
+    {
+        _nodeManagerFactory.NodeManager?.RemoveSubjectNodes(subject);
+    }
+
     protected override void OnServerStarted(IServerInternal server)
     {
-        server.SessionManager.SessionCreated += (s, _) =>
+        _server = server;
+
+        _sessionCreatedHandler = (session, _) =>
         {
-            _logger.LogInformation("OPC UA session {SessionId} with user {UserIdentity} created.", s.Id, s.Identity.DisplayName);
+            _logger.LogInformation("OPC UA session {SessionId} with user {UserIdentity} created.", session.Id, session.Identity.DisplayName);
         };
 
-        server.SessionManager.SessionClosing += (s, _) =>
+        _sessionClosingHandler = (session, _) =>
         {
-            _logger.LogInformation("OPC UA session {SessionId} with user {UserIdentity} closing.", s.Id, s.Identity.DisplayName);
+            _logger.LogInformation("OPC UA session {SessionId} with user {UserIdentity} closing.", session.Id, session.Identity.DisplayName);
         };
+
+        server.SessionManager.SessionCreated += _sessionCreatedHandler;
+        server.SessionManager.SessionClosing += _sessionClosingHandler;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && _server is not null)
+        {
+            if (_sessionCreatedHandler is not null)
+            {
+                _server.SessionManager.SessionCreated -= _sessionCreatedHandler;
+            }
+
+            if (_sessionClosingHandler is not null)
+            {
+                _server.SessionManager.SessionClosing -= _sessionClosingHandler;
+            }
+
+            _server = null;
+        }
+
+        base.Dispose(disposing);
     }
 }
