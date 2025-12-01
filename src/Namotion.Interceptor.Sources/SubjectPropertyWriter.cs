@@ -105,6 +105,9 @@ public sealed class SubjectPropertyWriter
     /// <param name="update">The update action to apply to the subject.</param>
     public void Write<TState>(TState state, Action<TState> update)
     {
+        // Hot path optimization: plain read (no volatile read) is fastest.
+        // Changes to _updates are rare (only during initialization/reconnection).
+        // If we see stale non-null during transition, we take lock and re-check - still correct.
         var updates = _updates;
         if (updates is not null)
         {

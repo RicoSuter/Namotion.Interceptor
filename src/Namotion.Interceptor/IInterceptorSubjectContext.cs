@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor;
@@ -10,7 +11,7 @@ public interface IInterceptorSubjectContext
 
     TInterface? TryGetService<TInterface>();
 
-    IEnumerable<TInterface> GetServices<TInterface>();
+    ImmutableArray<TInterface> GetServices<TInterface>();
 
     TProperty ExecuteInterceptedRead<TProperty>(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> readValue);
 

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
 
@@ -9,7 +10,7 @@ internal sealed class MethodInvocationChain<TInterceptor>
 
     public delegate object? ExecuteTerminalFunc(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> terminal);
 
-    private readonly TInterceptor[] _interceptors;
+    private readonly ImmutableArray<TInterceptor> _interceptors;
     private readonly ExecuteInterceptorFunc _executeInterceptor;
     private readonly ExecuteTerminalFunc _executeTerminal;
     private readonly InvocationContinuationNode[] _continuations;
@@ -19,7 +20,7 @@ internal sealed class MethodInvocationChain<TInterceptor>
     private static Func<IInterceptorSubject, object?[], object?>? _threadLocalTerminal;
 
     public MethodInvocationChain(
-        TInterceptor[] interceptors,
+        ImmutableArray<TInterceptor> interceptors,
         ExecuteInterceptorFunc executeInterceptor,
         ExecuteTerminalFunc executeTerminal)
     {

@@ -49,15 +49,13 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                 var property = registeredSubject.TryGetProperty(change.Property.Value.Name) ??
                     throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
 
-                subject
-                    .AddParent(property, change.Index);
+                subject.AddParent(property, change.Index);
 
-                property
-                    .AddChild(new SubjectPropertyChild
-                    {
-                        Index = change.Index,
-                        Subject = change.Subject,
-                    });
+                property.AddChild(new SubjectPropertyChild
+                {
+                    Index = change.Index,
+                    Subject = change.Subject,
+                });
             }
         }
     }
@@ -92,7 +90,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     {
         lock (_knownSubjects)
         {
-            var registeredSubject = TryGetRegisteredSubject(change.Subject);
+            var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
             if (registeredSubject is null)
             {
                 return;
@@ -110,7 +108,6 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                     registeredSubject.RemoveParent(property, change.Index);
 
                     // Remove child from the parent property's Children collection
-                    // Using struct initialization - no heap allocation
                     property.RemoveChild(new SubjectPropertyChild
                     {
                         Subject = change.Subject,

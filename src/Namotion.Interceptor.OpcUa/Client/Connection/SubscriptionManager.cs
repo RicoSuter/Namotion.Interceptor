@@ -282,6 +282,22 @@ internal class SubscriptionManager
                statusCode == StatusCodes.BadMonitoredItemFilterUnsupported;
     }
 
+    /// <summary>
+    /// Removes monitored items for a detached subject. Idempotent.
+    /// Note: OPC UA subscription items remain on server until session ends.
+    /// This just cleans up local tracking to avoid memory leaks.
+    /// </summary>
+    public void RemoveItemsForSubject(IInterceptorSubject subject)
+    {
+        foreach (var kvp in _monitoredItems)
+        {
+            if (kvp.Value.Reference.Subject == subject)
+            {
+                _monitoredItems.TryRemove(kvp.Key, out _);
+            }
+        }
+    }
+
     public void Dispose()
     {
         _shuttingDown = true;

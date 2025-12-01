@@ -1,10 +1,14 @@
-namespace Namotion.Interceptor.OpcUa.Client.Polling;
+using System;
+using System.Threading;
+
+namespace Namotion.Interceptor.Sources.Resilience;
 
 /// <summary>
-/// Circuit breaker for polling operations that prevents resource exhaustion during persistent failures.
+/// Circuit breaker pattern implementation that prevents resource exhaustion during persistent failures.
 /// Thread-safe implementation using volatile fields and interlocked operations.
+/// Can be used by any source implementation (MQTT, OPC UA, HTTP, etc.) to handle reconnection failures.
 /// </summary>
-internal sealed class PollingCircuitBreaker
+public sealed class CircuitBreaker
 {
     private readonly int _failureThreshold;
     private readonly TimeSpan _cooldownPeriod;
@@ -14,7 +18,12 @@ internal sealed class PollingCircuitBreaker
     private long _circuitOpenedAtTicks; // Using long (ticks) for atomic operations instead of DateTimeOffset struct
     private long _tripCount;
 
-    public PollingCircuitBreaker(int failureThreshold, TimeSpan cooldownPeriod)
+    /// <summary>
+    /// Creates a new circuit breaker.
+    /// </summary>
+    /// <param name="failureThreshold">Number of consecutive failures before opening the circuit.</param>
+    /// <param name="cooldownPeriod">Time to wait before allowing retry after circuit opens.</param>
+    public CircuitBreaker(int failureThreshold, TimeSpan cooldownPeriod)
     {
         if (failureThreshold <= 0)
             throw new ArgumentOutOfRangeException(nameof(failureThreshold), "Failure threshold must be greater than zero");
@@ -33,6 +42,7 @@ internal sealed class PollingCircuitBreaker
 
     /// <summary>
     /// Gets the total number of times the circuit breaker has tripped.
+    /// Useful for monitoring and alerting.
     /// </summary>
     public long TripCount => Interlocked.Read(ref _tripCount);
 
@@ -62,6 +72,7 @@ internal sealed class PollingCircuitBreaker
     /// <summary>
     /// Gets the time remaining until the circuit breaker cooldown completes.
     /// Returns TimeSpan.Zero if the circuit is closed.
+    /// Useful for logging and waiting.
     /// </summary>
     public TimeSpan GetCooldownRemaining()
     {
@@ -79,6 +90,7 @@ internal sealed class PollingCircuitBreaker
 
     /// <summary>
     /// Records a successful operation, closing the circuit and resetting the failure count atomically.
+    /// Call this after a successful connection/operation attempt.
     /// </summary>
     public void RecordSuccess()
     {
@@ -91,6 +103,7 @@ internal sealed class PollingCircuitBreaker
     /// <summary>
     /// Records a failed operation, potentially opening the circuit if threshold is reached.
     /// Returns true if the circuit was opened as a result of this failure.
+    /// Call this after each failed connection/operation attempt.
     /// </summary>
     public bool RecordFailure()
     {
@@ -110,7 +123,8 @@ internal sealed class PollingCircuitBreaker
     }
 
     /// <summary>
-    /// Resets the circuit breaker to closed state with zero failures.
+    /// Manually resets the circuit breaker to closed state with zero failures.
+    /// Useful for manual recovery or testing.
     /// </summary>
     public void Reset()
     {

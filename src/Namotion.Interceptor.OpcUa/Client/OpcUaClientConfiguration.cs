@@ -42,17 +42,8 @@ public class OpcUaClientConfiguration
     public int WriteRetryQueueSize { get; init; } = 1000;
 
     /// <summary>
-    /// Gets a value indicating whether to enable automatic healing of failed monitored items. Default is true.
-    /// When enabled, the subscription manager periodically retries creation of failed items
-    /// that may succeed later (e.g., BadTooManyMonitoredItems when resources free up).
-    /// Items with permanent errors (BadNodeIdUnknown) are not retried.
-    /// </summary>
-    public bool EnableAutoHealing { get; init; } = true;
-
-    /// <summary>
     /// Gets the interval for subscription health checks and auto-healing attempts. Default is 10 seconds.
     /// Failed monitored items (excluding design-time errors like BadNodeIdUnknown) are retried at this interval.
-    /// Only used when EnableAutoHealing is true.
     /// </summary>
     public TimeSpan SubscriptionHealthCheckInterval { get; init; } = TimeSpan.FromSeconds(10);
     
@@ -290,14 +281,11 @@ public class OpcUaClientConfiguration
                 nameof(WriteRetryQueueSize));
         }
 
-        if (EnableAutoHealing)
+        if (SubscriptionHealthCheckInterval < TimeSpan.FromSeconds(5))
         {
-            if (SubscriptionHealthCheckInterval < TimeSpan.FromSeconds(5))
-            {
-                throw new ArgumentException(
-                    $"SubscriptionHealthCheckInterval must be at least {TimeSpan.FromSeconds(5).TotalSeconds}s when EnableAutoHealing is true (got: {SubscriptionHealthCheckInterval.TotalSeconds}s)",
-                    nameof(SubscriptionHealthCheckInterval));
-            }
+            throw new ArgumentException(
+                $"SubscriptionHealthCheckInterval must be at least {TimeSpan.FromSeconds(5).TotalSeconds}s (got: {SubscriptionHealthCheckInterval.TotalSeconds}s)",
+                nameof(SubscriptionHealthCheckInterval));
         }
 
         if (MaximumItemsPerSubscription <= 0)

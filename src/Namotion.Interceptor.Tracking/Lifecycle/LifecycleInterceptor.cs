@@ -7,8 +7,6 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
-    private const string ReferenceCountKey = "Namotion.Interceptor.Tracking.ReferenceCount";
-
     private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference?>> _attachedSubjects = [];
 
     [ThreadStatic]
@@ -16,6 +14,18 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     [ThreadStatic]
     private static Stack<HashSet<IInterceptorSubject>>? _hashSetPool;
+
+    /// <summary>
+    /// Raised when a subject is attached to the object graph.
+    /// Handlers must be exception-free and fast (invoked inside lock).
+    /// </summary>
+    public event Action<SubjectLifecycleChange>? SubjectAttached;
+
+    /// <summary>
+    /// Raised when a subject is detached from the object graph.
+    /// Handlers must be exception-free and fast (invoked inside lock).
+    /// </summary>
+    public event Action<SubjectLifecycleChange>? SubjectDetached;
 
     public void AttachTo(IInterceptorSubject subject)
     {
@@ -65,25 +75,28 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
-    private void AttachTo(IInterceptorSubject subject, IInterceptorSubjectContext context, PropertyReference? property, object? index)
+    private void AttachTo(IInterceptorSubject subject, IInterceptorSubjectContext context,
+        PropertyReference? property, object? index)
     {
         var firstAttach = _attachedSubjects.TryAdd(subject, []);
         if (_attachedSubjects[subject].Add(property))
         {
-            var count = subject.Data.AddOrUpdate((null, ReferenceCountKey), 1, (_, count) => (int)count! + 1) as int?;
-            var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
+            var count = subject.IncrementReferenceCount();
+            var change = new SubjectLifecycleChange(subject, property, index, count);
 
             var properties = subject.Properties.Keys;
 
             foreach (var handler in context.GetServices<ILifecycleHandler>())
             {
-                handler.AttachSubject(registryContext);
+                handler.AttachSubject(change);
             }
 
             if (subject is ILifecycleHandler lifecycleHandler)
             {
-                lifecycleHandler.AttachSubject(registryContext);
+                lifecycleHandler.AttachSubject(change);
             }
+
+            SubjectAttached?.Invoke(change);
 
             if (firstAttach)
             {
@@ -95,7 +108,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
-    private void DetachFrom(IInterceptorSubject subject, IInterceptorSubjectContext context, PropertyReference? property, object? index)
+    private void DetachFrom(IInterceptorSubject subject, IInterceptorSubjectContext context,
+        PropertyReference? property, object? index)
     {
         if (_attachedSubjects.TryGetValue(subject, out var set) && set.Remove(property))
         {
@@ -109,19 +123,20 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
             }
 
-            var count = subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, 
-                (_, count) => (int)count! - 1) as int?;
-            
-            var registryContext = new SubjectLifecycleChange(subject, property, index, count ?? 1);
+            var count = subject.DecrementReferenceCount();
+
+            var change = new SubjectLifecycleChange(subject, property, index, count);
             if (subject is ILifecycleHandler lifecycleHandler)
             {
-                lifecycleHandler.DetachSubject(registryContext);
+                lifecycleHandler.DetachSubject(change);
             }
 
             foreach (var handler in context.GetServices<ILifecycleHandler>())
             {
-                handler.DetachSubject(registryContext);
+                handler.DetachSubject(change);
             }
+
+            SubjectDetached?.Invoke(change);
         }
     }
 
@@ -252,7 +267,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     }
 
     #region  Performance
-    
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static List<(IInterceptorSubject subject, PropertyReference property, object? index)> GetList()
     {
