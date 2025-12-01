@@ -29,6 +29,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
 
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
     private int _reconnectingIterations; // Tracks health check iterations while reconnecting (for stall detection)
@@ -309,23 +311,32 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <summary>
     /// Writes changes to OPC UA server atomically (all-or-nothing).
     /// Throws if any write fails, allowing the entire batch to be retried.
+    /// Thread-safe: uses internal lock to serialize concurrent calls.
     /// </summary>
     public async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        var session = _sessionManager?.CurrentSession;
-        if (session is null || !session.Connected)
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new InvalidOperationException("OPC UA session is not connected.");
-        }
+            var session = _sessionManager?.CurrentSession;
+            if (session is null || !session.Connected)
+            {
+                throw new InvalidOperationException("OPC UA session is not connected.");
+            }
 
-        var writeValues = CreateWriteValuesCollection(changes);
-        if (writeValues.Count is 0)
+            var writeValues = CreateWriteValuesCollection(changes);
+            if (writeValues.Count is 0)
+            {
+                return;
+            }
+
+            var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
+            ValidateWriteResults(writeResponse.Results);
+        }
+        finally
         {
-            return;
+            _writeLock.Release();
         }
-
-        var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
-        ValidateWriteResults(writeResponse.Results);
     }
 
     /// <summary>
@@ -480,6 +491,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         // This ensures that property data associated with this OpcUaNodeIdKey is cleared
         // even if properties are reused across multiple source instances
         CleanupPropertyData();
+        _writeLock.Dispose();
         Dispose();
     }
 

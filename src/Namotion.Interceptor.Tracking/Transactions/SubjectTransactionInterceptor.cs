@@ -10,12 +10,6 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// </summary>
 public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInterceptor
 {
-    /// <summary>
-    /// Optional callback invoked during CommitAsync to write changes to external sources.
-    /// Set by WithSourceTransactions() in the Sources library.
-    /// </summary>
-    public Func<IReadOnlyList<SubjectPropertyChange>, CancellationToken, Task<TransactionWriteResult>>? WriteChangesCallback { get; set; }
-
     /// <inheritdoc />
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
