@@ -124,7 +124,7 @@ builder.Services.AddMqttSubjectServer(
     subjectSelector: sp => sp.GetRequiredService<Device>(),
     configurationProvider: sp => new MqttServerConfiguration
     {
-        BrokerHost = "localhost",
+        BrokerHost = "127.0.0.1", // Optional: bind to specific interface (default: all interfaces)
         BrokerPort = 1883,
         PathProvider = new AttributeBasedSourcePathProvider("mqtt", "/"),
 

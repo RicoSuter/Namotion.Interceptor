@@ -83,11 +83,18 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
         }
 
-        var options = new MqttServerOptionsBuilder()
+        var optionsBuilder = new MqttServerOptionsBuilder()
             .WithDefaultEndpoint()
             .WithDefaultEndpointPort(_configuration.BrokerPort)
-            .WithMaxPendingMessagesPerClient(_configuration.MaxPendingMessagesPerClient)
-            .Build();
+            .WithMaxPendingMessagesPerClient(_configuration.MaxPendingMessagesPerClient);
+
+        if (!string.IsNullOrEmpty(_configuration.BrokerHost))
+        {
+            var boundAddress = System.Net.IPAddress.Parse(_configuration.BrokerHost);
+            optionsBuilder.WithDefaultEndpointBoundIPAddress(boundAddress);
+        }
+
+        var options = optionsBuilder.Build();
 
         _mqttServer = new MqttServerFactory().CreateMqttServer(options);
 

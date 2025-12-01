@@ -380,7 +380,6 @@ builder.Services.AddOpcUaSubjectClient(
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
         PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
-        EnableAutoHealing = true, // Default
         SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10) // Default: 10 seconds
     });
 ```
