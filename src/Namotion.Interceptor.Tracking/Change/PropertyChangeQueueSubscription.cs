@@ -26,14 +26,14 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     /// </summary>
     /// <param name="item">The property change to enqueue.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void Enqueue(SubjectPropertyChange item)
+    internal void Enqueue(in SubjectPropertyChange item)
     {
         if (_completed)
         {
             return;
         }
 
-        _queue.Enqueue(item);
+        _queue.Enqueue(item); // copy happens here into the queue
         _signal.Set(); // wake consumer (idempotent if already set)
     }
 
