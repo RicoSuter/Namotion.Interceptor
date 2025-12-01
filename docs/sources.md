@@ -171,10 +171,50 @@ Properties can receive concurrent writes from multiple origins:
 - **Source**: Inbound updates from the external system
 - **Servers**: Background services exposing the property (OPC UA server, MQTT broker)
 - **Local code**: Application services, UI handlers, etc.
+- **Transactions**: User code committing changes via `SubjectTransaction.CommitAsync()`
 
 The library provides automatic thread-safety at the property field access level. Individual property updates are atomic and thread-safe without requiring additional synchronization.
 
-**Source responsibility**: When implementing `ISubjectSource`, use the provided `SubjectPropertyWriter` to write inbound updates. This handles buffering during initialization and ensures correct ordering when updates arrive concurrently or out of order from the external system.
+### Inbound Updates
+
+When implementing `ISubjectSource`, use the provided `SubjectPropertyWriter` to write inbound updates. This handles buffering during initialization and ensures correct ordering when updates arrive concurrently or out of order from the external system.
+
+### Outbound Updates (WriteChangesAsync)
+
+`WriteChangesAsync` can be called concurrently from multiple code paths:
+- Background change propagation via `SubjectSourceBackgroundService`
+- Transaction commits via `SubjectTransaction.CommitAsync()`
+- Write retry queue flushing
+
+**Implementations MUST be thread-safe.** Use a `SemaphoreSlim` to serialize write operations:
+
+```csharp
+public class MySource : ISubjectSource
+{
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+
+    public async ValueTask WriteChangesAsync(
+        ReadOnlyMemory<SubjectPropertyChange> changes,
+        CancellationToken cancellationToken)
+    {
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Write to external system
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        // ... other cleanup ...
+        _writeLock.Dispose();
+    }
+}
+```
 
 ## Write Retry Queue
 

@@ -855,6 +855,445 @@ public class SubjectTransactionTests
         Assert.Null(SubjectTransaction.Current);
     }
 
+    #region Transaction Mode Tests
+
+    [Fact]
+    public async Task BestEffortMode_AppliesSuccessfulChanges_WhenSomeSourcesFail()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var successSource = CreateSucceedingSource();
+        var failSource = CreateFailingSource();
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(successSource.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.BestEffort);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+
+        // Assert - successful change IS applied, failed change is NOT
+        Assert.Equal("John", person.FirstName);
+        Assert.Null(person.LastName);
+        Assert.Single(ex.InnerExceptions);
+    }
+
+    [Fact]
+    public async Task StrictMode_AppliesNoChanges_WhenAnySourceFails()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var successSource = CreateSucceedingSource();
+        var failSource = CreateFailingSource();
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(successSource.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Strict);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+
+        // Assert - NO changes applied to in-process model (strict = all-or-nothing)
+        Assert.Null(person.FirstName);
+        Assert.Null(person.LastName);
+        Assert.Contains("No changes have been applied", ex.Message);
+    }
+
+    [Fact]
+    public async Task RollbackMode_RevertsSuccessfulSources_WhenAnySourceFails()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var writeCallCount = 0;
+        var successSource = new Mock<ISubjectSource>();
+        successSource.Setup(s => s.WriteBatchSize).Returns(0);
+        successSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Callback(() => writeCallCount++)
+            .Returns(ValueTask.CompletedTask);
+
+        var failSource = CreateFailingSource();
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(successSource.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Rollback);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+
+        // Assert - NO changes applied, and revert was attempted (2 calls: initial + revert)
+        Assert.Null(person.FirstName);
+        Assert.Null(person.LastName);
+        Assert.Equal(2, writeCallCount); // Initial write + revert
+        Assert.Contains("Rollback was attempted", ex.Message);
+    }
+
+    [Fact]
+    public async Task StrictMode_AppliesAllChanges_WhenAllSourcesSucceed()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source1 = CreateSucceedingSource();
+        var source2 = CreateSucceedingSource();
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Strict);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        await tx.CommitAsync();
+
+        // Assert - all changes applied when all succeed
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+    }
+
+    [Fact]
+    public async Task RollbackMode_AppliesAllChanges_WhenAllSourcesSucceed()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source1 = CreateSucceedingSource();
+        var source2 = CreateSucceedingSource();
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Rollback);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        await tx.CommitAsync();
+
+        // Assert - all changes applied when all succeed
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+    }
+
+    [Fact]
+    public async Task RollbackMode_ReportsRevertFailures_WhenRevertAlsoFails()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var successThenFailSource = new Mock<ISubjectSource>();
+        successThenFailSource.Setup(s => s.WriteBatchSize).Returns(0);
+        successThenFailSource.SetupSequence(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.CompletedTask) // Initial write succeeds
+            .ThrowsAsync(new InvalidOperationException("Revert failed")); // Revert fails
+
+        var failSource = CreateFailingSource();
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(successThenFailSource.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Rollback);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+
+        // Assert - both original failure and revert failure reported
+        Assert.Equal(2, ex.InnerExceptions.Count);
+    }
+
+    #endregion
+
+    #region Transaction Requirement Tests
+
+    [Fact]
+    public async Task SingleWriteRequirement_ThrowsException_WhenMultipleSources()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source1 = CreateSucceedingSource();
+        var source2 = CreateSucceedingSource();
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(
+            TransactionMode.Rollback,
+            TransactionRequirement.SingleWrite);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+
+        // Assert - validation fails before any writes
+        var innerEx = Assert.Single(ex.InnerExceptions);
+        Assert.IsType<InvalidOperationException>(innerEx);
+        Assert.Contains("2 sources", innerEx.Message);
+        Assert.Contains("only 1 is allowed", innerEx.Message);
+
+        // No changes applied
+        Assert.Null(person.FirstName);
+        Assert.Null(person.LastName);
+
+        // Sources were never called
+        source1.Verify(s => s.WriteChangesAsync(
+            It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        source2.Verify(s => s.WriteChangesAsync(
+            It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SingleWriteRequirement_ThrowsException_WhenChangesExceedBatchSize()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source = new Mock<ISubjectSource>();
+        source.Setup(s => s.WriteBatchSize).Returns(1); // Only 1 change per batch
+        source.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.CompletedTask);
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(
+            TransactionMode.Rollback,
+            TransactionRequirement.SingleWrite);
+        person.FirstName = "John";
+        person.LastName = "Doe"; // 2 changes > batch size of 1
+
+        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+
+        // Assert - validation fails before any writes
+        var innerEx = Assert.Single(ex.InnerExceptions);
+        Assert.IsType<InvalidOperationException>(innerEx);
+        Assert.Contains("2 changes", innerEx.Message);
+        Assert.Contains("WriteBatchSize is 1", innerEx.Message);
+
+        // Source was never called
+        source.Verify(s => s.WriteChangesAsync(
+            It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SingleWriteRequirement_Succeeds_WhenRequirementsMet()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source = new Mock<ISubjectSource>();
+        source.Setup(s => s.WriteBatchSize).Returns(10); // Enough for 2 changes
+        source.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.CompletedTask);
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(
+            TransactionMode.Rollback,
+            TransactionRequirement.SingleWrite);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        await tx.CommitAsync();
+
+        // Assert - changes applied successfully
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+
+        // Source was called once with both changes
+        source.Verify(s => s.WriteChangesAsync(
+            It.Is<ReadOnlyMemory<SubjectPropertyChange>>(m => m.Length == 2),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SingleWriteRequirement_Succeeds_WithUnlimitedBatchSize()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source = CreateSucceedingSource(); // WriteBatchSize = 0 (unlimited)
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(
+            TransactionMode.Rollback,
+            TransactionRequirement.SingleWrite);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        await tx.CommitAsync();
+
+        // Assert - changes applied successfully (0 = no limit)
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+    }
+
+    [Fact]
+    public async Task SingleWriteRequirement_AllowsChangesWithoutSource()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+        // No sources set - all changes are "without source"
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(
+            TransactionMode.Rollback,
+            TransactionRequirement.SingleWrite);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        await tx.CommitAsync();
+
+        // Assert - changes applied directly (no source validation needed)
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+    }
+
+    [Fact]
+    public async Task SingleWriteRequirement_AllowsMixedSourceAndNoSource()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source = CreateSucceedingSource();
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
+        // LastName has no source
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(
+            TransactionMode.Rollback,
+            TransactionRequirement.SingleWrite);
+        person.FirstName = "John";
+        person.LastName = "Doe"; // No source - always allowed
+
+        await tx.CommitAsync();
+
+        // Assert - both changes applied
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+    }
+
+    [Fact]
+    public async Task NoneRequirement_AllowsMultipleSources()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source1 = CreateSucceedingSource();
+        var source2 = CreateSucceedingSource();
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(
+            TransactionMode.Rollback,
+            TransactionRequirement.None);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        await tx.CommitAsync();
+
+        // Assert - changes applied successfully with multiple sources
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+    }
+
+    [Fact]
+    public async Task SingleWriteWithRollback_RevertsOnFailure_WithSingleSource()
+    {
+        // Arrange - OPC UA scenario: single source, rollback mode, single write requirement
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source = new Mock<ISubjectSource>();
+        source.Setup(s => s.WriteBatchSize).Returns(10);
+        source.SetupSequence(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Write failed")); // Single batch fails
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
+
+        // Act
+        using var tx = SubjectTransaction.BeginTransaction(
+            TransactionMode.Rollback,
+            TransactionRequirement.SingleWrite);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+
+        // Assert - no changes applied, single failure reported (no revert needed - nothing succeeded)
+        Assert.Null(person.FirstName);
+        Assert.Null(person.LastName);
+        Assert.Single(ex.InnerExceptions);
+    }
+
+    [Fact]
+    public async Task DefaultRequirement_IsNone()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var source1 = CreateSucceedingSource();
+        var source2 = CreateSucceedingSource();
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
+
+        // Act - default BeginTransaction() should allow multiple sources
+        using var tx = SubjectTransaction.BeginTransaction(); // No requirement specified
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        await tx.CommitAsync();
+
+        // Assert - changes applied successfully (default is None)
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Doe", person.LastName);
+    }
+
+    #endregion
+
+    #region Helper Methods
 
     private static IInterceptorSubjectContext CreateContext()
     {
@@ -864,4 +1303,24 @@ public class SubjectTransactionTests
             .WithFullPropertyTracking()
             .WithSourceTransactions();
     }
+
+    private static Mock<ISubjectSource> CreateSucceedingSource()
+    {
+        var mock = new Mock<ISubjectSource>();
+        mock.Setup(s => s.WriteBatchSize).Returns(0);
+        mock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.CompletedTask);
+        return mock;
+    }
+
+    private static Mock<ISubjectSource> CreateFailingSource()
+    {
+        var mock = new Mock<ISubjectSource>();
+        mock.Setup(s => s.WriteBatchSize).Returns(0);
+        mock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Source write failed"));
+        return mock;
+    }
+
+    #endregion
 }
