@@ -18,6 +18,12 @@ public class RegisteredSubject
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
     /// <summary>
+    /// Gets the current reference count (number of parent references).
+    /// Returns 0 if subject is not attached or lifecycle tracking is not enabled.
+    /// </summary>
+    public int ReferenceCount => Subject.GetReferenceCount();
+
+    /// <summary>
     /// Gets the properties which reference this subject.
     /// Thread-safe: Lock ensures atomic struct copy during read.
     /// </summary>

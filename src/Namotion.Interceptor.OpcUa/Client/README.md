@@ -174,7 +174,6 @@ services.AddOpcUaSubjectClient<MySubject>(
         options.SessionTimeout = 30000; // 30s
         options.ReconnectInterval = 2000; // 2s
         options.WriteRetryQueueSize = 5000; // Large buffer for extended outages
-        options.EnableAutoHealing = true;
         options.SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5);
         options.EnablePollingFallback = true;
     }
