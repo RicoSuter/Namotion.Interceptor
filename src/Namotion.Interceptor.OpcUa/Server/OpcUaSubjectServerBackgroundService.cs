@@ -4,6 +4,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 
@@ -18,6 +19,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
     private readonly ILogger _logger;
     private readonly OpcUaServerConfiguration _configuration;
 
+    private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaSubjectServer? _server;
     private int _consecutiveFailures;
 
@@ -73,6 +75,27 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
     {
         _context.WithRegistry();
 
+        _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
+        }
+
+        try
+        {
+            await ExecuteServerLoopAsync(stoppingToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (_lifecycleInterceptor is not null)
+            {
+                _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
+            }
+        }
+    }
+
+    private async Task ExecuteServerLoopAsync(CancellationToken stoppingToken)
+    {
         while (!stoppingToken.IsCancellationRequested)
         {
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
@@ -185,5 +208,10 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                 _logger.LogError(e, "Failed to apply property update from OPC UA client.");
             }
         }
+    }
+
+    private void OnSubjectDetached(SubjectLifecycleChange change)
+    {
+        _server?.RemoveSubjectNodes(change.Subject);
     }
 }

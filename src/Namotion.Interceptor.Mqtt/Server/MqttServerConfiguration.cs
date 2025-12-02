@@ -10,9 +10,11 @@ namespace Namotion.Interceptor.Mqtt.Server;
 public class MqttServerConfiguration
 {
     /// <summary>
-    /// Gets or sets the MQTT broker hostname or IP address.
+    /// Gets or sets the MQTT broker hostname or IP address to bind to.
+    /// Use "localhost" to bind to loopback only, or an IP address to bind to a specific interface.
+    /// Default is null which binds to all interfaces.
     /// </summary>
-    public required string BrokerHost { get; init; }
+    public string? BrokerHost { get; init; }
 
     /// <summary>
     /// Gets or sets the MQTT broker port. Default is 1883.
@@ -89,11 +91,6 @@ public class MqttServerConfiguration
     /// </summary>
     public void Validate()
     {
-        if (string.IsNullOrWhiteSpace(BrokerHost))
-        {
-            throw new ArgumentException("BrokerHost must be specified.", nameof(BrokerHost));
-        }
-
         if (PathProvider is null)
         {
             throw new ArgumentException("PathProvider must be specified.", nameof(PathProvider));

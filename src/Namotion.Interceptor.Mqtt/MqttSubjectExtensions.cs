@@ -70,13 +70,18 @@ public static class MqttSubjectExtensions
     }
 
     /// <summary>
-    /// Adds an MQTT server that publishes property changes to an MQTT broker.
+    /// Adds an MQTT server that publishes property changes to connected MQTT clients.
     /// </summary>
+    /// <param name="serviceCollection">The service collection.</param>
+    /// <param name="sourceName">The source name for path provider.</param>
+    /// <param name="brokerPort">The port to listen on. Default is 1883.</param>
+    /// <param name="brokerHost">Optional IP address to bind to. Default binds to all interfaces.</param>
+    /// <param name="topicPrefix">Optional topic prefix.</param>
     public static IServiceCollection AddMqttSubjectServer<TSubject>(
         this IServiceCollection serviceCollection,
-        string brokerHost,
         string sourceName,
         int brokerPort = 1883,
+        string? brokerHost = null,
         string? topicPrefix = null)
         where TSubject : IInterceptorSubject
     {

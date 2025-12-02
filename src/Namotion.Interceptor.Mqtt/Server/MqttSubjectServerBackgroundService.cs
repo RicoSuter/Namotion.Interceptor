@@ -15,6 +15,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Mqtt.Server;
 
@@ -33,9 +34,10 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     private readonly MqttServerConfiguration _configuration;
     private readonly ILogger _logger;
 
-    // TODO(memory): Might lead to memory leaks
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
     private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
+
+    private LifecycleInterceptor? _lifecycleInterceptor;
     
     private readonly List<Task> _runningInitialStateTasks = [];
     private readonly Lock _initialStateTasksLock = new();
@@ -75,11 +77,24 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var options = new MqttServerOptionsBuilder()
+        _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
+        }
+
+        var optionsBuilder = new MqttServerOptionsBuilder()
             .WithDefaultEndpoint()
             .WithDefaultEndpointPort(_configuration.BrokerPort)
-            .WithMaxPendingMessagesPerClient(_configuration.MaxPendingMessagesPerClient)
-            .Build();
+            .WithMaxPendingMessagesPerClient(_configuration.MaxPendingMessagesPerClient);
+
+        if (!string.IsNullOrEmpty(_configuration.BrokerHost))
+        {
+            var boundAddress = System.Net.IPAddress.Parse(_configuration.BrokerHost);
+            optionsBuilder.WithDefaultEndpointBoundIPAddress(boundAddress);
+        }
+
+        var options = optionsBuilder.Build();
 
         _mqttServer = new MqttServerFactory().CreateMqttServer(options);
 
@@ -220,22 +235,51 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
-        return _propertyToTopic.GetOrAdd(propertyReference, static (_, state) =>
+        if (_propertyToTopic.TryGetValue(propertyReference, out var cachedTopic))
         {
-            var (p, pathProvider, subject, topicPrefix) = state;
-            var path = p.TryGetSourcePath(pathProvider, subject);
-            return path is null ? null : MqttHelper.BuildTopic(path, topicPrefix);
-        }, (property, _configuration.PathProvider, _subject, _configuration.TopicPrefix));
+            return cachedTopic;
+        }
+
+        var path = property.TryGetSourcePath(_configuration.PathProvider, _subject);
+        var topic = path is null ? null : MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
+
+        // Add first, then validate (guarantees no memory leak)
+        if (_propertyToTopic.TryAdd(propertyReference, topic))
+        {
+            var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
+            if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+            {
+                _propertyToTopic.TryRemove(propertyReference, out _);
+            }
+        }
+
+        return topic;
     }
 
     private PropertyReference? TryGetPropertyForTopic(string path)
     {
-        return _pathToProperty.GetOrAdd(path, static (p, state) =>
+        if (_pathToProperty.TryGetValue(path, out var cachedProperty))
         {
-            var (subject, pathProvider) = state;
-            var (property, _) = subject.TryGetPropertyFromSourcePath(p, pathProvider);
-            return property?.Reference;
-        }, (_subject, _configuration.PathProvider));
+            return cachedProperty;
+        }
+
+        var (property, _) = _subject.TryGetPropertyFromSourcePath(path, _configuration.PathProvider);
+        var propertyReference = property?.Reference;
+
+        // Add first, then validate (guarantees no memory leak)
+        if (_pathToProperty.TryAdd(path, propertyReference))
+        {
+            if (propertyReference is { } propRef)
+            {
+                var registeredSubject = propRef.Subject.TryGetRegisteredSubject();
+                if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+                {
+                    _pathToProperty.TryRemove(path, out _);
+                }
+            }
+        }
+
+        return propertyReference;
     }
 
     private Task ClientConnectedAsync(ClientConnectedEventArgs arg)
@@ -371,12 +415,39 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         return Task.CompletedTask;
     }
 
+    private void OnSubjectDetached(SubjectLifecycleChange change)
+    {
+        // TODO(perf): O(n) scan over all cached entries per detached subject.
+        // Consider adding a reverse index (Dictionary<IInterceptorSubject, List<PropertyReference>>) for O(1) cleanup
+        // if profiling shows this as a bottleneck with large object graphs and frequent attach/detach cycles.
+        foreach (var kvp in _propertyToTopic)
+        {
+            if (kvp.Key.Subject == change.Subject)
+            {
+                _propertyToTopic.TryRemove(kvp.Key, out _);
+            }
+        }
+
+        foreach (var kvp in _pathToProperty)
+        {
+            if (kvp.Value?.Subject == change.Subject)
+            {
+                _pathToProperty.TryRemove(kvp.Key, out _);
+            }
+        }
+    }
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return;
+        }
+
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
         }
 
         var server = _mqttServer;
