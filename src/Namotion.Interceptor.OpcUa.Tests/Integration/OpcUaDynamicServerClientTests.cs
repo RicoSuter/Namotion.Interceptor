@@ -48,8 +48,8 @@ public class OpcUaDynamicServerClientTests
         }
         finally
         {
-            await (_server?.StopAsync() ?? Task.CompletedTask);
             await (_client?.StopAsync() ?? Task.CompletedTask);
+            await (_server?.StopAsync() ?? Task.CompletedTask);
         }
     }
 

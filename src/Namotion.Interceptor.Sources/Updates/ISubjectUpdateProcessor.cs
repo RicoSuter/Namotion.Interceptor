@@ -1,4 +1,4 @@
-﻿using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Sources.Updates;
 

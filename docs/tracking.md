@@ -193,12 +193,12 @@ public class MyLifecycleHandler : ILifecycleHandler
 {
     public void AttachSubject(SubjectLifecycleChange change)
     {
-        Console.WriteLine($"Attached: {change.Subject} via property {change.Property?.Value.Name}");
+        Console.WriteLine($"Attached: {change.Subject} via property {change.Property?.Name}");
     }
 
     public void DetachSubject(SubjectLifecycleChange change)
     {
-        Console.WriteLine($"Detached: {change.Subject} via property {change.Property?.Value.Name}");
+        Console.WriteLine($"Detached: {change.Subject} via property {change.Property?.Name}");
     }
 }
 ```
@@ -208,6 +208,88 @@ public class MyLifecycleHandler : ILifecycleHandler
 - **Registry package**: Track subjects and properties in the registry
 - **Sources package**: Subscribe/unsubscribe from external data sources
 - **Derived property detection**: Initialize derived properties on attach
+
+### Lifecycle Events
+
+In addition to `ILifecycleHandler`, the `LifecycleInterceptor` provides events for dynamic subscribers:
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithLifecycle();
+
+var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
+
+lifecycleInterceptor.SubjectAttached += change =>
+{
+    Console.WriteLine($"Subject attached: {change.Subject}");
+};
+
+lifecycleInterceptor.SubjectDetached += change =>
+{
+    Console.WriteLine($"Subject detached: {change.Subject}");
+};
+```
+
+Events are useful for:
+- Cache invalidation when subjects are removed from the object graph
+- Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
+- Integration packages (MQTT, OPC UA) that need to clean up internal state
+
+### Handler Requirements
+
+> **Important**: Both `ILifecycleHandler` methods and lifecycle events are invoked **synchronously inside a lock**. Handlers must follow these requirements:
+
+1. **Must be exception-free**: Throwing exceptions will break the lifecycle pipeline for other handlers. Wrap any potentially failing operations in try-catch internally.
+
+2. **Must be fast**: The lock is held during invocation, so blocking operations will degrade performance across the entire system. Typical handlers should complete in microseconds (e.g., dictionary operations).
+
+3. **Dispatch long-running work**: If you need to perform I/O, network calls, or other slow operations, dispatch to an external queue and process asynchronously:
+
+```csharp
+// Good: Fast dispatch to queue
+lifecycleInterceptor.SubjectDetached += change =>
+{
+    _cleanupQueue.Enqueue(change.Subject); // Returns immediately
+};
+
+// Bad: Blocking I/O in handler
+lifecycleInterceptor.SubjectDetached += async change =>
+{
+    await database.DeleteAsync(change.Subject); // Blocks the lock!
+};
+```
+
+4. **Thread-safe operations**: Use thread-safe data structures like `ConcurrentDictionary` with atomic operations (`TryRemove`, `TryAdd`) rather than check-then-act patterns.
+
+### Reference Counting
+
+Each subject tracks how many parent references point to it via `GetReferenceCount()`:
+
+```csharp
+var referenceCount = subject.GetReferenceCount();
+// Returns the number of properties referencing this subject
+// Returns 0 if not attached or lifecycle tracking is disabled
+```
+
+The reference count is managed internally by the library:
+- `SubjectAttached` fires on **every** attachment (after count is incremented)
+- `SubjectDetached` fires on **every** detachment (after count is decremented)
+
+The `SubjectLifecycleChange` record includes `ReferenceCount` with the updated count after the increment/decrement. Handlers can check this to determine if this is a first attachment (count == 1) or last detachment (count == 0):
+
+```csharp
+lifecycleInterceptor.SubjectDetached += change =>
+{
+    if (change.ReferenceCount == 0)
+    {
+        // Fully detached - safe to clean up
+        CleanupResources(change.Subject);
+    }
+};
+```
+
+This enables proper cleanup when subjects are removed from all parent references, even when referenced by multiple properties or collections.
 
 ## Parent-Child Relationship Tracking
 
@@ -240,15 +322,14 @@ var context = InterceptorSubjectContext
     .Create()
     .WithReadPropertyRecorder();
 
-var recorder = context.GetService<ReadPropertyRecorder>();
+var person = new Person(context);
 
-var accessedProperties = new HashSet<PropertyReference>();
-using (recorder.StartRecording(accessedProperties))
-{
-    var fullName = person.FullName; // Records FirstName and LastName
-}
+using var scope = ReadPropertyRecorder.Start();
 
-// accessedProperties now contains references to FirstName and LastName
+var fullName = person.FullName; // Records FirstName and LastName
+
+var accessedProperties = scope.GetPropertiesAndDispose();
+// accessedProperties contains references to FirstName and LastName
 ```
 
 This is primarily used internally by the derived property change detection system but can also be used for custom scenarios.
@@ -263,14 +344,24 @@ This is primarily used internally by the derived property change detection syste
 - **Multiple Subscriptions**: Each subscription is independent with its own isolated queue. Different subscriptions can be consumed by different threads concurrently.
 - **Guarantees**: The implementation is deadlock-free, never loses updates, and ensures all enqueued items are processed before disposal completes.
 
-**Change Sources**: Use `SubjectMutationContext.ApplyChangesWithSource()` to mark changes as coming from external sources:
+**Change Sources**: Use `SubjectChangeContext.WithSource()` to mark changes as coming from external sources:
 
 ```csharp
-SubjectMutationContext.ApplyChangesWithSource(mqttSource, () =>
+using (SubjectChangeContext.WithSource(mqttSource))
 {
     subject.Temperature = newValue;
     // change.Source will be mqttSource, not null
-});
+}
+```
+
+For setting values from external sources with timestamps, use the `SetValueFromSource()` extension method:
+
+```csharp
+propertyReference.SetValueFromSource(
+    source: mqttSource,
+    changedTimestamp: DateTimeOffset.Now,
+    receivedTimestamp: DateTimeOffset.Now,
+    valueFromSource: newValue);
 ```
 
 This prevents feedback loops where changes from external sources are written back to those same sources.

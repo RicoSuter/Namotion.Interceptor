@@ -70,7 +70,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     {
         lock (_writeLock)
         {
-            var registeredSubject = TryGetRegisteredSubject(change.Subject);
+            var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
             if (registeredSubject is null)
             {
                 return;
@@ -91,7 +91,6 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                     }
 
                     // Remove child from the parent property's Children collection
-                    // Using struct initialization - no heap allocation
                     property.RemoveChild(new SubjectPropertyChild
                     {
                         Subject = change.Subject,

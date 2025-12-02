@@ -1,5 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
@@ -10,7 +10,7 @@ using Namotion.Interceptor.Sources.Paths;
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class OpcUaSubjectServerExtensions
+public static class OpcUaSubjectExtensions
 {
     public static IServiceCollection AddOpcUaSubjectClient<TSubject>(
         this IServiceCollection serviceCollection,
@@ -40,7 +40,7 @@ public static class OpcUaSubjectServerExtensions
         {
             ServerUrl = serverUrl,
             RootName = rootName,
-            SourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
+            PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
             TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)
@@ -74,7 +74,8 @@ public static class OpcUaSubjectServerExtensions
                     subject.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
                     configuration.BufferTime,
-                    configuration.RetryTime);
+                    configuration.RetryTime,
+                    configuration.WriteRetryQueueSize);
             });
     }
 
@@ -102,7 +103,7 @@ public static class OpcUaSubjectServerExtensions
         return serviceCollection.AddOpcUaSubjectServer(subjectSelector, _ => new OpcUaServerConfiguration
         {
             RootName = rootName,
-            SourcePathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
+            PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
             ValueConverter = new OpcUaValueConverter()
         });
     }
@@ -119,22 +120,11 @@ public static class OpcUaSubjectServerExtensions
             .AddKeyedSingleton(key, (sp, _) =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new OpcUaSubjectServerSource(
+                return new OpcUaSubjectServerBackgroundService(
                     subject,
                     sp.GetRequiredKeyedService<OpcUaServerConfiguration>(key),
-                    sp.GetRequiredService<ILogger<OpcUaSubjectServerSource>>());
+                    sp.GetRequiredService<ILogger<OpcUaSubjectServerBackgroundService>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServerSource>(key))
-            .AddSingleton<IHostedService>(sp =>
-            {
-                var configuration = sp.GetRequiredKeyedService<OpcUaServerConfiguration>(key);
-                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new SubjectSourceBackgroundService(
-                    sp.GetRequiredKeyedService<OpcUaSubjectServerSource>(key),
-                    subject.Context,
-                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
-                    configuration.BufferTime,
-                    configuration.RetryTime);
-            });
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServerBackgroundService>(key));
     }
 }

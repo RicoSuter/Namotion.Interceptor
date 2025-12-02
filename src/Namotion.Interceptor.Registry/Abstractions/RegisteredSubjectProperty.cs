@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Performance;
@@ -18,7 +19,10 @@ public class RegisteredSubjectProperty
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
 
     private readonly List<SubjectPropertyChild> _children = [];
+    private ImmutableArray<SubjectPropertyChild> _childrenCache;
+
     private PropertyAttributeAttribute? _attributeMetadata;
+    internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
     private RegisteredSubjectProperty()
     {
@@ -42,6 +46,8 @@ public class RegisteredSubjectProperty
         // No need to lock because the subject containing this property is removed from the registry already
         // ReSharper disable once InconsistentlySynchronizedField
         _children.Clear();
+        _childrenCache = default;
+        AttributesCache = null;
         Pool.Return(this);
     }
 
@@ -96,15 +102,12 @@ public class RegisteredSubjectProperty
     /// Checks whether this property has child subjects, which can be either
     /// a subject reference, a collection of subjects, or a dictionary of subjects.
     /// </summary>
-    public bool HasChildSubjects => 
-        IsSubjectReference || IsSubjectCollection || IsSubjectDictionary;
+    public bool HasChildSubjects => IsSubjectReference || IsSubjectCollection || IsSubjectDictionary;
 
     /// <summary>
     /// Gets a value indicating whether this property references another subject.
     /// </summary>
-    public bool IsSubjectReference => 
-        IsSubjectReferenceCache.GetOrAdd(Type, t => 
-            t == typeof(object) || t.IsAssignableTo(typeof(IInterceptorSubject)));
+    public bool IsSubjectReference => IsSubjectReferenceCache.GetOrAdd(Type, IsSubjectReferenceType);
     
     /// <summary>
     /// Gets a value indicating whether this property references multiple subject with a collection.
@@ -116,7 +119,7 @@ public class RegisteredSubjectProperty
                 t.IsAssignableTo(typeof(IEnumerable)) &&
                 t.GetInterfaces().Any(i =>
                     i.IsAssignableTo(typeof(IEnumerable)) &&
-                    i.GenericTypeArguments.FirstOrDefault()?.IsAssignableTo(typeof(IInterceptorSubject)) == true);
+                    IsSubjectReferenceType(i.GenericTypeArguments.FirstOrDefault()));
         });
 
     /// <summary>
@@ -133,8 +136,16 @@ public class RegisteredSubjectProperty
                     {
                         Name: "KeyValuePair`2",
                         Namespace: "System.Collections.Generic"
-                    } keyValueType && keyValueType.GenericTypeArguments[1].IsAssignableTo(typeof(IInterceptorSubject)));
+                    } keyValueType && IsSubjectReferenceType(keyValueType.GenericTypeArguments[1]));
         });
+
+    private static bool IsSubjectReferenceType(Type? type)
+    {
+        if (type is null) return false;
+        return type.IsInterface || // any subject type might implement an any interface
+               type == typeof(object) ||
+               type.IsAssignableTo(typeof(IInterceptorSubject));
+    }
 
     /// <summary>
     /// Gets a value indicating whether the property has a getter.
@@ -166,14 +177,21 @@ public class RegisteredSubjectProperty
 
     /// <summary>
     /// Gets the collection or dictionary items of the property.
+    /// Thread-safe: Lock on private readonly List ensures thread-safe access.
+    /// Performance: Returns cached ImmutableArray - only rebuilds when invalidated.
     /// </summary>
-    public ICollection<SubjectPropertyChild> Children
+    public ImmutableArray<SubjectPropertyChild> Children
     {
         get
         {
             lock (_children)
             {
-                return _children.ToArray();
+                if (_childrenCache.IsDefault)
+                {
+                    _childrenCache = [.. _children];
+                }
+
+                return _childrenCache;
             }
         }
     }
@@ -278,8 +296,6 @@ public class RegisteredSubjectProperty
         get => AttributesCache = (AttributesCache ?? Parent.GetPropertyAttributes(Name).ToArray());
     }
     
-    internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
-
     /// <summary>
     /// Gets a property attribute by name.
     /// </summary>
@@ -315,34 +331,35 @@ public class RegisteredSubjectProperty
     {
         lock (_children)
         {
-            if (!_children.Contains(child))
-            {
-                _children.Add(child);
-            }
+            // No Contains check needed - LifecycleInterceptor already guarantees
+            // no duplicates via HashSet<PropertyReference?> in _attachedSubjects
+            _children.Add(child);
+            _childrenCache = default;
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void RemoveChild(SubjectPropertyChild parent)
+    internal void RemoveChild(SubjectPropertyChild child)
     {
         lock (_children)
         {
-            var index = _children.IndexOf(parent);
+            var index = _children.IndexOf(child);
             if (index == -1)
-            {
                 return;
-            }
 
             _children.RemoveAt(index);
 
+            // Handle collection index reordering after removal
+            // For subject collections, update all further indices
             if (IsSubjectCollection && index < _children.Count)
             {
                 for (int i = index; i < _children.Count; i++)
                 {
-                    var child = _children[i];
-                    _children[i] = child with { Index = i };
+                    _children[i] = _children[i] with { Index = i };
                 }
             }
+
+            _childrenCache = default; // invalidate cache
         }
     }
 }
