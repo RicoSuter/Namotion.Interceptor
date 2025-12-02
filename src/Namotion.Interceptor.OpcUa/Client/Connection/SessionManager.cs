@@ -17,9 +17,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
-    private readonly SubscriptionManager _subscriptionManager;
     private readonly SessionReconnectHandler _reconnectHandler;
-    private readonly PollingManager? _pollingManager;
 
     private Session? _session;
     private CancellationToken _stoppingToken;
@@ -47,7 +45,17 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
     /// <summary>
     /// Gets the current subscriptions managed by the subscription manager.
     /// </summary>
-    public IReadOnlyCollection<Subscription> Subscriptions => _subscriptionManager.Subscriptions;
+    public IReadOnlyCollection<Subscription> Subscriptions => SubscriptionManager.Subscriptions;
+
+    /// <summary>
+    /// Gets the subscription manager for cleanup operations.
+    /// </summary>
+    internal SubscriptionManager SubscriptionManager { get; }
+
+    /// <summary>
+    /// Gets the polling manager for cleanup operations (may be null if polling disabled).
+    /// </summary>
+    internal PollingManager? PollingManager { get; }
 
     public SessionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
     {
@@ -58,14 +66,14 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
 
         if (_configuration.EnablePollingFallback)
         {
-            _pollingManager = new PollingManager(
+            PollingManager = new PollingManager(
                 source, sessionManager: this,
                 propertyWriter, _configuration, _logger);
 
-            _pollingManager.Start();
+            PollingManager.Start();
         }
 
-        _subscriptionManager = new SubscriptionManager(source, propertyWriter, _pollingManager, configuration, logger);
+        SubscriptionManager = new SubscriptionManager(source, propertyWriter, PollingManager, configuration, logger);
     }
 
     /// <summary>
@@ -129,14 +137,14 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
     {
         _stoppingToken = cancellationToken;
 
-        await _subscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
+        await SubscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Created {SubscriptionCount} subscriptions with {Subscribed} " +
             "total monitored items ({Polled} via polling).",
-            _subscriptionManager.Subscriptions.Count,
-            _subscriptionManager.MonitoredItems.Count,
-            _pollingManager?.PollingItemCount ?? 0);
+            SubscriptionManager.Subscriptions.Count,
+            SubscriptionManager.MonitoredItems.Count,
+            PollingManager?.PollingItemCount ?? 0);
     }
 
     /// <summary>
@@ -231,7 +239,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
                     var transferredSubscriptions = newSession.Subscriptions.ToList();
                     if (transferredSubscriptions.Count > 0)
                     {
-                        _subscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
+                        SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
                         _logger.LogInformation("OPC UA session reconnected: Transferred {Count} subscriptions.", transferredSubscriptions.Count);
                     }
                 }
@@ -334,8 +342,8 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         }
 
         try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
-        try { _subscriptionManager.Dispose(); } catch { /* best effort */ }
-        try { _pollingManager?.Dispose(); } catch { /* best effort */ }
+        try { SubscriptionManager.Dispose(); } catch { /* best effort */ }
+        try { PollingManager?.Dispose(); } catch { /* best effort */ }
 
         var sessionToDispose = _session;
         if (sessionToDispose is not null)

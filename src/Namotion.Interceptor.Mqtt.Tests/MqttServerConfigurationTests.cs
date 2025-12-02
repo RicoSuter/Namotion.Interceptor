@@ -12,7 +12,6 @@ public class MqttServerConfigurationTests
         // Arrange
         var config = new MqttServerConfiguration
         {
-            BrokerHost = "localhost",
             BrokerPort = 1883,
             PathProvider = new AttributeBasedSourcePathProvider("test", "/", null)
         };
@@ -22,18 +21,18 @@ public class MqttServerConfigurationTests
     }
 
     [Fact]
-    public void Validate_NullBrokerHost_ThrowsArgumentException()
+    public void Validate_WithBrokerHost_DoesNotThrow()
     {
         // Arrange
         var config = new MqttServerConfiguration
         {
-            BrokerHost = null!,
+            BrokerHost = "127.0.0.1",
             BrokerPort = 1883,
             PathProvider = new AttributeBasedSourcePathProvider("test", "/", null)
         };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => config.Validate());
+        config.Validate(); // Should not throw
     }
 
     [Fact]
@@ -42,7 +41,6 @@ public class MqttServerConfigurationTests
         // Arrange
         var config = new MqttServerConfiguration
         {
-            BrokerHost = "localhost",
             BrokerPort = 1883,
             PathProvider = null!
         };
@@ -57,11 +55,11 @@ public class MqttServerConfigurationTests
         // Arrange & Act
         var config = new MqttServerConfiguration
         {
-            BrokerHost = "localhost",
             PathProvider = new AttributeBasedSourcePathProvider("test", "/", null)
         };
 
         // Assert
+        Assert.Null(config.BrokerHost); // Default is null (bind to all interfaces)
         Assert.Equal(1883, config.BrokerPort);
         Assert.Equal(25000, config.MaxPendingMessagesPerClient);
         Assert.NotNull(config.ValueConverter);

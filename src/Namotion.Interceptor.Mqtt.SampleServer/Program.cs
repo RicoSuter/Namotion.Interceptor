@@ -31,7 +31,7 @@ builder.Services.AddMqttSubjectServer(
     _ => root,
     _ => new MqttServerConfiguration
     {
-        BrokerHost = "localhost",
+        // BrokerHost = "127.0.0.1", // Optional: bind to specific interface
         BrokerPort = 1883,
         PathProvider = new AttributeBasedSourcePathProvider("mqtt", "/"),
         DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
