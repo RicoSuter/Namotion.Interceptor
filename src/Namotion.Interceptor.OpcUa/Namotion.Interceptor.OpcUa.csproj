@@ -5,6 +5,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageLicenseExpression>GPL-2.0-only</PackageLicenseExpression>
+    <!-- Set to true to use local OPC UA project references (development), false for NuGet packages (production) -->
+    <UseLocalOpcUaProjects>false</UseLocalOpcUaProjects>
+  </PropertyGroup>
+
+  <!-- Define compiler constant when using local OPC UA projects -->
+  <PropertyGroup Condition="'$(UseLocalOpcUaProjects)' == 'true'">
+    <DefineConstants>$(DefineConstants);USE_LOCAL_OPCUA</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,7 +29,14 @@
     <EmbeddedResource Include="NodeSets\*" />
   </ItemGroup>
 
-  <ItemGroup>
+  <!-- Local project references for development -->
+  <ItemGroup Condition="'$(UseLocalOpcUaProjects)' == 'true'">
+    <ProjectReference Include="..\..\..\UA-.NETStandard\Libraries\Opc.Ua.Server\Opc.Ua.Server.csproj" />
+    <ProjectReference Include="..\..\..\UA-.NETStandard\Libraries\Opc.Ua.Client\Opc.Ua.Client.csproj" />
+  </ItemGroup>
+
+  <!-- NuGet package references for production -->
+  <ItemGroup Condition="'$(UseLocalOpcUaProjects)' != 'true'">
     <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Server" Version="1.5.378.10-preview" />
     <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.378.10-preview" />
   </ItemGroup>
