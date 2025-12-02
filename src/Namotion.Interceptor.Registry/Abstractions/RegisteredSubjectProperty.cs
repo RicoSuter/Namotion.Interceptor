@@ -36,7 +36,17 @@ public class RegisteredSubjectProperty
         property.ReflectionAttributes = reflectionAttributes;
         property.Reference = new PropertyReference(parent.Subject, name);
 
-        property._attributeMetadata = reflectionAttributes.OfType<PropertyAttributeAttribute>().SingleOrDefault();
+        // Find PropertyAttributeAttribute without LINQ allocation
+        property._attributeMetadata = null;
+        foreach (var attribute in reflectionAttributes)
+        {
+            if (attribute is PropertyAttributeAttribute paa)
+            {
+                property._attributeMetadata = paa;
+                break;
+            }
+        }
+
         return property;
     }
 
@@ -48,6 +58,14 @@ public class RegisteredSubjectProperty
         _children.Clear();
         _childrenCache = default;
         AttributesCache = null;
+
+        // Clear all references to allow GC and prevent use-after-return issues
+        Parent = null!;
+        Reference = default;
+        Type = null!;
+        ReflectionAttributes = null!;
+        _attributeMetadata = null;
+
         Pool.Return(this);
     }
 

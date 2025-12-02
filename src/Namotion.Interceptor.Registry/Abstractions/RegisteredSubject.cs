@@ -40,14 +40,22 @@ public class RegisteredSubject
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void Return()
     {
-        // No need to clean _properties as it is overwritten in Create() anyway
+        // Return all properties to their pool first
         var properties = _properties.Values.AsSpan();
         for (var i = 0; i < properties.Length; i++)
         {
             properties[i].Return();
         }
 
-        _parents = [];
+        // Clear all references to allow GC and prevent use-after-return issues
+        Subject = null!;
+        _properties = FrozenDictionary<string, RegisteredSubjectProperty>.Empty;
+
+        lock (_parentsLock)
+        {
+            _parents = [];
+        }
+
         Pool.Return(this);
     }
 
