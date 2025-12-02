@@ -62,7 +62,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         _propertyWriter = propertyWriter;
         _logger = logger;
         _configuration = configuration;
-        _reconnectHandler = new SessionReconnectHandler(false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
+        _reconnectHandler = new SessionReconnectHandler(configuration.TelemetryContext, false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
         if (_configuration.EnablePollingFallback)
         {
@@ -88,23 +88,35 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         CancellationToken cancellationToken)
     {
         var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
+        var serverUri = new Uri(configuration.ServerUrl);
+
+        using var discoveryClient = await DiscoveryClient.CreateAsync(
+            application.ApplicationConfiguration,
+            serverUri,
+            endpointConfiguration, ct: cancellationToken).ConfigureAwait(false);
+
+        var endpoints = await discoveryClient.GetEndpointsAsync(null, cancellationToken).ConfigureAwait(false);
         var endpointDescription = CoreClientUtils.SelectEndpoint(
             application.ApplicationConfiguration,
-            configuration.ServerUrl,
-            useSecurity: false);
+            serverUri,
+            endpoints,
+            useSecurity: false,
+            configuration.TelemetryContext);
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
         var oldSession = Volatile.Read(ref _session);
 
-        var newSession = await Session.Create(
+        var sessionFactory = configuration.ActualSessionFactory;
+        var newSession = await sessionFactory.CreateAsync(
             application.ApplicationConfiguration,
             endpoint,
             updateBeforeConnect: false,
-            application.ApplicationName,
+            sessionName: application.ApplicationName,
             sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
-            new UserIdentity(),
+            identity: new UserIdentity(),
             preferredLocales: null,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken).ConfigureAwait(false) as Session
+            ?? throw new InvalidOperationException("Failed to create OPC UA session.");
 
         newSession.KeepAlive -= OnKeepAlive;
         newSession.KeepAlive += OnKeepAlive;

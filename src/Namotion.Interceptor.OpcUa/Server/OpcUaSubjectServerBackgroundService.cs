@@ -98,7 +98,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var application = _configuration.CreateApplicationInstance();
+            var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
 
             if (_configuration.CleanCertificateStore)
             {
@@ -112,8 +112,8 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                 {
                     _server = server;
 
-                    await application.CheckApplicationInstanceCertificates(true);
-                    await application.Start(server);
+                    await application.CheckApplicationInstanceCertificatesAsync(true, ct: stoppingToken).ConfigureAwait(false);
+                    await application.StartAsync(server).ConfigureAwait(false);
 
                     using var changeQueueProcessor = new ChangeQueueProcessor(
                         source: this, _context,
@@ -145,7 +145,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
             {
                 try
                 {
-                    ShutdownServer(application);
+                    await ShutdownServerAsync(application).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -155,7 +155,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         }
     }
 
-    private void ShutdownServer(ApplicationInstance application)
+    private async Task ShutdownServerAsync(ApplicationInstance application)
     {
         try
         {
@@ -168,7 +168,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                 }
             }
 
-            application.Stop();
+            await application.StopAsync().ConfigureAwait(false);
         }
         catch (ServiceResultException e) when (e.StatusCode == StatusCodes.BadServerHalted)
         {
