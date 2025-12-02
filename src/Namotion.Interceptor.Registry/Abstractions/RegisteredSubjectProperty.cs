@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Registry.Performance;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
@@ -10,6 +11,9 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubjectProperty
 {
+    private static readonly ObjectPool<RegisteredSubjectProperty> Pool = new(
+        static () => new RegisteredSubjectProperty());
+
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectReferenceCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
@@ -17,25 +21,52 @@ public class RegisteredSubjectProperty
     private readonly List<SubjectPropertyChild> _children = [];
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
 
-    private readonly PropertyAttributeAttribute? _attributeMetadata;
+    private PropertyAttributeAttribute? _attributeMetadata;
     internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
-    public RegisteredSubjectProperty(RegisteredSubject parent, string name,
-        Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
+    private RegisteredSubjectProperty()
     {
-        Parent = parent;
-        Type = type;
-        ReflectionAttributes = reflectionAttributes;
-        Reference = new PropertyReference(parent.Subject, name);
+    }
 
+    public static RegisteredSubjectProperty Create(RegisteredSubject parent, string name, Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
+    {
+        var property = Pool.Rent();
+        property.Parent = parent;
+        property.Type = type;
+        property.ReflectionAttributes = reflectionAttributes;
+        property.Reference = new PropertyReference(parent.Subject, name);
+
+        // Find PropertyAttributeAttribute without LINQ allocation
+        property._attributeMetadata = null;
         foreach (var attribute in reflectionAttributes)
         {
             if (attribute is PropertyAttributeAttribute paa)
             {
-                _attributeMetadata = paa;
+                property._attributeMetadata = paa;
                 break;
             }
         }
+
+        return property;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void Return()
+    {
+        // No need to lock because the subject containing this property is removed from the registry already
+        // ReSharper disable once InconsistentlySynchronizedField
+        _children.Clear();
+        _childrenCache = default;
+        AttributesCache = null;
+
+        // Clear all references to allow GC and prevent use-after-return issues
+        Parent = null!;
+        Reference = default;
+        Type = null!;
+        ReflectionAttributes = null!;
+        _attributeMetadata = null;
+
+        Pool.Return(this);
     }
 
     /// <summary>
@@ -51,22 +82,22 @@ public class RegisteredSubjectProperty
     /// <summary>
     /// Gets the parent subject which contains the property.
     /// </summary>
-    public RegisteredSubject Parent { get; }
+    public RegisteredSubject Parent { get; private set; }
     
     /// <summary>
     /// Gets the property reference.
     /// </summary>
-    public PropertyReference Reference { get; }
+    public PropertyReference Reference { get; private set; }
     
     /// <summary>
     /// Gets the type of the property.
     /// </summary>
-    public Type Type { get; }
+    public Type Type { get; private set; }
 
     /// <summary>
     /// Gets a list of all .NET reflection attributes.
     /// </summary>
-    public IReadOnlyCollection<Attribute> ReflectionAttributes { get; }
+    public IReadOnlyCollection<Attribute> ReflectionAttributes { get; private set; }
     
     /// <summary>
     /// Gets the browse name of the property (either the property or attribute name).
