@@ -19,6 +19,7 @@
       <ProjectReference Include="..\Namotion.Interceptor.SamplesModel\Namotion.Interceptor.SamplesModel.csproj" />
       <ProjectReference Include="..\Namotion.Interceptor.OpcUa\Namotion.Interceptor.OpcUa.csproj" />
       <ProjectReference Include="..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
+      <ProjectReference Include="..\Namotion.Interceptor.ServiceDefaults\Namotion.Interceptor.ServiceDefaults.csproj" />
       <ProjectReference Include="..\Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj" />
       <ProjectReference Include="..\Namotion.Interceptor.Validation\Namotion.Interceptor.Validation.csproj" />
       <ProjectReference Include="..\Namotion.Interceptor\Namotion.Interceptor.csproj" />

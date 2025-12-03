@@ -10,6 +10,8 @@ using Namotion.Interceptor.Validation;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+builder.AddServiceDefaults();
+
 var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking()

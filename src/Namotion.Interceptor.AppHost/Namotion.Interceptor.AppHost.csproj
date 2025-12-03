@@ -1,0 +1,16 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.0.1">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <UserSecretsId>9298438c-4d88-466b-82c5-ae6a52b1cc1e</UserSecretsId>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\Namotion.Interceptor.OpcUa.SampleClient\Namotion.Interceptor.OpcUa.SampleClient.csproj" />
+      <ProjectReference Include="..\Namotion.Interceptor.OpcUa.SampleServer\Namotion.Interceptor.OpcUa.SampleServer.csproj" />
+    </ItemGroup>
+
+</Project>
