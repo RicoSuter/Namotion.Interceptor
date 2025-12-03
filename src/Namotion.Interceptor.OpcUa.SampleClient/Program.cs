@@ -11,6 +11,8 @@ using Opc.Ua;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+builder.AddServiceDefaults();
+
 var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking()
@@ -27,7 +29,7 @@ var root = new Root(context);
 context.AddService(root);
 
 builder.Services.AddSingleton(root);
-builder.Services.AddHostedService<ClientWorker>();
+// builder.Services.AddHostedService<ClientWorker>();
 builder.Services.AddOpcUaSubjectClient<Root>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 
 using var performanceProfiler = new PerformanceProfiler(context, "Client");
