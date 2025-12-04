@@ -29,7 +29,7 @@ public class OpcUaServerConfiguration
     /// Gets the source path provider used to map between OPC UA node browse names and C# property names.
     /// This provider determines which properties are included and how their names are translated.
     /// </summary>
-    public required ISourcePathProvider SourcePathProvider { get; init; }
+    public required ISourcePathProvider PathProvider { get; init; }
 
     /// <summary>
     /// Gets the value converter used to convert between OPC UA node values and C# property values.
@@ -46,12 +46,12 @@ public class OpcUaServerConfiguration
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
     /// </summary>
-    public TimeSpan? BufferTime { get; set; }
+    public TimeSpan? BufferTime { get; init; }
     
     /// <summary>
     /// Gets or sets the retry time (default: 10s).
     /// </summary>
-    public TimeSpan? RetryTime { get; set; }
+    public TimeSpan? RetryTime { get; init; }
 
     public virtual ApplicationInstance CreateApplicationInstance()
     {

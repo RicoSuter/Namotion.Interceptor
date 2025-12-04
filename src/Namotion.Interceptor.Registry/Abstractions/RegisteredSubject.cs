@@ -10,19 +10,29 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubject
 {
-    private readonly Lock _lock = new();
+    private readonly Lock _parentsLock = new();
 
-    private FrozenDictionary<string, RegisteredSubjectProperty> _properties;
-    private readonly HashSet<SubjectPropertyParent> _parents = []; // TODO(perf): Use a FrozenSet?
-    
+    private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
+    private ImmutableArray<SubjectPropertyParent> _parents = [];
+
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
-    public ICollection<SubjectPropertyParent> Parents
+    /// <summary>
+    /// Gets the current reference count (number of parent references).
+    /// Returns 0 if subject is not attached or lifecycle tracking is not enabled.
+    /// </summary>
+    public int ReferenceCount => Subject.GetReferenceCount();
+
+    /// <summary>
+    /// Gets the properties which reference this subject.
+    /// Thread-safe: Lock ensures atomic struct copy during read.
+    /// </summary>
+    public ImmutableArray<SubjectPropertyParent> Parents
     {
         get
         {
-            lock (_lock)
-                return _parents.ToArray();
+            lock (_parentsLock)
+                return _parents;
         }
     }
 
@@ -33,11 +43,12 @@ public class RegisteredSubject
     /// </summary>
     public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
     {
-        lock (_lock)
+        foreach (var property in _properties.Values)
         {
-            return _properties.Values
-                .Where(p => p.IsAttribute &&
-                            p.AttributeMetadata.PropertyName == propertyName);
+            if (property.IsAttribute && property.AttributeMetadata.PropertyName == propertyName)
+            {
+                yield return property;
+            }
         }
     }
 
@@ -49,13 +60,16 @@ public class RegisteredSubject
     /// <returns>The attribute property.</returns>
     public RegisteredSubjectProperty? TryGetPropertyAttribute(string propertyName, string attributeName)
     {
-        lock (_lock)
+        foreach (var property in _properties.Values)
         {
-            return _properties.Values
-                .FirstOrDefault(p => p.IsAttribute &&
-                                     p.AttributeMetadata.PropertyName == propertyName &&
-                                     p.AttributeMetadata.AttributeName == attributeName);
+            if (property.IsAttribute &&
+                property.AttributeMetadata.PropertyName == propertyName &&
+                property.AttributeMetadata.AttributeName == attributeName)
+            {
+                return property;
+            }
         }
+        return null;
     }
 
     /// <summary>
@@ -66,8 +80,7 @@ public class RegisteredSubject
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty? TryGetProperty(string propertyName)
     {
-        lock (_lock)
-            return _properties.GetValueOrDefault(propertyName);
+        return _properties.GetValueOrDefault(propertyName);
     }
 
     public RegisteredSubject(IInterceptorSubject subject)
@@ -83,14 +96,18 @@ public class RegisteredSubject
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
     {
-        lock (_lock)
-            _parents.Add(new SubjectPropertyParent { Property = parent, Index = index });
+        lock (_parentsLock)
+        {
+            _parents = _parents.Add(new SubjectPropertyParent { Property = parent, Index = index });
+        }
     }
 
     internal void RemoveParent(RegisteredSubjectProperty parent, object? index)
     {
-        lock (_lock)
-            _parents.Remove(new SubjectPropertyParent { Property = parent, Index = index });
+        lock (_parentsLock)
+        {
+            _parents = _parents.Remove(new SubjectPropertyParent { Property = parent, Index = index });
+        }
     }
 
     /// <summary>
@@ -188,16 +205,15 @@ public class RegisteredSubject
     {
         var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
 
-        lock (_lock)
-        {
-            _properties = _properties
-                .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
-                .ToFrozenDictionary(p => p.Key, p => p.Value);
+        var newProperties = _properties
+            .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
+            .ToFrozenDictionary(p => p.Key, p => p.Value);
 
-            foreach (var property in _properties.Values)
-            {
-                property.AttributesCache = null;
-            }
+        _properties = newProperties;
+
+        foreach (var property in newProperties.Values)
+        {
+            property.AttributesCache = null;
         }
 
         Subject.AttachSubjectProperty(subjectProperty.Reference);

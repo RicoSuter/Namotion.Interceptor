@@ -3,10 +3,27 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+		<!-- Set to true to use local MQTTnet project references (development), false for NuGet packages (production) -->
+		<UseLocalMqttProjects>false</UseLocalMqttProjects>
 	</PropertyGroup>
-	<ItemGroup>
+
+	<!-- Define compiler constant when using local MQTTnet projects -->
+	<PropertyGroup Condition="'$(UseLocalMqttProjects)' == 'true'">
+		<DefineConstants>$(DefineConstants);USE_LOCAL_MQTTNET</DefineConstants>
+	</PropertyGroup>
+
+	<!-- Local project references for development (with new batch APIs) -->
+	<ItemGroup Condition="'$(UseLocalMqttProjects)' == 'true'">
+		<ProjectReference Include="..\..\..\MQTTnet\Source\MQTTnet\MQTTnet.csproj" />
+		<ProjectReference Include="..\..\..\MQTTnet\Source\MQTTnet.Server\MQTTnet.Server.csproj" />
+	</ItemGroup>
+
+	<!-- NuGet package references for production baseline -->
+	<ItemGroup Condition="'$(UseLocalMqttProjects)' != 'true'">
+		<PackageReference Include="MQTTnet" Version="5.0.1.1416" />
 		<PackageReference Include="MQTTnet.Server" Version="5.0.1.1416" />
 	</ItemGroup>
+
 	<ItemGroup>
 	  <ProjectReference Include="..\Namotion.Interceptor.Sources\Namotion.Interceptor.Sources.csproj" />
 	</ItemGroup>

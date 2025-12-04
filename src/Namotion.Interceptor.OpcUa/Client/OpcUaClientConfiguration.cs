@@ -32,11 +32,20 @@ public class OpcUaClientConfiguration
     /// Gets the maximum number of monitored items per subscription. Default is 1000.
     /// </summary>
     public int MaximumItemsPerSubscription { get; init; } = 1000;
-    
+
     /// <summary>
-    /// Gets the delay before attempting to reconnect after a disconnect. Default is 5 seconds.
+    /// Gets the maximum number of write operations to queue for retry when disconnected. Default is 1000.
+    /// When the session is disconnected, write operations are queued up to this limit.
+    /// Once reconnected, queued writes are flushed to the server in order (FIFO).
+    /// Set to 0 to disable write retry queue (writes will be dropped when disconnected).
     /// </summary>
-    public TimeSpan ReconnectDelay { get; init; } = TimeSpan.FromSeconds(5);
+    public int WriteRetryQueueSize { get; init; } = 1000;
+
+    /// <summary>
+    /// Gets the interval for subscription health checks and auto-healing attempts. Default is 10 seconds.
+    /// Failed monitored items (excluding design-time errors like BadNodeIdUnknown) are retried at this interval.
+    /// </summary>
+    public TimeSpan SubscriptionHealthCheckInterval { get; init; } = TimeSpan.FromSeconds(10);
     
     /// <summary>
     /// Gets or sets an async predicate that is called when an unknown (not statically typed) OPC UA node or variable is found during browsing.
@@ -50,7 +59,7 @@ public class OpcUaClientConfiguration
     /// Gets the source path provider used to map between OPC UA node browse names and C# property names.
     /// This provider determines which properties are included and how their names are translated.
     /// </summary>
-    public required ISourcePathProvider SourcePathProvider { get; init; }
+    public required ISourcePathProvider PathProvider { get; init; }
 
     /// <summary>
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
@@ -71,58 +80,121 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
     /// </summary>
-    public TimeSpan? BufferTime { get; set; }
-    
+    public TimeSpan? BufferTime { get; init; }
+
     /// <summary>
     /// Gets or sets the retry time (default: 10s).
     /// </summary>
-    public TimeSpan? RetryTime { get; set; }
+    public TimeSpan? RetryTime { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute (default: 0).
     /// </summary>
-    public int DefaultSamplingInterval { get; set; }
+    public int DefaultSamplingInterval { get; init; }
 
     /// <summary>
     /// Gets or sets the default queue size for monitored items when not specified on the [OpcUaNode] attribute (default: 10).
     /// </summary>
-    public uint DefaultQueueSize { get; set; } = 10;
+    public uint DefaultQueueSize { get; init; } = 10;
 
     /// <summary>
     /// Gets or sets whether the server should discard the oldest value in the queue when the queue is full for monitored items (default: true).
     /// </summary>
-    public bool DefaultDiscardOldest { get; set; } = true;
+    public bool DefaultDiscardOldest { get; init; } = true;
 
     /// <summary>
     /// Gets or sets the default publishing interval for subscriptions in milliseconds (default: 0).
     /// Larger values reduce overhead by batching more notifications per publish.
     /// </summary>
-    public int DefaultPublishingInterval { get; set; } = 0;
+    public int DefaultPublishingInterval { get; init; } = 0;
 
     /// <summary>
     /// Gets or sets the subscription keep-alive count (default: 10).
     /// </summary>
-    public uint SubscriptionKeepAliveCount { get; set; } = 10;
+    public uint SubscriptionKeepAliveCount { get; init; } = 10;
 
     /// <summary>
     /// Gets or sets the subscription lifetime count (default: 100).
     /// </summary>
-    public uint SubscriptionLifetimeCount { get; set; } = 100;
+    public uint SubscriptionLifetimeCount { get; init; } = 100;
 
     /// <summary>
     /// Gets or sets the subscription priority (default: 0 = server default).
     /// </summary>
-    public byte SubscriptionPriority { get; set; } = 0;
+    public byte SubscriptionPriority { get; init; } = 0;
 
     /// <summary>
     /// Gets or sets the maximum notifications per publish that the client requests (default: 0 = server default).
     /// </summary>
-    public uint SubscriptionMaximumNotificationsPerPublish { get; set; } = 0;
+    public uint SubscriptionMaximumNotificationsPerPublish { get; init; } = 0;
 
     /// <summary>
     /// Gets or sets the maximum references per node to read per browse request. 0 uses server default.
     /// </summary>
-    public uint MaximumReferencesPerNode { get; set; } = 0;
+    public uint MaximumReferencesPerNode { get; init; } = 0;
+
+    /// <summary>
+    /// Gets or sets whether to enable automatic polling fallback when subscriptions are not supported.
+    /// When enabled, items that fail subscription creation automatically fall back to periodic polling.
+    /// Default is true.
+    /// </summary>
+    public bool EnablePollingFallback { get; init; } = true;
+
+    /// <summary>
+    /// Gets or sets the polling interval for items that don't support subscriptions.
+    /// Only used when EnablePollingFallback is true.
+    /// Default is 1000ms (1 second).
+    /// </summary>
+    public TimeSpan PollingInterval { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Gets or sets the maximum batch size for polling read operations.
+    /// Larger batches reduce network calls but increase latency.
+    /// Default is 100 items per batch.
+    /// </summary>
+    public int PollingBatchSize { get; init; } = 100;
+
+    /// <summary>
+    /// Gets or sets the timeout to wait for the polling manager to complete during disposal.
+    /// If the polling task does not complete within this timeout, it will be abandoned.
+    /// Default is 10 seconds.
+    /// </summary>
+    public TimeSpan PollingDisposalTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Gets or sets the number of consecutive polling failures before the circuit breaker opens.
+    /// When the circuit breaker opens, polling is suspended temporarily to prevent resource exhaustion.
+    /// Only used when EnablePollingFallback is true.
+    /// Default is 5 failures.
+    /// </summary>
+    public int PollingCircuitBreakerThreshold { get; init; } = 5;
+
+    /// <summary>
+    /// Gets or sets the cooldown period after the circuit breaker opens before attempting to resume polling.
+    /// After this period, polling automatically resumes and the circuit breaker resets.
+    /// Only used when EnablePollingFallback is true.
+    /// Default is 30 seconds.
+    /// </summary>
+    public TimeSpan PollingCircuitBreakerCooldown { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Gets or sets the OPC UA session timeout.
+    /// This determines how long the server will maintain the session after losing communication.
+    /// Default is 60 seconds.
+    /// </summary>
+    public TimeSpan SessionTimeout { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Gets or sets the maximum time the reconnect handler will attempt to reconnect before giving up.
+    /// Default is 60 seconds.
+    /// </summary>
+    public TimeSpan ReconnectHandlerTimeout { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Gets or sets the interval between reconnection attempts when connection is lost.
+    /// Default is 5 seconds.
+    /// </summary>
+    public TimeSpan ReconnectInterval { get; init; } = TimeSpan.FromSeconds(5);
 
     public virtual ApplicationInstance CreateApplicationInstance()
     {
@@ -188,5 +260,91 @@ public class OpcUaClientConfiguration
 
         application.ApplicationConfiguration = config;
         return application;
+    }
+
+    /// <summary>
+    /// Validates configuration values and throws ArgumentException if invalid.
+    /// Call this method during initialization to fail fast with clear error messages.
+    /// </summary>
+    public void Validate()
+    {
+        ArgumentNullException.ThrowIfNull(ServerUrl);
+        ArgumentNullException.ThrowIfNull(PathProvider);
+        ArgumentNullException.ThrowIfNull(TypeResolver);
+        ArgumentNullException.ThrowIfNull(ValueConverter);
+        ArgumentNullException.ThrowIfNull(SubjectFactory);
+
+        if (WriteRetryQueueSize < 0)
+        {
+            throw new ArgumentException(
+                $"WriteRetryQueueSize must be non-negative, got: {WriteRetryQueueSize}",
+                nameof(WriteRetryQueueSize));
+        }
+
+        if (SubscriptionHealthCheckInterval < TimeSpan.FromSeconds(5))
+        {
+            throw new ArgumentException(
+                $"SubscriptionHealthCheckInterval must be at least {TimeSpan.FromSeconds(5).TotalSeconds}s (got: {SubscriptionHealthCheckInterval.TotalSeconds}s)",
+                nameof(SubscriptionHealthCheckInterval));
+        }
+
+        if (MaximumItemsPerSubscription <= 0)
+        {
+            throw new ArgumentException(
+                $"MaximumItemsPerSubscription must be positive, got: {MaximumItemsPerSubscription}",
+                nameof(MaximumItemsPerSubscription));
+        }
+
+        if (EnablePollingFallback)
+        {
+            if (PollingInterval < TimeSpan.FromMilliseconds(100))
+            {
+                throw new ArgumentException(
+                    $"PollingInterval must be at least {TimeSpan.FromMilliseconds(100).TotalMilliseconds}ms when EnablePollingFallback is true (got: {PollingInterval.TotalMilliseconds}ms)",
+                    nameof(PollingInterval));
+            }
+
+            if (PollingBatchSize <= 0)
+            {
+                throw new ArgumentException(
+                    $"PollingBatchSize must be positive, got: {PollingBatchSize}",
+                    nameof(PollingBatchSize));
+            }
+
+            if (PollingCircuitBreakerThreshold <= 0)
+            {
+                throw new ArgumentException(
+                    $"PollingCircuitBreakerThreshold must be positive, got: {PollingCircuitBreakerThreshold}",
+                    nameof(PollingCircuitBreakerThreshold));
+            }
+
+            if (PollingCircuitBreakerCooldown < TimeSpan.FromSeconds(1))
+            {
+                throw new ArgumentException(
+                    $"PollingCircuitBreakerCooldown must be at least {TimeSpan.FromSeconds(1).TotalSeconds}s when EnablePollingFallback is true (got: {PollingCircuitBreakerCooldown.TotalSeconds}s)",
+                    nameof(PollingCircuitBreakerCooldown));
+            }
+        }
+
+        if (SessionTimeout < TimeSpan.FromSeconds(1))
+        {
+            throw new ArgumentException(
+                $"SessionTimeout must be at least 1000ms, got: {SessionTimeout}",
+                nameof(SessionTimeout));
+        }
+
+        if (ReconnectHandlerTimeout < TimeSpan.FromSeconds(1))
+        {
+            throw new ArgumentException(
+                $"ReconnectHandlerTimeout must be at least 1000ms, got: {ReconnectHandlerTimeout}",
+                nameof(ReconnectHandlerTimeout));
+        }
+
+        if (ReconnectInterval < TimeSpan.FromSeconds(0.1))
+        {
+            throw new ArgumentException(
+                $"ReconnectInterval must be at least 100ms, got: {ReconnectInterval}",
+                nameof(ReconnectInterval));
+        }
     }
 }

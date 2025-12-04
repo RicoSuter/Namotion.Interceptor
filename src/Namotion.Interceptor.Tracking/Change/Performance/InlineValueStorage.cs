@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using System.Linq.Expressions;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -12,12 +12,13 @@ namespace Namotion.Interceptor.Tracking.Change.Performance;
 [StructLayout(LayoutKind.Explicit)]
 internal readonly struct InlineValueStorage
 {
-    private static readonly ConcurrentDictionary<Type, Func<long, object>> BoxingDelegates = new();
+    private static readonly ConcurrentDictionary<Type, Func<InlineValueStorage, object>> BoxingDelegates = new();
 
-    public const int MaxSize = 8; // 8 bytes per value (covers int, long, double, float, etc.)
+    public const int MaxSize = 16; // 16 bytes per value (covers decimal, DateTime, DateTimeOffset, Guid, etc.)
 
-    [FieldOffset(0)] private readonly long _valueData;
-    [FieldOffset(8)] private readonly Type? _storedType;
+    [FieldOffset(0)] private readonly long _valueData0;
+    [FieldOffset(8)] private readonly long _valueData1;
+    [FieldOffset(16)] private readonly Type? _storedType;
 
     public Type? StoredType => _storedType;
 
@@ -26,7 +27,7 @@ internal readonly struct InlineValueStorage
     {
         var storage = new InlineValueStorage();
         Unsafe.AsRef(in storage._storedType) = typeof(TValue);
-        Unsafe.WriteUnaligned(ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in storage._valueData)), value);
+        Unsafe.WriteUnaligned(ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in storage._valueData0)), value);
         return storage;
     }
 
@@ -35,7 +36,7 @@ internal readonly struct InlineValueStorage
     {
         if (_storedType == typeof(TValue))
         {
-            value = Unsafe.ReadUnaligned<TValue>(ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in _valueData)));
+            value = Unsafe.ReadUnaligned<TValue>(ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in _valueData0)));
             return true;
         }
 
@@ -48,9 +49,10 @@ internal readonly struct InlineValueStorage
     {
         if (_storedType == null) return null;
 
-        // Fast path for common primitive types (no dictionary lookup)
-        ref var byteRef = ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in _valueData));
+        // Fast path for common primitive types (no reflection)
+        ref var byteRef = ref Unsafe.As<long, byte>(ref Unsafe.AsRef(in _valueData0));
 
+        // 1-8 byte types
         if (_storedType == typeof(int)) return Unsafe.ReadUnaligned<int>(ref byteRef);
         if (_storedType == typeof(long)) return Unsafe.ReadUnaligned<long>(ref byteRef);
         if (_storedType == typeof(double)) return Unsafe.ReadUnaligned<double>(ref byteRef);
@@ -58,39 +60,40 @@ internal readonly struct InlineValueStorage
         if (_storedType == typeof(bool)) return Unsafe.ReadUnaligned<bool>(ref byteRef);
         if (_storedType == typeof(byte)) return Unsafe.ReadUnaligned<byte>(ref byteRef);
         if (_storedType == typeof(short)) return Unsafe.ReadUnaligned<short>(ref byteRef);
-        if (_storedType == typeof(decimal)) return Unsafe.ReadUnaligned<decimal>(ref byteRef);
+        if (_storedType == typeof(uint)) return Unsafe.ReadUnaligned<uint>(ref byteRef);
+        if (_storedType == typeof(ulong)) return Unsafe.ReadUnaligned<ulong>(ref byteRef);
+        if (_storedType == typeof(ushort)) return Unsafe.ReadUnaligned<ushort>(ref byteRef);
+        if (_storedType == typeof(sbyte)) return Unsafe.ReadUnaligned<sbyte>(ref byteRef);
+        if (_storedType == typeof(char)) return Unsafe.ReadUnaligned<char>(ref byteRef);
         if (_storedType == typeof(DateTime)) return Unsafe.ReadUnaligned<DateTime>(ref byteRef);
+
+        // 9-16 byte types
+        if (_storedType == typeof(decimal)) return Unsafe.ReadUnaligned<decimal>(ref byteRef);
         if (_storedType == typeof(DateTimeOffset)) return Unsafe.ReadUnaligned<DateTimeOffset>(ref byteRef);
+        if (_storedType == typeof(Guid)) return Unsafe.ReadUnaligned<Guid>(ref byteRef);
+        if (_storedType == typeof(TimeSpan)) return Unsafe.ReadUnaligned<TimeSpan>(ref byteRef);
 
-        // Custom structs: use cached compiled delegate
-        return BoxingDelegates.GetOrAdd(_storedType, CreateBoxingDelegate)(_valueData);
+        // Custom structs: use cached delegate (first call creates delegate via reflection, subsequent calls are fast)
+        return BoxingDelegates.GetOrAdd(_storedType, CreateBoxingDelegateForType)(this);
     }
-    
-    private static Func<long, object> CreateBoxingDelegate(Type type)
+
+    private static Func<InlineValueStorage, object> CreateBoxingDelegateForType(Type type)
     {
-        // Create a compiled delegate: (long data) => Unsafe.ReadUnaligned<T>(ref Unsafe.As<long, byte>(ref data))
-        var dataParam = Expression.Parameter(typeof(long), "data");
+        // Use reflection once to create a typed delegate, subsequent calls use the fast delegate
+        var method = typeof(InlineValueStorage)
+            .GetMethod(nameof(CreateBoxingDelegate), BindingFlags.NonPublic | BindingFlags.Static)!
+            .MakeGenericMethod(type);
 
-        // ref Unsafe.AsRef(in data)
-        var asRefMethod = typeof(Unsafe).GetMethod(nameof(Unsafe.AsRef), [type.MakeByRefType()])!.MakeGenericMethod(typeof(long));
-        var dataRef = Expression.Call(asRefMethod, dataParam);
+        return (Func<InlineValueStorage, object>)method.Invoke(null, null)!;
+    }
 
-        // ref Unsafe.As<long, byte>(ref dataRef)
-        var asMethod = typeof(Unsafe).GetMethods()
-            .First(m => m is { Name: nameof(Unsafe.As), IsGenericMethodDefinition: true } &&
-                        m.GetGenericArguments().Length == 2 &&
-                        m.GetParameters().Length == 1 &&
-                        m.GetParameters()[0].ParameterType.IsByRef)
-            .MakeGenericMethod(typeof(long), typeof(byte));
-
-        var byteRef = Expression.Call(asMethod, dataRef);
-
-        // Unsafe.ReadUnaligned<type>(ref byteRef)
-        var readMethod = typeof(Unsafe).GetMethod(nameof(Unsafe.ReadUnaligned), [typeof(byte).MakeByRefType()])!.MakeGenericMethod(type);
-
-        var readCall = Expression.Call(readMethod, byteRef);
-        var boxed = Expression.Convert(readCall, typeof(object));
-        return Expression.Lambda<Func<long, object>>(boxed, dataParam).Compile();
+    private static Func<InlineValueStorage, object> CreateBoxingDelegate<T>()
+    {
+        // This delegate is compiled once and reused - fast invocation after first call
+        return static storage =>
+        {
+            storage.TryGetValue<T>(out var value);
+            return value!;
+        };
     }
 }
-

@@ -42,7 +42,16 @@ public partial class SampleSubject
     public partial string? Name { get; set; }
 
     protected string? Hidden { get; set; }
-}";
+}
+
+public partial class ClassWithoutInterceptorSubject
+{
+    public partial int Value { get; set; }
+    public partial string? Name { get; set; }
+
+    protected string? Hidden { get; set; }
+}
+";
 
         // Act
         var generated = GeneratedSourceCode(source);
