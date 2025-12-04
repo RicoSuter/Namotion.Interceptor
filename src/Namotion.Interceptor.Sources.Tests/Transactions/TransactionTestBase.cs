@@ -24,7 +24,8 @@ public abstract class TransactionTestBase
         mock.Setup(s => s.WriteChangesAsync(
                 It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
                 It.IsAny<CancellationToken>()))
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Success(changes)));
         return mock;
     }
 
@@ -35,7 +36,7 @@ public abstract class TransactionTestBase
         mock.Setup(s => s.WriteChangesAsync(
                 It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
                 It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException(message));
+            .Returns(new ValueTask<WriteResult>(WriteResult.Failure(new InvalidOperationException(message))));
         return mock;
     }
 
@@ -46,7 +47,8 @@ public abstract class TransactionTestBase
         mock.Setup(s => s.WriteChangesAsync(
                 It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
                 It.IsAny<CancellationToken>()))
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Success(changes)));
         return mock;
     }
 }

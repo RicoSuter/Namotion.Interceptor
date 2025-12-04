@@ -20,10 +20,11 @@ public enum TransactionMode
     Strict,
 
     /// <summary>
-    /// Rollback mode: Attempt to revert successful source writes on failure.
+    /// Rollback mode (default): Attempt to revert successful source writes on failure.
     /// If any source write fails, attempts to write the original values back to sources that succeeded.
     /// If revert also fails, both the original failure and revert failures are reported.
     /// No changes are applied to the in-process model on failure.
+    /// This mode provides the strongest consistency guarantee between in-memory state and external sources.
     /// </summary>
     Rollback
 }

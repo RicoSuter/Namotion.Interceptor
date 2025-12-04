@@ -53,16 +53,21 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
 
         foreach (var (source, sourceChanges) in changesBySource)
         {
-            try
+            var memory = new ReadOnlyMemory<SubjectPropertyChange>(sourceChanges.ToArray());
+            var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
+
+            // Track successful changes (may be partial or complete)
+            var writtenList = result.SuccessfulChanges.ToArray().ToList();
+            if (writtenList.Count > 0)
             {
-                var memory = new ReadOnlyMemory<SubjectPropertyChange>(sourceChanges.ToArray());
-                await source.WriteChangesInBatchesAsync(memory, cancellationToken);
-                successfulChanges.AddRange(sourceChanges);
-                successfulSourceWrites.Add((source, sourceChanges));
+                successfulChanges.AddRange(writtenList);
+                successfulSourceWrites.Add((source, writtenList));
             }
-            catch (Exception ex)
+
+            // Record any failure
+            if (result.Error is not null)
             {
-                failures.Add(new SourceWriteException(source, sourceChanges, ex));
+                failures.Add(new SourceWriteException(source, sourceChanges, result.Error));
             }
         }
 
@@ -95,28 +100,26 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
 
         foreach (var (source, originalChanges) in successfulWrites)
         {
-            try
-            {
-                // Create rollback changes with old/new values swapped
-                var rollbackChanges = originalChanges
-                    .Select(c => SubjectPropertyChange.Create(
-                        c.Property,
-                        source: c.Source,
-                        changedTimestamp: DateTimeOffset.UtcNow,
-                        receivedTimestamp: null,
-                        c.GetNewValue<object?>(),  // Current "new" becomes old
-                        c.GetOldValue<object?>())) // Original "old" becomes new (revert target)
-                    .ToArray();
+            // Create rollback changes with old/new values swapped
+            var rollbackChanges = originalChanges
+                .Select(c => SubjectPropertyChange.Create(
+                    c.Property,
+                    source: c.Source,
+                    changedTimestamp: DateTimeOffset.UtcNow,
+                    receivedTimestamp: null,
+                    c.GetNewValue<object?>(),  // Current "new" becomes old
+                    c.GetOldValue<object?>())) // Original "old" becomes new (revert target)
+                .ToArray();
 
-                var memory = new ReadOnlyMemory<SubjectPropertyChange>(rollbackChanges);
-                await source.WriteChangesInBatchesAsync(memory, cancellationToken);
-            }
-            catch (Exception ex)
+            var memory = new ReadOnlyMemory<SubjectPropertyChange>(rollbackChanges);
+            var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
+
+            if (result.Error is not null)
             {
                 revertFailures.Add(new SourceWriteException(
                     source,
                     originalChanges,
-                    new InvalidOperationException($"Failed to rollback changes to source {source.GetType().Name}", ex)));
+                    new InvalidOperationException($"Failed to rollback changes to source {source.GetType().Name}", result.Error)));
             }
         }
 

@@ -121,7 +121,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithMixedSourceAndLocal_AppliesLocalAndSuccessfulSource()
+    public async Task CommitAsync_WithMixedSourceAndLocal_InBestEffortMode_AppliesLocalAndSuccessfulSource()
     {
         var context = CreateContext();
         var person = new Person(context);
@@ -131,7 +131,8 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var firstNameProp = new PropertyReference(person, nameof(Person.FirstName));
         firstNameProp.SetSource(failingSource.Object);
 
-        using (var transaction = SubjectTransaction.BeginTransaction())
+        // Use BestEffort mode to test partial success (local properties should be applied)
+        using (var transaction = SubjectTransaction.BeginTransaction(TransactionMode.BestEffort))
         {
             person.FirstName = "John";
             person.LastName = "Doe";
@@ -156,15 +157,21 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var source1Mock = new Mock<ISubjectSource>();
         source1Mock.Setup(s => s.WriteBatchSize).Returns(0);
         source1Mock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>((changes, _) => source1Writes.Add(changes.Length))
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                source1Writes.Add(changes.Length);
+                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+            });
 
         var source2Writes = new List<int>();
         var source2Mock = new Mock<ISubjectSource>();
         source2Mock.Setup(s => s.WriteBatchSize).Returns(0);
         source2Mock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>((changes, _) => source2Writes.Add(changes.Length))
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                source2Writes.Add(changes.Length);
+                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+            });
 
         var firstNameProp = new PropertyReference(person, nameof(Person.FirstName));
         var lastNameProp = new PropertyReference(person, nameof(Person.LastName));
@@ -193,10 +200,11 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var sourceMock = new Mock<ISubjectSource>();
         sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
         sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>((_, ct) =>
+            .Returns<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>((changes, ct) =>
             {
-                ct.ThrowIfCancellationRequested();
-                return ValueTask.CompletedTask;
+                if (ct.IsCancellationRequested)
+                    return new ValueTask<WriteResult>(WriteResult.Failure(new OperationCanceledException(ct)));
+                return new ValueTask<WriteResult>(WriteResult.Success(changes));
             });
 
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
@@ -227,14 +235,14 @@ public class SubjectTransactionSourceTests : TransactionTestBase
 
         var capturedChanges = new List<SubjectPropertyChange>();
         sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>((changes, _) =>
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 foreach (var change in changes.Span)
                 {
                     capturedChanges.Add(change);
                 }
-            })
-            .Returns(ValueTask.CompletedTask);
+                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+            });
 
         var firstNameProp = new PropertyReference(person, nameof(Person.FirstName));
         var lastNameProp = new PropertyReference(person, nameof(Person.LastName));
@@ -271,15 +279,21 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var source1Mock = new Mock<ISubjectSource>();
         source1Mock.Setup(s => s.WriteBatchSize).Returns(0);
         source1Mock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>((changes, _) => source1Writes.Add(changes.Length))
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                source1Writes.Add(changes.Length);
+                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+            });
 
         var source2Writes = new List<int>();
         var source2Mock = new Mock<ISubjectSource>();
         source2Mock.Setup(s => s.WriteBatchSize).Returns(0);
         source2Mock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>((changes, _) => source2Writes.Add(changes.Length))
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                source2Writes.Add(changes.Length);
+                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+            });
 
         new PropertyReference(person1, nameof(Person.FirstName)).SetSource(source1Mock.Object);
         new PropertyReference(person2, nameof(Person.FirstName)).SetSource(source2Mock.Object);
