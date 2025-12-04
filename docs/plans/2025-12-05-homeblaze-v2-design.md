@@ -10,8 +10,8 @@ HomeBlaze v2 uses the file system as the source of truth. A root configuration f
 
 ### Projects (Minimal for v1)
 
-- `HomeBlaze` - Blazor Server host, wires everything together
-- `HomeBlaze.Client` - Shared models, subjects, and core services
+- `HomeBlaze` - Blazor Server host (server-side only, no WASM), wires everything together
+- `HomeBlaze.Core` - Shared models, subjects, services, and attributes
 
 ### Key Services
 
