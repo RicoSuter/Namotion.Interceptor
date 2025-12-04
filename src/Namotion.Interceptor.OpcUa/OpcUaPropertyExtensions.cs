@@ -6,20 +6,20 @@ namespace Namotion.Interceptor.OpcUa;
 
 internal static class OpcUaPropertyExtensions
 {
-    public static string? ResolvePropertyName(this RegisteredSubjectProperty property, ISourcePathProvider sourcePathProvider)
+    public static string? ResolvePropertyName(this RegisteredSubjectProperty property, ISourcePathProvider pathProvider)
     {
         if (property.IsAttribute)
         {
             var attributedProperty = property.GetAttributedProperty();
-            var propertyName = sourcePathProvider.TryGetPropertySegment(property);
+            var propertyName = pathProvider.TryGetPropertySegment(property);
             if (propertyName is null)
                 return null;
 
             // TODO: Create property reference node instead of __?
-            return ResolvePropertyName(attributedProperty, sourcePathProvider) + "__" + propertyName;
+            return ResolvePropertyName(attributedProperty, pathProvider) + "__" + propertyName;
         }
 
-        return sourcePathProvider.TryGetPropertySegment(property);
+        return pathProvider.TryGetPropertySegment(property);
     }
 
     public static OpcUaNodeAttribute? TryGetOpcUaNodeAttribute(this RegisteredSubjectProperty property)

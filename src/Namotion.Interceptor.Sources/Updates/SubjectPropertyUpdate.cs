@@ -151,7 +151,7 @@ public class SubjectPropertyUpdate
         else if (property.IsSubjectReference)
         {
             Kind = SubjectPropertyUpdateKind.Item;
-            Item = value is IInterceptorSubject itemSubject ? 
+            Item = value is IInterceptorSubject itemSubject ?
                 SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, createReferenceUpdate, processors, knownSubjectUpdates, propertyUpdates) :
                 null;
         }
@@ -175,8 +175,8 @@ public class SubjectPropertyUpdate
             var item = dictionary[key];
             collectionUpdates.Add(new SubjectPropertyCollectionUpdate
             {
-                Item = item is not null ? 
-                    SubjectUpdate.GetOrCreateCompleteUpdate(item, createReferenceUpdate, processors, knownSubjectUpdates, propertyUpdates) : 
+                Item = item is not null ?
+                    SubjectUpdate.GetOrCreateCompleteUpdate(item, createReferenceUpdate, processors, knownSubjectUpdates, propertyUpdates) :
                     null,
                 Index = key
             });

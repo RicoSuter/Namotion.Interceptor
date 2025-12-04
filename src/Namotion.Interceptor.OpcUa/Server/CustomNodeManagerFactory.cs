@@ -6,12 +6,14 @@ namespace Namotion.Interceptor.OpcUa.Server;
 internal class CustomNodeManagerFactory : INodeManagerFactory
 {
     private readonly IInterceptorSubject _subject;
-    private readonly OpcUaSubjectServerSource _source;
+    private readonly OpcUaSubjectServerBackgroundService _source;
     private readonly OpcUaServerConfiguration _configuration;
 
     public StringCollection NamespacesUris => new(_configuration.GetNamespaceUris());
 
-    public CustomNodeManagerFactory(IInterceptorSubject subject, OpcUaSubjectServerSource source, OpcUaServerConfiguration configuration)
+    public CustomNodeManager? NodeManager { get; private set; }
+
+    public CustomNodeManagerFactory(IInterceptorSubject subject, OpcUaSubjectServerBackgroundService source, OpcUaServerConfiguration configuration)
     {
         _subject = subject;
         _source = source;
@@ -20,6 +22,7 @@ internal class CustomNodeManagerFactory : INodeManagerFactory
 
     public INodeManager Create(IServerInternal server, ApplicationConfiguration applicationConfiguration)
     {
-        return new CustomNodeManager(_subject, _source, server, applicationConfiguration, _configuration);
+        NodeManager = new CustomNodeManager(_subject, _source, server, applicationConfiguration, _configuration);
+        return NodeManager;
     }
 }

@@ -1,36 +1,31 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
-using Namotion.Interceptor.Dynamic;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 public class OpcUaSubjectLoaderTests
 {
-    private readonly Mock<ILogger> _mockLogger;
-    private readonly Mock<ISubjectSource> _mockSource;
-    private readonly List<PropertyReference> _propertiesWithOpcData;
+    private readonly HashSet<PropertyReference> _propertiesWithOpcData;
     private readonly OpcUaClientConfiguration _baseConfiguration;
 
     public OpcUaSubjectLoaderTests()
     {
-        _mockLogger = new Mock<ILogger>();
-        _mockSource = new Mock<ISubjectSource>();
         _propertiesWithOpcData = [];
-
         _baseConfiguration = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            SourcePathProvider = new AttributeBasedSourcePathProvider("opc", "."),
-            TypeResolver = new OpcUaTypeResolver(_mockLogger.Object),
+            PathProvider = new AttributeBasedSourcePathProvider("opc", "."),
+            TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaSubjectClientSource>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(new DefaultSubjectFactory()),
             ShouldAddDynamicProperty = static (_, _) => Task.FromResult(false) // Don't add dynamic properties
@@ -108,7 +103,7 @@ public class OpcUaSubjectLoaderTests
     public async Task LoadSubjectAsync_WithDynamicPropertiesEnabled_ShouldAddDynamicProperties()
     {
         // Arrange: override base configuration for this loader
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(_mockLogger.Object);
+        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
         mockTypeResolver
             .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(typeof(int));
@@ -161,7 +156,7 @@ public class OpcUaSubjectLoaderTests
     public async Task LoadSubjectAsync_WithObjectType_ShouldNotAddProperty()
     {
         // Arrange: override base configuration for this loader
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(_mockLogger.Object);
+        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
         mockTypeResolver
             .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Type?)null); // Simulate unresolved type (should return DynamicObject or similar when an expandable object is required)
@@ -224,7 +219,7 @@ public class OpcUaSubjectLoaderTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = _baseConfiguration.ServerUrl,
-            SourcePathProvider = _baseConfiguration.SourcePathProvider,
+            PathProvider = _baseConfiguration.PathProvider,
             TypeResolver = typeResolver ?? _baseConfiguration.TypeResolver,
             ValueConverter = _baseConfiguration.ValueConverter,
             SubjectFactory = _baseConfiguration.SubjectFactory,
@@ -235,8 +230,8 @@ public class OpcUaSubjectLoaderTests
         return new OpcUaSubjectLoader(
             config,
             _propertiesWithOpcData,
-            _mockSource.Object,
-            _mockLogger.Object);
+            new OpcUaSubjectClientSource(new DynamicSubject(), config, NullLogger<OpcUaSubjectClientSource>.Instance),
+            NullLogger<OpcUaSubjectClientSource>.Instance);
     }
 
     private IInterceptorSubject CreateTestSubject()

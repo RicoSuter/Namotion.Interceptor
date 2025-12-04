@@ -62,7 +62,21 @@ public readonly struct SubjectPropertyChange
                 null);
         }
 
-        // Slow path: reference types or large value types - TWO allocations (one per value)
+        // Fast path: strings - store directly without wrapper (ZERO allocations)
+        if (typeof(TValue) == typeof(string))
+        {
+            return new SubjectPropertyChange(
+                property,
+                source,
+                changedTimestamp,
+                receivedTimestamp,
+                default,
+                default,
+                oldValue,
+                newValue);
+        }
+
+        // Slow path: other reference types or large value types - TWO allocations (one per value)
         return new SubjectPropertyChange(
             property,
             source,
@@ -108,12 +122,32 @@ public readonly struct SubjectPropertyChange
             // Support casting to object (will box the value)
             if (typeof(TValue) == typeof(object))
             {
+                // If no inline storage was used, this was a null string/reference
+                if (storage.StoredType == null)
+                {
+                    value = default!;
+                    return true;
+                }
                 value = (TValue)storage.GetValueBoxed()!;
+                return true;
+            }
+
+            // Handle null strings: boxedHolder is null AND no inline storage was used
+            if (typeof(TValue) == typeof(string) && storage.StoredType == null)
+            {
+                value = default!;
                 return true;
             }
 
             value = default!;
             return false;
+        }
+
+        // Fast path: direct string retrieval (strings stored without wrapper)
+        if (typeof(TValue) == typeof(string) && boxedHolder is string)
+        {
+            value = (TValue)boxedHolder;
+            return true;
         }
 
         // Fast path: boxed holder with interface dispatch (no reflection)
@@ -131,6 +165,13 @@ public readonly struct SubjectPropertyChange
                 value = (TValue)holder.GetValueBoxed()!;
                 return true;
             }
+        }
+
+        // Support casting stored strings to object
+        if (typeof(TValue) == typeof(object) && boxedHolder is string)
+        {
+            value = (TValue)boxedHolder;
+            return true;
         }
 
         value = default!;

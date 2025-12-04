@@ -229,7 +229,7 @@ public class SubjectRegistryCycleTests
         var childrenProperty = registeredParent.TryGetProperty(nameof(Person.Children))!;
 
         // Should have 2 children: child and parent itself
-        Assert.Equal(2, childrenProperty.Children.Count);
+        Assert.Equal(2, childrenProperty.Children.Length);
         Assert.Contains(childrenProperty.Children, c => c.Subject == child);
         Assert.Contains(childrenProperty.Children, c => c.Subject == parent);
 

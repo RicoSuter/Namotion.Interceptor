@@ -55,7 +55,7 @@ public class OpcUaTypeResolver
                 return null;
             }
 
-            var nodesToRead = new ReadValueIdCollection
+            var nodesToRead = new ReadValueIdCollection(2)
             {
                 new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.DataType },
                 new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.ValueRank }

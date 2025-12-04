@@ -70,17 +70,17 @@ public sealed class PropertyChangeQueue : IWriteInterceptor, IDisposable
             oldValue,
             newValue);
 
-        Enqueue(propertyChange);
+        Enqueue(in propertyChange);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Enqueue(SubjectPropertyChange change)
+    private void Enqueue(in SubjectPropertyChange change)
     {
         // ReSharper disable once InconsistentlySynchronizedField
         var subscriptions = _subscriptions; // volatile read
         for (int i = 0; i < subscriptions.Length; i++)
         {
-            subscriptions[i].Enqueue(change); // never blocks
+            subscriptions[i].Enqueue(in change); // never blocks
         }
     }
 

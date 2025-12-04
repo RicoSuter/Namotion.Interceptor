@@ -1,6 +1,5 @@
 ﻿using System.Reactive.Concurrency;
 using System.Reactive.Linq;
-using System.Threading.Channels;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
@@ -77,16 +76,23 @@ public static class InterceptorSubjectContextExtensions
     /// Gets the property changed observable which is registered in the context.
     /// </summary>
     /// <param name="context">The context.</param>
-    /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).</param>
+    /// <param name="scheduler">The scheduler to run the callbacks on (defaults to Scheduler.Default).
+    /// Use ImmediateScheduler.Instance for zero-allocation synchronous delivery.</param>
     /// <returns>The observable.</returns>
     public static IObservable<SubjectPropertyChange> GetPropertyChangeObservable(this IInterceptorSubjectContext context, IScheduler? scheduler = null)
     {
-        scheduler ??= Scheduler.Default;
-        return context
+        var observable = context
             .GetService<PropertyChangeObservable>()
             .Publish()
-            .RefCount() // single upstream subscription (shared)
-            .ObserveOn(scheduler); // per-subscriber queue; producer will not be blocked
+            .RefCount(); // single upstream subscription (shared)
+
+        if (scheduler == ImmediateScheduler.Instance)
+        {
+            // Skip ObserveOn for ImmediateScheduler - it's synchronous and ObserveOn adds allocation overhead
+            return observable;
+        }
+
+        return observable.ObserveOn(scheduler ?? Scheduler.Default);
     }
 
     /// <summary>

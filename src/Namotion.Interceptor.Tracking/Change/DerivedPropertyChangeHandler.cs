@@ -15,9 +15,17 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     // - Uses optimistic concurrency control to handle concurrent updates safely
 
     // Thread Safety: Lock-free with allocation-free steady state. Handles concurrent writes via merge mode.
-    
+
     [ThreadStatic]
     private static DerivedPropertyRecorder? _recorder;
+
+    // Thread-local storage for derived property recalculation to avoid closure allocations.
+    // These fields allow using static delegates instead of capturing closures.
+    [ThreadStatic]
+    private static object? _threadLocalOldValue;
+
+    private static readonly Func<IInterceptorSubject, object?> GetOldValueDelegate = static _ => _threadLocalOldValue;
+    private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
 
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
@@ -86,14 +94,16 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         StartRecordingTouchedProperties();
         var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
         StoreRecordedTouchedProperties(derivedProperty);
-        
+
         derivedProperty.SetLastKnownValue(newValue);
         derivedProperty.SetWriteTimestamp(timestamp);
 
         // Fire change notification (null source indicates derived property change)
+        // Use thread-local storage + static delegates to avoid closure allocation
+        _threadLocalOldValue = oldValue;
         using (SubjectChangeContext.WithSource(null))
         {
-            derivedProperty.SetPropertyValueWithInterception(newValue, _ => oldValue, delegate { });
+            derivedProperty.SetPropertyValueWithInterception(newValue, GetOldValueDelegate, NoOpWriteDelegate);
         }
     }
 
