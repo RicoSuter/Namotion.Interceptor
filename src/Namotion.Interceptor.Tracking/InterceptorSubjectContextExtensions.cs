@@ -21,6 +21,7 @@ public static class InterceptorSubjectContextExtensions
             .WithEqualityCheck()
             .WithDerivedPropertyChangeDetection()
             .WithTransactions()               // Before notifications - captures writes
+            .WithPropertyTimestamp()          // Track timestamps for conflict detection
             .WithPropertyChangeObservable()   // Notifications suppressed for captured writes
             .WithPropertyChangeQueue()
             .WithContextInheritance();
@@ -36,6 +37,16 @@ public static class InterceptorSubjectContextExtensions
     {
         context.TryAddService(() => new SubjectTransactionInterceptor(), _ => true);
         return context;
+    }
+
+    /// <summary>
+    /// Enables property timestamp tracking for conflict detection in transactions.
+    /// </summary>
+    /// <param name="context">The context.</param>
+    /// <returns>The context.</returns>
+    public static IInterceptorSubjectContext WithPropertyTimestamp(this IInterceptorSubjectContext context)
+    {
+        return context.WithService(() => new PropertyTimestampInterceptor());
     }
 
     /// <summary>
