@@ -37,12 +37,12 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Begins a new transaction with the specified mode and requirements.
     /// </summary>
-    /// <param name="mode">The transaction mode controlling failure handling behavior. Defaults to <see cref="TransactionMode.BestEffort"/>.</param>
+    /// <param name="mode">The transaction mode controlling failure handling behavior. Defaults to <see cref="TransactionMode.Rollback"/> for maximum consistency.</param>
     /// <param name="requirement">The transaction requirement for validation. Defaults to <see cref="TransactionRequirement.None"/>.</param>
     /// <returns>A new SubjectTransaction instance.</returns>
     /// <exception cref="InvalidOperationException">Thrown when a nested transaction is attempted.</exception>
     public static SubjectTransaction BeginTransaction(
-        TransactionMode mode = TransactionMode.BestEffort,
+        TransactionMode mode = TransactionMode.Rollback,
         TransactionRequirement requirement = TransactionRequirement.None)
     {
         if (CurrentTransaction.Value != null)

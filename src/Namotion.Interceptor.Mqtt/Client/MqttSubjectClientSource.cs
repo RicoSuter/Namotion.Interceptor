@@ -121,7 +121,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     /// <inheritdoc />
     /// <remarks>Thread-safe: uses internal lock to serialize concurrent calls.</remarks>
-    public async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -129,16 +129,18 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             var client = _client;
             if (client is null || !client.IsConnected)
             {
-                throw new InvalidOperationException("MQTT client is not connected.");
+                return WriteResult.Failure(new InvalidOperationException("MQTT client is not connected."));
             }
 
             var length = changes.Length;
-            if (length == 0) return;
+            if (length == 0) return WriteResult.Success(ReadOnlyMemory<SubjectPropertyChange>.Empty);
 
             var messagesPool = ArrayPool<MqttApplicationMessage>.Shared;
             var userPropsArrayPool = ArrayPool<List<MqttUserProperty>?>.Shared;
+            var changeIndicesPool = ArrayPool<int>.Shared;
 
             var messages = messagesPool.Rent(length);
+            var changeIndices = changeIndicesPool.Rent(length); // Track which original change index each message corresponds to
             var userPropertiesArray = _configuration.SourceTimestampPropertyName is not null
                 ? userPropsArrayPool.Rent(length)
                 : null;
@@ -193,22 +195,62 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                         userPropertiesArray[messageCount] = userProps;
                     }
 
+                    changeIndices[messageCount] = i;
                     messages[messageCount++] = message;
                 }
 
                 if (messageCount > 0)
                 {
+                    var publishedCount = 0;
+                    Exception? publishError = null;
+
 #if USE_LOCAL_MQTTNET
-                    await client.PublishManyAsync(
-                        new ArraySegment<MqttApplicationMessage>(messages, 0, messageCount),
-                        cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        await client.PublishManyAsync(
+                            new ArraySegment<MqttApplicationMessage>(messages, 0, messageCount),
+                            cancellationToken).ConfigureAwait(false);
+                        publishedCount = messageCount;
+                    }
+                    catch (Exception ex)
+                    {
+                        publishError = ex;
+                    }
 #else
                     for (var i = 0; i < messageCount; i++)
                     {
-                        await client.PublishAsync(messages[i], cancellationToken).ConfigureAwait(false);
+                        try
+                        {
+                            await client.PublishAsync(messages[i], cancellationToken).ConfigureAwait(false);
+                            publishedCount++;
+                        }
+                        catch (Exception ex)
+                        {
+                            publishError = ex;
+                            break;
+                        }
                     }
 #endif
+
+                    // Build result based on what succeeded
+                    if (publishError is not null)
+                    {
+                        if (publishedCount > 0)
+                        {
+                            // Partial success - collect the successful changes
+                            var successfulChanges = new SubjectPropertyChange[publishedCount];
+                            for (var i = 0; i < publishedCount; i++)
+                            {
+                                successfulChanges[i] = changes.Span[changeIndices[i]];
+                            }
+                            return WriteResult.PartialSuccess(successfulChanges, publishError);
+                        }
+                        return WriteResult.Failure(publishError);
+                    }
                 }
+
+                // All succeeded - return original changes
+                return WriteResult.Success(changes);
             }
             finally
             {
@@ -224,8 +266,13 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                     userPropsArrayPool.Return(userPropertiesArray);
                 }
 
+                changeIndicesPool.Return(changeIndices);
                 messagesPool.Return(messages);
             }
+        }
+        catch (Exception ex)
+        {
+            return WriteResult.Failure(ex);
         }
         finally
         {

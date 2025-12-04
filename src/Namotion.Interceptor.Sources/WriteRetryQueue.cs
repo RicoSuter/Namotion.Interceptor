@@ -143,30 +143,30 @@ internal sealed class WriteRetryQueue : IDisposable
                 }
 
                 var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);
-                try
-                {
-                    await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception e)
-                {
-                    _logger.LogWarning(e, "Failed to flush {Count} queued writes to source, re-queuing.", count);
+                var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
 
-                    // Insert at front to preserve order
-                    lock (_lock)
+                // Null out references to allow GC (SubjectPropertyChange contains object refs)
+                for (var i = 0; i < count; i++)
+                {
+                    _scratchBuffer[i] = default;
+                }
+
+                if (result.Error is not null)
+                {
+                    _logger.LogWarning(result.Error, "Failed to flush {Count} queued writes to source, re-queuing failed items.", count);
+
+                    // Re-queue the items that failed (not the ones that succeeded)
+                    var failedChanges = memory.Slice(result.SuccessfulChanges.Length).ToArray();
+                    if (failedChanges.Length > 0)
                     {
-                        _pendingWrites.InsertRange(0, memory.ToArray());
-                        Volatile.Write(ref _count, _pendingWrites.Count);
+                        lock (_lock)
+                        {
+                            _pendingWrites.InsertRange(0, failedChanges);
+                            Volatile.Write(ref _count, _pendingWrites.Count);
+                        }
                     }
 
                     return false;
-                }
-                finally
-                {
-                    // Null out references to allow GC (SubjectPropertyChange contains object refs)
-                    for (var i = 0; i < count; i++)
-                    {
-                        _scratchBuffer[i] = default;
-                    }
                 }
             }
 

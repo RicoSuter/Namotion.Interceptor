@@ -152,7 +152,7 @@ public class SubjectSourceBenchmark
 
         public int WriteBatchSize => int.MaxValue;
 
-        public ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
             _count += changes.Length;
 
@@ -161,7 +161,7 @@ public class SubjectSourceBenchmark
                 _signal.Set();
             }
 
-            return ValueTask.CompletedTask;
+            return new ValueTask<WriteResult>(WriteResult.Success(changes));
         }
     }
 }

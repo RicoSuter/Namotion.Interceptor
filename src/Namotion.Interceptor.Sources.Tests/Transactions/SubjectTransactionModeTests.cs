@@ -92,7 +92,8 @@ public class SubjectTransactionModeTests : TransactionTestBase
         successSource.Setup(s => s.WriteBatchSize).Returns(0);
         successSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback(() => writeCallCount++)
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Success(changes)));
 
         var failSource = CreateFailingSource();
 
@@ -117,11 +118,18 @@ public class SubjectTransactionModeTests : TransactionTestBase
         var context = CreateContext();
         var person = new Person(context);
 
+        var callCount = 0;
         var successThenFailSource = new Mock<ISubjectSource>();
         successThenFailSource.Setup(s => s.WriteBatchSize).Returns(0);
-        successThenFailSource.SetupSequence(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(ValueTask.CompletedTask) // Initial write succeeds
-            .ThrowsAsync(new InvalidOperationException("Revert failed")); // Revert fails
+        successThenFailSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                callCount++;
+                if (callCount == 1)
+                    return new ValueTask<WriteResult>(WriteResult.Success(changes)); // Initial write succeeds
+                else
+                    return new ValueTask<WriteResult>(WriteResult.Failure(new InvalidOperationException("Revert failed"))); // Revert fails
+            });
 
         var failSource = CreateFailingSource();
 

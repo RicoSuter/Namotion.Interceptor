@@ -31,14 +31,16 @@ public interface ISubjectSource
     public int WriteBatchSize { get; }
 
     /// <summary>
-    /// Applies a set of property changes to the source with all-or-nothing (transactional) semantics.
-    /// If any change fails, the entire batch should throw an exception and will be retried.
+    /// Applies a set of property changes to the source.
+    /// Returns a <see cref="WriteResult"/> indicating which changes succeeded.
+    /// On partial failure, returns the subset of changes that were successfully written.
     /// Implementations MUST be thread-safe and handle concurrent calls, typically by using
     /// a <see cref="SemaphoreSlim"/> to serialize write operations internally.
     /// </summary>
     /// <param name="changes">The collection of subject property changes.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
+    /// <returns>A <see cref="WriteResult"/> containing successful changes and any error.</returns>
+    ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
 
     /// <summary>
     /// Loads the initial state from the external authoritative system and returns a delegate that applies it to the associated subject.
