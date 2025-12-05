@@ -1,0 +1,213 @@
+@using System.Reflection
+@using System.Collections
+@using HomeBlaze.Core.Attributes
+@using Microsoft.AspNetCore.Components.Web
+@using Namotion.Interceptor
+@using Namotion.Interceptor.Registry.Abstractions
+
+<MudText Typo="Typo.h6" Class="mb-2">@GetSubjectTitle()</MudText>
+<MudText Typo="Typo.caption" Class="mb-4" Color="Color.Secondary">@Subject?.GetType().Name</MudText>
+
+@if (Subject != null && _registeredSubject != null)
+{
+    <MudSimpleTable Dense="true" Hover="true" Striped="true">
+        <thead>
+            <tr>
+                <th>Property</th>
+                <th>Value</th>
+                <th style="width: 30px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var prop in GetOrderedProperties())
+            {
+                <tr>
+                    <td>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                            @if (IsConfigurationProperty(prop))
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Save" Size="Size.Small" Color="Color.Primary" Title="Configuration (persisted)" />
+                            }
+                            <MudText Typo="Typo.body2">@prop.BrowseName</MudText>
+                        </MudStack>
+                    </td>
+                    <td>
+                        @{
+                            var value = prop.GetValue();
+                        }
+                        @if (value == null)
+                        {
+                            <em>null</em>
+                        }
+                        else if (prop.IsSubjectDictionary)
+                        {
+                            <MudStack Spacing="1">
+                                @foreach (var child in prop.Children)
+                                {
+                                    var displayName = GetSubjectDisplayName(child.Subject);
+                                    <MudLink OnClick="@((MouseEventArgs _) => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, child.Index, child.Subject)))" Style="cursor: pointer;">
+                                        @child.Index: @displayName
+                                    </MudLink>
+                                }
+                            </MudStack>
+                        }
+                        else if (prop.IsSubjectCollection)
+                        {
+                            <MudStack Spacing="1">
+                                @foreach (var child in prop.Children)
+                                {
+                                    var displayName = GetSubjectDisplayName(child.Subject);
+                                    <MudLink OnClick="@((MouseEventArgs _) => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, child.Index, child.Subject)))" Style="cursor: pointer;">
+                                        [@child.Index] @displayName
+                                    </MudLink>
+                                }
+                            </MudStack>
+                        }
+                        else if (prop.IsSubjectReference && value is IInterceptorSubject singleSubject)
+                        {
+                            <MudLink OnClick="@((MouseEventArgs _) => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, null, singleSubject)))" Style="cursor: pointer;">
+                                @GetSubjectDisplayName(singleSubject)
+                            </MudLink>
+                        }
+                        else if (prop.Type == typeof(bool))
+                        {
+                            var boolValue = (bool)value;
+                            <MudIcon Icon="@(boolValue ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
+                                     Color="@(boolValue ? Color.Success : Color.Error)"
+                                     Size="Size.Small" />
+                        }
+                        else if (prop.Type == typeof(TimeSpan))
+                        {
+                            <MudText Typo="Typo.body2">@(((TimeSpan)value).ToString(@"hh\:mm\:ss\.fff"))</MudText>
+                        }
+                        else if (prop.Type == typeof(DateTime) || prop.Type == typeof(DateTimeOffset))
+                        {
+                            <MudText Typo="Typo.body2">@value</MudText>
+                        }
+                        else if (prop.Type.IsEnum)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@value</MudChip>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.body2">@(value?.ToString() ?? "")</MudText>
+                        }
+                    </td>
+                    <td>
+                        @if (IsPrimitiveProperty(prop) && IsConfigurationProperty(prop))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                          Size="Size.Small"
+                                          OnClick="@(() => EditProperty(prop))" />
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public ISubjectRegistry? SubjectRegistry { get; set; }
+
+    [Parameter]
+    public EventCallback<PropertyClickEventArgs> OnPropertyClick { get; set; }
+
+    private RegisteredSubject? _registeredSubject;
+
+    protected override void OnParametersSet()
+    {
+        _registeredSubject = Subject != null && SubjectRegistry != null
+            ? SubjectRegistry.TryGetRegisteredSubject(Subject)
+            : null;
+    }
+
+    private string GetSubjectTitle()
+    {
+        if (Subject == null) return "No Selection";
+
+        var nameProp = Subject.GetType().GetProperty("Name");
+        if (nameProp != null)
+        {
+            var name = nameProp.GetValue(Subject) as string;
+            if (!string.IsNullOrEmpty(name)) return name;
+        }
+
+        return Subject.GetType().Name;
+    }
+
+    private IEnumerable<RegisteredSubjectProperty> GetOrderedProperties()
+    {
+        if (_registeredSubject == null)
+            return Enumerable.Empty<RegisteredSubjectProperty>();
+
+        return _registeredSubject.Properties
+            .Where(p => !IsInternalProperty(p))
+            .OrderBy(p => GetPropertyOrder(p))
+            .ThenBy(p => p.BrowseName);
+    }
+
+    private int GetPropertyOrder(RegisteredSubjectProperty prop)
+    {
+        // Dictionary
+        if (prop.IsSubjectDictionary)
+            return 4;
+
+        // Collection
+        if (prop.IsSubjectCollection)
+            return 3;
+
+        // Subject reference
+        if (prop.IsSubjectReference)
+            return 2;
+
+        // Primitive
+        return 1;
+    }
+
+    private bool IsInternalProperty(RegisteredSubjectProperty prop)
+    {
+        // Hide internal interceptor properties and attribute properties
+        if (prop.IsAttribute)
+            return true;
+
+        return prop.Name switch
+        {
+            "Context" or "__Context" or "__InterceptorContext" => true,
+            _ when prop.Name.StartsWith("__") => true,
+            _ => false
+        };
+    }
+
+    private bool IsPrimitiveProperty(RegisteredSubjectProperty prop)
+    {
+        return GetPropertyOrder(prop) == 1;
+    }
+
+    private bool IsConfigurationProperty(RegisteredSubjectProperty prop)
+    {
+        return prop.ReflectionAttributes.OfType<ConfigurationAttribute>().Any();
+    }
+
+    private string GetSubjectDisplayName(IInterceptorSubject subject)
+    {
+        var nameProp = subject.GetType().GetProperty("Name");
+        if (nameProp != null)
+        {
+            var name = nameProp.GetValue(subject) as string;
+            if (!string.IsNullOrEmpty(name)) return name;
+        }
+        return subject.GetType().Name;
+    }
+
+    private void EditProperty(RegisteredSubjectProperty prop)
+    {
+        // TODO: Implement property editing dialog
+    }
+
+    public record PropertyClickEventArgs(string PropertyName, object? Index, IInterceptorSubject Subject);
+}

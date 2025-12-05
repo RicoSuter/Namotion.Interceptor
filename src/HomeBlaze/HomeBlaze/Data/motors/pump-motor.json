@@ -1,0 +1,6 @@
+{
+    "Type": "HomeBlaze.Core.Subjects.Motor",
+    "Name": "Water Pump",
+    "TargetSpeed": 2200,
+    "SimulationInterval": "00:00:00.500"
+}
