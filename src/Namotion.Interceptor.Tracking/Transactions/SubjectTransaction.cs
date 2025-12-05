@@ -118,8 +118,8 @@ public sealed class SubjectTransaction : IDisposable
         {
             // BestEffort: Apply all successful changes even if some failed
             TransactionMode.BestEffort => true,
-            // Strict/Rollback: Only apply if ALL changes succeeded
-            TransactionMode.Strict or TransactionMode.Rollback => allFailures.Count == 0,
+            // Rollback: Only apply if ALL changes succeeded
+            TransactionMode.Rollback => allFailures.Count == 0,
             _ => true
         };
 
@@ -152,7 +152,6 @@ public sealed class SubjectTransaction : IDisposable
             var message = _mode switch
             {
                 TransactionMode.BestEffort => "One or more external sources failed. Successfully written changes have been applied.",
-                TransactionMode.Strict => "One or more external sources failed. No changes have been applied to the in-process model.",
                 TransactionMode.Rollback => "One or more external sources failed. Rollback was attempted. No changes have been applied to the in-process model.",
                 _ => "One or more external sources failed."
             };
