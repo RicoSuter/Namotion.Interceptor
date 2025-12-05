@@ -6,6 +6,7 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 internal sealed class TransactionLock : IDisposable
 {
     private readonly SemaphoreSlim _semaphore = new(1, 1);
+    private int _disposed;
 
     /// <summary>
     /// Acquires the transaction lock for this context.
@@ -13,12 +14,23 @@ internal sealed class TransactionLock : IDisposable
     public async ValueTask<IDisposable> AcquireAsync(CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-        return new LockReleaser(_semaphore);
+        try
+        {
+            return new LockReleaser(_semaphore);
+        }
+        catch
+        {
+            _semaphore.Release();
+            throw;
+        }
     }
 
     public void Dispose()
     {
-        _semaphore.Dispose();
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            _semaphore.Dispose();
+        }
     }
 
     private sealed class LockReleaser : IDisposable
