@@ -25,14 +25,14 @@ var typeRegistry = new SubjectTypeRegistry()
     .Register<GenericFile>()
     .Register<Motor>();
 
-// Set up view registry with assembly scanning
-var viewRegistry = new SubjectViewRegistry()
+// Set up component registry with assembly scanning
+var componentRegistry = new SubjectComponentRegistry()
     .ScanAssemblies(typeof(App).Assembly); // HomeBlaze UI components
 
 // Register services
 builder.Services.AddSingleton<IInterceptorSubjectContext>(context);
 builder.Services.AddSingleton(typeRegistry);
-builder.Services.AddSingleton(viewRegistry);
+builder.Services.AddSingleton(componentRegistry);
 
 // Register serializer with factory pattern
 builder.Services.AddSingleton(sp => new SubjectSerializer(typeRegistry, sp));

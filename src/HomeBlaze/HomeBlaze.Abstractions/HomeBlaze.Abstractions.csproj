@@ -10,4 +10,8 @@
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
     </ItemGroup>
 
+    <ItemGroup>
+        <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
+    </ItemGroup>
+
 </Project>
