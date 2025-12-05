@@ -7,12 +7,14 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Represents a transaction that captures property changes and commits them atomically.
 /// Changes are buffered until <see cref="CommitAsync"/> is called.
 /// </summary>
-public sealed class SubjectTransaction : IDisposable
+public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
 {
     private static readonly AsyncLocal<SubjectTransaction?> CurrentTransaction = new();
 
     private readonly TransactionMode _mode;
     private readonly TransactionRequirement _requirement;
+    private readonly TransactionConflictBehavior _conflictBehavior;
+    private readonly IDisposable? _lockReleaser;
 
     private volatile bool _isCommitting;
     private volatile bool _isCommitted;
@@ -28,10 +30,35 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     internal bool IsCommitting => _isCommitting;
 
-    private SubjectTransaction(TransactionMode mode, TransactionRequirement requirement)
+    /// <summary>
+    /// Gets the context this transaction is bound to.
+    /// </summary>
+    public IInterceptorSubjectContext Context { get; }
+
+    /// <summary>
+    /// Gets the timestamp when the transaction started.
+    /// </summary>
+    public DateTimeOffset StartTimestamp { get; }
+
+    /// <summary>
+    /// Gets the conflict behavior for this transaction.
+    /// </summary>
+    public TransactionConflictBehavior ConflictBehavior => _conflictBehavior;
+
+    private SubjectTransaction(
+        IInterceptorSubjectContext context,
+        TransactionMode mode,
+        TransactionRequirement requirement,
+        TransactionConflictBehavior conflictBehavior,
+        DateTimeOffset startTimestamp,
+        IDisposable? lockReleaser)
     {
+        Context = context;
         _mode = mode;
         _requirement = requirement;
+        _conflictBehavior = conflictBehavior;
+        StartTimestamp = startTimestamp;
+        _lockReleaser = lockReleaser;
     }
 
     /// <summary>
@@ -48,7 +75,58 @@ public sealed class SubjectTransaction : IDisposable
         if (CurrentTransaction.Value != null)
             throw new InvalidOperationException("Nested transactions are not supported.");
 
-        var transaction = new SubjectTransaction(mode, requirement);
+        var transaction = new SubjectTransaction(
+            null!,
+            mode,
+            requirement,
+            TransactionConflictBehavior.FailOnConflict,
+            DateTimeOffset.UtcNow,
+            null);
+        CurrentTransaction.Value = transaction;
+        return transaction;
+    }
+
+    /// <summary>
+    /// Begins a new transaction bound to the specified context.
+    /// Waits if another transaction is active on this context.
+    /// </summary>
+    /// <param name="context">The context to bind the transaction to.</param>
+    /// <param name="mode">The transaction mode controlling failure handling behavior.</param>
+    /// <param name="requirement">The transaction requirement for validation.</param>
+    /// <param name="conflictBehavior">The conflict detection behavior.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A new SubjectTransaction instance.</returns>
+    internal static async ValueTask<SubjectTransaction> BeginAsync(
+        IInterceptorSubjectContext context,
+        TransactionMode mode,
+        TransactionRequirement requirement,
+        TransactionConflictBehavior conflictBehavior,
+        CancellationToken cancellationToken)
+    {
+        if (CurrentTransaction.Value != null)
+            throw new InvalidOperationException("Nested transactions are not supported.");
+
+        // Get or create TransactionLock for this context
+        var lockService = context.TryGetService<TransactionLock>();
+        if (lockService == null)
+        {
+            // Add the lock service lazily
+            context.TryAddService(
+                () => new TransactionLock(),
+                existing => existing != null);
+            lockService = context.TryGetService<TransactionLock>();
+        }
+
+        // Acquire the lock
+        var lockReleaser = await lockService!.AcquireAsync(cancellationToken).ConfigureAwait(false);
+
+        var transaction = new SubjectTransaction(
+            context,
+            mode,
+            requirement,
+            conflictBehavior,
+            DateTimeOffset.UtcNow,
+            lockReleaser);
         CurrentTransaction.Value = transaction;
         return transaction;
     }
@@ -168,7 +246,17 @@ public sealed class SubjectTransaction : IDisposable
         {
             PendingChanges.Clear();
             CurrentTransaction.Value = null;
+            _lockReleaser?.Dispose();
             _isDisposed = true;
         }
+    }
+
+    /// <summary>
+    /// Asynchronously disposes the transaction, discarding any uncommitted changes.
+    /// </summary>
+    public ValueTask DisposeAsync()
+    {
+        Dispose();
+        return ValueTask.CompletedTask;
     }
 }
