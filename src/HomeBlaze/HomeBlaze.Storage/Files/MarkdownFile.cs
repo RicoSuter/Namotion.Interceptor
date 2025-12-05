@@ -3,7 +3,7 @@ using HomeBlaze.Abstractions.Attributes;
 using Microsoft.AspNetCore.Components;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Storage;
+namespace HomeBlaze.Storage.Files;
 
 /// <summary>
 /// Represents a Markdown file in storage.

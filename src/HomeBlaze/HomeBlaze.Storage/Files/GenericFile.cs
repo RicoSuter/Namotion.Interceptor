@@ -2,7 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Storage;
+namespace HomeBlaze.Storage.Files;
 
 /// <summary>
 /// Represents a generic file in storage.

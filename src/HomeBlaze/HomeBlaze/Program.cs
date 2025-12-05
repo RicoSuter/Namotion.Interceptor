@@ -3,7 +3,10 @@ using HomeBlaze.Components;
 using HomeBlaze.Core.Services;
 using HomeBlaze.Core.Subjects;
 using HomeBlaze.Storage;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using GenericFile = HomeBlaze.Storage.Files.GenericFile;
+using MarkdownFile = HomeBlaze.Storage.Files.MarkdownFile;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -84,13 +87,25 @@ public class RootLoaderService : IHostedService
     {
         try
         {
-            await _rootManager.LoadAsync("root.json", cancellationToken);
+            await _rootManager.LoadAsync("root.json", ResolveStoragePaths, cancellationToken);
             _logger.LogInformation("Root loaded successfully");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load root configuration");
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Resolves relative paths in storage containers to be relative to the config file location.
+    /// </summary>
+    private void ResolveStoragePaths(IInterceptorSubject root, string configDir)
+    {
+        if (root is FileSystemStorage storage && !Path.IsPathRooted(storage.Path))
+        {
+            storage.Path = Path.GetFullPath(Path.Combine(configDir, storage.Path));
+            _logger.LogInformation("Resolved storage path to: {Path}", storage.Path);
         }
     }
 

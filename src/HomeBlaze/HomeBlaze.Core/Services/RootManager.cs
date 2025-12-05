@@ -1,8 +1,7 @@
-using HomeBlaze.Core.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
-namespace HomeBlaze.Storage;
+namespace HomeBlaze.Core.Services;
 
 /// <summary>
 /// Manages loading and access to the root subject.
@@ -41,8 +40,12 @@ public class RootManager
     /// Loads the root subject from the configuration file.
     /// </summary>
     /// <param name="configPath">Path to the root.json configuration file.</param>
+    /// <param name="postLoad">Optional callback to run after loading (e.g., to resolve relative paths).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task LoadAsync(string configPath = "root.json", CancellationToken cancellationToken = default)
+    public async Task LoadAsync(
+        string configPath = "root.json",
+        Action<IInterceptorSubject, string>? postLoad = null,
+        CancellationToken cancellationToken = default)
     {
         if (Root != null)
         {
@@ -66,51 +69,13 @@ public class RootManager
             throw new InvalidOperationException("Failed to deserialize root configuration");
         }
 
-        // Resolve relative paths in FileSystemStorage relative to root.json location
-        var configDir = Path.GetDirectoryName(fullPath) ?? Environment.CurrentDirectory;
-        if (Root is FileSystemStorage storage && !Path.IsPathRooted(storage.Path))
-        {
-            storage.Path = Path.GetFullPath(Path.Combine(configDir, storage.Path));
-            _logger?.LogInformation("Resolved storage path to: {Path}", storage.Path);
-        }
-
         _logger?.LogInformation("Root loaded: {Type}", Root.GetType().FullName);
+
+        // Allow caller to handle post-load customization (e.g., path resolution)
+        var configDir = Path.GetDirectoryName(fullPath) ?? Environment.CurrentDirectory;
+        postLoad?.Invoke(Root, configDir);
 
         // Register root in context for easy access
         _context.AddService(Root);
-    }
-
-    /// <summary>
-    /// Gets a subject by navigating a path from the root.
-    /// Path segments are separated by '/'.
-    /// </summary>
-    public IInterceptorSubject? GetByPath(string path)
-    {
-        if (Root == null || string.IsNullOrWhiteSpace(path))
-            return Root;
-
-        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        IInterceptorSubject? current = Root;
-
-        foreach (var segment in segments)
-        {
-            if (current == null)
-                return null;
-
-            // Try to get child from storage container
-            if (current is StorageContainer container)
-            {
-                if (container.Children.TryGetValue(segment, out var child))
-                {
-                    current = child;
-                    continue;
-                }
-            }
-
-            // Could add support for other navigation patterns here
-            return null;
-        }
-
-        return current;
     }
 }
