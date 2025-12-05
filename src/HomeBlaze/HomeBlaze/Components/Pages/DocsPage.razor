@@ -1,5 +1,5 @@
 @page "/docs/{*Path}"
-@using Markdig
+@using HomeBlaze.Abstractions
 @inject RootManager RootManager
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
@@ -12,14 +12,19 @@ else if (_error != null)
 {
     <MudAlert Severity="Severity.Error">@_error</MudAlert>
 }
-else if (_markdownFile != null)
+else if (_page != null)
 {
     <MudPaper Class="pa-4" Elevation="0">
         <MudText Typo="Typo.h4" Class="mb-4">@_title</MudText>
         <MudDivider Class="mb-4" />
-        <div class="markdown-content">
-            @((MarkupString)_htmlContent)
-        </div>
+        @if (_page.ContentFragment != null)
+        {
+            @_page.ContentFragment
+        }
+        else
+        {
+            <MudText>No content available</MudText>
+        }
     </MudPaper>
 }
 else
@@ -51,25 +56,20 @@ else
 
     private bool _loading = true;
     private string? _error;
-    private MarkdownFile? _markdownFile;
+    private IPage? _page;
     private string _title = "";
-    private string _htmlContent = "";
 
-    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .Build();
-
-    protected override async Task OnParametersSetAsync()
+    protected override void OnParametersSet()
     {
-        await LoadMarkdownAsync();
+        LoadPage();
     }
 
-    private async Task LoadMarkdownAsync()
+    private void LoadPage()
     {
         _loading = true;
         _error = null;
-        _markdownFile = null;
-        _htmlContent = "";
+        _page = null;
+        _title = "";
 
         try
         {
@@ -79,18 +79,16 @@ else
                 return;
             }
 
-            // Find the markdown file
+            // Find the page
             var root = RootManager.Root;
             if (root is StorageContainer storage)
             {
-                _markdownFile = FindMarkdownFile(storage, Path);
+                _page = FindPage(storage, Path);
             }
 
-            if (_markdownFile != null)
+            if (_page != null)
             {
-                _title = GetTitle(_markdownFile);
-                var content = await _markdownFile.GetContentAsync();
-                _htmlContent = Markdown.ToHtml(content ?? "", Pipeline);
+                _title = _page.NavigationTitle ?? _page.Title ?? "Untitled";
             }
         }
         catch (Exception ex)
@@ -103,7 +101,7 @@ else
         }
     }
 
-    private MarkdownFile? FindMarkdownFile(StorageContainer container, string path)
+    private IPage? FindPage(StorageContainer container, string path)
     {
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (segments.Length == 0) return null;
@@ -123,19 +121,9 @@ else
             currentContainer = subContainer;
         }
 
-        // Find the markdown file
+        // Find the page by filename
         return currentContainer.Children.Values
-            .OfType<MarkdownFile>()
-            .FirstOrDefault(f => f.FileName == fileName);
-    }
-
-    private string GetTitle(MarkdownFile markdown)
-    {
-        var name = System.IO.Path.GetFileNameWithoutExtension(markdown.FileName);
-        return string.Join(" ", name
-            .Replace("-", " ")
-            .Replace("_", " ")
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Select(word => char.ToUpper(word[0]) + word[1..].ToLower()));
+            .OfType<IPage>()
+            .FirstOrDefault(p => p is IStorageItem item && item.FileName == fileName);
     }
 }

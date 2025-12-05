@@ -22,6 +22,7 @@ public partial class Motor : BackgroundService
     /// Target speed in RPM.
     /// </summary>
     [Configuration]
+    [State("Target", Order = 2)]
     public partial int TargetSpeed { get; set; }
 
     /// <summary>
@@ -35,16 +36,19 @@ public partial class Motor : BackgroundService
     /// <summary>
     /// Current speed in RPM.
     /// </summary>
+    [State("Speed", Order = 3)]
     public partial int CurrentSpeed { get; set; }
 
     /// <summary>
     /// Current temperature in Celsius.
     /// </summary>
+    [State(Order = 4, Unit = StateUnit.DegreeCelsius)]
     public partial double Temperature { get; set; }
 
     /// <summary>
     /// Current operational status.
     /// </summary>
+    [State(Order = 1)]
     public partial MotorStatus Status { get; set; }
 
     // Derived properties
@@ -53,12 +57,14 @@ public partial class Motor : BackgroundService
     /// Difference between target and current speed.
     /// </summary>
     [Derived]
+    [State("Delta", Order = 5)]
     public int SpeedDelta => TargetSpeed - CurrentSpeed;
 
     /// <summary>
     /// Whether the motor is at target speed (within 50 RPM).
     /// </summary>
     [Derived]
+    [State("At Target", Order = 6)]
     public bool IsAtTargetSpeed => Math.Abs(SpeedDelta) < 50;
 
     public Motor()

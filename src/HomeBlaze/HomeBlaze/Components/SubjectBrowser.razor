@@ -300,7 +300,14 @@
     {
         if (_jsModule != null)
         {
-            await _jsModule.DisposeAsync();
+            try
+            {
+                await _jsModule.DisposeAsync();
+            }
+            catch (Microsoft.JSInterop.JSDisconnectedException)
+            {
+                // Circuit already disconnected, nothing to clean up
+            }
         }
         Dispose();
     }
