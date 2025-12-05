@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tracking.Transactions;
 namespace Namotion.Interceptor.Sources.Tests.Transactions;
 
 /// <summary>
-/// Tests for transaction modes: BestEffort, Strict, and Rollback.
+/// Tests for transaction modes: BestEffort and Rollback.
 /// </summary>
 public class SubjectTransactionModeTests : TransactionTestBase
 {
@@ -35,32 +35,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task StrictMode_AppliesNoChanges_WhenAnySourceFails()
-    {
-        var context = CreateContext();
-        var person = new Person(context);
-
-        var successSource = CreateSucceedingSource();
-        var failSource = CreateFailingSource();
-
-        new PropertyReference(person, nameof(Person.FirstName)).SetSource(successSource.Object);
-        new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
-
-        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Strict);
-        person.FirstName = "John";
-        person.LastName = "Doe";
-
-        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
-
-        Assert.Null(person.FirstName);
-        Assert.Null(person.LastName);
-        Assert.Contains("No changes have been applied", ex.Message);
-    }
-
-    [Theory]
-    [InlineData(TransactionMode.Strict)]
-    [InlineData(TransactionMode.Rollback)]
-    public async Task AllOrNothingModes_ApplyAllChanges_WhenAllSourcesSucceed(TransactionMode mode)
+    public async Task RollbackMode_AppliesAllChanges_WhenAllSourcesSucceed()
     {
         var context = CreateContext();
         var person = new Person(context);
@@ -71,7 +46,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(mode);
+        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Rollback);
         person.FirstName = "John";
         person.LastName = "Doe";
 

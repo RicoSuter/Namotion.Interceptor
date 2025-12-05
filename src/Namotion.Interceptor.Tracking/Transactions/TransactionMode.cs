@@ -13,13 +13,6 @@ public enum TransactionMode
     BestEffort,
 
     /// <summary>
-    /// Strict mode: All-or-nothing for the in-process model.
-    /// If ANY source write fails, no changes are applied to the in-process model.
-    /// Note: Successfully written sources will retain their new values (external inconsistency possible).
-    /// </summary>
-    Strict,
-
-    /// <summary>
     /// Rollback mode (default): Attempt to revert successful source writes on failure.
     /// If any source write fails, attempts to write the original values back to sources that succeeded.
     /// If revert also fails, both the original failure and revert failures are reported.
