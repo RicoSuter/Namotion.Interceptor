@@ -1,4 +1,4 @@
-using HomeBlaze.Core.Attributes;
+using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Attributes;
 

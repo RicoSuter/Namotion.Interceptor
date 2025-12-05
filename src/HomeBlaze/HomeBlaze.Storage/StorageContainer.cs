@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Core.Storage;
+namespace HomeBlaze.Storage;
 
 /// <summary>
 /// Base class for storage containers that hold child subjects.

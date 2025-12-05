@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Core.Subjects;
+namespace HomeBlaze.Storage;
 
 /// <summary>
 /// Represents a generic file in storage.

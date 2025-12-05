@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
-using HomeBlaze.Core.Attributes;
+using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 

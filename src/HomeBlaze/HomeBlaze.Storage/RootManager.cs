@@ -1,7 +1,8 @@
+using HomeBlaze.Core.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
-namespace HomeBlaze.Core.Services;
+namespace HomeBlaze.Storage;
 
 /// <summary>
 /// Manages loading and access to the root subject.
@@ -67,7 +68,7 @@ public class RootManager
 
         // Resolve relative paths in FileSystemStorage relative to root.json location
         var configDir = Path.GetDirectoryName(fullPath) ?? Environment.CurrentDirectory;
-        if (Root is Storage.FileSystemStorage storage && !Path.IsPathRooted(storage.Path))
+        if (Root is FileSystemStorage storage && !Path.IsPathRooted(storage.Path))
         {
             storage.Path = Path.GetFullPath(Path.Combine(configDir, storage.Path));
             _logger?.LogInformation("Resolved storage path to: {Path}", storage.Path);
@@ -97,7 +98,7 @@ public class RootManager
                 return null;
 
             // Try to get child from storage container
-            if (current is Storage.StorageContainer container)
+            if (current is StorageContainer container)
             {
                 if (container.Children.TryGetValue(segment, out var child))
                 {

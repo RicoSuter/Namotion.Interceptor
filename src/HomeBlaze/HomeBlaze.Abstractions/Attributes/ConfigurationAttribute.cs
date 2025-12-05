@@ -1,4 +1,4 @@
-namespace HomeBlaze.Core.Attributes;
+namespace HomeBlaze.Abstractions.Attributes;
 
 /// <summary>
 /// Marks a property as configuration that should be persisted to JSON.

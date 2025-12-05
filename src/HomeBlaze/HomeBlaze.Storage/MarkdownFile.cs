@@ -1,7 +1,7 @@
-using HomeBlaze.Core.Attributes;
+using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Core.Subjects;
+namespace HomeBlaze.Storage;
 
 /// <summary>
 /// Represents a Markdown file in storage.

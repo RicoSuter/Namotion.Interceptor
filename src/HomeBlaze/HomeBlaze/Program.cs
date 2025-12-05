@@ -1,8 +1,8 @@
 using MudBlazor.Services;
 using HomeBlaze.Components;
 using HomeBlaze.Core.Services;
-using HomeBlaze.Core.Storage;
 using HomeBlaze.Core.Subjects;
+using HomeBlaze.Storage;
 using Namotion.Interceptor;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,22 +15,27 @@ var context = SubjectContextFactory.Create(builder.Services);
 
 // Set up type registry with assembly scanning
 var typeRegistry = new SubjectTypeRegistry()
-    .ScanAssemblies(typeof(FileSystemStorage).Assembly) // HomeBlaze.Core types
+    .ScanAssemblies(typeof(FileSystemStorage).Assembly, typeof(Motor).Assembly) // HomeBlaze.Storage and Core types
     .Register<FileSystemStorage>()
     .Register<Folder>()
     .Register<MarkdownFile>()
     .Register<GenericFile>()
     .Register<Motor>();
 
+// Set up view registry with assembly scanning
+var viewRegistry = new SubjectViewRegistry()
+    .ScanAssemblies(typeof(App).Assembly); // HomeBlaze UI components
+
 // Register services
 builder.Services.AddSingleton<IInterceptorSubjectContext>(context);
 builder.Services.AddSingleton(typeRegistry);
+builder.Services.AddSingleton(viewRegistry);
 
-// Register serializer with service provider (using factory to inject sp)
+// Register serializer with factory pattern
 builder.Services.AddSingleton(sp => new SubjectSerializer(typeRegistry, sp));
 
-// Register RootManager with service provider
-builder.Services.AddSingleton<RootManager>(sp => new RootManager(
+// Register RootManager with factory pattern
+builder.Services.AddSingleton(sp => new RootManager(
     typeRegistry,
     sp.GetRequiredService<SubjectSerializer>(),
     context,

@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using HomeBlaze.Core.Attributes;
+using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 

@@ -1,43 +1,33 @@
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Core.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Core.Storage;
+namespace HomeBlaze.Storage;
 
 /// <summary>
-/// Represents a folder within a storage container.
-/// Inherits scanning and watching behavior from parent storage.
+/// Storage container backed by the local file system.
+/// Uses FileSystemWatcher for real-time change detection.
 /// </summary>
 [InterceptorSubject]
-public partial class Folder : StorageContainer
+public partial class FileSystemStorage : StorageContainer
 {
     private FileSystemWatcher? _watcher;
     private readonly SubjectTypeRegistry _typeRegistry;
     private readonly SubjectSerializer _serializer;
-    private readonly ILogger? _logger;
+    private readonly ILogger<FileSystemStorage>? _logger;
 
     /// <summary>
-    /// Full path to this folder.
+    /// Root path of the storage.
     /// </summary>
+    [Configuration]
     public partial string Path { get; set; }
 
-    public Folder(
+    public FileSystemStorage(
         SubjectTypeRegistry typeRegistry,
         SubjectSerializer serializer,
-        ILogger? logger = null) : base(logger)
-    {
-        _typeRegistry = typeRegistry;
-        _serializer = serializer;
-        _logger = logger;
-        Path = string.Empty;
-    }
-
-    public Folder(
-        IInterceptorSubjectContext context,
-        SubjectTypeRegistry typeRegistry,
-        SubjectSerializer serializer,
-        ILogger? logger = null) : base(context, logger)
+        ILogger<FileSystemStorage>? logger = null) : base(logger)
     {
         _typeRegistry = typeRegistry;
         _serializer = serializer;
@@ -50,34 +40,42 @@ public partial class Folder : StorageContainer
         if (string.IsNullOrWhiteSpace(Path))
             throw new InvalidOperationException("Path is not configured");
 
-        if (!Directory.Exists(Path))
-            throw new DirectoryNotFoundException($"Directory not found: {Path}");
+        var fullPath = System.IO.Path.GetFullPath(Path);
+        if (!Directory.Exists(fullPath))
+            throw new DirectoryNotFoundException($"Directory not found: {fullPath}");
 
-        _logger?.LogDebug("Scanning folder: {Path}", Path);
+        _logger?.LogInformation("Scanning directory: {Path}", fullPath);
 
+        await ScanDirectoryAsync(fullPath, cancellationToken);
+    }
+
+    private async Task ScanDirectoryAsync(string directoryPath, CancellationToken cancellationToken)
+    {
         var context = ((IInterceptorSubject)this).Context;
         var existingKeys = new HashSet<string>(Children.Keys);
 
         // Scan files
-        foreach (var filePath in Directory.GetFiles(Path))
+        foreach (var filePath in Directory.GetFiles(directoryPath))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var fileName = System.IO.Path.GetFileName(filePath);
+
             existingKeys.Remove(fileName);
 
             if (Children.ContainsKey(fileName))
-                continue;
+                continue; // Already exists
 
             var subject = await CreateSubjectForFileAsync(filePath, context, cancellationToken);
             if (subject != null)
             {
                 AddChild(fileName, subject);
+                _logger?.LogDebug("Added file: {FileName}", fileName);
             }
         }
 
-        // Scan subdirectories
-        foreach (var subDirPath in Directory.GetDirectories(Path))
+        // Scan directories
+        foreach (var subDirPath in Directory.GetDirectories(directoryPath))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -85,7 +83,7 @@ public partial class Folder : StorageContainer
             existingKeys.Remove(dirName);
 
             if (Children.ContainsKey(dirName))
-                continue;
+                continue; // Already exists
 
             var folder = new Folder(context, _typeRegistry, _serializer, _logger)
             {
@@ -94,12 +92,14 @@ public partial class Folder : StorageContainer
             };
 
             AddChild(dirName, folder);
+            _logger?.LogDebug("Added folder: {DirName}", dirName);
         }
 
         // Remove items that no longer exist
         foreach (var key in existingKeys)
         {
             RemoveChild(key);
+            _logger?.LogDebug("Removed: {Key}", key);
         }
     }
 
@@ -130,11 +130,12 @@ public partial class Folder : StorageContainer
         var mappedType = _typeRegistry.ResolveTypeForExtension(extension);
         if (mappedType != null)
         {
-            return CreateFileSubject(mappedType, filePath, context);
+            var subject = CreateFileSubject(mappedType, filePath, context);
+            return subject;
         }
 
         // Default to GenericFile
-        return CreateFileSubject(typeof(Subjects.GenericFile), filePath, context);
+        return CreateFileSubject(typeof(GenericFile), filePath, context);
     }
 
     private IInterceptorSubject? CreateFileSubject(Type type, string filePath, IInterceptorSubjectContext context)
@@ -145,7 +146,10 @@ public partial class Folder : StorageContainer
             if (ctor != null)
             {
                 var subject = (IInterceptorSubject)ctor.Invoke(new object[] { context });
+
+                // Set common file properties if available
                 SetFileProperties(subject, filePath);
+
                 return subject;
             }
         }
@@ -180,17 +184,16 @@ public partial class Folder : StorageContainer
             }
             catch
             {
-                // Ignore
+                // Ignore if can't set
             }
         }
     }
 
     protected override async Task WatchAsync(CancellationToken cancellationToken)
     {
-        if (!Directory.Exists(Path))
-            return;
+        var fullPath = System.IO.Path.GetFullPath(Path);
 
-        _watcher = new FileSystemWatcher(Path)
+        _watcher = new FileSystemWatcher(fullPath)
         {
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
                            NotifyFilters.LastWrite | NotifyFilters.CreationTime,
@@ -201,7 +204,10 @@ public partial class Folder : StorageContainer
         _watcher.Created += OnFileSystemChange;
         _watcher.Deleted += OnFileSystemChange;
         _watcher.Changed += OnFileSystemChange;
-        _watcher.Renamed += OnFileSystemChange;
+        _watcher.Renamed += OnFileSystemRenamed;
+        _watcher.Error += OnFileSystemError;
+
+        _logger?.LogInformation("Watching directory: {Path}", fullPath);
 
         try
         {
@@ -217,16 +223,29 @@ public partial class Folder : StorageContainer
 
     private void OnFileSystemChange(object sender, FileSystemEventArgs e)
     {
+        _logger?.LogDebug("File system change: {ChangeType} {Name}", e.ChangeType, e.Name);
+        // Trigger rescan - could be optimized to only handle the specific change
         Task.Run(async () =>
         {
             try
             {
-                await ScanAsync(CancellationToken.None);
+                await ScanDirectoryAsync(System.IO.Path.GetFullPath(Path), CancellationToken.None);
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Error handling file system change in folder {Path}", Path);
+                _logger?.LogError(ex, "Error handling file system change");
             }
         });
+    }
+
+    private void OnFileSystemRenamed(object sender, RenamedEventArgs e)
+    {
+        _logger?.LogDebug("File system renamed: {OldName} -> {Name}", e.OldName, e.Name);
+        OnFileSystemChange(sender, e);
+    }
+
+    private void OnFileSystemError(object sender, ErrorEventArgs e)
+    {
+        _logger?.LogError(e.GetException(), "FileSystemWatcher error");
     }
 }
