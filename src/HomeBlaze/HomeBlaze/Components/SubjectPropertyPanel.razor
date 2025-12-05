@@ -4,6 +4,7 @@
 @using Microsoft.AspNetCore.Components.Web
 @using Namotion.Interceptor
 @using Namotion.Interceptor.Registry.Abstractions
+@inherits HomeBlazorComponentBase
 
 <MudText Typo="Typo.h6" Class="mb-2">@GetSubjectTitle()</MudText>
 <MudText Typo="Typo.caption" Class="mb-4" Color="Color.Secondary">@Subject?.GetType().Name</MudText>
@@ -39,31 +40,43 @@
                         {
                             <em>null</em>
                         }
-                        else if (prop.IsSubjectDictionary)
+                        else if (value is IDictionary dict && HasSubjectValues(dict))
                         {
                             <MudStack Spacing="1">
-                                @foreach (var child in prop.Children)
+                                @foreach (DictionaryEntry entry in dict)
                                 {
-                                    var displayName = GetSubjectDisplayName(child.Subject);
-                                    <MudLink OnClick="@((MouseEventArgs _) => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, child.Index, child.Subject)))" Style="cursor: pointer;">
-                                        @child.Index: @displayName
-                                    </MudLink>
+                                    if (entry.Value is IInterceptorSubject subject)
+                                    {
+                                        var displayName = GetSubjectDisplayName(subject);
+                                        var key = entry.Key;
+                                        <MudLink OnClick="@((MouseEventArgs _) => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, key, subject)))" Style="cursor: pointer;">
+                                            @key: @displayName
+                                        </MudLink>
+                                    }
                                 }
                             </MudStack>
                         }
-                        else if (prop.IsSubjectCollection)
+                        else if (value is IEnumerable enumerable && value is not string && HasSubjectItems(enumerable))
                         {
                             <MudStack Spacing="1">
-                                @foreach (var child in prop.Children)
-                                {
-                                    var displayName = GetSubjectDisplayName(child.Subject);
-                                    <MudLink OnClick="@((MouseEventArgs _) => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, child.Index, child.Subject)))" Style="cursor: pointer;">
-                                        [@child.Index] @displayName
-                                    </MudLink>
+                                @{
+                                    var index = 0;
+                                    foreach (var item in enumerable)
+                                    {
+                                        if (item is IInterceptorSubject subject)
+                                        {
+                                            var displayName = GetSubjectDisplayName(subject);
+                                            var idx = index;
+                                            <MudLink OnClick="@((MouseEventArgs _) => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, idx, subject)))" Style="cursor: pointer;">
+                                                [@idx] @displayName
+                                            </MudLink>
+                                        }
+                                        index++;
+                                    }
                                 }
                             </MudStack>
                         }
-                        else if (prop.IsSubjectReference && value is IInterceptorSubject singleSubject)
+                        else if (value is IInterceptorSubject singleSubject)
                         {
                             <MudLink OnClick="@((MouseEventArgs _) => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, null, singleSubject)))" Style="cursor: pointer;">
                                 @GetSubjectDisplayName(singleSubject)
@@ -121,9 +134,30 @@
 
     protected override void OnParametersSet()
     {
+        base.OnParametersSet();
         _registeredSubject = Subject != null && SubjectRegistry != null
             ? SubjectRegistry.TryGetRegisteredSubject(Subject)
             : null;
+    }
+
+    private bool HasSubjectValues(IDictionary dict)
+    {
+        foreach (DictionaryEntry entry in dict)
+        {
+            if (entry.Value is IInterceptorSubject)
+                return true;
+        }
+        return false;
+    }
+
+    private bool HasSubjectItems(IEnumerable enumerable)
+    {
+        foreach (var item in enumerable)
+        {
+            if (item is IInterceptorSubject)
+                return true;
+        }
+        return false;
     }
 
     private string GetSubjectTitle()
@@ -153,16 +187,16 @@
 
     private int GetPropertyOrder(RegisteredSubjectProperty prop)
     {
-        // Dictionary
-        if (prop.IsSubjectDictionary)
+        var value = prop.GetValue();
+
+        // Check actual value for ordering
+        if (value is IDictionary dict && HasSubjectValues(dict))
             return 4;
 
-        // Collection
-        if (prop.IsSubjectCollection)
+        if (value is IEnumerable enumerable && value is not string && HasSubjectItems(enumerable))
             return 3;
 
-        // Subject reference
-        if (prop.IsSubjectReference)
+        if (value is IInterceptorSubject)
             return 2;
 
         // Primitive
