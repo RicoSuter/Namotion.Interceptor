@@ -1,9 +1,11 @@
+@using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
-@using HomeBlaze.Abstractions.Views
+@using HomeBlaze.Abstractions.Components
 @using HomeBlaze.Core.Subjects
+@using Namotion.Interceptor
 
-@attribute [SubjectView("edit", typeof(Motor))]
-@implements ISubjectEditView
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Motor))]
+@implements ISubjectEditComponent
 
 <MudPaper Class="pa-4">
     <MudText Typo="Typo.h6" Class="mb-4">Edit Motor</MudText>
@@ -30,14 +32,16 @@
     <MudDivider Class="my-4" />
 
     <MudText Typo="Typo.subtitle2" Class="mb-2">Current State (Read-only)</MudText>
-    <MudText>Current Speed: @Subject?.CurrentSpeed RPM</MudText>
-    <MudText>Temperature: @Subject?.Temperature.ToString("F1")°C</MudText>
-    <MudText>Status: @Subject?.Status</MudText>
+    <MudText>Current Speed: @Motor?.CurrentSpeed RPM</MudText>
+    <MudText>Temperature: @Motor?.Temperature.ToString("F1")°C</MudText>
+    <MudText>Status: @Motor?.Status</MudText>
 </MudPaper>
 
 @code {
     [Parameter]
-    public Motor? Subject { get; set; }
+    public IInterceptorSubject? Subject { get; set; }
+
+    private Motor? Motor => Subject as Motor;
 
     private string _name = string.Empty;
     private int _targetSpeed;
@@ -57,11 +61,11 @@
 
     protected override void OnParametersSet()
     {
-        if (Subject != null)
+        if (Motor != null)
         {
-            _name = Subject.Name ?? string.Empty;
-            _targetSpeed = Subject.TargetSpeed;
-            _simulationIntervalMs = (int)Subject.SimulationInterval.TotalMilliseconds;
+            _name = Motor.Name ?? string.Empty;
+            _targetSpeed = Motor.TargetSpeed;
+            _simulationIntervalMs = (int)Motor.SimulationInterval.TotalMilliseconds;
 
             _originalName = _name;
             _originalTargetSpeed = _targetSpeed;
@@ -77,11 +81,11 @@
 
     public Task SaveAsync()
     {
-        if (Subject != null && IsValid)
+        if (Motor != null && IsValid)
         {
-            Subject.Name = _name;
-            Subject.TargetSpeed = _targetSpeed;
-            Subject.SimulationInterval = TimeSpan.FromMilliseconds(_simulationIntervalMs);
+            Motor.Name = _name;
+            Motor.TargetSpeed = _targetSpeed;
+            Motor.SimulationInterval = TimeSpan.FromMilliseconds(_simulationIntervalMs);
 
             _originalName = _name;
             _originalTargetSpeed = _targetSpeed;

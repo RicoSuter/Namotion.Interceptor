@@ -185,10 +185,6 @@
     {
         if (Subject == null) return "No Selection";
 
-        // Check for IPage (navigation title) first
-        if (Subject is IPage page && !string.IsNullOrEmpty(page.NavigationTitle))
-            return page.NavigationTitle;
-
         // Check for ITitleProvider
         if (Subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
             return titleProvider.Title;
@@ -350,10 +346,6 @@
 
     private string GetSubjectDisplayName(IInterceptorSubject subject)
     {
-        // Check for IPage (navigation title) first
-        if (subject is IPage page && !string.IsNullOrEmpty(page.NavigationTitle))
-            return page.NavigationTitle;
-
         // Check for ITitleProvider
         if (subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
             return titleProvider.Title;

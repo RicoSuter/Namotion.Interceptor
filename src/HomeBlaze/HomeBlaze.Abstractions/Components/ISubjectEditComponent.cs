@@ -1,10 +1,10 @@
-namespace HomeBlaze.Abstractions.Views;
+namespace HomeBlaze.Abstractions.Components;
 
 /// <summary>
-/// Interface for edit view components that provide validation state and save functionality.
+/// Interface for edit components that provide validation state and save functionality.
 /// Components implementing this interface can be used as edit views in the subject browser.
 /// </summary>
-public interface ISubjectEditView
+public interface ISubjectEditComponent : ISubjectComponent
 {
     /// <summary>
     /// Gets whether the form is valid and ready to be saved.
