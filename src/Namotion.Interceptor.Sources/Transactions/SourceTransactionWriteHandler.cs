@@ -39,7 +39,7 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
         // 2. Validate SingleWrite requirement
         if (requirement == TransactionRequirement.SingleWrite)
         {
-            var validationError = ValidateSingleWriteRequirement(changesBySource);
+            var validationError = ValidateSingleWriteRequirement(changesBySource, changesWithoutSource);
             if (validationError != null)
             {
                 return new TransactionWriteResult(changesWithoutSource, [validationError]);
@@ -49,7 +49,7 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
         // 3. Write to each source, tracking successful writes for potential rollback
         var successfulChanges = new List<SubjectPropertyChange>(changesWithoutSource);
         var successfulSourceWrites = new List<(ISubjectSource Source, List<SubjectPropertyChange> Changes)>();
-        var failures = new List<Exception>();
+        var failedChanges = new List<SourceWriteFailure>();
 
         foreach (var (source, sourceChanges) in changesBySource)
         {
@@ -64,39 +64,46 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
                 successfulSourceWrites.Add((source, writtenList));
             }
 
-            // Record any failure
+            // Record any failures
             if (result.Error is not null)
             {
-                failures.Add(new SourceWriteException(source, sourceChanges, result.Error));
+                // Add SourceWriteFailure for each failed change
+                foreach (var failedChange in sourceChanges.Except(writtenList))
+                {
+                    failedChanges.Add(new SourceWriteFailure(
+                        failedChange,
+                        source,
+                        new SourceWriteException(source, [failedChange], result.Error)));
+                }
             }
         }
 
         // 4. Handle rollback mode - attempt to revert successful writes on failure
-        if (mode == TransactionMode.Rollback && failures.Count > 0 && successfulSourceWrites.Count > 0)
+        if (mode == TransactionMode.Rollback && failedChanges.Count > 0 && successfulSourceWrites.Count > 0)
         {
             var revertFailures = await TryRevertSuccessfulWritesAsync(
                 successfulSourceWrites,
                 cancellationToken);
 
-            failures.AddRange(revertFailures);
+            failedChanges.AddRange(revertFailures);
 
             // In rollback mode with failures, report no successful changes
             // (either they failed originally or were reverted)
-            return new TransactionWriteResult(changesWithoutSource, failures);
+            return new TransactionWriteResult(changesWithoutSource, failedChanges);
         }
 
-        return new TransactionWriteResult(successfulChanges, failures);
+        return new TransactionWriteResult(successfulChanges, failedChanges);
     }
 
     /// <summary>
     /// Attempts to revert successful source writes by writing the old values back.
     /// This is best-effort - revert failures are collected and reported.
     /// </summary>
-    private static async Task<List<Exception>> TryRevertSuccessfulWritesAsync(
+    private static async Task<List<SourceWriteFailure>> TryRevertSuccessfulWritesAsync(
         List<(ISubjectSource Source, List<SubjectPropertyChange> Changes)> successfulWrites,
         CancellationToken cancellationToken)
     {
-        var revertFailures = new List<Exception>();
+        var revertFailures = new List<SourceWriteFailure>();
 
         foreach (var (source, originalChanges) in successfulWrites)
         {
@@ -116,10 +123,15 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
 
             if (result.Error is not null)
             {
-                revertFailures.Add(new SourceWriteException(
+                var rollbackException = new SourceWriteException(
                     source,
                     originalChanges,
-                    new InvalidOperationException($"Failed to rollback changes to source {source.GetType().Name}", result.Error)));
+                    new InvalidOperationException($"Failed to rollback changes to source {source.GetType().Name}", result.Error));
+
+                foreach (var change in originalChanges)
+                {
+                    revertFailures.Add(new SourceWriteFailure(change, source, rollbackException));
+                }
             }
         }
 
@@ -128,10 +140,11 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
 
     /// <summary>
     /// Validates that the SingleWrite requirement is satisfied.
-    /// Returns an InvalidOperationException if validation fails, or null if validation passes.
+    /// Returns a SourceWriteFailure if validation fails, or null if validation passes.
     /// </summary>
-    private static InvalidOperationException? ValidateSingleWriteRequirement(
-        Dictionary<ISubjectSource, List<SubjectPropertyChange>> changesBySource)
+    private static SourceWriteFailure? ValidateSingleWriteRequirement(
+        Dictionary<ISubjectSource, List<SubjectPropertyChange>> changesBySource,
+        List<SubjectPropertyChange> changesWithoutSource)
     {
         if (changesBySource.Count == 0)
         {
@@ -141,8 +154,11 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
 
         if (changesBySource.Count > 1)
         {
-            return new InvalidOperationException(
+            var error = new InvalidOperationException(
                 $"SingleWrite requirement violated: Transaction contains changes for {changesBySource.Count} sources, but only 1 is allowed.");
+            var firstChange = changesBySource.First().Value.First();
+            var firstSource = changesBySource.First().Key;
+            return new SourceWriteFailure(firstChange, firstSource, error);
         }
 
         // Single source - check batch size
@@ -151,9 +167,10 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
 
         if (batchSize > 0 && sourceChanges.Count > batchSize)
         {
-            return new InvalidOperationException(
+            var error = new InvalidOperationException(
                 $"SingleWrite requirement violated: Transaction contains {sourceChanges.Count} changes for source '{source.GetType().Name}', " +
                 $"but WriteBatchSize is {batchSize}. Reduce the number of changes or use a different transaction requirement.");
+            return new SourceWriteFailure(sourceChanges.First(), source, error);
         }
 
         return null;

@@ -27,11 +27,11 @@ public class SubjectTransactionModeTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
 
         Assert.Equal("John", person.FirstName);
         Assert.Null(person.LastName);
-        Assert.Single(ex.InnerExceptions);
+        Assert.Single(ex.FailedChanges);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
 
         Assert.Null(person.FirstName);
         Assert.Null(person.LastName);
@@ -115,8 +115,8 @@ public class SubjectTransactionModeTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
 
-        Assert.Equal(2, ex.InnerExceptions.Count);
+        Assert.Equal(2, ex.FailedChanges.Count);
     }
 }

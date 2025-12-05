@@ -29,12 +29,12 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
 
-        var innerEx = Assert.Single(ex.InnerExceptions);
-        Assert.IsType<InvalidOperationException>(innerEx);
-        Assert.Contains("2 sources", innerEx.Message);
-        Assert.Contains("only 1 is allowed", innerEx.Message);
+        Assert.Single(ex.FailedChanges);
+        Assert.IsType<InvalidOperationException>(ex.FailedChanges[0].Error);
+        Assert.Contains("2 sources", ex.FailedChanges[0].Error.Message);
+        Assert.Contains("only 1 is allowed", ex.FailedChanges[0].Error.Message);
 
         Assert.Null(person.FirstName);
         Assert.Null(person.LastName);
@@ -64,12 +64,12 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe"; // 2 changes > batch size of 1
 
-        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
 
-        var innerEx = Assert.Single(ex.InnerExceptions);
-        Assert.IsType<InvalidOperationException>(innerEx);
-        Assert.Contains("2 changes", innerEx.Message);
-        Assert.Contains("WriteBatchSize is 1", innerEx.Message);
+        Assert.Single(ex.FailedChanges);
+        Assert.IsType<InvalidOperationException>(ex.FailedChanges[0].Error);
+        Assert.Contains("2 changes", ex.FailedChanges[0].Error.Message);
+        Assert.Contains("WriteBatchSize is 1", ex.FailedChanges[0].Error.Message);
 
         source.Verify(s => s.WriteChangesAsync(
             It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
@@ -211,10 +211,11 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<AggregateException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
 
         Assert.Null(person.FirstName);
         Assert.Null(person.LastName);
-        Assert.Single(ex.InnerExceptions);
+        // Each failed property change is reported separately
+        Assert.Equal(2, ex.FailedChanges.Count);
     }
 }

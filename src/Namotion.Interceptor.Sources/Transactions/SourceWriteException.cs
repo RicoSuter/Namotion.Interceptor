@@ -7,9 +7,10 @@ namespace Namotion.Interceptor.Sources.Transactions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This exception is collected during the commit process and wrapped in an <see cref="AggregateException"/>
-/// if multiple sources fail. The transaction continues attempting to write to all sources even if
-/// some fail, maximizing the number of successful writes.
+/// This exception is collected during the commit process. The transaction continues attempting to
+/// write to all sources even if some fail, maximizing the number of successful writes.
+/// A <see cref="Namotion.Interceptor.Tracking.Transactions.TransactionException"/> is thrown at the
+/// end containing all successful and failed changes.
 /// </para>
 /// <para>
 /// Changes that failed to write are NOT applied to the in-process model to maintain consistency
