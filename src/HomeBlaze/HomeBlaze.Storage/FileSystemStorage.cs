@@ -140,7 +140,7 @@ public partial class FileSystemStorage : StorageContainer
         }
 
         // Default to GenericFile
-        return CreateFileSubject(typeof(GenericFile), filePath, context);
+        return CreateFileSubject(typeof(Files.GenericFile), filePath, context);
     }
 
     private IInterceptorSubject? CreateFileSubject(Type type, string filePath, IInterceptorSubjectContext context)
