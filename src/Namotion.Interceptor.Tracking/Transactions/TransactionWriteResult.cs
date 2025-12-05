@@ -13,18 +13,18 @@ public class TransactionWriteResult
     public IReadOnlyList<SubjectPropertyChange> SuccessfulChanges { get; }
 
     /// <summary>
-    /// Gets the exceptions that occurred during write operations.
+    /// Gets the failed write operations with detailed failure information.
     /// </summary>
-    public IReadOnlyList<Exception> Failures { get; }
+    public IReadOnlyList<SourceWriteFailure> FailedChanges { get; }
 
     public TransactionWriteResult(
         IReadOnlyList<SubjectPropertyChange> successfulChanges,
-        IReadOnlyList<Exception> failures)
+        IReadOnlyList<SourceWriteFailure> failedChanges)
     {
         SuccessfulChanges = successfulChanges;
-        Failures = failures;
+        FailedChanges = failedChanges;
     }
 
     public static TransactionWriteResult Success(IReadOnlyList<SubjectPropertyChange> changes) =>
-        new(changes, Array.Empty<Exception>());
+        new(changes, Array.Empty<SourceWriteFailure>());
 }

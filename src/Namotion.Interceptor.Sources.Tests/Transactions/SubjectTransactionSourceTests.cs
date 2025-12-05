@@ -96,7 +96,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WithSourceWriteFailure_ThrowsAggregateException()
+    public async Task CommitAsync_WithSourceWriteFailure_ThrowsTransactionException()
     {
         var context = CreateContext();
         var person = new Person(context);
@@ -110,11 +110,11 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         {
             person.FirstName = "John";
 
-            var exception = await Assert.ThrowsAsync<AggregateException>(
+            var exception = await Assert.ThrowsAsync<TransactionException>(
                 () => transaction.CommitAsync(CancellationToken.None));
 
-            Assert.Single(exception.InnerExceptions);
-            Assert.IsType<SourceWriteException>(exception.InnerExceptions[0]);
+            Assert.Single(exception.FailedChanges);
+            Assert.IsType<SourceWriteException>(exception.FailedChanges[0].Error);
         }
 
         Assert.Null(person.FirstName);
@@ -137,10 +137,10 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             person.FirstName = "John";
             person.LastName = "Doe";
 
-            var exception = await Assert.ThrowsAsync<AggregateException>(
+            var exception = await Assert.ThrowsAsync<TransactionException>(
                 () => transaction.CommitAsync(CancellationToken.None));
 
-            Assert.Single(exception.InnerExceptions);
+            Assert.Single(exception.FailedChanges);
         }
 
         Assert.Null(person.FirstName);
@@ -216,10 +216,11 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         {
             person.FirstName = "John";
 
-            var exception = await Assert.ThrowsAsync<AggregateException>(
+            var exception = await Assert.ThrowsAsync<TransactionException>(
                 () => transaction.CommitAsync(cts.Token));
 
-            var sourceWriteException = Assert.Single(exception.InnerExceptions.OfType<SourceWriteException>());
+            Assert.Single(exception.FailedChanges);
+            var sourceWriteException = Assert.IsType<SourceWriteException>(exception.FailedChanges[0].Error);
             Assert.IsType<OperationCanceledException>(sourceWriteException.InnerException);
         }
     }

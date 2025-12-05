@@ -26,6 +26,15 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
     public static SubjectTransaction? Current => CurrentTransaction.Value;
 
     /// <summary>
+    /// Sets the current transaction in this execution context.
+    /// This is needed for async patterns where AsyncLocal must be set in the caller's context.
+    /// </summary>
+    internal static void SetCurrent(SubjectTransaction? transaction)
+    {
+        CurrentTransaction.Value = transaction;
+    }
+
+    /// <summary>
     /// Gets a value indicating whether the transaction is currently committing changes.
     /// </summary>
     internal bool IsCommitting => _isCommitting;
@@ -103,9 +112,6 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
         TransactionConflictBehavior conflictBehavior,
         CancellationToken cancellationToken)
     {
-        if (CurrentTransaction.Value != null)
-            throw new InvalidOperationException("Nested transactions are not supported.");
-
         // Get or create TransactionLock for this context
         var lockService = context.TryGetService<TransactionLock>();
         if (lockService == null)
@@ -117,8 +123,17 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
             lockService = context.TryGetService<TransactionLock>();
         }
 
-        // Acquire the lock
+        // Acquire the lock - this serializes concurrent transactions on the same context
         var lockReleaser = await lockService!.AcquireAsync(cancellationToken).ConfigureAwait(false);
+
+        // Check for nested transactions AFTER acquiring lock
+        // This allows concurrent transactions from different async contexts (they queue on lock)
+        // but prevents nesting within the same async flow
+        if (CurrentTransaction.Value != null)
+        {
+            lockReleaser.Dispose(); // Release lock before throwing
+            throw new InvalidOperationException("Nested transactions are not supported.");
+        }
 
         var transaction = new SubjectTransaction(
             context,
@@ -127,7 +142,8 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
             conflictBehavior,
             DateTimeOffset.UtcNow,
             lockReleaser);
-        CurrentTransaction.Value = transaction;
+        // Note: Don't set CurrentTransaction.Value here - it won't flow to caller's context
+        // The caller (extension method) will call SetCurrent after awaiting this
         return transaction;
     }
 
@@ -150,7 +166,7 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ObjectDisposedException">Thrown when the transaction has been disposed.</exception>
-    /// <exception cref="AggregateException">Thrown when one or more external source writes failed.</exception>
+    /// <exception cref="TransactionException">Thrown when one or more external source writes failed.</exception>
     public async Task CommitAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
@@ -167,9 +183,28 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
 
         var changes = PendingChanges.Values.ToList();
 
-        // 1. Group changes by context and call write handlers (external source writes)
+        // 1. Check for conflicts at commit time if FailOnConflict behavior is enabled
+        if (_conflictBehavior == TransactionConflictBehavior.FailOnConflict)
+        {
+            var conflictingProperties = new List<PropertyReference>();
+            foreach (var change in changes)
+            {
+                var lastChangedTimestamp = change.Property.GetLastChangedTimestamp();
+                if (lastChangedTimestamp.HasValue && lastChangedTimestamp.Value > StartTimestamp)
+                {
+                    conflictingProperties.Add(change.Property);
+                }
+            }
+
+            if (conflictingProperties.Count > 0)
+            {
+                throw new TransactionConflictException(conflictingProperties);
+            }
+        }
+
+        // 2. Group changes by context and call write handlers (external source writes)
         var allSuccessfulChanges = new List<SubjectPropertyChange>();
-        var allFailures = new List<Exception>();
+        var allFailedChanges = new List<SourceWriteFailure>();
 
         var changesByContext = changes.GroupBy(c => c.Property.Subject.Context);
         foreach (var contextGroup in changesByContext)
@@ -182,7 +217,7 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
             {
                 var result = await writeHandler.WriteChangesAsync(contextChanges, _mode, _requirement, cancellationToken);
                 allSuccessfulChanges.AddRange(result.SuccessfulChanges);
-                allFailures.AddRange(result.Failures);
+                allFailedChanges.AddRange(result.FailedChanges);
             }
             else
             {
@@ -191,24 +226,24 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
             }
         }
 
-        // 2. Handle mode-specific behavior
+        // 3. Handle mode-specific behavior
         var shouldApplyChanges = _mode switch
         {
             // BestEffort: Apply all successful changes even if some failed
             TransactionMode.BestEffort => true,
             // Rollback: Only apply if ALL changes succeeded
-            TransactionMode.Rollback => allFailures.Count == 0,
+            TransactionMode.Rollback => allFailedChanges.Count == 0,
             _ => true
         };
 
-        // 3. Mark as committing (interceptor passes through)
+        // 4. Mark as committing (interceptor passes through)
         _isCommitting = true;
 
         try
         {
             if (shouldApplyChanges)
             {
-                // 4. Apply successful changes to in-process model (full interceptor chain runs)
+                // 5. Apply successful changes to in-process model (full interceptor chain runs)
                 foreach (var change in allSuccessfulChanges)
                 {
                     var metadata = change.Property.Metadata;
@@ -218,14 +253,14 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
         }
         finally
         {
-            // 5. Partial cleanup - clear pending changes but let Dispose handle AsyncLocal
+            // 6. Partial cleanup - clear pending changes but let Dispose handle AsyncLocal
             // AsyncLocal changes in async context don't propagate back to caller
             PendingChanges.Clear();
             _isCommitted = true;
         }
 
-        // 6. Throw if any external writes failed
-        if (allFailures.Count > 0)
+        // 7. Throw if any external writes failed
+        if (allFailedChanges.Count > 0)
         {
             var message = _mode switch
             {
@@ -233,7 +268,7 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
                 TransactionMode.Rollback => "One or more external sources failed. Rollback was attempted. No changes have been applied to the in-process model.",
                 _ => "One or more external sources failed."
             };
-            throw new AggregateException(message, allFailures);
+            throw new TransactionException(message, allSuccessfulChanges, allFailedChanges);
         }
     }
 

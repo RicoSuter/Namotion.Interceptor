@@ -7,7 +7,7 @@ public enum TransactionMode
 {
     /// <summary>
     /// Best-effort mode: Apply all successful changes to the in-process model, even if some sources fail.
-    /// Failed changes are not applied. An <see cref="AggregateException"/> is thrown containing all failures.
+    /// Failed changes are not applied. A <see cref="TransactionException"/> is thrown containing all failures.
     /// This maximizes successful writes but may result in partial updates.
     /// </summary>
     BestEffort,
