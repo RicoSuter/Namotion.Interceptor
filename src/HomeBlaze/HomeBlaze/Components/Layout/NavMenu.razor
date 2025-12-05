@@ -1,0 +1,119 @@
+@inject RootManager RootManager
+@implements IDisposable
+
+<MudNavMenu>
+    @if (_markdownFiles.Any())
+    {
+        @foreach (var file in _markdownFiles)
+        {
+            <MudNavLink Href="@($"docs/{file.Path}")"
+                        Match="NavLinkMatch.All"
+                        Icon="@Icons.Material.Filled.Description">
+                @file.Title
+            </MudNavLink>
+        }
+        <MudDivider Class="my-2" />
+    }
+
+    <MudNavLink Href="browser"
+                Match="NavLinkMatch.Prefix"
+                Icon="@Icons.Material.Filled.FolderOpen">
+        Browser
+    </MudNavLink>
+</MudNavMenu>
+
+@code {
+    private List<MarkdownFileInfo> _markdownFiles = new();
+    private Timer? _refreshTimer;
+
+    protected override void OnInitialized()
+    {
+        RefreshMarkdownFiles();
+        // Periodically refresh to catch new files
+        _refreshTimer = new Timer(_ => InvokeAsync(() =>
+        {
+            RefreshMarkdownFiles();
+            StateHasChanged();
+        }), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private void RefreshMarkdownFiles()
+    {
+        _markdownFiles.Clear();
+
+        var root = RootManager.Root;
+        if (root is StorageContainer storage)
+        {
+            CollectMarkdownFiles(storage, "");
+        }
+    }
+
+    private void CollectMarkdownFiles(StorageContainer container, string basePath)
+    {
+        foreach (var child in container.Children.Values)
+        {
+            if (child is MarkdownFile markdown)
+            {
+                var path = string.IsNullOrEmpty(basePath)
+                    ? markdown.FileName
+                    : $"{basePath}/{markdown.FileName}";
+
+                _markdownFiles.Add(new MarkdownFileInfo
+                {
+                    Title = GetTitle(markdown),
+                    Path = path,
+                    Order = GetOrder(markdown)
+                });
+            }
+            else if (child is StorageContainer subContainer)
+            {
+                var subPath = string.IsNullOrEmpty(basePath)
+                    ? subContainer.Name ?? ""
+                    : $"{basePath}/{subContainer.Name}";
+                CollectMarkdownFiles(subContainer, subPath);
+            }
+        }
+
+        // Sort by order, then by title
+        _markdownFiles = _markdownFiles
+            .OrderBy(f => f.Order)
+            .ThenBy(f => f.Title)
+            .ToList();
+    }
+
+    private string GetTitle(MarkdownFile markdown)
+    {
+        // Use filename without extension as title, but make it readable
+        var name = Path.GetFileNameWithoutExtension(markdown.FileName);
+        // Convert kebab-case or snake_case to Title Case
+        return string.Join(" ", name
+            .Replace("-", " ")
+            .Replace("_", " ")
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(word => char.ToUpper(word[0]) + word[1..].ToLower()));
+    }
+
+    private int GetOrder(MarkdownFile markdown)
+    {
+        // readme files go first
+        var name = Path.GetFileNameWithoutExtension(markdown.FileName).ToLower();
+        return name switch
+        {
+            "readme" => 0,
+            "index" => 1,
+            _ => 100
+        };
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+    }
+
+    private class MarkdownFileInfo
+    {
+        public string Title { get; set; } = "";
+        public string Path { get; set; } = "";
+        public int Order { get; set; }
+    }
+}

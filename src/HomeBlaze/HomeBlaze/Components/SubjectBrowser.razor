@@ -1,0 +1,214 @@
+@using System.Text.RegularExpressions
+@using Namotion.Interceptor
+@using Namotion.Interceptor.Registry.Abstractions
+@inject RootManager RootManager
+@inject NavigationManager NavigationManager
+@inject ISubjectRegistry SubjectRegistry
+@implements IDisposable
+
+<MudStack Row="true" Class="browser-toolbar mb-2">
+    <MudBreadcrumbs Items="_breadcrumbs" />
+    <MudSpacer />
+</MudStack>
+
+<MudStack Row="true" Class="miller-columns" Style="overflow-x: auto; min-height: 400px;">
+    @foreach (var pane in _panes)
+    {
+        <MudPaper Class="subject-pane" Elevation="1" Style="width: 300px; min-width: 300px; max-width: 300px; overflow-y: auto; padding: 16px;">
+            <SubjectPropertyPanel
+                Subject="@pane.Subject"
+                SubjectRegistry="@SubjectRegistry"
+                OnPropertyClick="@((args) => OnPropertyClick(pane, args.PropertyName, args.Index, args.Subject))" />
+        </MudPaper>
+    }
+</MudStack>
+
+<style>
+    .miller-columns {
+        gap: 8px;
+    }
+    .subject-pane {
+        overflow-y: auto;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public string? Path { get; set; }
+
+    private List<SubjectPane> _panes = new();
+    private List<BreadcrumbItem> _breadcrumbs = new();
+    private bool _isNavigatingProgrammatically;
+
+    // Regex to parse PropertyName[Index] format
+    private static readonly Regex SegmentRegex = new(@"^([^\[]+)(?:\[([^\]]*)\])?$", RegexOptions.Compiled);
+
+    protected override void OnInitialized()
+    {
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    protected override void OnParametersSet()
+    {
+        RebuildFromPath();
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (_isNavigatingProgrammatically)
+            return;
+
+        var uri = new Uri(e.Location);
+        var segments = uri.AbsolutePath.TrimStart('/').Split('/');
+        if (segments.Length > 0 && segments[0] == "browser")
+        {
+            var decodedSegments = segments.Skip(1).Select(Uri.UnescapeDataString);
+            Path = string.Join("/", decodedSegments);
+            RebuildFromPath();
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void RebuildFromPath()
+    {
+        _panes.Clear();
+        _breadcrumbs.Clear();
+
+        var root = RootManager.Root;
+        if (root == null) return;
+
+        // Always show root as first pane
+        _panes.Add(new SubjectPane { Subject = root, DisplayName = "Root" });
+        _breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
+
+        if (string.IsNullOrEmpty(Path))
+            return;
+
+        var pathSegments = Path.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(Uri.UnescapeDataString)
+            .ToArray();
+
+        IInterceptorSubject currentSubject = root;
+        var currentPathParts = new List<string>();
+
+        for (int i = 0; i < pathSegments.Length; i++)
+        {
+            var segment = pathSegments[i];
+            var parsed = ParseSegment(segment);
+            if (parsed == null)
+                break;
+
+            var (propertyName, index) = parsed.Value;
+            var child = FindChildByProperty(currentSubject, propertyName, index);
+
+            if (child == null)
+                break;
+
+            currentPathParts.Add(segment);
+            var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
+            var displayName = index != null ? $"{propertyName}[{index}]" : propertyName;
+
+            _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
+            _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName });
+            currentSubject = child;
+        }
+    }
+
+    private (string PropertyName, object? Index)? ParseSegment(string segment)
+    {
+        var match = SegmentRegex.Match(segment);
+        if (!match.Success)
+            return null;
+
+        var propertyName = match.Groups[1].Value;
+        var indexStr = match.Groups[2].Success ? match.Groups[2].Value : null;
+
+        return (propertyName, indexStr);
+    }
+
+    private IInterceptorSubject? FindChildByProperty(IInterceptorSubject parent, string propertyName, object? index)
+    {
+        var registered = SubjectRegistry.TryGetRegisteredSubject(parent);
+        if (registered == null)
+            return null;
+
+        var property = registered.TryGetProperty(propertyName);
+        if (property == null || !property.HasChildSubjects)
+            return null;
+
+        // For single subject reference (no index)
+        if (property.IsSubjectReference && index == null)
+        {
+            return property.GetValue() as IInterceptorSubject;
+        }
+
+        // For collections or dictionaries, find child by index
+        foreach (var child in property.Children)
+        {
+            var childIndex = child.Index?.ToString();
+            if (childIndex == index?.ToString())
+            {
+                return child.Subject;
+            }
+        }
+
+        return null;
+    }
+
+    private void OnPropertyClick(SubjectPane clickedPane, string propertyName, object? index, IInterceptorSubject subject)
+    {
+        // Find the index of the clicked pane
+        var paneIndex = _panes.IndexOf(clickedPane);
+        if (paneIndex < 0) return;
+
+        // Remove all panes after the clicked one
+        while (_panes.Count > paneIndex + 1)
+        {
+            _panes.RemoveAt(_panes.Count - 1);
+        }
+
+        // Build segment name
+        var segmentName = index != null ? $"{propertyName}[{index}]" : propertyName;
+
+        // Add the new subject pane
+        _panes.Add(new SubjectPane { Subject = subject, DisplayName = segmentName });
+
+        UpdateUrl();
+        StateHasChanged();
+    }
+
+    private void UpdateUrl()
+    {
+        var pathParts = new List<string>();
+        // Skip the first pane (root) when building path
+        foreach (var pane in _panes.Skip(1))
+        {
+            pathParts.Add(Uri.EscapeDataString(pane.DisplayName));
+        }
+
+        var url = "/browser" + (pathParts.Any() ? "/" + string.Join("/", pathParts) : "");
+
+        _isNavigatingProgrammatically = true;
+        NavigationManager.NavigateTo(url, replace: true);
+        _isNavigatingProgrammatically = false;
+
+        _breadcrumbs.Clear();
+        _breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
+        for (int i = 0; i < pathParts.Count; i++)
+        {
+            var breadcrumbPath = "/browser/" + string.Join("/", pathParts.Take(i + 1));
+            _breadcrumbs.Add(new BreadcrumbItem(Uri.UnescapeDataString(pathParts[i]), breadcrumbPath));
+        }
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+
+    private class SubjectPane
+    {
+        public IInterceptorSubject Subject { get; set; } = null!;
+        public string DisplayName { get; set; } = "";
+    }
+}

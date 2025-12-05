@@ -1,0 +1,141 @@
+@page "/docs/{*Path}"
+@using Markdig
+@inject RootManager RootManager
+
+<PageTitle>@_title - HomeBlaze</PageTitle>
+
+@if (_loading)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else if (_error != null)
+{
+    <MudAlert Severity="Severity.Error">@_error</MudAlert>
+}
+else if (_markdownFile != null)
+{
+    <MudPaper Class="pa-4" Elevation="0">
+        <MudText Typo="Typo.h4" Class="mb-4">@_title</MudText>
+        <MudDivider Class="mb-4" />
+        <div class="markdown-content">
+            @((MarkupString)_htmlContent)
+        </div>
+    </MudPaper>
+}
+else
+{
+    <MudAlert Severity="Severity.Warning">Document not found: @Path</MudAlert>
+}
+
+<style>
+    .markdown-content h1 { font-size: 2rem; font-weight: 500; margin: 1.5rem 0 1rem; }
+    .markdown-content h2 { font-size: 1.5rem; font-weight: 500; margin: 1.25rem 0 0.75rem; }
+    .markdown-content h3 { font-size: 1.25rem; font-weight: 500; margin: 1rem 0 0.5rem; }
+    .markdown-content p { margin: 0.75rem 0; line-height: 1.6; }
+    .markdown-content ul, .markdown-content ol { margin: 0.75rem 0; padding-left: 1.5rem; }
+    .markdown-content li { margin: 0.25rem 0; }
+    .markdown-content code { background: rgba(0,0,0,0.1); padding: 0.2em 0.4em; border-radius: 4px; font-family: monospace; }
+    .markdown-content pre { background: rgba(0,0,0,0.1); padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 1rem 0; }
+    .markdown-content pre code { background: transparent; padding: 0; }
+    .markdown-content table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    .markdown-content th, .markdown-content td { border: 1px solid rgba(128,128,128,0.3); padding: 0.5rem; text-align: left; }
+    .markdown-content th { background: rgba(0,0,0,0.05); font-weight: 500; }
+    .markdown-content blockquote { border-left: 4px solid rgba(128,128,128,0.3); margin: 1rem 0; padding-left: 1rem; color: rgba(128,128,128,0.8); }
+    .markdown-content a { color: #7e6fff; text-decoration: none; }
+    .markdown-content a:hover { text-decoration: underline; }
+</style>
+
+@code {
+    [Parameter]
+    public string? Path { get; set; }
+
+    private bool _loading = true;
+    private string? _error;
+    private MarkdownFile? _markdownFile;
+    private string _title = "";
+    private string _htmlContent = "";
+
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadMarkdownAsync();
+    }
+
+    private async Task LoadMarkdownAsync()
+    {
+        _loading = true;
+        _error = null;
+        _markdownFile = null;
+        _htmlContent = "";
+
+        try
+        {
+            if (string.IsNullOrEmpty(Path))
+            {
+                _error = "No document path specified";
+                return;
+            }
+
+            // Find the markdown file
+            var root = RootManager.Root;
+            if (root is StorageContainer storage)
+            {
+                _markdownFile = FindMarkdownFile(storage, Path);
+            }
+
+            if (_markdownFile != null)
+            {
+                _title = GetTitle(_markdownFile);
+                var content = await _markdownFile.GetContentAsync();
+                _htmlContent = Markdown.ToHtml(content ?? "", Pipeline);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load document: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private MarkdownFile? FindMarkdownFile(StorageContainer container, string path)
+    {
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0) return null;
+
+        var fileName = segments.Last();
+        var folderPath = segments.Take(segments.Length - 1).ToArray();
+
+        // Navigate to the folder
+        var currentContainer = container;
+        foreach (var folder in folderPath)
+        {
+            var subContainer = currentContainer.Children.Values
+                .OfType<StorageContainer>()
+                .FirstOrDefault(c => c.Name == folder);
+
+            if (subContainer == null) return null;
+            currentContainer = subContainer;
+        }
+
+        // Find the markdown file
+        return currentContainer.Children.Values
+            .OfType<MarkdownFile>()
+            .FirstOrDefault(f => f.FileName == fileName);
+    }
+
+    private string GetTitle(MarkdownFile markdown)
+    {
+        var name = System.IO.Path.GetFileNameWithoutExtension(markdown.FileName);
+        return string.Join(" ", name
+            .Replace("-", " ")
+            .Replace("_", " ")
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(word => char.ToUpper(word[0]) + word[1..].ToLower()));
+    }
+}

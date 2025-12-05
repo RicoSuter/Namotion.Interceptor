@@ -1,0 +1,128 @@
+@page "/"
+@inject RootManager RootManager
+@inject NavigationManager NavigationManager
+
+<PageTitle>Home - HomeBlaze</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-4">
+    <MudPaper Class="pa-6" Elevation="2">
+        <MudText Typo="Typo.h3" Class="mb-2">HomeBlaze v2</MudText>
+        <MudText Typo="Typo.subtitle1" Color="Color.Secondary" Class="mb-4">
+            A file-system-backed state model built on Namotion.Interceptor
+        </MudText>
+
+        <MudDivider Class="my-4" />
+
+        @if (_rootLoaded)
+        {
+            <MudText Typo="Typo.h6" Class="mb-3">Quick Stats</MudText>
+            <MudGrid>
+                <MudItem xs="12" sm="4">
+                    <MudPaper Class="pa-4 d-flex flex-column align-center" Elevation="1">
+                        <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Large" Color="Color.Primary" />
+                        <MudText Typo="Typo.h4" Class="mt-2">@_folderCount</MudText>
+                        <MudText Typo="Typo.caption">Folders</MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudPaper Class="pa-4 d-flex flex-column align-center" Elevation="1">
+                        <MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Size="Size.Large" Color="Color.Secondary" />
+                        <MudText Typo="Typo.h4" Class="mt-2">@_fileCount</MudText>
+                        <MudText Typo="Typo.caption">Files</MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudPaper Class="pa-4 d-flex flex-column align-center" Elevation="1">
+                        <MudIcon Icon="@Icons.Material.Filled.Settings" Size="Size.Large" Color="Color.Tertiary" />
+                        <MudText Typo="Typo.h4" Class="mt-2">@_subjectCount</MudText>
+                        <MudText Typo="Typo.caption">Subjects</MudText>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+
+            <MudDivider Class="my-4" />
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.FolderOpen"
+                       Size="Size.Large"
+                       Href="/browser"
+                       Class="mt-2">
+                Open Browser
+            </MudButton>
+        }
+        else
+        {
+            <MudProgressCircular Indeterminate="true" Class="d-block mx-auto my-4" />
+            <MudText Align="Align.Center" Color="Color.Secondary">Loading root configuration...</MudText>
+        }
+    </MudPaper>
+
+    <MudPaper Class="pa-4 mt-4" Elevation="1">
+        <MudText Typo="Typo.h6" Class="mb-2">Features</MudText>
+        <MudList T="string" Dense="true">
+            <MudListItem Icon="@Icons.Material.Filled.Storage">
+                File-system-backed state model
+            </MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.TrackChanges">
+                Live property change tracking
+            </MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.Save">
+                Auto-persistence for configuration
+            </MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.Cloud">
+                Protocol exposure (OPC UA, MQTT)
+            </MudListItem>
+        </MudList>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private bool _rootLoaded;
+    private int _folderCount;
+    private int _fileCount;
+    private int _subjectCount;
+
+    protected override void OnInitialized()
+    {
+        RefreshStats();
+    }
+
+    private void RefreshStats()
+    {
+        var root = RootManager.Root;
+        if (root == null)
+        {
+            _rootLoaded = false;
+            return;
+        }
+
+        _rootLoaded = true;
+        _folderCount = 0;
+        _fileCount = 0;
+        _subjectCount = 0;
+
+        if (root is StorageContainer storage)
+        {
+            CountItems(storage);
+        }
+    }
+
+    private void CountItems(StorageContainer container)
+    {
+        foreach (var child in container.Children.Values)
+        {
+            _subjectCount++;
+
+            if (child is StorageContainer subContainer)
+            {
+                _folderCount++;
+                CountItems(subContainer);
+            }
+            else
+            {
+                _fileCount++;
+            }
+        }
+    }
+}

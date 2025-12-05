@@ -85,7 +85,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "HomeBlaze", "HomeBlaze", "{
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HomeBlaze", "HomeBlaze\HomeBlaze\HomeBlaze.csproj", "{C6F2EEE5-A6B0-47CD-9D4A-4C0E0AA78E74}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HomeBlaze.Client", "HomeBlaze\HomeBlaze.Client\HomeBlaze.Client.csproj", "{6CA6E16B-1440-4A50-9CB4-6317B2C8C9B9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HomeBlaze.Core", "HomeBlaze\HomeBlaze.Core\HomeBlaze.Core.csproj", "{6CA6E16B-1440-4A50-9CB4-6317B2C8C9B9}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Namotion.Interceptor.Mqtt.SampleClient", "Namotion.Interceptor.Mqtt.SampleClient\Namotion.Interceptor.Mqtt.SampleClient.csproj", "{BE44817A-BD7B-4427-A5FF-1DC6B9D634A2}"
 EndProject

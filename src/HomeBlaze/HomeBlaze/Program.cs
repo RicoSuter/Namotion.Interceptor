@@ -1,52 +1,93 @@
 using MudBlazor.Services;
 using HomeBlaze.Components;
+using HomeBlaze.Core.Services;
+using HomeBlaze.Core.Storage;
+using HomeBlaze.Core.Subjects;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Tracking;
-
-using Host = HomeBlaze.Client.State.Host;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add MudBlazor services
 builder.Services.AddMudServices();
 
-// Add Namotion.Interceptor.Blazor services
-var context = InterceptorSubjectContext
-    .Create()
-    .WithFullPropertyTracking()
-    .WithReadPropertyRecorder();
+// Create InterceptorSubjectContext with all interceptors
+var context = SubjectContextFactory.Create(builder.Services);
 
-builder.Services
-    .AddSingleton<Host>(_ => new Host(context))
-    .AddHostedService(sp => sp.GetRequiredService<Host>());
+// Set up type registry with assembly scanning
+var typeRegistry = new SubjectTypeRegistry()
+    .ScanAssemblies(typeof(FileSystemStorage).Assembly) // HomeBlaze.Core types
+    .Register<FileSystemStorage>()
+    .Register<Folder>()
+    .Register<MarkdownFile>()
+    .Register<GenericFile>()
+    .Register<Motor>();
+
+// Register services
+builder.Services.AddSingleton<IInterceptorSubjectContext>(context);
+builder.Services.AddSingleton(typeRegistry);
+
+// Register serializer with service provider (using factory to inject sp)
+builder.Services.AddSingleton(sp => new SubjectSerializer(typeRegistry, sp));
+
+// Register RootManager with service provider
+builder.Services.AddSingleton<RootManager>(sp => new RootManager(
+    typeRegistry,
+    sp.GetRequiredService<SubjectSerializer>(),
+    context,
+    sp.GetService<ILogger<RootManager>>()));
+
+// Add hosted service to load root on startup
+builder.Services.AddHostedService<RootLoaderService>();
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
-    // .AddInteractiveWebAssemblyComponents();
 
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseWebAssemblyDebugging();
-}
-else
+if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
 
 app.UseHttpsRedirection();
-
 app.UseAntiforgery();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
-    // .AddInteractiveWebAssemblyRenderMode()
-    .AddInteractiveServerRenderMode()
-    .AddAdditionalAssemblies(typeof(HomeBlaze.Client._Imports).Assembly);
+    .AddInteractiveServerRenderMode();
 
 app.Run();
+
+/// <summary>
+/// Hosted service that loads the root configuration on startup.
+/// </summary>
+public class RootLoaderService : IHostedService
+{
+    private readonly RootManager _rootManager;
+    private readonly ILogger<RootLoaderService> _logger;
+
+    public RootLoaderService(RootManager rootManager, ILogger<RootLoaderService> logger)
+    {
+        _rootManager = rootManager;
+        _logger = logger;
+    }
+
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _rootManager.LoadAsync("root.json", cancellationToken);
+            _logger.LogInformation("Root loaded successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load root configuration");
+            throw;
+        }
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
