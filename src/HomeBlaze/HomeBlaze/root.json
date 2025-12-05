@@ -1,4 +1,4 @@
 {
-    "Type": "HomeBlaze.Core.Storage.FileSystemStorage",
+    "Type": "HomeBlaze.Storage.FileSystemStorage",
     "Path": "./Data"
 }

@@ -1,34 +1,43 @@
-using HomeBlaze.Core.Attributes;
 using HomeBlaze.Core.Services;
-using HomeBlaze.Core.Subjects;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Core.Storage;
+namespace HomeBlaze.Storage;
 
 /// <summary>
-/// Storage container backed by the local file system.
-/// Uses FileSystemWatcher for real-time change detection.
+/// Represents a folder within a storage container.
+/// Inherits scanning and watching behavior from parent storage.
 /// </summary>
 [InterceptorSubject]
-public partial class FileSystemStorage : StorageContainer
+public partial class Folder : StorageContainer
 {
     private FileSystemWatcher? _watcher;
     private readonly SubjectTypeRegistry _typeRegistry;
     private readonly SubjectSerializer _serializer;
-    private readonly ILogger<FileSystemStorage>? _logger;
+    private readonly ILogger? _logger;
 
     /// <summary>
-    /// Root path of the storage.
+    /// Full path to this folder.
     /// </summary>
-    [Configuration]
     public partial string Path { get; set; }
 
-    public FileSystemStorage(
+    public Folder(
         SubjectTypeRegistry typeRegistry,
         SubjectSerializer serializer,
-        ILogger<FileSystemStorage>? logger = null) : base(logger)
+        ILogger? logger = null) : base(logger)
+    {
+        _typeRegistry = typeRegistry;
+        _serializer = serializer;
+        _logger = logger;
+        Path = string.Empty;
+    }
+
+    public Folder(
+        IInterceptorSubjectContext context,
+        SubjectTypeRegistry typeRegistry,
+        SubjectSerializer serializer,
+        ILogger? logger = null) : base(context, logger)
     {
         _typeRegistry = typeRegistry;
         _serializer = serializer;
@@ -41,43 +50,34 @@ public partial class FileSystemStorage : StorageContainer
         if (string.IsNullOrWhiteSpace(Path))
             throw new InvalidOperationException("Path is not configured");
 
-        var fullPath = System.IO.Path.GetFullPath(Path);
-        if (!Directory.Exists(fullPath))
-            throw new DirectoryNotFoundException($"Directory not found: {fullPath}");
+        if (!Directory.Exists(Path))
+            throw new DirectoryNotFoundException($"Directory not found: {Path}");
 
-        _logger?.LogInformation("Scanning directory: {Path}", fullPath);
+        _logger?.LogDebug("Scanning folder: {Path}", Path);
 
-        await ScanDirectoryAsync(fullPath, cancellationToken);
-    }
-
-    private async Task ScanDirectoryAsync(string directoryPath, CancellationToken cancellationToken)
-    {
         var context = ((IInterceptorSubject)this).Context;
         var existingKeys = new HashSet<string>(Children.Keys);
 
         // Scan files
-        foreach (var filePath in Directory.GetFiles(directoryPath))
+        foreach (var filePath in Directory.GetFiles(Path))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var fileName = System.IO.Path.GetFileName(filePath);
-            var extension = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
-
             existingKeys.Remove(fileName);
 
             if (Children.ContainsKey(fileName))
-                continue; // Already exists
+                continue;
 
             var subject = await CreateSubjectForFileAsync(filePath, context, cancellationToken);
             if (subject != null)
             {
                 AddChild(fileName, subject);
-                _logger?.LogDebug("Added file: {FileName}", fileName);
             }
         }
 
-        // Scan directories
-        foreach (var subDirPath in Directory.GetDirectories(directoryPath))
+        // Scan subdirectories
+        foreach (var subDirPath in Directory.GetDirectories(Path))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -85,7 +85,7 @@ public partial class FileSystemStorage : StorageContainer
             existingKeys.Remove(dirName);
 
             if (Children.ContainsKey(dirName))
-                continue; // Already exists
+                continue;
 
             var folder = new Folder(context, _typeRegistry, _serializer, _logger)
             {
@@ -94,14 +94,12 @@ public partial class FileSystemStorage : StorageContainer
             };
 
             AddChild(dirName, folder);
-            _logger?.LogDebug("Added folder: {DirName}", dirName);
         }
 
         // Remove items that no longer exist
         foreach (var key in existingKeys)
         {
             RemoveChild(key);
-            _logger?.LogDebug("Removed: {Key}", key);
         }
     }
 
@@ -111,7 +109,6 @@ public partial class FileSystemStorage : StorageContainer
         CancellationToken cancellationToken)
     {
         var extension = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
-        var fileName = System.IO.Path.GetFileName(filePath);
 
         // JSON files - deserialize with Type discriminator
         if (extension == ".json")
@@ -133,8 +130,7 @@ public partial class FileSystemStorage : StorageContainer
         var mappedType = _typeRegistry.ResolveTypeForExtension(extension);
         if (mappedType != null)
         {
-            var subject = CreateFileSubject(mappedType, filePath, context);
-            return subject;
+            return CreateFileSubject(mappedType, filePath, context);
         }
 
         // Default to GenericFile
@@ -149,10 +145,7 @@ public partial class FileSystemStorage : StorageContainer
             if (ctor != null)
             {
                 var subject = (IInterceptorSubject)ctor.Invoke(new object[] { context });
-
-                // Set common file properties if available
                 SetFileProperties(subject, filePath);
-
                 return subject;
             }
         }
@@ -187,16 +180,17 @@ public partial class FileSystemStorage : StorageContainer
             }
             catch
             {
-                // Ignore if can't set
+                // Ignore
             }
         }
     }
 
     protected override async Task WatchAsync(CancellationToken cancellationToken)
     {
-        var fullPath = System.IO.Path.GetFullPath(Path);
+        if (!Directory.Exists(Path))
+            return;
 
-        _watcher = new FileSystemWatcher(fullPath)
+        _watcher = new FileSystemWatcher(Path)
         {
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
                            NotifyFilters.LastWrite | NotifyFilters.CreationTime,
@@ -207,10 +201,7 @@ public partial class FileSystemStorage : StorageContainer
         _watcher.Created += OnFileSystemChange;
         _watcher.Deleted += OnFileSystemChange;
         _watcher.Changed += OnFileSystemChange;
-        _watcher.Renamed += OnFileSystemRenamed;
-        _watcher.Error += OnFileSystemError;
-
-        _logger?.LogInformation("Watching directory: {Path}", fullPath);
+        _watcher.Renamed += OnFileSystemChange;
 
         try
         {
@@ -226,29 +217,16 @@ public partial class FileSystemStorage : StorageContainer
 
     private void OnFileSystemChange(object sender, FileSystemEventArgs e)
     {
-        _logger?.LogDebug("File system change: {ChangeType} {Name}", e.ChangeType, e.Name);
-        // Trigger rescan - could be optimized to only handle the specific change
         Task.Run(async () =>
         {
             try
             {
-                await ScanDirectoryAsync(System.IO.Path.GetFullPath(Path), CancellationToken.None);
+                await ScanAsync(CancellationToken.None);
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Error handling file system change");
+                _logger?.LogError(ex, "Error handling file system change in folder {Path}", Path);
             }
         });
-    }
-
-    private void OnFileSystemRenamed(object sender, RenamedEventArgs e)
-    {
-        _logger?.LogDebug("File system renamed: {OldName} -> {Name}", e.OldName, e.Name);
-        OnFileSystemChange(sender, e);
-    }
-
-    private void OnFileSystemError(object sender, ErrorEventArgs e)
-    {
-        _logger?.LogError(e.GetException(), "FileSystemWatcher error");
     }
 }

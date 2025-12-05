@@ -2,34 +2,39 @@
 @using Namotion.Interceptor.Registry.Abstractions
 @inherits HomeBlazorComponentBase
 @inject NavigationManager NavigationManager
+@inject IJSRuntime JsRuntime
+
+@implements IAsyncDisposable
 
 <MudStack Row="true" Class="browser-toolbar mb-2">
     <MudBreadcrumbs Items="_breadcrumbs" />
     <MudSpacer />
 </MudStack>
 
-<MudStack Row="true" Class="miller-columns" Style="overflow-x: auto; min-height: 400px;">
-    @foreach (var pane in _panes)
+<div id="scrollContainer" style="height: calc(100% - 60px); overflow-x: auto; overflow-y: hidden; display: flex; gap: 8px;">
+    @for (int i = 0; i < _panes.Count; i++)
     {
-        <MudPaper Class="subject-pane" Elevation="1" Style="width: 300px; min-width: 300px; max-width: 300px; overflow-y: auto; padding: 16px;">
+        var pane = _panes[i];
+        var isFirst = i == 0;
+        var selectedChild = i < _panes.Count - 1 ? _panes[i + 1].Subject : null;
+
+        <MudPaper Class="subject-pane" Elevation="1" Style="width: 480px; min-width: 480px; max-width: 480px; height: 100%; overflow-y: auto; padding: 16px;">
             <SubjectPropertyPanel
                 Subject="@pane.Subject"
                 SubjectRegistry="@_subjectRegistry"
-                OnPropertyClick="@((args) => OnPropertyClick(pane, args.PropertyName, args.Index, args.Subject))" />
+                ObjectPath="@pane.ObjectPath"
+                SelectedChild="@selectedChild"
+                CanClose="@(!isFirst)"
+                OnPropertyClick="@((args) => OnPropertyClick(pane, args.PropertyName, args.Index, args.Subject))"
+                OnClose="@(() => OnPaneClose(pane))"
+                OnDelete="@(() => OnPaneDelete(pane))" />
         </MudPaper>
     }
-</MudStack>
-
-<style>
-    .miller-columns {
-        gap: 8px;
-    }
-    .subject-pane {
-        overflow-y: auto;
-    }
-</style>
+</div>
 
 @code {
+    private const int PaneWidth = 480;
+
     [Parameter]
     public string? Path { get; set; }
 
@@ -37,6 +42,8 @@
     private List<BreadcrumbItem> _breadcrumbs = new();
     private string? _lastNavigatedUrl;
     private ISubjectRegistry? _subjectRegistry;
+    private bool _scrollToLastPane;
+    private IJSObjectReference? _jsModule;
 
     protected override void OnInitialized()
     {
@@ -52,6 +59,24 @@
         {
             RebuildFromPath();
         }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _jsModule = await JsRuntime.InvokeAsync<IJSObjectReference>(
+                "import", "./Components/SubjectBrowser.razor.js");
+        }
+
+        if (_scrollToLastPane && _jsModule != null)
+        {
+            _scrollToLastPane = false;
+            var scrollLeft = PaneWidth * (_panes.Count - 1) + (_panes.Count - 1) * 8; // 8px gap
+            await _jsModule.InvokeVoidAsync("scrollIntoView", "scrollContainer", scrollLeft);
+        }
+
+        await base.OnAfterRenderAsync(firstRender);
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
@@ -86,7 +111,7 @@
         _subjectRegistry = RootContext?.GetService<ISubjectRegistry>();
 
         // Always show root as first pane
-        _panes.Add(new SubjectPane { Subject = Root, DisplayName = "Root", PropertyName = null, Index = null });
+        _panes.Add(new SubjectPane { Subject = Root, DisplayName = "Root", ObjectPath = "Root", PropertyName = null, Index = null });
         _breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
 
         if (string.IsNullOrEmpty(Path))
@@ -98,6 +123,7 @@
 
         IInterceptorSubject currentSubject = Root;
         var currentPathParts = new List<string>();
+        var currentObjectPath = "Root";
         RegisteredSubjectProperty? pendingProperty = null;
 
         for (int i = 0; i < pathSegments.Length; i++)
@@ -124,9 +150,10 @@
                     if (child == null)
                         break;
 
+                    currentObjectPath = $"{currentObjectPath}.{segment}";
                     var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
                     _breadcrumbs.Add(new BreadcrumbItem(segment, breadcrumbPath));
-                    _panes.Add(new SubjectPane { Subject = child, DisplayName = segment, PropertyName = segment, Index = null });
+                    _panes.Add(new SubjectPane { Subject = child, DisplayName = segment, ObjectPath = currentObjectPath, PropertyName = segment, Index = null });
                     currentSubject = child;
                 }
                 else
@@ -143,10 +170,11 @@
                     break;
 
                 currentPathParts.Add(segment);
+                currentObjectPath = $"{currentObjectPath}.{pendingProperty.Name}[{segment}]";
                 var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
                 var displayName = $"{pendingProperty.Name}[{segment}]";
                 _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, PropertyName = pendingProperty.Name, Index = segment });
+                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, ObjectPath = currentObjectPath, PropertyName = pendingProperty.Name, Index = segment });
                 currentSubject = child;
                 pendingProperty = null;
             }
@@ -178,14 +206,41 @@
             _panes.RemoveAt(_panes.Count - 1);
         }
 
-        // Build display name
+        // Build display name and object path
         var displayName = index != null ? $"{propertyName}[{index}]" : propertyName;
+        var parentPath = clickedPane.ObjectPath;
+        var objectPath = index != null
+            ? $"{parentPath}.{propertyName}[{index}]"
+            : $"{parentPath}.{propertyName}";
 
         // Add the new subject pane
-        _panes.Add(new SubjectPane { Subject = subject, DisplayName = displayName, PropertyName = propertyName, Index = index });
+        _panes.Add(new SubjectPane { Subject = subject, DisplayName = displayName, ObjectPath = objectPath, PropertyName = propertyName, Index = index });
+
+        _scrollToLastPane = true;
+        UpdateUrl();
+        StateHasChanged();
+    }
+
+    private void OnPaneClose(SubjectPane pane)
+    {
+        var paneIndex = _panes.IndexOf(pane);
+        if (paneIndex <= 0) return; // Can't close the root pane
+
+        // Remove this pane and all panes after it
+        while (_panes.Count > paneIndex)
+        {
+            _panes.RemoveAt(_panes.Count - 1);
+        }
 
         UpdateUrl();
         StateHasChanged();
+    }
+
+    private async Task OnPaneDelete(SubjectPane pane)
+    {
+        // TODO: Implement delete functionality
+        // This would remove the subject from its parent collection
+        await Task.CompletedTask;
     }
 
     private void UpdateUrl()
@@ -241,10 +296,20 @@
         base.Dispose();
     }
 
+    public async ValueTask DisposeAsync()
+    {
+        if (_jsModule != null)
+        {
+            await _jsModule.DisposeAsync();
+        }
+        Dispose();
+    }
+
     private class SubjectPane
     {
         public IInterceptorSubject Subject { get; set; } = null!;
         public string DisplayName { get; set; } = "";
+        public string ObjectPath { get; set; } = "";
         public string? PropertyName { get; set; }
         public object? Index { get; set; }
     }
