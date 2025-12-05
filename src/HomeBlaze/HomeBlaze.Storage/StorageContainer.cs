@@ -1,3 +1,5 @@
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -10,8 +12,14 @@ namespace HomeBlaze.Storage;
 /// Implements BackgroundService for self-contained lifecycle management.
 /// </summary>
 [InterceptorSubject]
-public abstract partial class StorageContainer : BackgroundService
+public abstract partial class StorageContainer : BackgroundService, IIconProvider, ITitleProvider
 {
+    // MudBlazor Icons.Material.Filled.Storage
+    private const string StorageIcon = "<svg style=\"width:24px;height:24px\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M2,20H22V16H2M2,4V8H22V4M2,14H22V10H2Z\" /></svg>";
+
+    public virtual string? Icon => StorageIcon;
+    public virtual string? Title => Name;
+
     private readonly ILogger? _logger;
     private int _retryCount;
     private const int MaxRetries = 5;
@@ -20,16 +28,19 @@ public abstract partial class StorageContainer : BackgroundService
     /// <summary>
     /// Display name of this container.
     /// </summary>
+    [Configuration]
     public partial string? Name { get; set; }
 
     /// <summary>
     /// Child subjects indexed by name/key.
     /// </summary>
+    [State(Order = 10)]
     public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 
     /// <summary>
     /// Current status of the storage container.
     /// </summary>
+    [State(Order = 1)]
     public partial StorageStatus Status { get; set; }
 
     /// <summary>
@@ -40,6 +51,7 @@ public abstract partial class StorageContainer : BackgroundService
     /// <summary>
     /// Last successful scan time.
     /// </summary>
+    [State("Last Scan", Order = 2)]
     public partial DateTime? LastScanTime { get; set; }
 
     protected StorageContainer()

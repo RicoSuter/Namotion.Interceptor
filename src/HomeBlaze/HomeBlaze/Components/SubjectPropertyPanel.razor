@@ -1,9 +1,11 @@
 @using System.Reflection
 @using System.Collections
+@using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
 @using Microsoft.AspNetCore.Components.Web
 @using Namotion.Interceptor
 @using Namotion.Interceptor.Registry.Abstractions
+@inject IDialogService DialogService
 @inherits HomeBlazorComponentBase
 
 @if (Subject != null && _registeredSubject != null)
@@ -20,7 +22,7 @@
         }
 
         <h1 style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0; font-size: 1.25rem;">
-            <MudIcon Size="Size.Small" Icon="@Icons.Material.Filled.Folder" />
+            <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" />
             @GetSubjectTitle()
         </h1>
         <MudText Typo="Typo.caption" Color="Color.Secondary">@Subject.GetType().Name</MudText>
@@ -29,6 +31,15 @@
     <div style="height: calc(100% - 70px); overflow-y: auto; padding-top: 16px;">
         @* Action Buttons *@
         <div class="mb-4">
+            @if (HasConfigurationProperties())
+            {
+                <MudIconButton OnClick="@OpenConfigurationDialog"
+                               Icon="@Icons.Material.Filled.Edit"
+                               Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Size="Size.Small"
+                               Class="mr-2" />
+            }
             <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
                            Icon="@Icons.Material.Filled.Delete"
                            Variant="Variant.Filled"
@@ -42,7 +53,7 @@
         {
             var value = prop.GetValue();
             <MudText Style="@(value is null ? "opacity: 0.5" : "")" Class="mb-1">
-                <strong>@prop.BrowseName: </strong>
+                <strong>@GetPropertyDisplayName(prop): </strong>
                 @RenderPropertyValue(prop, value)
             </MudText>
         }
@@ -67,7 +78,7 @@
                     }
                     <MudListItem Value="@child"
                                  OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, key, child)))"
-                                 Icon="@Icons.Material.Filled.Folder"
+                                 Icon="@GetSubjectIcon(child)"
                                  IconColor="Color.Default">
                         @if (isSelected)
                         {
@@ -88,7 +99,7 @@
             {
                 <MudExpansionPanel Dense="true" Expanded="@ShouldExpand(prop)">
                     <TitleContent>
-                        @prop.BrowseName
+                        @GetPropertyDisplayName(prop)
                         <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-2">@children.Count</MudChip>
                     </TitleContent>
                     <ChildContent>
@@ -98,7 +109,7 @@
                                 var isSelected = child == SelectedChild;
                                 <MudListItem Value="@child"
                                              OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, key, child)))"
-                                             Icon="@Icons.Material.Filled.Folder"
+                                             Icon="@GetSubjectIcon(child)"
                                              IconColor="Color.Default">
                                     @if (isSelected)
                                     {
@@ -174,6 +185,15 @@
     {
         if (Subject == null) return "No Selection";
 
+        // Check for IPage (navigation title) first
+        if (Subject is IPage page && !string.IsNullOrEmpty(page.NavigationTitle))
+            return page.NavigationTitle;
+
+        // Check for ITitleProvider
+        if (Subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
+            return titleProvider.Title;
+
+        // Fallback to Name property
         var nameProp = Subject.GetType().GetProperty("Name");
         if (nameProp != null)
         {
@@ -182,6 +202,14 @@
         }
 
         return Subject.GetType().Name;
+    }
+
+    private string GetSubjectIcon(IInterceptorSubject? subject)
+    {
+        if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.Icon))
+            return iconProvider.Icon;
+
+        return Icons.Material.Filled.QuestionMark;
     }
 
     private string GetObjectPath()
@@ -195,8 +223,9 @@
             return Enumerable.Empty<RegisteredSubjectProperty>();
 
         return _registeredSubject.Properties
-            .Where(p => !IsInternalProperty(p) && !HasChildSubjects(p))
-            .OrderBy(p => p.BrowseName);
+            .Where(p => HasStateAttribute(p) && !HasChildSubjects(p))
+            .OrderBy(p => GetStateOrder(p))
+            .ThenBy(p => GetPropertyDisplayName(p));
     }
 
     private IEnumerable<RegisteredSubjectProperty> GetChildProperties()
@@ -205,8 +234,34 @@
             return Enumerable.Empty<RegisteredSubjectProperty>();
 
         return _registeredSubject.Properties
-            .Where(p => !IsInternalProperty(p) && HasChildSubjects(p))
-            .OrderBy(p => p.BrowseName);
+            .Where(p => HasStateAttribute(p) && HasChildSubjects(p))
+            .OrderBy(p => GetStateOrder(p))
+            .ThenBy(p => GetPropertyDisplayName(p));
+    }
+
+    private bool HasStateAttribute(RegisteredSubjectProperty prop)
+    {
+        if (Subject == null) return false;
+        var propertyInfo = Subject.GetType().GetProperty(prop.Name);
+        return propertyInfo?.GetCustomAttribute<StateAttribute>(true) != null;
+    }
+
+    private StateAttribute? GetStateAttribute(RegisteredSubjectProperty prop)
+    {
+        if (Subject == null) return null;
+        var propertyInfo = Subject.GetType().GetProperty(prop.Name);
+        return propertyInfo?.GetCustomAttribute<StateAttribute>(true);
+    }
+
+    private int GetStateOrder(RegisteredSubjectProperty prop)
+    {
+        return GetStateAttribute(prop)?.Order ?? int.MaxValue;
+    }
+
+    private string GetPropertyDisplayName(RegisteredSubjectProperty prop)
+    {
+        var stateAttr = GetStateAttribute(prop);
+        return stateAttr?.Name ?? prop.BrowseName;
     }
 
     private bool HasChildSubjects(RegisteredSubjectProperty prop)
@@ -295,6 +350,15 @@
 
     private string GetSubjectDisplayName(IInterceptorSubject subject)
     {
+        // Check for IPage (navigation title) first
+        if (subject is IPage page && !string.IsNullOrEmpty(page.NavigationTitle))
+            return page.NavigationTitle;
+
+        // Check for ITitleProvider
+        if (subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
+            return titleProvider.Title;
+
+        // Fallback to Name property
         var nameProp = subject.GetType().GetProperty("Name");
         if (nameProp != null)
         {
@@ -324,4 +388,32 @@
     }
 
     public record PropertyClickEventArgs(string PropertyName, object? Index, IInterceptorSubject Subject);
+
+    private bool HasConfigurationProperties()
+    {
+        if (Subject == null) return false;
+
+        return Subject.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Any(p => p.GetCustomAttribute<ConfigurationAttribute>(true) != null && p.CanRead && p.CanWrite);
+    }
+
+    private async Task OpenConfigurationDialog()
+    {
+        if (Subject == null) return;
+
+        var parameters = new DialogParameters<SubjectConfigurationDialog>
+        {
+            { x => x.Subject, Subject }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        var title = GetSubjectTitle();
+        await DialogService.ShowAsync<SubjectConfigurationDialog>($"Edit {title}", parameters, options);
+    }
 }

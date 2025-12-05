@@ -1,0 +1,63 @@
+@using Markdig
+
+<div class="markdown-content">
+    @if (_isLoading)
+    {
+        <p>Loading...</p>
+    }
+    else if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="error">@_error</div>
+    }
+    else
+    {
+        @((MarkupString)_htmlContent)
+    }
+</div>
+
+@code {
+    [Parameter]
+    public MarkdownFile? File { get; set; }
+
+    private string _htmlContent = string.Empty;
+    private string? _error;
+    private bool _isLoading = true;
+
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadContentAsync();
+    }
+
+    private async Task LoadContentAsync()
+    {
+        if (File == null)
+        {
+            _htmlContent = string.Empty;
+            _isLoading = false;
+            return;
+        }
+
+        try
+        {
+            _isLoading = true;
+            _error = null;
+            StateHasChanged();
+
+            var markdown = await File.GetContentAsync();
+            _htmlContent = Markdown.ToHtml(markdown, Pipeline);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load content: {ex.Message}";
+            _htmlContent = string.Empty;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+}
