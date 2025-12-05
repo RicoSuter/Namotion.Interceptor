@@ -43,6 +43,8 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     private SubjectPropertyWriter? _propertyWriter;
     private MqttConnectionMonitor? _connectionMonitor;
 
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+
     private int _disposed;
     private volatile bool _isStarted;
 
@@ -118,107 +120,163 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     }
 
     /// <inheritdoc />
-    public async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    /// <remarks>Thread-safe: uses internal lock to serialize concurrent calls.</remarks>
+    public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        var client = _client;
-        if (client is null || !client.IsConnected)
-        {
-            throw new InvalidOperationException("MQTT client is not connected.");
-        }
-
-        var length = changes.Length;
-        if (length == 0) return;
-
-        var messagesPool = ArrayPool<MqttApplicationMessage>.Shared;
-        var userPropsArrayPool = ArrayPool<List<MqttUserProperty>?>.Shared;
-
-        var messages = messagesPool.Rent(length);
-        var userPropertiesArray = _configuration.SourceTimestampPropertyName is not null
-            ? userPropsArrayPool.Rent(length)
-            : null;
-        var messageCount = 0;
-
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var changesSpan = changes.Span;
-
-            // Build all messages first
-            for (var i = 0; i < length; i++)
+            var client = _client;
+            if (client is null || !client.IsConnected)
             {
-                var change = changesSpan[i];
-                var property = change.Property.TryGetRegisteredProperty();
-                if (property is null || property.HasChildSubjects)
+                return WriteResult.Failure(new InvalidOperationException("MQTT client is not connected."));
+            }
+
+            var length = changes.Length;
+            if (length == 0) return WriteResult.Success(ReadOnlyMemory<SubjectPropertyChange>.Empty);
+
+            var messagesPool = ArrayPool<MqttApplicationMessage>.Shared;
+            var userPropsArrayPool = ArrayPool<List<MqttUserProperty>?>.Shared;
+            var changeIndicesPool = ArrayPool<int>.Shared;
+
+            var messages = messagesPool.Rent(length);
+            var changeIndices = changeIndicesPool.Rent(length); // Track which original change index each message corresponds to
+            var userPropertiesArray = _configuration.SourceTimestampPropertyName is not null
+                ? userPropsArrayPool.Rent(length)
+                : null;
+            var messageCount = 0;
+
+            try
+            {
+                var changesSpan = changes.Span;
+
+                // Build all messages first
+                for (var i = 0; i < length; i++)
                 {
-                    continue;
+                    var change = changesSpan[i];
+                    var property = change.Property.TryGetRegisteredProperty();
+                    if (property is null || property.HasChildSubjects)
+                    {
+                        continue;
+                    }
+
+                    var topic = TryGetTopicForProperty(change.Property, property);
+                    if (topic is null) continue;
+
+                    byte[] payload;
+                    try
+                    {
+                        payload = _configuration.ValueConverter.Serialize(
+                            change.GetNewValue<object?>(),
+                            property.Type);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to serialize value for property {PropertyName}.", property.Name);
+                        continue;
+                    }
+
+                    var message = new MqttApplicationMessage
+                    {
+                        Topic = topic,
+                        PayloadSegment = new ArraySegment<byte>(payload),
+                        QualityOfServiceLevel = _configuration.DefaultQualityOfService,
+                        Retain = _configuration.UseRetainedMessages
+                    };
+
+                    if (userPropertiesArray is not null)
+                    {
+                        var userProps = UserPropertiesPool.Rent();
+                        userProps.Clear();
+                        userProps.Add(new MqttUserProperty(
+                            _configuration.SourceTimestampPropertyName!,
+                            _configuration.SourceTimestampConverter(change.ChangedTimestamp)));
+                        message.UserProperties = userProps;
+                        userPropertiesArray[messageCount] = userProps;
+                    }
+
+                    changeIndices[messageCount] = i;
+                    messages[messageCount++] = message;
                 }
 
-                var topic = TryGetTopicForProperty(change.Property, property);
-                if (topic is null) continue;
-
-                byte[] payload;
-                try
+                if (messageCount > 0)
                 {
-                    payload = _configuration.ValueConverter.Serialize(
-                        change.GetNewValue<object?>(),
-                        property.Type);
+                    var publishedCount = 0;
+                    Exception? publishError = null;
+
+#if USE_LOCAL_MQTTNET
+                    try
+                    {
+                        await client.PublishManyAsync(
+                            new ArraySegment<MqttApplicationMessage>(messages, 0, messageCount),
+                            cancellationToken).ConfigureAwait(false);
+                        publishedCount = messageCount;
+                    }
+                    catch (Exception ex)
+                    {
+                        publishError = ex;
+                    }
+#else
+                    for (var i = 0; i < messageCount; i++)
+                    {
+                        try
+                        {
+                            await client.PublishAsync(messages[i], cancellationToken).ConfigureAwait(false);
+                            publishedCount++;
+                        }
+                        catch (Exception ex)
+                        {
+                            publishError = ex;
+                            break;
+                        }
+                    }
+#endif
+
+                    // Build result based on what succeeded
+                    if (publishError is not null)
+                    {
+                        if (publishedCount > 0)
+                        {
+                            // Partial success - collect the successful changes
+                            var successfulChanges = new SubjectPropertyChange[publishedCount];
+                            for (var i = 0; i < publishedCount; i++)
+                            {
+                                successfulChanges[i] = changes.Span[changeIndices[i]];
+                            }
+                            return WriteResult.PartialSuccess(successfulChanges, publishError);
+                        }
+                        return WriteResult.Failure(publishError);
+                    }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to serialize value for property {PropertyName}.", property.Name);
-                    continue;
-                }
 
-                var message = new MqttApplicationMessage
-                {
-                    Topic = topic,
-                    PayloadSegment = new ArraySegment<byte>(payload),
-                    QualityOfServiceLevel = _configuration.DefaultQualityOfService,
-                    Retain = _configuration.UseRetainedMessages
-                };
-
+                // All succeeded - return original changes
+                return WriteResult.Success(changes);
+            }
+            finally
+            {
                 if (userPropertiesArray is not null)
                 {
-                    var userProps = UserPropertiesPool.Rent();
-                    userProps.Clear();
-                    userProps.Add(new MqttUserProperty(
-                        _configuration.SourceTimestampPropertyName!,
-                        _configuration.SourceTimestampConverter(change.ChangedTimestamp)));
-                    message.UserProperties = userProps;
-                    userPropertiesArray[messageCount] = userProps;
+                    for (var i = 0; i < messageCount; i++)
+                    {
+                        if (userPropertiesArray[i] is { } list)
+                        {
+                            UserPropertiesPool.Return(list);
+                        }
+                    }
+                    userPropsArrayPool.Return(userPropertiesArray);
                 }
 
-                messages[messageCount++] = message;
+                changeIndicesPool.Return(changeIndices);
+                messagesPool.Return(messages);
             }
-
-            if (messageCount > 0)
-            {
-#if USE_LOCAL_MQTTNET
-                await client.PublishManyAsync(
-                    new ArraySegment<MqttApplicationMessage>(messages, 0, messageCount),
-                    cancellationToken).ConfigureAwait(false);
-#else
-                for (var i = 0; i < messageCount; i++)
-                {
-                    await client.PublishAsync(messages[i], cancellationToken).ConfigureAwait(false);
-                }
-#endif
-            }
+        }
+        catch (Exception ex)
+        {
+            return WriteResult.Failure(ex);
         }
         finally
         {
-            if (userPropertiesArray is not null)
-            {
-                for (var i = 0; i < messageCount; i++)
-                {
-                    if (userPropertiesArray[i] is { } list)
-                    {
-                        UserPropertiesPool.Return(list);
-                    }
-                }
-                userPropsArrayPool.Return(userPropertiesArray);
-            }
-
-            messagesPool.Return(messages);
+            _writeLock.Release();
         }
     }
 
@@ -481,6 +539,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _topicToProperty.Clear();
         _propertyToTopic.Clear();
 
+        _writeLock.Dispose();
         Dispose();
     }
 }

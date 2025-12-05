@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -27,6 +28,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     private static readonly Func<IInterceptorSubject, object?> GetOldValueDelegate = static _ => _threadLocalOldValue;
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
 
+    /// <inheritdoc />
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
         if (change.Property.Metadata.IsDerived)
@@ -41,11 +43,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
     }
 
+    /// <inheritdoc />
     public void DetachProperty(SubjectPropertyLifecycleChange change)
     {
         // No cleanup needed - dependencies are managed per-property
     }
 
+    /// <inheritdoc />
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
         var result = next(ref context);
@@ -59,12 +63,23 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         return result;
     }
 
+    /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         next(ref context);
 
+        // Fast path: Skip if no derived properties depend on this property
+        // Check this first as it's more likely to early-exit than transaction check
         var usedByProperties = context.Property.GetUsedByProperties().Items;
         if (usedByProperties.Length == 0)
+        {
+            return;
+        }
+
+        // Skip derived property recalculation during transaction capture
+        // (derived values will be recalculated from pending values when read)
+        var transaction = SubjectTransaction.Current;
+        if (transaction is { IsCommitting: false })
         {
             return;
         }

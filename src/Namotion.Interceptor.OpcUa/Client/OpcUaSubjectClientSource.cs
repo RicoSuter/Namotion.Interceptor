@@ -5,6 +5,7 @@ using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Sources.Transactions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
@@ -27,6 +28,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private LifecycleInterceptor? _lifecycleInterceptor;
     private SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
+
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
@@ -306,73 +309,87 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     }
 
     /// <summary>
-    /// Writes changes to OPC UA server atomically (all-or-nothing).
-    /// Throws if any write fails, allowing the entire batch to be retried.
+    /// Writes changes to OPC UA server with per-node result tracking.
+    /// Returns a <see cref="WriteResult"/> indicating which nodes succeeded.
+    /// Thread-safe: uses internal lock to serialize concurrent calls.
     /// </summary>
-    public async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        var session = _sessionManager?.CurrentSession;
-        if (session is null || !session.Connected)
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new InvalidOperationException("OPC UA session is not connected.");
-        }
+            var session = _sessionManager?.CurrentSession;
+            if (session is null || !session.Connected)
+            {
+                return WriteResult.Failure(new InvalidOperationException("OPC UA session is not connected."));
+            }
 
-        var writeValues = CreateWriteValuesCollection(changes);
-        if (writeValues.Count is 0)
+            var (writeValues, changesList) = CreateWriteValuesCollection(changes);
+            if (writeValues.Count is 0)
+            {
+                return WriteResult.Success(ReadOnlyMemory<SubjectPropertyChange>.Empty);
+            }
+
+            var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
+            return ProcessWriteResults(writeResponse.Results, changesList);
+        }
+        catch (Exception ex)
         {
-            return;
+            return WriteResult.Failure(ex);
         }
-
-        var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
-        ValidateWriteResults(writeResponse.Results);
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     /// <summary>
-    /// Validates write results and throws if any write failed (all-or-nothing semantics).
+    /// Processes write results and returns a WriteResult with per-node success tracking.
     /// </summary>
-    private void ValidateWriteResults(StatusCodeCollection results)
+    private WriteResult ProcessWriteResults(StatusCodeCollection results, List<SubjectPropertyChange> writtenChanges)
     {
+        var successfulChanges = new List<SubjectPropertyChange>();
         var transientFailureCount = 0;
         var permanentFailureCount = 0;
 
         for (var i = 0; i < results.Count; i++)
         {
-            if (StatusCode.IsBad(results[i]))
+            if (StatusCode.IsGood(results[i]))
             {
-                if (IsTransientWriteError(results[i]))
-                {
-                    transientFailureCount++;
-                }
-                else
-                {
-                    permanentFailureCount++;
-                }
+                successfulChanges.Add(writtenChanges[i]);
+            }
+            else if (IsTransientWriteError(results[i]))
+            {
+                transientFailureCount++;
+            }
+            else
+            {
+                permanentFailureCount++;
             }
         }
 
         if (transientFailureCount > 0 || permanentFailureCount > 0)
         {
             _logger.LogWarning(
-                "OPC UA write batch failed: {TransientCount} transient, {PermanentCount} permanent failures out of {TotalCount} writes.",
-                transientFailureCount, permanentFailureCount, results.Count);
+                "OPC UA write batch partial failure: {SuccessCount} succeeded, {TransientCount} transient failures, {PermanentCount} permanent failures out of {TotalCount} writes.",
+                successfulChanges.Count, transientFailureCount, permanentFailureCount, results.Count);
 
-            if (transientFailureCount > 0)
-            {
-                throw new InvalidOperationException(
-                    $"OPC UA write failed with {transientFailureCount} transient errors. Entire batch will be retried.");
-            }
-
-            // Only permanent errors, log but don't retry
-            _logger.LogError(
-                "OPC UA write batch had {PermanentCount} permanent failures. These changes will not be retried.",
-                permanentFailureCount);
+            var error = new OpcUaWriteException(transientFailureCount, permanentFailureCount, results.Count);
+            return successfulChanges.Count > 0
+                ? WriteResult.PartialSuccess(successfulChanges.ToArray(), error)
+                : WriteResult.Failure(error);
         }
+
+        // All succeeded - return the original changes array (zero allocation)
+        return WriteResult.Success(writtenChanges.ToArray());
     }
 
-    private WriteValueCollection CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
+    private (WriteValueCollection WriteValues, List<SubjectPropertyChange> IncludedChanges) CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
         var span = changes.Span;
         var writeValues = new WriteValueCollection(span.Length);
+        var includedChanges = new List<SubjectPropertyChange>(span.Length);
+
         for (var i = 0; i < span.Length; i++)
         {
             var change = span[i];
@@ -402,9 +419,11 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     SourceTimestamp = change.ChangedTimestamp.UtcDateTime
                 }
             });
+
+            includedChanges.Add(change);
         }
 
-        return writeValues;
+        return (writeValues, includedChanges);
     }
 
     /// <summary>
@@ -479,6 +498,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         // This ensures that property data associated with this OpcUaNodeIdKey is cleared
         // even if properties are reused across multiple source instances
         CleanupPropertyData();
+        _writeLock.Dispose();
         Dispose();
     }
 
@@ -487,6 +507,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         foreach (var property in _propertiesWithOpcData)
         {
             property.RemovePropertyData(OpcUaNodeIdKey);
+            property.RemoveSource();
         }
 
         _propertiesWithOpcData.Clear();
