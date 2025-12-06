@@ -1,4 +1,7 @@
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Abstractions.Attributes
 @using Markdig
+@attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
 
 <div class="markdown-content">
     @if (_isLoading)
@@ -22,6 +25,7 @@
     private string _htmlContent = string.Empty;
     private string? _error;
     private bool _isLoading = true;
+    private MarkdownFile? _loadedFile;
 
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
@@ -29,11 +33,17 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        await LoadContentAsync();
+        // Only reload if File changed
+        if (File != _loadedFile)
+        {
+            await LoadContentAsync();
+        }
     }
 
     private async Task LoadContentAsync()
     {
+        _loadedFile = File;
+
         if (File == null)
         {
             _htmlContent = string.Empty;
@@ -45,7 +55,6 @@
         {
             _isLoading = true;
             _error = null;
-            StateHasChanged();
 
             var markdown = await File.GetContentAsync();
             _htmlContent = Markdown.ToHtml(markdown, Pipeline);

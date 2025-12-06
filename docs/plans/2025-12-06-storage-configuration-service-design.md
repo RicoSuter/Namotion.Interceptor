@@ -38,11 +38,30 @@ Background service that listens to property changes and auto-saves configuration
 // HomeBlaze.Core/Services/StorageService.cs
 public class StorageService : BackgroundService
 {
-    private readonly List<ISubjectStorageHandler> _handlers = new();
+    // Copy-on-write pattern for lock-free iteration (same as PropertyChangeQueue)
+    private volatile ISubjectStorageHandler[] _handlers = [];
+    private readonly Lock _handlersLock = new();
     private readonly ConcurrentQueue<(IInterceptorSubject, int retryCount)> _retryQueue = new();
 
-    public void RegisterHandler(ISubjectStorageHandler handler);
-    public void UnregisterHandler(ISubjectStorageHandler handler);
+    public void RegisterHandler(ISubjectStorageHandler handler)
+    {
+        lock (_handlersLock)
+        {
+            var handlers = _handlers;
+            var updated = new ISubjectStorageHandler[handlers.Length + 1];
+            Array.Copy(handlers, updated, handlers.Length);
+            updated[handlers.Length] = handler;
+            _handlers = updated;
+        }
+    }
+
+    public void UnregisterHandler(ISubjectStorageHandler handler)
+    {
+        lock (_handlersLock)
+        {
+            _handlers = _handlers.Where(h => h != handler).ToArray();
+        }
+    }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -52,8 +71,8 @@ public class StorageService : BackgroundService
         while (!ct.IsCancellationRequested)
         {
             // Process property changes
-            // Filter for [Configuration] attributes
-            // Iterate handlers until one returns true
+            // Filter for [Configuration] attributes (cache lookup per type)
+            // Iterate _handlers (volatile read, lock-free) until one returns true
             // On IOException: queue for retry with exponential backoff
         }
     }
@@ -63,14 +82,16 @@ public class StorageService : BackgroundService
 ### 4. Storage
 
 Root of a storage context using FluentStorage. Implements `ISubjectStorageHandler`.
+Note: Does NOT extend BackgroundService - StorageService manages all background work.
 
 ```csharp
 // HomeBlaze.Storage/Storage.cs
 [InterceptorSubject, Configurable]
-public partial class Storage : BackgroundService, ISubjectStorageHandler, ITitleProvider
+public partial class Storage : ISubjectStorageHandler, ITitleProvider, IDisposable
 {
     private IBlobStorage? _client;
-    private readonly Dictionary<IInterceptorSubject, string> _subjectPaths = new();
+    // Thread-safe: accessed from StorageService background thread and UI thread
+    private readonly ConcurrentDictionary<IInterceptorSubject, string> _subjectPaths = new();
 
     // Configuration
     [Configuration] public partial string StorageType { get; set; }      // "filesystem", "azure-blob"
@@ -80,7 +101,7 @@ public partial class Storage : BackgroundService, ISubjectStorageHandler, ITitle
     [State] public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
     [State] public partial StorageStatus Status { get; set; }
 
-    // ISubjectStorageHandler - called by StorageService
+    // ISubjectStorageHandler - called by StorageService background thread
     public async Task<bool> WriteAsync(IInterceptorSubject subject, CancellationToken ct)
     {
         if (!_subjectPaths.TryGetValue(subject, out var path)) return false;
@@ -95,6 +116,9 @@ public partial class Storage : BackgroundService, ISubjectStorageHandler, ITitle
     public Task WriteBlobAsync(string path, Stream content, CancellationToken ct);  // Upsert
     public Task DeleteBlobAsync(string path, CancellationToken ct);
     public Task<Stream> ReadBlobAsync(string path, CancellationToken ct);
+
+    // Scanning - called on initialization or refresh
+    public Task ScanAsync(CancellationToken ct);
 }
 ```
 
@@ -321,3 +345,25 @@ Add FluentStorage NuGet packages:
 - `FluentStorage` - Core abstractions
 - `FluentStorage.Azure.Blobs` - Azure Blob Storage (optional)
 - `FluentStorage.AWS.S3` - AWS S3 (optional)
+
+## Review Notes (2025-12-06)
+
+Based on architecture, quality, and performance reviews:
+
+### Applied Fixes
+1. **Thread safety: `_handlers`** - Use copy-on-write volatile array pattern (like PropertyChangeQueue)
+2. **Thread safety: `_subjectPaths`** - Use `ConcurrentDictionary`
+3. **Storage lifecycle** - Removed `BackgroundService` inheritance; StorageService manages all background work
+4. **Configuration attribute caching** - Note to cache `[Configuration]` property lookup per type
+
+### Deferred Decisions
+- **File type abstraction** - Keep simple for now (accept SaveAsync duplication); add base class later if needed
+- **IStorageOperations interface** - Consider later for Storage/VirtualFolder unification
+- **Bounded retry queue** - Implement if unbounded growth becomes an issue
+- **Stream-based serialization** - Optimize later if memory pressure observed
+
+### Open Questions (to resolve during implementation)
+1. Handler priority: First-registered-first-tried (current) or add priority mechanism?
+2. RootManager: Keep Rx approach or migrate to StorageService pattern?
+3. Configuration changes on Storage: How to handle `_client` recreation when ConnectionString changes?
+4. Debouncing: Per-subject or global debounce in StorageService?

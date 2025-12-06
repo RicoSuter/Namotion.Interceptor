@@ -7,7 +7,7 @@
     {
         @foreach (var file in _markdownFiles)
         {
-            <MudNavLink Href="@($"docs/{file.Path}")"
+            <MudNavLink Href="@($"pages/{file.Path}")"
                         Match="NavLinkMatch.All"
                         Icon="@Icons.Material.Filled.Description">
                 @file.Title
@@ -43,21 +43,21 @@
         _markdownFiles.Clear();
 
         var root = RootManager.Root;
-        if (root is StorageContainer storage)
+        if (root is FluentStorageContainer storage)
         {
-            CollectMarkdownFiles(storage, "");
+            // Start with "Children" property path
+            CollectMarkdownFiles(storage.Children, "Children");
         }
     }
 
-    private void CollectMarkdownFiles(StorageContainer container, string basePath)
+    private void CollectMarkdownFiles(Dictionary<string, IInterceptorSubject> children, string basePath)
     {
-        foreach (var child in container.Children.Values)
+        foreach (var (name, child) in children)
         {
             if (child is MarkdownFile markdown)
             {
-                var path = string.IsNullOrEmpty(basePath)
-                    ? markdown.FileName
-                    : $"{basePath}/{markdown.FileName}";
+                // Property path format: Children/key
+                var path = $"{basePath}/{name}";
 
                 _markdownFiles.Add(new MarkdownFileInfo
                 {
@@ -66,12 +66,11 @@
                     Order = GetOrder(markdown)
                 });
             }
-            else if (child is StorageContainer subContainer)
+            else if (child is VirtualFolder folder)
             {
-                var subPath = string.IsNullOrEmpty(basePath)
-                    ? subContainer.Name ?? ""
-                    : $"{basePath}/{subContainer.Name}";
-                CollectMarkdownFiles(subContainer, subPath);
+                // Property path format: basePath/key/Children
+                var subPath = $"{basePath}/{name}/Children";
+                CollectMarkdownFiles(folder.Children, subPath);
             }
         }
 

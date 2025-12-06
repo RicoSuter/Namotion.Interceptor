@@ -1,5 +1,6 @@
 @using Namotion.Interceptor
 @using Namotion.Interceptor.Registry.Abstractions
+@using System.Collections
 @inherits HomeBlazorComponentBase
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
@@ -183,14 +184,36 @@
 
     private IInterceptorSubject? FindChildByIndex(RegisteredSubjectProperty property, string indexStr)
     {
-        foreach (var child in property.Children)
+        // Get the property value directly instead of using cached registry children
+        var value = property.GetValue();
+        if (value == null)
+            return null;
+
+        // Handle Dictionary<string, IInterceptorSubject>
+        if (value is IDictionary dict)
         {
-            var childIndex = child.Index?.ToString();
-            if (childIndex == indexStr)
+            foreach (DictionaryEntry entry in dict)
             {
-                return child.Subject;
+                var key = entry.Key?.ToString();
+                if (key == indexStr && entry.Value is IInterceptorSubject subject)
+                    return subject;
             }
         }
+        // Handle List/Array with numeric index
+        else if (value is IEnumerable enumerable and not string)
+        {
+            if (int.TryParse(indexStr, out var index))
+            {
+                var i = 0;
+                foreach (var item in enumerable)
+                {
+                    if (i == index && item is IInterceptorSubject subject)
+                        return subject;
+                    i++;
+                }
+            }
+        }
+
         return null;
     }
 
