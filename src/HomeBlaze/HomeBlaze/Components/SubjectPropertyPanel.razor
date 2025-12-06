@@ -10,27 +10,26 @@
 
 @if (Subject != null)
 {
-    @* Header *@
-    <MudListSubheader Class="pa-0">
+    @* Header - Fixed at top *@
+    <MudListSubheader Style="flex-shrink: 0;">
         @if (CanClose)
         {
             <MudFab OnClick="@(() => OnClose.InvokeAsync())"
                     Color="Color.Primary"
                     StartIcon="@Icons.Material.Filled.Close"
                     Size="Size.Small"
-                    Style="float: right; margin-right: 5px" />
+                    Style="float: right" />
         }
 
-        <h1 style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0; font-size: 1.25rem;">
-            <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" />
+        <h1 style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0;">
+            <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" Class="mr-2" Style="vertical-align: middle;" />
             @GetSubjectTitle()
         </h1>
-        <MudText Typo="Typo.caption" Color="Color.Secondary">@Subject.GetType().Name</MudText>
     </MudListSubheader>
 
-    <div style="height: calc(100% - 70px); overflow-y: auto; padding-top: 16px;">
-        @* Action Buttons *@
-        <div class="mb-4">
+    <div style="flex: 1; overflow-y: auto; overflow-x: hidden;">
+        <MudListSubheader Style="word-break: break-word;">
+            @* Action Buttons *@
             @if (HasConfigurationProperties())
             {
                 <MudIconButton OnClick="@OpenConfigurationDialog"
@@ -46,18 +45,21 @@
                            Color="Color.Error"
                            Size="Size.Small"
                            Class="mr-2" />
-        </div>
 
-        @* Primitive Properties *@
-        @foreach (var prop in GetPrimitiveProperties())
-        {
-            @RenderProperty(prop, 0)
-        }
-
-        @if (GetPrimitiveProperties().Any())
-        {
             <br />
-        }
+            <br />
+
+            @* Primitive Properties *@
+            @foreach (var prop in GetPrimitiveProperties())
+            {
+                @RenderProperty(prop, 0)
+            }
+
+            @if (GetPrimitiveProperties().Any())
+            {
+                <br />
+            }
+        </MudListSubheader>
 
         @* Child Collections *@
         @foreach (var property in GetChildProperties())
@@ -66,12 +68,12 @@
             @if (children.Length == 1)
             {
                 @* Single child - no expansion panel *@
-                <MudList T="object" Dense="true" Class="pa-0">
+                <MudList T="object" SelectedValue="SelectedChild" Style="padding-top: 0; padding-bottom: 0">
                     @{
                         var child = children[0];
                         var isSelected = child.Subject == SelectedChild;
                     }
-                    <MudListItem Value="@child"
+                    <MudListItem Value="@child.Subject"
                                  OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
                                  Icon="@GetSubjectIcon(child.Subject)"
                                  IconColor="Color.Default">
@@ -81,10 +83,10 @@
                                 <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
                             </div>
                         }
-                        @GetSubjectDisplayName(child)
+                        <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
                         @if (HasChildren(child))
                         {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-2">@GetChildCount(child)</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Dark">@GetChildCount(child)</MudChip>
                         }
                     </MudListItem>
                     <MudDivider />
@@ -92,17 +94,17 @@
             }
             else if (children.Length > 1)
             {
-                <MudExpansionPanel Dense="true" Expanded="true">
+                <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="px-4">
                     <TitleContent>
                         @GetPropertyDisplayName(property)
-                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-2">@children.Length</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Dark">@children.Length</MudChip>
                     </TitleContent>
                     <ChildContent>
-                        <MudList T="object" Dense="true" Class="pa-0">
+                        <MudList T="object" SelectedValue="SelectedChild">
                             @foreach (var child in children)
                             {
                                 var isSelected = child.Subject == SelectedChild;
-                                <MudListItem Value="@child"
+                                <MudListItem Value="@child.Subject"
                                              OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
                                              Icon="@GetSubjectIcon(child.Subject)"
                                              IconColor="Color.Default">
@@ -112,10 +114,10 @@
                                             <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
                                         </div>
                                     }
-                                    @GetSubjectDisplayName(child)
+                                    <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
                                     @if (HasChildren(child))
                                     {
-                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-2">@GetChildCount(child)</MudChip>
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark">@GetChildCount(child)</MudChip>
                                     }
                                 </MudListItem>
                                 <MudDivider />
@@ -128,14 +130,19 @@
 
         @* Details Accordion *@
         <br />
-        <MudExpansionPanels MultiExpansion="true" Elevation="0" Dense="true">
-            <MudExpansionPanel Text="Details" Expanded="false">
-                <div class="ml-4">
-                    <small style="word-break: break-all">
-                        <p><strong>Path:</strong> @GetObjectPath()</p>
-                        <p><strong>Type:</strong> @Subject.GetType().FullName</p>
-                    </small>
-                </div>
+        <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Style="overflow: hidden;">
+            <MudExpansionPanel Expanded="false" Gutters="false" Class="px-4">
+                <TitleContent>
+                    Details
+                </TitleContent>
+                <ChildContent>
+                    <div class="mb-4">
+                        <small style="word-break: break-all;">
+                            <p class="my-1"><strong>ID:</strong> @GetObjectPath()</p>
+                            <p class="my-1"><strong>Type:</strong> @Subject.GetType().FullName</p>
+                        </small>
+                    </div>
+                </ChildContent>
             </MudExpansionPanel>
         </MudExpansionPanels>
     </div>
@@ -235,21 +242,22 @@
         var marginLeft = depth * 24;
         var displayName = prop.IsAttribute ? prop.AttributeMetadata.AttributeName : GetPropertyDisplayName(prop);
 
-        <div class="mb-1" style="margin-left: @(marginLeft)px; @(value is null ? "opacity: 0.5" : "")">
+        <MudText Style="@($"margin-left: {marginLeft}px; {(value is null ? "opacity: 0.5" : "")}")">
             @if (hasAttributes)
             {
                 <MudIconButton Icon="@(isExpanded ? Icons.Material.Filled.ArrowDropDown : Icons.Material.Filled.ArrowRight)"
                                Size="Size.Small"
-                               Style="padding: 0; margin-right: 4px; width: 20px; height: 20px;"
+                               Class="mr-1"
+                               Style="padding: 0; width: 20px; height: 20px;"
                                OnClick="@(() => TogglePropertyExpanded(prop.Name))" />
             }
-            else
+            else if (depth > 0)
             {
                 <span style="display: inline-block; width: 24px;"></span>
             }
             <strong>@displayName: </strong>
             @RenderPropertyValue(prop, value)
-        </div>
+        </MudText>
 
         @if (isExpanded)
         {

@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Attributes;
@@ -9,7 +10,7 @@ namespace HomeBlaze.Core.Subjects;
 /// Sample motor subject with configuration and simulated sensor values.
 /// </summary>
 [InterceptorSubject]
-public partial class Motor : BackgroundService
+public partial class Motor : BackgroundService, IPersistentSubject
 {
     // Configuration (persisted to JSON)
 
@@ -129,6 +130,17 @@ public partial class Motor : BackgroundService
 
         Status = MotorStatus.Stopped;
         Temperature = 25.0;
+    }
+
+    /// <summary>
+    /// IPersistentSubject implementation - called after configuration properties have been updated.
+    /// </summary>
+    public Task ReloadAsync(CancellationToken cancellationToken = default)
+    {
+        // Properties are already updated by the storage container.
+        // Override this method if you need to react to configuration changes
+        // (e.g., restart a connection, recalculate derived values, etc.)
+        return Task.CompletedTask;
     }
 }
 

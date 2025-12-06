@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Storage;
 using HomeBlaze.Core.Services;
@@ -9,7 +10,7 @@ namespace HomeBlaze.Tests;
 
 // Test fixture for StorageService tests
 [InterceptorSubject]
-public partial class TestConfigurableSubject
+public partial class TestConfigurableSubject : IPersistentSubject
 {
     [Configuration]
     public partial string Name { get; set; }
@@ -25,6 +26,12 @@ public partial class TestConfigurableSubject
         Name = string.Empty;
         Value = 0;
         NonConfigProperty = string.Empty;
+    }
+
+    public Task ReloadAsync(CancellationToken cancellationToken = default)
+    {
+        // Properties are already updated by the storage container
+        return Task.CompletedTask;
     }
 }
 

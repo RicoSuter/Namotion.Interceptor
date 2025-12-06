@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Core.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
@@ -13,6 +13,7 @@ namespace HomeBlaze.Core.Services;
 /// Serializes and deserializes InterceptorSubject instances to/from JSON.
 /// Uses "Type" discriminator for polymorphic deserialization.
 /// Only serializes properties marked with [Configuration].
+/// Only types implementing IPersistent can be deserialized.
 /// </summary>
 public class SubjectSerializer
 {
@@ -67,11 +68,8 @@ public class SubjectSerializer
         if (type == null)
             throw new InvalidOperationException($"Unknown type: {typeName}. Make sure it's registered in SubjectTypeRegistry.");
 
-        // Check if this type has [Configuration] properties using reflection (before instance creation)
-        // We need to use reflection here because we don't have a subject instance yet
-        var hasConfigurable = type.GetProperties()
-            .Any(p => p.GetCustomAttribute<ConfigurationAttribute>() is not null);
-        if (!hasConfigurable)
+        // Only types implementing IPersistentSubject can be deserialized
+        if (!typeof(IPersistentSubject).IsAssignableFrom(type))
             return null;
 
         // Create instance
