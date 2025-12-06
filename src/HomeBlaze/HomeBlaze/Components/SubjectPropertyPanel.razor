@@ -1,6 +1,7 @@
-@using System.Reflection
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Core.Extensions
+@using Namotion.Interceptor
 @using Namotion.Interceptor.Registry.Abstractions
 
 @inject IDialogService DialogService
@@ -50,11 +51,7 @@
         @* Primitive Properties *@
         @foreach (var prop in GetPrimitiveProperties())
         {
-            var value = prop.GetValue();
-            <MudText Style="@(value is null ? "opacity: 0.5" : "")" Class="mb-1">
-                <strong>@GetPropertyDisplayName(prop): </strong>
-                @RenderPropertyValue(prop, value)
-            </MudText>
+            @RenderProperty(prop, 0)
         }
 
         @if (GetPrimitiveProperties().Any())
@@ -170,6 +167,7 @@
     public EventCallback OnDelete { get; set; }
 
     private RegisteredSubject? _registeredSubject;
+    private HashSet<string> _expandedProperties = new();
 
     protected override void OnParametersSet()
     {
@@ -204,73 +202,67 @@
 
     private IEnumerable<RegisteredSubjectProperty> GetPrimitiveProperties()
     {
-        EnsureSubjectRegistered();
-
         if (_registeredSubject == null)
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => HasStateAttribute(p) && !HasChildSubjects(p))
-            .OrderBy(GetStateOrder);
+            .Where(p => p.GetStateAttribute() != null && !HasChildSubjects(p))
+            .OrderBy(p => p.GetDisplayOrder());
     }
 
     private IEnumerable<RegisteredSubjectProperty> GetChildProperties()
     {
-        EnsureSubjectRegistered();
-
         if (_registeredSubject == null)
             return [];
 
         return _registeredSubject.Properties
             .Where(p => !p.IsAttribute && HasChildSubjects(p))
-            .OrderBy(GetStateOrder);
+            .OrderBy(p => p.GetDisplayOrder());
     }
 
-    private void EnsureSubjectRegistered()
+    private void TogglePropertyExpanded(string propertyName)
     {
-        if (_registeredSubject != null || Subject == null || SubjectRegistry == null)
-            return;
+        if (!_expandedProperties.Remove(propertyName))
+            _expandedProperties.Add(propertyName);
+    }
 
-        // Access all properties to trigger registration
-        var props = Subject.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        foreach (var prop in props)
-        {
-            if (prop.CanRead)
+    private RenderFragment RenderProperty(RegisteredSubjectProperty prop, int depth) => __builder =>
+    {
+        var value = prop.GetValue();
+        var attributes = prop.Attributes.ToArray();
+        var hasAttributes = attributes.Length > 0;
+        var isExpanded = _expandedProperties.Contains(prop.Name);
+        var marginLeft = depth * 24;
+        var displayName = prop.IsAttribute ? prop.AttributeMetadata.AttributeName : GetPropertyDisplayName(prop);
+
+        <div class="mb-1" style="margin-left: @(marginLeft)px; @(value is null ? "opacity: 0.5" : "")">
+            @if (hasAttributes)
             {
-                try
-                {
-                    _ = prop.GetValue(Subject);
-                }
-                catch
-                {
-                    // Ignore errors accessing properties
-                }
+                <MudIconButton Icon="@(isExpanded ? Icons.Material.Filled.ArrowDropDown : Icons.Material.Filled.ArrowRight)"
+                               Size="Size.Small"
+                               Style="padding: 0; margin-right: 4px; width: 20px; height: 20px;"
+                               OnClick="@(() => TogglePropertyExpanded(prop.Name))" />
+            }
+            else
+            {
+                <span style="display: inline-block; width: 24px;"></span>
+            }
+            <strong>@displayName: </strong>
+            @RenderPropertyValue(prop, value)
+        </div>
+
+        @if (isExpanded)
+        {
+            foreach (var attr in attributes)
+            {
+                @RenderProperty(attr, depth + 1)
             }
         }
-
-        // Try to get registered subject again
-        _registeredSubject = SubjectRegistry.TryGetRegisteredSubject(Subject);
-    }
-
-    private bool HasStateAttribute(RegisteredSubjectProperty property)
-    {
-        return property.Reference.Metadata.Attributes.OfType<StateAttribute>().Any();
-    }
-
-    private StateAttribute? GetStateAttribute(RegisteredSubjectProperty property)
-    {
-        return property.Reference.Metadata.Attributes.OfType<StateAttribute>().FirstOrDefault();
-    }
-
-    private int GetStateOrder(RegisteredSubjectProperty property)
-    {
-        return GetStateAttribute(property)?.Order ?? int.MaxValue;
-    }
+    };
 
     private string GetPropertyDisplayName(RegisteredSubjectProperty property)
     {
-        var stateAttr = GetStateAttribute(property);
-        return stateAttr?.Name ?? property.Name;
+        return property.GetDisplayName();
     }
 
     private bool HasChildSubjects(RegisteredSubjectProperty property)
@@ -283,7 +275,7 @@
         if (value == null) return "null";
 
         // Use StateAttribute's GetDisplayText for unit formatting
-        var stateAttr = GetStateAttribute(prop);
+        var stateAttr = prop.GetStateAttribute();
         if (stateAttr != null && stateAttr.Unit != StateUnit.Default)
         {
             return stateAttr.GetDisplayText(value);
@@ -333,11 +325,7 @@
 
     private bool HasConfigurationProperties()
     {
-        if (_registeredSubject == null)
-            return false;
-
-        return _registeredSubject.Properties.Any(p =>
-            p.Reference.Metadata.Attributes.OfType<ConfigurationAttribute>().Any());
+        return Subject?.HasConfigurationProperties() ?? false;
     }
 
     private async Task OpenConfigurationDialog()

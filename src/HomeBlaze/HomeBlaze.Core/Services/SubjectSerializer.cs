@@ -2,8 +2,10 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Core.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Core.Services;
 
@@ -57,12 +59,20 @@ public class SubjectSerializer
         }
 
         var typeName = typeElement.GetString();
+
         if (string.IsNullOrWhiteSpace(typeName))
             return null;
 
         var type = _typeRegistry.ResolveType(typeName);
         if (type == null)
             throw new InvalidOperationException($"Unknown type: {typeName}. Make sure it's registered in SubjectTypeRegistry.");
+
+        // Check if this type has [Configuration] properties using reflection (before instance creation)
+        // We need to use reflection here because we don't have a subject instance yet
+        var hasConfigurable = type.GetProperties()
+            .Any(p => p.GetCustomAttribute<ConfigurationAttribute>() is not null);
+        if (!hasConfigurable)
+            return null;
 
         // Create instance
         var subject = CreateInstance(type, context);
@@ -99,17 +109,11 @@ public class SubjectSerializer
         // Write type discriminator
         writer.WriteString(TypeDiscriminator, type.FullName);
 
-        // Write [Configuration] properties
-        foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        // Write [Configuration] properties using registry (no reflection)
+        foreach (var regProperty in subject.GetConfigurationProperties())
         {
-            if (property.GetCustomAttribute<ConfigurationAttribute>() == null)
-                continue;
-
-            if (!property.CanRead)
-                continue;
-
-            var value = property.GetValue(subject);
-            var propertyName = JsonNamingPolicy.CamelCase.ConvertName(property.Name);
+            var value = regProperty.GetValue();
+            var propertyName = JsonNamingPolicy.CamelCase.ConvertName(regProperty.Name);
 
             if (value == null)
             {
@@ -133,10 +137,10 @@ public class SubjectSerializer
     private IInterceptorSubject? CreateInstance(Type type, IInterceptorSubjectContext context)
     {
         // Try constructor with context parameter first
-        var ctorWithContext = type.GetConstructor(new[] { typeof(IInterceptorSubjectContext) });
+        var ctorWithContext = type.GetConstructor([typeof(IInterceptorSubjectContext)]);
         if (ctorWithContext != null)
         {
-            return (IInterceptorSubject)ctorWithContext.Invoke(new object[] { context });
+            return (IInterceptorSubject)ctorWithContext.Invoke([context]);
         }
 
         // Try using service provider for DI (supports complex constructors)
@@ -175,40 +179,73 @@ public class SubjectSerializer
 
     private void PopulateProperties(IInterceptorSubject subject, JsonElement element, IInterceptorSubjectContext context)
     {
-        var type = subject.GetType();
+        // Use registry for property lookup (subject is now instantiated and registered)
+        var registered = subject.TryGetRegisteredSubject();
 
         foreach (var jsonProperty in element.EnumerateObject())
         {
             if (jsonProperty.Name.Equals(TypeDiscriminator, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            // Find matching property (case-insensitive)
-            var property = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            // Try registry first for property lookup
+            var regProperty = registered?.Properties
                 .FirstOrDefault(p => p.Name.Equals(jsonProperty.Name, StringComparison.OrdinalIgnoreCase));
 
-            if (property == null || !property.CanWrite)
-                continue;
-
-            try
+            if (regProperty != null && regProperty.HasSetter)
             {
-                object? value;
-
-                if (typeof(IInterceptorSubject).IsAssignableFrom(property.PropertyType))
+                try
                 {
-                    // Nested subject
-                    value = DeserializeElement(jsonProperty.Value, context);
-                }
-                else
-                {
-                    // Regular value
-                    value = JsonSerializer.Deserialize(jsonProperty.Value.GetRawText(), property.PropertyType, _jsonOptions);
-                }
+                    object? value;
 
-                property.SetValue(subject, value);
+                    if (typeof(IInterceptorSubject).IsAssignableFrom(regProperty.Type))
+                    {
+                        // Nested subject
+                        value = DeserializeElement(jsonProperty.Value, context);
+                    }
+                    else
+                    {
+                        // Regular value
+                        value = JsonSerializer.Deserialize(jsonProperty.Value.GetRawText(), regProperty.Type, _jsonOptions);
+                    }
+
+                    regProperty.SetValue(value);
+                }
+                catch
+                {
+                    // Skip properties that can't be set
+                }
             }
-            catch (Exception)
+            else
             {
-                // Skip properties that can't be set
+                // Fall back to reflection for properties not in registry
+                var type = subject.GetType();
+                var property = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(p => p.Name.Equals(jsonProperty.Name, StringComparison.OrdinalIgnoreCase));
+
+                if (property == null || !property.CanWrite)
+                    continue;
+
+                try
+                {
+                    object? value;
+
+                    if (typeof(IInterceptorSubject).IsAssignableFrom(property.PropertyType))
+                    {
+                        // Nested subject
+                        value = DeserializeElement(jsonProperty.Value, context);
+                    }
+                    else
+                    {
+                        // Regular value
+                        value = JsonSerializer.Deserialize(jsonProperty.Value.GetRawText(), property.PropertyType, _jsonOptions);
+                    }
+
+                    property.SetValue(subject, value);
+                }
+                catch
+                {
+                    // Skip properties that can't be set
+                }
             }
         }
     }
