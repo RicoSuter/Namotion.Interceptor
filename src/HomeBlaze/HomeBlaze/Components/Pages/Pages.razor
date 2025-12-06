@@ -3,7 +3,9 @@
 @using HomeBlaze.Core.Services
 @using Namotion.Interceptor
 @using Namotion.Interceptor.Registry.Abstractions
+
 @inherits HomeBlazorComponentBase
+
 @inject SubjectComponentRegistry ComponentRegistry
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
@@ -41,6 +43,7 @@ else
         _componentType = null;
         _title = "";
 
+        EnableTracking = false;
         if (Root == null)
             return;
 

@@ -17,6 +17,9 @@ public abstract class ContextTrackingComponentBase : ComponentBase, IDisposable
     /// Implement this property to provide the context from your specific source.
     /// </summary>
     protected abstract IInterceptorSubjectContext? TrackingContext { get; }
+    
+    // TODO: Remove as soon as we have correct tracking here, currently needed to avoid flickering
+    public bool EnableTracking { get; set; } = true;
 
     protected override void OnInitialized()
     {
@@ -34,7 +37,13 @@ public abstract class ContextTrackingComponentBase : ComponentBase, IDisposable
         _subscription?.Dispose();
         _subscription = TrackingContext?
             .GetPropertyChangeObservable()
-            .Subscribe(_ => InvokeAsync(StateHasChanged));
+            .Subscribe(_ =>
+            {
+                if (EnableTracking)
+                {
+                    InvokeAsync(StateHasChanged);
+                }
+            });
     }
 
     public virtual void Dispose()

@@ -12,14 +12,16 @@
     <MudSpacer />
 </MudStack>
 
-<div id="scrollContainer" style="height: calc(100% - 60px); overflow-x: auto; overflow-y: hidden; display: flex; gap: 8px;">
+<div id="scrollContainer" style="height: calc(100% - 48px); width: 100%; overflow-x: auto; overflow-y: hidden; display: flex; padding: 0 16px 16px 16px;">
     @for (int i = 0; i < _panes.Count; i++)
     {
         var pane = _panes[i];
         var isFirst = i == 0;
         var selectedChild = i < _panes.Count - 1 ? _panes[i + 1].Subject : null;
 
-        <MudPaper Class="subject-pane" Elevation="1" Style="width: 480px; min-width: 480px; max-width: 480px; height: 100%; overflow-y: auto; padding: 16px;">
+        <MudPaper Width="@((_paneWidth - 16) + "px")"
+                  Class="mr-4"
+                  Style="@($"min-width: {_paneWidth - 16}px; flex-shrink: 0; height: 100%; display: flex; flex-direction: column;")">
             <SubjectPropertyPanel
                 Subject="@pane.Subject"
                 SubjectRegistry="@_subjectRegistry"
@@ -34,7 +36,7 @@
 </div>
 
 @code {
-    private const int PaneWidth = 480;
+    private decimal _paneWidth = 400;
 
     [Parameter]
     public string? Path { get; set; }
@@ -73,7 +75,7 @@
         if (_scrollToLastPane && _jsModule != null)
         {
             _scrollToLastPane = false;
-            var scrollLeft = PaneWidth * (_panes.Count - 1) + (_panes.Count - 1) * 8; // 8px gap
+            var scrollLeft = _paneWidth * (_panes.Count - 1);
             await _jsModule.InvokeVoidAsync("scrollIntoView", "scrollContainer", scrollLeft);
         }
 
@@ -190,9 +192,9 @@
             return null;
 
         // Handle Dictionary<string, IInterceptorSubject>
-        if (value is IDictionary dict)
+        if (value is IDictionary dictionary)
         {
-            foreach (DictionaryEntry entry in dict)
+            foreach (DictionaryEntry entry in dictionary)
             {
                 var key = entry.Key?.ToString();
                 if (key == indexStr && entry.Value is IInterceptorSubject subject)
@@ -327,7 +329,7 @@
             {
                 await _jsModule.DisposeAsync();
             }
-            catch (Microsoft.JSInterop.JSDisconnectedException)
+            catch (JSDisconnectedException)
             {
                 // Circuit already disconnected, nothing to clean up
             }

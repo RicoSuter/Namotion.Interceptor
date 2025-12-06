@@ -9,7 +9,7 @@ namespace HomeBlaze.Storage.Files;
 /// Binary content is accessed via methods to avoid tracking overhead.
 /// </summary>
 [InterceptorSubject]
-public partial class GenericFile : IIconProvider, IStorageItem, ITitleProvider
+public partial class GenericFile : IIconProvider, IStorageItem, ITitleProvider, IPersistentSubject
 {
     // MudBlazor Icons.Material.Filled.InsertDriveFile
     private const string FileIcon = "<svg style=\"width:24px;height:24px\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M6,2A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2H6M13,3.5L18.5,9H13V3.5Z\" /></svg>";
@@ -88,5 +88,20 @@ public partial class GenericFile : IIconProvider, IStorageItem, ITitleProvider
         var fileInfo = new FileInfo(FilePath);
         FileSize = fileInfo.Length;
         LastModified = fileInfo.LastWriteTimeUtc;
+    }
+
+    /// <summary>
+    /// IPersistentSubject implementation - reloads file metadata.
+    /// </summary>
+    public Task ReloadAsync(CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrEmpty(FilePath) && File.Exists(FilePath))
+        {
+            var fileInfo = new FileInfo(FilePath);
+            FileSize = fileInfo.Length;
+            LastModified = fileInfo.LastWriteTimeUtc;
+        }
+
+        return Task.CompletedTask;
     }
 }
