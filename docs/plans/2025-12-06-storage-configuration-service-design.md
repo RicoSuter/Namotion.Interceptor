@@ -30,20 +30,7 @@ public interface ISubjectStorageHandler
 }
 ```
 
-### 3. IFileSubject
-
-Interface for file-backed subjects with save capability.
-
-```csharp
-// HomeBlaze.Abstractions/Storage/IFileSubject.cs
-public interface IFileSubject
-{
-    Storage Storage { get; }
-    string BlobPath { get; }
-}
-```
-
-### 4. StorageService
+### 3. StorageService
 
 Background service that listens to property changes and auto-saves configurations.
 
@@ -73,7 +60,7 @@ public class StorageService : BackgroundService
 }
 ```
 
-### 5. Storage
+### 4. Storage
 
 Root of a storage context using FluentStorage. Implements `ISubjectStorageHandler`.
 
@@ -111,7 +98,7 @@ public partial class Storage : BackgroundService, ISubjectStorageHandler, ITitle
 }
 ```
 
-### 6. VirtualFolder
+### 5. VirtualFolder
 
 Hierarchical grouping that delegates operations to parent Storage.
 
@@ -140,7 +127,7 @@ public partial class VirtualFolder : ITitleProvider
 }
 ```
 
-### 7. FileSubjectFactory
+### 6. FileSubjectFactory
 
 Creates file subjects based on extension registry.
 
@@ -185,12 +172,12 @@ public class FileSubjectFactory
 }
 ```
 
-### 8. File Subject Types
+### 7. File Subject Types
 
 ```csharp
 // HomeBlaze.Storage/Files/MarkdownFile.cs
 [InterceptorSubject]
-public partial class MarkdownFile : IFileSubject, ITitleProvider
+public partial class MarkdownFile : ITitleProvider
 {
     public Storage Storage { get; }
     public string BlobPath { get; }
@@ -207,7 +194,7 @@ public partial class MarkdownFile : IFileSubject, ITitleProvider
 
 // HomeBlaze.Storage/Files/JsonFile.cs
 [InterceptorSubject]
-public partial class JsonFile : IFileSubject, ITitleProvider
+public partial class JsonFile : ITitleProvider
 {
     public Storage Storage { get; }
     public string BlobPath { get; }
@@ -224,7 +211,7 @@ public partial class JsonFile : IFileSubject, ITitleProvider
 
 // HomeBlaze.Storage/Files/GenericFile.cs
 [InterceptorSubject]
-public partial class GenericFile : IFileSubject
+public partial class GenericFile
 {
     public Storage Storage { get; }
     public string BlobPath { get; }
@@ -305,14 +292,13 @@ public class RootManager : ISubjectStorageHandler, IDisposable
 5. **PropertyChangeQueue** - StorageService uses high-perf queue, not Observable
 6. **Retry with backoff** - IOException triggers retry queue with exponential backoff
 7. **FileSubjectFactory** - Uses SubjectTypeRegistry for extensible file type mapping
-8. **IFileSubject.SaveAsync()** - Text files save via property, GenericFile takes Stream param
+8. **No IFileSubject interface** - File types have Storage/BlobPath/SaveAsync directly (simpler)
 
 ## Files to Create/Modify
 
 ### New Files
 - `HomeBlaze.Abstractions/Attributes/ConfigurableAttribute.cs`
 - `HomeBlaze.Abstractions/Storage/ISubjectStorageHandler.cs`
-- `HomeBlaze.Abstractions/Storage/IFileSubject.cs`
 - `HomeBlaze.Core/Services/StorageService.cs`
 - `HomeBlaze.Storage/Storage.cs`
 - `HomeBlaze.Storage/VirtualFolder.cs`
@@ -321,8 +307,8 @@ public class RootManager : ISubjectStorageHandler, IDisposable
 
 ### Modified Files
 - `HomeBlaze.Core/Services/RootManager.cs` - Implement ISubjectStorageHandler
-- `HomeBlaze.Storage/Files/MarkdownFile.cs` - Add IFileSubject, Storage ref, SaveAsync
-- `HomeBlaze.Storage/Files/GenericFile.cs` - Add IFileSubject, stream-based API
+- `HomeBlaze.Storage/Files/MarkdownFile.cs` - Add Storage ref, BlobPath, SaveAsync
+- `HomeBlaze.Storage/Files/GenericFile.cs` - Add Storage ref, BlobPath, stream-based API
 
 ### Removed Files
 - `HomeBlaze.Storage/StorageContainer.cs` - Replaced by Storage
