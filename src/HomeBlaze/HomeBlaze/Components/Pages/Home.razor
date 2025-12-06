@@ -102,22 +102,22 @@
         _fileCount = 0;
         _subjectCount = 0;
 
-        if (Root is StorageContainer storage)
+        if (Root is FluentStorageContainer storage)
         {
-            CountItems(storage);
+            CountItems(storage.Children);
         }
     }
 
-    private void CountItems(StorageContainer container)
+    private void CountItems(Dictionary<string, IInterceptorSubject> children)
     {
-        foreach (var child in container.Children.Values)
+        foreach (var child in children.Values)
         {
             _subjectCount++;
 
-            if (child is StorageContainer subContainer)
+            if (child is VirtualFolder folder)
             {
                 _folderCount++;
-                CountItems(subContainer);
+                CountItems(folder.Children);
             }
             else
             {

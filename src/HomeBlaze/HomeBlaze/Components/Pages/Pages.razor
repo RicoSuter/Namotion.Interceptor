@@ -48,6 +48,12 @@ else
         if (registry == null)
             return;
 
+        // Ensure root is registered by accessing a property
+        if (Root is FluentStorageContainer storage)
+        {
+            _ = storage.Children; // Trigger registration
+        }
+
         _subject = SubjectPathResolver.ResolveSubject(Root, registry, Path ?? "");
 
         if (_subject != null)

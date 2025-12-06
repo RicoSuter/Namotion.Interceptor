@@ -1,14 +1,13 @@
 @using System.Reflection
-@using System.Collections
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
-@using Microsoft.AspNetCore.Components.Web
-@using Namotion.Interceptor
 @using Namotion.Interceptor.Registry.Abstractions
+
 @inject IDialogService DialogService
+
 @inherits HomeBlazorComponentBase
 
-@if (Subject != null && _registeredSubject != null)
+@if (Subject != null)
 {
     @* Header *@
     <MudListSubheader Class="pa-0">
@@ -64,21 +63,20 @@
         }
 
         @* Child Collections *@
-        @foreach (var prop in GetChildProperties())
+        @foreach (var property in GetChildProperties())
         {
-            var children = GetChildSubjects(prop).ToList();
-
-            @if (children.Count == 1)
+            var children = property.Children;
+            @if (children.Length == 1)
             {
                 @* Single child - no expansion panel *@
                 <MudList T="object" Dense="true" Class="pa-0">
                     @{
-                        var (child, key) = children[0];
-                        var isSelected = child == SelectedChild;
+                        var child = children[0];
+                        var isSelected = child.Subject == SelectedChild;
                     }
                     <MudListItem Value="@child"
-                                 OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, key, child)))"
-                                 Icon="@GetSubjectIcon(child)"
+                                 OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
+                                 Icon="@GetSubjectIcon(child.Subject)"
                                  IconColor="Color.Default">
                         @if (isSelected)
                         {
@@ -95,21 +93,21 @@
                     <MudDivider />
                 </MudList>
             }
-            else if (children.Count > 1)
+            else if (children.Length > 1)
             {
-                <MudExpansionPanel Dense="true" Expanded="@ShouldExpand(prop)">
+                <MudExpansionPanel Dense="true" Expanded="true">
                     <TitleContent>
-                        @GetPropertyDisplayName(prop)
-                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-2">@children.Count</MudChip>
+                        @GetPropertyDisplayName(property)
+                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-2">@children.Length</MudChip>
                     </TitleContent>
                     <ChildContent>
                         <MudList T="object" Dense="true" Class="pa-0">
-                            @foreach (var (child, key) in children)
+                            @foreach (var child in children)
                             {
-                                var isSelected = child == SelectedChild;
+                                var isSelected = child.Subject == SelectedChild;
                                 <MudListItem Value="@child"
-                                             OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, key, child)))"
-                                             Icon="@GetSubjectIcon(child)"
+                                             OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
+                                             Icon="@GetSubjectIcon(child.Subject)"
                                              IconColor="Color.Default">
                                     @if (isSelected)
                                     {
@@ -183,21 +181,12 @@
 
     private string GetSubjectTitle()
     {
-        if (Subject == null) return "No Selection";
-
-        // Check for ITitleProvider
-        if (Subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
-            return titleProvider.Title;
-
-        // Fallback to Name property
-        var nameProp = Subject.GetType().GetProperty("Name");
-        if (nameProp != null)
+        return Subject switch
         {
-            var name = nameProp.GetValue(Subject) as string;
-            if (!string.IsNullOrEmpty(name)) return name;
-        }
-
-        return Subject.GetType().Name;
+            null => "No Selection",
+            ITitleProvider titleProvider when !string.IsNullOrEmpty(titleProvider.Title) => titleProvider.Title,
+            _ => Subject.GetType().Name
+        };
     }
 
     private string GetSubjectIcon(IInterceptorSubject? subject)
@@ -215,124 +204,92 @@
 
     private IEnumerable<RegisteredSubjectProperty> GetPrimitiveProperties()
     {
+        EnsureSubjectRegistered();
+
         if (_registeredSubject == null)
-            return Enumerable.Empty<RegisteredSubjectProperty>();
+            return [];
 
         return _registeredSubject.Properties
             .Where(p => HasStateAttribute(p) && !HasChildSubjects(p))
-            .OrderBy(p => GetStateOrder(p))
-            .ThenBy(p => GetPropertyDisplayName(p));
+            .OrderBy(GetStateOrder);
     }
 
     private IEnumerable<RegisteredSubjectProperty> GetChildProperties()
     {
+        EnsureSubjectRegistered();
+
         if (_registeredSubject == null)
-            return Enumerable.Empty<RegisteredSubjectProperty>();
+            return [];
 
         return _registeredSubject.Properties
-            .Where(p => HasStateAttribute(p) && HasChildSubjects(p))
-            .OrderBy(p => GetStateOrder(p))
-            .ThenBy(p => GetPropertyDisplayName(p));
+            .Where(p => !p.IsAttribute && HasChildSubjects(p))
+            .OrderBy(GetStateOrder);
     }
 
-    private bool HasStateAttribute(RegisteredSubjectProperty prop)
+    private void EnsureSubjectRegistered()
     {
-        if (Subject == null) return false;
-        var propertyInfo = Subject.GetType().GetProperty(prop.Name);
-        return propertyInfo?.GetCustomAttribute<StateAttribute>(true) != null;
-    }
+        if (_registeredSubject != null || Subject == null || SubjectRegistry == null)
+            return;
 
-    private StateAttribute? GetStateAttribute(RegisteredSubjectProperty prop)
-    {
-        if (Subject == null) return null;
-        var propertyInfo = Subject.GetType().GetProperty(prop.Name);
-        return propertyInfo?.GetCustomAttribute<StateAttribute>(true);
-    }
-
-    private int GetStateOrder(RegisteredSubjectProperty prop)
-    {
-        return GetStateAttribute(prop)?.Order ?? int.MaxValue;
-    }
-
-    private string GetPropertyDisplayName(RegisteredSubjectProperty prop)
-    {
-        var stateAttr = GetStateAttribute(prop);
-        return stateAttr?.Name ?? prop.BrowseName;
-    }
-
-    private bool HasChildSubjects(RegisteredSubjectProperty prop)
-    {
-        var value = prop.GetValue();
-        if (value == null) return false;
-
-        if (value is IInterceptorSubject) return true;
-
-        if (value is IDictionary dict)
+        // Access all properties to trigger registration
+        var props = Subject.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        foreach (var prop in props)
         {
-            foreach (DictionaryEntry entry in dict)
-                if (entry.Value is IInterceptorSubject) return true;
-        }
-        else if (value is IEnumerable enumerable && value is not string)
-        {
-            foreach (var item in enumerable)
-                if (item is IInterceptorSubject) return true;
-        }
-
-        return false;
-    }
-
-    private IEnumerable<(IInterceptorSubject Subject, object? Key)> GetChildSubjects(RegisteredSubjectProperty prop)
-    {
-        var value = prop.GetValue();
-        if (value == null) yield break;
-
-        if (value is IInterceptorSubject subject)
-        {
-            yield return (subject, null);
-        }
-        else if (value is IDictionary dict)
-        {
-            foreach (DictionaryEntry entry in dict)
+            if (prop.CanRead)
             {
-                if (entry.Value is IInterceptorSubject s)
-                    yield return (s, entry.Key);
+                try
+                {
+                    _ = prop.GetValue(Subject);
+                }
+                catch
+                {
+                    // Ignore errors accessing properties
+                }
             }
         }
-        else if (value is IEnumerable enumerable && value is not string)
-        {
-            var index = 0;
-            foreach (var item in enumerable)
-            {
-                if (item is IInterceptorSubject s)
-                    yield return (s, index);
-                index++;
-            }
-        }
+
+        // Try to get registered subject again
+        _registeredSubject = SubjectRegistry.TryGetRegisteredSubject(Subject);
     }
 
-    private bool IsInternalProperty(RegisteredSubjectProperty prop)
+    private bool HasStateAttribute(RegisteredSubjectProperty property)
     {
-        if (prop.IsAttribute) return true;
-
-        return prop.Name switch
-        {
-            "Context" or "__Context" or "__InterceptorContext" => true,
-            _ when prop.Name.StartsWith("__") => true,
-            _ => false
-        };
+        return property.Reference.Metadata.Attributes.OfType<StateAttribute>().Any();
     }
 
-    private bool ShouldExpand(RegisteredSubjectProperty prop)
+    private StateAttribute? GetStateAttribute(RegisteredSubjectProperty property)
     {
-        // Expand by default if it's the only child property or if subject is root
-        var childProps = GetChildProperties().ToList();
-        return childProps.Count == 1 || Subject == Root;
+        return property.Reference.Metadata.Attributes.OfType<StateAttribute>().FirstOrDefault();
+    }
+
+    private int GetStateOrder(RegisteredSubjectProperty property)
+    {
+        return GetStateAttribute(property)?.Order ?? int.MaxValue;
+    }
+
+    private string GetPropertyDisplayName(RegisteredSubjectProperty property)
+    {
+        var stateAttr = GetStateAttribute(property);
+        return stateAttr?.Name ?? property.Name;
+    }
+
+    private bool HasChildSubjects(RegisteredSubjectProperty property)
+    {
+        return property.HasChildSubjects;
     }
 
     private string RenderPropertyValue(RegisteredSubjectProperty prop, object? value)
     {
         if (value == null) return "null";
 
+        // Use StateAttribute's GetDisplayText for unit formatting
+        var stateAttr = GetStateAttribute(prop);
+        if (stateAttr != null && stateAttr.Unit != StateUnit.Default)
+        {
+            return stateAttr.GetDisplayText(value);
+        }
+
+        // Default formatting for common types
         return value switch
         {
             bool b => b ? "Yes" : "No",
@@ -344,49 +301,43 @@
         };
     }
 
-    private string GetSubjectDisplayName(IInterceptorSubject subject)
+    private string GetSubjectDisplayName(SubjectPropertyChild child)
     {
-        // Check for ITitleProvider
+        var subject = child.Subject;
         if (subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
             return titleProvider.Title;
 
-        // Fallback to Name property
-        var nameProp = subject.GetType().GetProperty("Name");
-        if (nameProp != null)
-        {
-            var name = nameProp.GetValue(subject) as string;
-            if (!string.IsNullOrEmpty(name)) return name;
-        }
-        return subject.GetType().Name;
+        return subject?.ToString() ?? "n/a";
     }
 
-    private bool HasChildren(IInterceptorSubject subject)
+    private bool HasChildren(SubjectPropertyChild child)
     {
+        var subject = child.Subject;
         var registered = SubjectRegistry?.TryGetRegisteredSubject(subject);
-        if (registered == null) return false;
-
-        return registered.Properties.Any(p => !IsInternalProperty(p) && HasChildSubjects(p));
+        return registered != null && 
+               registered.Properties.Any(p => !p.IsAttribute && HasChildSubjects(p));
     }
 
-    private int GetChildCount(IInterceptorSubject subject)
+    private int GetChildCount(SubjectPropertyChild child)
     {
+        var subject = child.Subject;
         var registered = SubjectRegistry?.TryGetRegisteredSubject(subject);
         if (registered == null) return 0;
 
         return registered.Properties
-            .Where(p => !IsInternalProperty(p) && HasChildSubjects(p))
-            .SelectMany(p => GetChildSubjects(p))
-            .Count();
+            .Where(p => !p.IsAttribute && HasChildSubjects(p))
+            .Sum(p => p.Children.Length);
     }
 
     public record PropertyClickEventArgs(string PropertyName, object? Index, IInterceptorSubject Subject);
 
     private bool HasConfigurationProperties()
     {
-        if (Subject == null) return false;
+        if (_registeredSubject == null)
+            return false;
 
-        return Subject.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Any(p => p.GetCustomAttribute<ConfigurationAttribute>(true) != null && p.CanRead && p.CanWrite);
+        return _registeredSubject.Properties.Any(p =>
+            p.Reference.Metadata.Attributes.OfType<ConfigurationAttribute>().Any());
     }
 
     private async Task OpenConfigurationDialog()

@@ -31,19 +31,43 @@ public static class SubjectPathResolver
         {
             var segment = Uri.UnescapeDataString(segments[i]);
             var registered = registry.TryGetRegisteredSubject(current);
-            if (registered == null)
-                return null;
+            var property = registered?.TryGetProperty(segment);
 
-            var property = registered.TryGetProperty(segment);
-            if (property == null || !property.HasChildSubjects)
-                return null;
+            object? value;
+            bool isSubjectReference;
 
-            var value = property.GetValue();
+            // Try registry first, fall back to reflection
+            if (property != null)
+            {
+                if (!property.HasChildSubjects)
+                    return null;
+
+                value = property.GetValue();
+                isSubjectReference = property.IsSubjectReference;
+            }
+            else
+            {
+                // Fall back to reflection for unregistered subjects
+                var propInfo = current.GetType().GetProperty(segment);
+                if (propInfo == null)
+                    return null;
+
+                value = propInfo.GetValue(current);
+                if (value == null)
+                    return null;
+
+                isSubjectReference = value is IInterceptorSubject;
+                var isCollection = !isSubjectReference && (value is IDictionary || (value is IEnumerable && value is not string));
+
+                if (!isSubjectReference && !isCollection)
+                    return null;
+            }
+
             if (value == null)
                 return null;
 
             // Direct subject reference
-            if (property.IsSubjectReference)
+            if (isSubjectReference)
             {
                 if (value is not IInterceptorSubject subject)
                     return null;
