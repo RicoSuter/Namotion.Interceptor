@@ -16,17 +16,17 @@ Marks a subject class as JSON-serializable with `[Configuration]` properties.
 public class ConfigurableAttribute : Attribute { }
 ```
 
-### 2. ISubjectConfigurationWriter
+### 2. ISubjectStorageHandler
 
-Interface for components that can persist subject configurations.
+Interface for components that can persist subject configurations to storage.
 
 ```csharp
-// HomeBlaze.Abstractions/Storage/ISubjectConfigurationWriter.cs
-public interface ISubjectConfigurationWriter
+// HomeBlaze.Abstractions/Storage/ISubjectStorageHandler.cs
+public interface ISubjectStorageHandler
 {
-    /// <returns>true if saved, false if not this writer's subject</returns>
+    /// <returns>true if saved, false if not this handler's subject</returns>
     /// <exception cref="IOException">On transient errors (retry later)</exception>
-    Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken ct);
+    Task<bool> WriteAsync(IInterceptorSubject subject, CancellationToken ct);
 }
 ```
 
@@ -43,19 +43,19 @@ public interface IFileSubject
 }
 ```
 
-### 4. ConfigurationService
+### 4. StorageService
 
 Background service that listens to property changes and auto-saves configurations.
 
 ```csharp
-// HomeBlaze.Core/Services/ConfigurationService.cs
-public class ConfigurationService : BackgroundService
+// HomeBlaze.Core/Services/StorageService.cs
+public class StorageService : BackgroundService
 {
-    private readonly List<ISubjectConfigurationWriter> _writers = new();
+    private readonly List<ISubjectStorageHandler> _handlers = new();
     private readonly ConcurrentQueue<(IInterceptorSubject, int retryCount)> _retryQueue = new();
 
-    public void RegisterWriter(ISubjectConfigurationWriter writer);
-    public void UnregisterWriter(ISubjectConfigurationWriter writer);
+    public void RegisterHandler(ISubjectStorageHandler handler);
+    public void UnregisterHandler(ISubjectStorageHandler handler);
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -66,7 +66,7 @@ public class ConfigurationService : BackgroundService
         {
             // Process property changes
             // Filter for [Configuration] attributes
-            // Iterate writers until one returns true
+            // Iterate handlers until one returns true
             // On IOException: queue for retry with exponential backoff
         }
     }
@@ -75,12 +75,12 @@ public class ConfigurationService : BackgroundService
 
 ### 5. Storage
 
-Root of a storage context using FluentStorage. Implements `ISubjectConfigurationWriter`.
+Root of a storage context using FluentStorage. Implements `ISubjectStorageHandler`.
 
 ```csharp
 // HomeBlaze.Storage/Storage.cs
 [InterceptorSubject, Configurable]
-public partial class Storage : BackgroundService, ISubjectConfigurationWriter, ITitleProvider
+public partial class Storage : BackgroundService, ISubjectStorageHandler, ITitleProvider
 {
     private IBlobStorage? _client;
     private readonly Dictionary<IInterceptorSubject, string> _subjectPaths = new();
@@ -93,8 +93,8 @@ public partial class Storage : BackgroundService, ISubjectConfigurationWriter, I
     [State] public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
     [State] public partial StorageStatus Status { get; set; }
 
-    // ISubjectConfigurationWriter - called by ConfigurationService
-    public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken ct)
+    // ISubjectStorageHandler - called by StorageService
+    public async Task<bool> WriteAsync(IInterceptorSubject subject, CancellationToken ct)
     {
         if (!_subjectPaths.TryGetValue(subject, out var path)) return false;
         var json = _serializer.Serialize(subject);
@@ -281,12 +281,12 @@ Storage
 
 ## RootManager Integration
 
-RootManager also implements `ISubjectConfigurationWriter` for root.json:
+RootManager also implements `ISubjectStorageHandler` for root.json:
 
 ```csharp
-public class RootManager : ISubjectConfigurationWriter, IDisposable
+public class RootManager : ISubjectStorageHandler, IDisposable
 {
-    public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken ct)
+    public async Task<bool> WriteAsync(IInterceptorSubject subject, CancellationToken ct)
     {
         if (subject != Root) return false;
         var json = _serializer.Serialize(Root);
@@ -302,7 +302,7 @@ public class RootManager : ISubjectConfigurationWriter, IDisposable
 2. **Stream-based blob API** - `WriteBlobAsync(path, Stream)` for memory efficiency
 3. **Upsert semantics** - `WriteBlobAsync` creates or updates (no separate Add/Update)
 4. **Centralized path tracking** - Storage tracks all `_subjectPaths`, VirtualFolders delegate
-5. **PropertyChangeQueue** - ConfigurationService uses high-perf queue, not Observable
+5. **PropertyChangeQueue** - StorageService uses high-perf queue, not Observable
 6. **Retry with backoff** - IOException triggers retry queue with exponential backoff
 7. **FileSubjectFactory** - Uses SubjectTypeRegistry for extensible file type mapping
 8. **IFileSubject.SaveAsync()** - Text files save via property, GenericFile takes Stream param
@@ -311,16 +311,16 @@ public class RootManager : ISubjectConfigurationWriter, IDisposable
 
 ### New Files
 - `HomeBlaze.Abstractions/Attributes/ConfigurableAttribute.cs`
-- `HomeBlaze.Abstractions/Storage/ISubjectConfigurationWriter.cs`
+- `HomeBlaze.Abstractions/Storage/ISubjectStorageHandler.cs`
 - `HomeBlaze.Abstractions/Storage/IFileSubject.cs`
-- `HomeBlaze.Core/Services/ConfigurationService.cs`
+- `HomeBlaze.Core/Services/StorageService.cs`
 - `HomeBlaze.Storage/Storage.cs`
 - `HomeBlaze.Storage/VirtualFolder.cs`
 - `HomeBlaze.Storage/FileSubjectFactory.cs`
 - `HomeBlaze.Storage/Files/JsonFile.cs`
 
 ### Modified Files
-- `HomeBlaze.Core/Services/RootManager.cs` - Implement ISubjectConfigurationWriter
+- `HomeBlaze.Core/Services/RootManager.cs` - Implement ISubjectStorageHandler
 - `HomeBlaze.Storage/Files/MarkdownFile.cs` - Add IFileSubject, Storage ref, SaveAsync
 - `HomeBlaze.Storage/Files/GenericFile.cs` - Add IFileSubject, stream-based API
 
