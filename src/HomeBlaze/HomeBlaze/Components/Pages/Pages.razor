@@ -1,0 +1,71 @@
+@page "/pages/{*Path}"
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Core.Services
+@using Namotion.Interceptor
+@using Namotion.Interceptor.Registry.Abstractions
+@inherits HomeBlazorComponentBase
+@inject SubjectComponentRegistry ComponentRegistry
+
+<PageTitle>@_title - HomeBlaze</PageTitle>
+
+@if (_subject == null)
+{
+    <MudAlert Severity="Severity.Warning">Subject not found at path: @Path</MudAlert>
+}
+else if (_componentType != null)
+{
+    <DynamicComponent Type="_componentType"
+        Parameters="@(new Dictionary<string, object?> { ["Subject"] = _subject })" />
+}
+else
+{
+    <MudText>No page component registered for @_subject.GetType().Name</MudText>
+}
+
+@code {
+    [Parameter]
+    public string? Path { get; set; }
+
+    private IInterceptorSubject? _subject;
+    private Type? _componentType;
+    private string _title = "";
+
+    protected override void OnParametersSet()
+    {
+        LoadSubject();
+    }
+
+    private void LoadSubject()
+    {
+        _subject = null;
+        _componentType = null;
+        _title = "";
+
+        if (Root == null)
+            return;
+
+        var registry = RootContext?.GetService<ISubjectRegistry>();
+        if (registry == null)
+            return;
+
+        _subject = SubjectPathResolver.ResolveSubject(Root, registry, Path ?? "");
+
+        if (_subject != null)
+        {
+            var registration = ComponentRegistry.GetComponent(
+                _subject.GetType(),
+                SubjectComponentType.Page);
+            _componentType = registration?.ComponentType;
+
+            // Get title from ITitleProvider if implemented
+            if (_subject is ITitleProvider titleProvider)
+            {
+                _title = titleProvider.Title ?? _subject.GetType().Name;
+            }
+            else
+            {
+                _title = _subject.GetType().Name;
+            }
+        }
+    }
+}

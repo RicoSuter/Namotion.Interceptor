@@ -1,0 +1,6 @@
+{
+    "Type": "HomeBlaze.Core.Subjects.Motor",
+    "Name": "Conveyor Belt",
+    "TargetSpeed": 800,
+    "SimulationInterval": "00:00:02"
+}

@@ -1,0 +1,411 @@
+@using System.Reflection
+@using System.Collections
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Abstractions.Attributes
+@using Microsoft.AspNetCore.Components.Web
+@using Namotion.Interceptor
+@using Namotion.Interceptor.Registry.Abstractions
+@inject IDialogService DialogService
+@inherits HomeBlazorComponentBase
+
+@if (Subject != null && _registeredSubject != null)
+{
+    @* Header *@
+    <MudListSubheader Class="pa-0">
+        @if (CanClose)
+        {
+            <MudFab OnClick="@(() => OnClose.InvokeAsync())"
+                    Color="Color.Primary"
+                    StartIcon="@Icons.Material.Filled.Close"
+                    Size="Size.Small"
+                    Style="float: right; margin-right: 5px" />
+        }
+
+        <h1 style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0; font-size: 1.25rem;">
+            <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" />
+            @GetSubjectTitle()
+        </h1>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">@Subject.GetType().Name</MudText>
+    </MudListSubheader>
+
+    <div style="height: calc(100% - 70px); overflow-y: auto; padding-top: 16px;">
+        @* Action Buttons *@
+        <div class="mb-4">
+            @if (HasConfigurationProperties())
+            {
+                <MudIconButton OnClick="@OpenConfigurationDialog"
+                               Icon="@Icons.Material.Filled.Edit"
+                               Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Size="Size.Small"
+                               Class="mr-2" />
+            }
+            <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
+                           Icon="@Icons.Material.Filled.Delete"
+                           Variant="Variant.Filled"
+                           Color="Color.Error"
+                           Size="Size.Small"
+                           Class="mr-2" />
+        </div>
+
+        @* Primitive Properties *@
+        @foreach (var prop in GetPrimitiveProperties())
+        {
+            var value = prop.GetValue();
+            <MudText Style="@(value is null ? "opacity: 0.5" : "")" Class="mb-1">
+                <strong>@GetPropertyDisplayName(prop): </strong>
+                @RenderPropertyValue(prop, value)
+            </MudText>
+        }
+
+        @if (GetPrimitiveProperties().Any())
+        {
+            <br />
+        }
+
+        @* Child Collections *@
+        @foreach (var prop in GetChildProperties())
+        {
+            var children = GetChildSubjects(prop).ToList();
+
+            @if (children.Count == 1)
+            {
+                @* Single child - no expansion panel *@
+                <MudList T="object" Dense="true" Class="pa-0">
+                    @{
+                        var (child, key) = children[0];
+                        var isSelected = child == SelectedChild;
+                    }
+                    <MudListItem Value="@child"
+                                 OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, key, child)))"
+                                 Icon="@GetSubjectIcon(child)"
+                                 IconColor="Color.Default">
+                        @if (isSelected)
+                        {
+                            <div style="float: right; line-height: 0">
+                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                            </div>
+                        }
+                        @GetSubjectDisplayName(child)
+                        @if (HasChildren(child))
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-2">@GetChildCount(child)</MudChip>
+                        }
+                    </MudListItem>
+                    <MudDivider />
+                </MudList>
+            }
+            else if (children.Count > 1)
+            {
+                <MudExpansionPanel Dense="true" Expanded="@ShouldExpand(prop)">
+                    <TitleContent>
+                        @GetPropertyDisplayName(prop)
+                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-2">@children.Count</MudChip>
+                    </TitleContent>
+                    <ChildContent>
+                        <MudList T="object" Dense="true" Class="pa-0">
+                            @foreach (var (child, key) in children)
+                            {
+                                var isSelected = child == SelectedChild;
+                                <MudListItem Value="@child"
+                                             OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(prop.Name, key, child)))"
+                                             Icon="@GetSubjectIcon(child)"
+                                             IconColor="Color.Default">
+                                    @if (isSelected)
+                                    {
+                                        <div style="float: right; line-height: 0">
+                                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                                        </div>
+                                    }
+                                    @GetSubjectDisplayName(child)
+                                    @if (HasChildren(child))
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-2">@GetChildCount(child)</MudChip>
+                                    }
+                                </MudListItem>
+                                <MudDivider />
+                            }
+                        </MudList>
+                    </ChildContent>
+                </MudExpansionPanel>
+            }
+        }
+
+        @* Details Accordion *@
+        <br />
+        <MudExpansionPanels MultiExpansion="true" Elevation="0" Dense="true">
+            <MudExpansionPanel Text="Details" Expanded="false">
+                <div class="ml-4">
+                    <small style="word-break: break-all">
+                        <p><strong>Path:</strong> @GetObjectPath()</p>
+                        <p><strong>Type:</strong> @Subject.GetType().FullName</p>
+                    </small>
+                </div>
+            </MudExpansionPanel>
+        </MudExpansionPanels>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public ISubjectRegistry? SubjectRegistry { get; set; }
+
+    [Parameter]
+    public IInterceptorSubject? SelectedChild { get; set; }
+
+    [Parameter]
+    public bool CanClose { get; set; }
+
+    [Parameter]
+    public string? ObjectPath { get; set; }
+
+    [Parameter]
+    public EventCallback<PropertyClickEventArgs> OnPropertyClick { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    [Parameter]
+    public EventCallback OnDelete { get; set; }
+
+    private RegisteredSubject? _registeredSubject;
+
+    protected override void OnParametersSet()
+    {
+        base.OnParametersSet();
+        _registeredSubject = Subject != null && SubjectRegistry != null
+            ? SubjectRegistry.TryGetRegisteredSubject(Subject)
+            : null;
+    }
+
+    private string GetSubjectTitle()
+    {
+        if (Subject == null) return "No Selection";
+
+        // Check for ITitleProvider
+        if (Subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
+            return titleProvider.Title;
+
+        // Fallback to Name property
+        var nameProp = Subject.GetType().GetProperty("Name");
+        if (nameProp != null)
+        {
+            var name = nameProp.GetValue(Subject) as string;
+            if (!string.IsNullOrEmpty(name)) return name;
+        }
+
+        return Subject.GetType().Name;
+    }
+
+    private string GetSubjectIcon(IInterceptorSubject? subject)
+    {
+        if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.Icon))
+            return iconProvider.Icon;
+
+        return Icons.Material.Filled.QuestionMark;
+    }
+
+    private string GetObjectPath()
+    {
+        return ObjectPath ?? "Root";
+    }
+
+    private IEnumerable<RegisteredSubjectProperty> GetPrimitiveProperties()
+    {
+        if (_registeredSubject == null)
+            return Enumerable.Empty<RegisteredSubjectProperty>();
+
+        return _registeredSubject.Properties
+            .Where(p => HasStateAttribute(p) && !HasChildSubjects(p))
+            .OrderBy(p => GetStateOrder(p))
+            .ThenBy(p => GetPropertyDisplayName(p));
+    }
+
+    private IEnumerable<RegisteredSubjectProperty> GetChildProperties()
+    {
+        if (_registeredSubject == null)
+            return Enumerable.Empty<RegisteredSubjectProperty>();
+
+        return _registeredSubject.Properties
+            .Where(p => HasStateAttribute(p) && HasChildSubjects(p))
+            .OrderBy(p => GetStateOrder(p))
+            .ThenBy(p => GetPropertyDisplayName(p));
+    }
+
+    private bool HasStateAttribute(RegisteredSubjectProperty prop)
+    {
+        if (Subject == null) return false;
+        var propertyInfo = Subject.GetType().GetProperty(prop.Name);
+        return propertyInfo?.GetCustomAttribute<StateAttribute>(true) != null;
+    }
+
+    private StateAttribute? GetStateAttribute(RegisteredSubjectProperty prop)
+    {
+        if (Subject == null) return null;
+        var propertyInfo = Subject.GetType().GetProperty(prop.Name);
+        return propertyInfo?.GetCustomAttribute<StateAttribute>(true);
+    }
+
+    private int GetStateOrder(RegisteredSubjectProperty prop)
+    {
+        return GetStateAttribute(prop)?.Order ?? int.MaxValue;
+    }
+
+    private string GetPropertyDisplayName(RegisteredSubjectProperty prop)
+    {
+        var stateAttr = GetStateAttribute(prop);
+        return stateAttr?.Name ?? prop.BrowseName;
+    }
+
+    private bool HasChildSubjects(RegisteredSubjectProperty prop)
+    {
+        var value = prop.GetValue();
+        if (value == null) return false;
+
+        if (value is IInterceptorSubject) return true;
+
+        if (value is IDictionary dict)
+        {
+            foreach (DictionaryEntry entry in dict)
+                if (entry.Value is IInterceptorSubject) return true;
+        }
+        else if (value is IEnumerable enumerable && value is not string)
+        {
+            foreach (var item in enumerable)
+                if (item is IInterceptorSubject) return true;
+        }
+
+        return false;
+    }
+
+    private IEnumerable<(IInterceptorSubject Subject, object? Key)> GetChildSubjects(RegisteredSubjectProperty prop)
+    {
+        var value = prop.GetValue();
+        if (value == null) yield break;
+
+        if (value is IInterceptorSubject subject)
+        {
+            yield return (subject, null);
+        }
+        else if (value is IDictionary dict)
+        {
+            foreach (DictionaryEntry entry in dict)
+            {
+                if (entry.Value is IInterceptorSubject s)
+                    yield return (s, entry.Key);
+            }
+        }
+        else if (value is IEnumerable enumerable && value is not string)
+        {
+            var index = 0;
+            foreach (var item in enumerable)
+            {
+                if (item is IInterceptorSubject s)
+                    yield return (s, index);
+                index++;
+            }
+        }
+    }
+
+    private bool IsInternalProperty(RegisteredSubjectProperty prop)
+    {
+        if (prop.IsAttribute) return true;
+
+        return prop.Name switch
+        {
+            "Context" or "__Context" or "__InterceptorContext" => true,
+            _ when prop.Name.StartsWith("__") => true,
+            _ => false
+        };
+    }
+
+    private bool ShouldExpand(RegisteredSubjectProperty prop)
+    {
+        // Expand by default if it's the only child property or if subject is root
+        var childProps = GetChildProperties().ToList();
+        return childProps.Count == 1 || Subject == Root;
+    }
+
+    private string RenderPropertyValue(RegisteredSubjectProperty prop, object? value)
+    {
+        if (value == null) return "null";
+
+        return value switch
+        {
+            bool b => b ? "Yes" : "No",
+            DateTime dt => dt.ToString("g"),
+            DateTimeOffset dto => dto.ToString("g"),
+            TimeSpan ts => ts.ToString(@"hh\:mm\:ss"),
+            Enum e => e.ToString(),
+            _ => value.ToString() ?? ""
+        };
+    }
+
+    private string GetSubjectDisplayName(IInterceptorSubject subject)
+    {
+        // Check for ITitleProvider
+        if (subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
+            return titleProvider.Title;
+
+        // Fallback to Name property
+        var nameProp = subject.GetType().GetProperty("Name");
+        if (nameProp != null)
+        {
+            var name = nameProp.GetValue(subject) as string;
+            if (!string.IsNullOrEmpty(name)) return name;
+        }
+        return subject.GetType().Name;
+    }
+
+    private bool HasChildren(IInterceptorSubject subject)
+    {
+        var registered = SubjectRegistry?.TryGetRegisteredSubject(subject);
+        if (registered == null) return false;
+
+        return registered.Properties.Any(p => !IsInternalProperty(p) && HasChildSubjects(p));
+    }
+
+    private int GetChildCount(IInterceptorSubject subject)
+    {
+        var registered = SubjectRegistry?.TryGetRegisteredSubject(subject);
+        if (registered == null) return 0;
+
+        return registered.Properties
+            .Where(p => !IsInternalProperty(p) && HasChildSubjects(p))
+            .SelectMany(p => GetChildSubjects(p))
+            .Count();
+    }
+
+    public record PropertyClickEventArgs(string PropertyName, object? Index, IInterceptorSubject Subject);
+
+    private bool HasConfigurationProperties()
+    {
+        if (Subject == null) return false;
+
+        return Subject.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Any(p => p.GetCustomAttribute<ConfigurationAttribute>(true) != null && p.CanRead && p.CanWrite);
+    }
+
+    private async Task OpenConfigurationDialog()
+    {
+        if (Subject == null) return;
+
+        var parameters = new DialogParameters<SubjectConfigurationDialog>
+        {
+            { x => x.Subject, Subject }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        var title = GetSubjectTitle();
+        await DialogService.ShowAsync<SubjectConfigurationDialog>($"Edit {title}", parameters, options);
+    }
+}
