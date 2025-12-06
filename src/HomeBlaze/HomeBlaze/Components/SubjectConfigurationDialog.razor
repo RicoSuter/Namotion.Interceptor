@@ -1,14 +1,23 @@
-@using System.Reflection
-@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Core.Extensions
 @using HomeBlaze.Core.Services
 @using Microsoft.AspNetCore.Components.Rendering
 @using Namotion.Interceptor
+@using Namotion.Interceptor.Registry
+@using Namotion.Interceptor.Registry.Abstractions
+@using Namotion.Interceptor.Tracking
+@implements IDisposable
 @inject RootManager RootManager
 
 <MudDialog>
     <DialogContent>
         @if (Subject != null && _configProperties.Any())
         {
+            @if (_externalChangeDetected)
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-3">
+                    Configuration was changed externally. Your unsaved changes may be overwritten.
+                </MudAlert>
+            }
             <MudForm @ref="_form" @bind-IsValid="@_isValid">
                 @foreach (var prop in _configProperties)
                 {
@@ -38,53 +47,68 @@
 
     private MudForm? _form;
     private bool _isValid;
-    private List<ConfigPropertyInfo> _configProperties = new();
+    private bool _isSaving;
+    private bool _externalChangeDetected;
+    private List<RegisteredSubjectProperty> _configProperties = new();
     private Dictionary<string, object?> _editValues = new();
+    private IDisposable? _changeSubscription;
 
     protected override void OnParametersSet()
     {
         base.OnParametersSet();
 
+        // Clean up previous subscription
+        _changeSubscription?.Dispose();
+        _changeSubscription = null;
+
         if (Subject != null)
         {
-            _configProperties = GetConfigurationProperties().ToList();
+            // Use registry instead of reflection
+            _configProperties = Subject.GetConfigurationProperties()
+                .Where(p => p.HasSetter)
+                .OrderBy(p => p.GetDisplayOrder())
+                .ToList();
+
             _editValues = _configProperties.ToDictionary(
-                p => p.PropertyInfo.Name,
-                p => p.PropertyInfo.GetValue(Subject));
+                p => p.Name,
+                p => p.GetValue());
+
+            // Subscribe to property changes on this subject
+            SubscribeToPropertyChanges();
         }
     }
 
-    private IEnumerable<ConfigPropertyInfo> GetConfigurationProperties()
+    private void SubscribeToPropertyChanges()
     {
-        if (Subject == null) yield break;
+        if (Subject == null) return;
 
-        var type = Subject.GetType();
-        foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        try
         {
-            var configAttr = prop.GetCustomAttribute<ConfigurationAttribute>(true);
-            if (configAttr != null && prop.CanRead && prop.CanWrite)
-            {
-                var stateAttr = prop.GetCustomAttribute<StateAttribute>(true);
-                yield return new ConfigPropertyInfo
-                {
-                    PropertyInfo = prop,
-                    DisplayName = stateAttr?.Name ?? SplitCamelCase(prop.Name),
-                    Order = stateAttr?.Order ?? int.MaxValue
-                };
-            }
+            var observable = Subject.Context.GetPropertyChangeObservable();
+            _changeSubscription = observable
+                .Subscribe(
+                    onNext: change =>
+                    {
+                        // Only care about changes to our subject's configuration properties
+                        if (change.Property.Subject == Subject &&
+                            !_isSaving &&
+                            change.Property.TryGetRegisteredProperty()?.IsConfigurationProperty() == true)
+                        {
+                            _externalChangeDetected = true;
+                            InvokeAsync(StateHasChanged);
+                        }
+                    },
+                    onError: _ => { });
+        }
+        catch
+        {
+            // PropertyChangeObservable may not be registered - that's okay
         }
     }
 
-    private static string SplitCamelCase(string input)
+    private RenderFragment RenderPropertyEditor(RegisteredSubjectProperty prop) => builder =>
     {
-        return System.Text.RegularExpressions.Regex.Replace(
-            input, "([a-z])([A-Z])", "$1 $2");
-    }
-
-    private RenderFragment RenderPropertyEditor(ConfigPropertyInfo prop) => builder =>
-    {
-        var propType = prop.PropertyInfo.PropertyType;
-        var underlyingType = Nullable.GetUnderlyingType(propType) ?? propType;
+        var underlyingType = Nullable.GetUnderlyingType(prop.Type) ?? prop.Type;
 
         if (underlyingType == typeof(string))
         {
@@ -121,121 +145,121 @@
         }
     };
 
-    private void RenderStringEditor(RenderTreeBuilder builder, ConfigPropertyInfo prop)
+    private void RenderStringEditor(RenderTreeBuilder builder, RegisteredSubjectProperty prop)
     {
         var seq = 0;
         builder.OpenComponent<MudTextField<string>>(seq++);
-        builder.AddAttribute(seq++, "Label", prop.DisplayName);
-        builder.AddAttribute(seq++, "Value", (string?)_editValues[prop.PropertyInfo.Name]);
+        builder.AddAttribute(seq++, "Label", prop.GetDisplayName());
+        builder.AddAttribute(seq++, "Value", (string?)_editValues[prop.Name]);
         builder.AddAttribute(seq++, "ValueChanged", EventCallback.Factory.Create<string>(this, value =>
         {
-            _editValues[prop.PropertyInfo.Name] = value;
+            _editValues[prop.Name] = value;
         }));
-        builder.AddAttribute(seq++, "Required", !IsNullableType(prop.PropertyInfo.PropertyType));
+        builder.AddAttribute(seq++, "Required", !IsNullableType(prop.Type));
         builder.AddAttribute(seq++, "Variant", Variant.Outlined);
         builder.AddAttribute(seq++, "Class", "mb-3");
         builder.CloseComponent();
     }
 
-    private void RenderIntEditor(RenderTreeBuilder builder, ConfigPropertyInfo prop)
+    private void RenderIntEditor(RenderTreeBuilder builder, RegisteredSubjectProperty prop)
     {
         var seq = 0;
         builder.OpenComponent<MudNumericField<int?>>(seq++);
-        builder.AddAttribute(seq++, "Label", prop.DisplayName);
-        builder.AddAttribute(seq++, "Value", _editValues[prop.PropertyInfo.Name] as int?);
+        builder.AddAttribute(seq++, "Label", prop.GetDisplayName());
+        builder.AddAttribute(seq++, "Value", _editValues[prop.Name] as int?);
         builder.AddAttribute(seq++, "ValueChanged", EventCallback.Factory.Create<int?>(this, value =>
         {
-            _editValues[prop.PropertyInfo.Name] = value;
+            _editValues[prop.Name] = value;
         }));
-        builder.AddAttribute(seq++, "Required", !IsNullableType(prop.PropertyInfo.PropertyType));
+        builder.AddAttribute(seq++, "Required", !IsNullableType(prop.Type));
         builder.AddAttribute(seq++, "Variant", Variant.Outlined);
         builder.AddAttribute(seq++, "Class", "mb-3");
         builder.CloseComponent();
     }
 
-    private void RenderDoubleEditor(RenderTreeBuilder builder, ConfigPropertyInfo prop)
+    private void RenderDoubleEditor(RenderTreeBuilder builder, RegisteredSubjectProperty prop)
     {
         var seq = 0;
         builder.OpenComponent<MudNumericField<double?>>(seq++);
-        builder.AddAttribute(seq++, "Label", prop.DisplayName);
-        builder.AddAttribute(seq++, "Value", _editValues[prop.PropertyInfo.Name] as double?);
+        builder.AddAttribute(seq++, "Label", prop.GetDisplayName());
+        builder.AddAttribute(seq++, "Value", _editValues[prop.Name] as double?);
         builder.AddAttribute(seq++, "ValueChanged", EventCallback.Factory.Create<double?>(this, value =>
         {
-            _editValues[prop.PropertyInfo.Name] = value;
+            _editValues[prop.Name] = value;
         }));
-        builder.AddAttribute(seq++, "Required", !IsNullableType(prop.PropertyInfo.PropertyType));
+        builder.AddAttribute(seq++, "Required", !IsNullableType(prop.Type));
         builder.AddAttribute(seq++, "Variant", Variant.Outlined);
         builder.AddAttribute(seq++, "Class", "mb-3");
         builder.CloseComponent();
     }
 
-    private void RenderDecimalEditor(RenderTreeBuilder builder, ConfigPropertyInfo prop)
+    private void RenderDecimalEditor(RenderTreeBuilder builder, RegisteredSubjectProperty prop)
     {
         var seq = 0;
         builder.OpenComponent<MudNumericField<decimal?>>(seq++);
-        builder.AddAttribute(seq++, "Label", prop.DisplayName);
-        builder.AddAttribute(seq++, "Value", _editValues[prop.PropertyInfo.Name] as decimal?);
+        builder.AddAttribute(seq++, "Label", prop.GetDisplayName());
+        builder.AddAttribute(seq++, "Value", _editValues[prop.Name] as decimal?);
         builder.AddAttribute(seq++, "ValueChanged", EventCallback.Factory.Create<decimal?>(this, value =>
         {
-            _editValues[prop.PropertyInfo.Name] = value;
+            _editValues[prop.Name] = value;
         }));
-        builder.AddAttribute(seq++, "Required", !IsNullableType(prop.PropertyInfo.PropertyType));
+        builder.AddAttribute(seq++, "Required", !IsNullableType(prop.Type));
         builder.AddAttribute(seq++, "Variant", Variant.Outlined);
         builder.AddAttribute(seq++, "Class", "mb-3");
         builder.CloseComponent();
     }
 
-    private void RenderBoolEditor(RenderTreeBuilder builder, ConfigPropertyInfo prop)
+    private void RenderBoolEditor(RenderTreeBuilder builder, RegisteredSubjectProperty prop)
     {
         var seq = 0;
         builder.OpenComponent<MudCheckBox<bool>>(seq++);
-        builder.AddAttribute(seq++, "Label", prop.DisplayName);
-        builder.AddAttribute(seq++, "Value", _editValues[prop.PropertyInfo.Name] is bool b && b);
+        builder.AddAttribute(seq++, "Label", prop.GetDisplayName());
+        builder.AddAttribute(seq++, "Value", _editValues[prop.Name] is bool b && b);
         builder.AddAttribute(seq++, "ValueChanged", EventCallback.Factory.Create<bool>(this, value =>
         {
-            _editValues[prop.PropertyInfo.Name] = value;
+            _editValues[prop.Name] = value;
         }));
         builder.AddAttribute(seq++, "Class", "mb-3");
         builder.CloseComponent();
     }
 
-    private void RenderTimeSpanEditor(RenderTreeBuilder builder, ConfigPropertyInfo prop)
+    private void RenderTimeSpanEditor(RenderTreeBuilder builder, RegisteredSubjectProperty prop)
     {
-        var value = _editValues[prop.PropertyInfo.Name];
+        var value = _editValues[prop.Name];
         var timeSpan = value is TimeSpan ts ? ts : TimeSpan.Zero;
         var totalSeconds = (int)timeSpan.TotalSeconds;
 
         var seq = 0;
         builder.OpenComponent<MudNumericField<int>>(seq++);
-        builder.AddAttribute(seq++, "Label", $"{prop.DisplayName} (seconds)");
+        builder.AddAttribute(seq++, "Label", $"{prop.GetDisplayName()} (seconds)");
         builder.AddAttribute(seq++, "Value", totalSeconds);
         builder.AddAttribute(seq++, "ValueChanged", EventCallback.Factory.Create<int>(this, seconds =>
         {
-            _editValues[prop.PropertyInfo.Name] = TimeSpan.FromSeconds(seconds);
+            _editValues[prop.Name] = TimeSpan.FromSeconds(seconds);
         }));
         builder.AddAttribute(seq++, "Min", 0);
-        builder.AddAttribute(seq++, "Required", !IsNullableType(prop.PropertyInfo.PropertyType));
+        builder.AddAttribute(seq++, "Required", !IsNullableType(prop.Type));
         builder.AddAttribute(seq++, "Variant", Variant.Outlined);
         builder.AddAttribute(seq++, "Class", "mb-3");
         builder.CloseComponent();
     }
 
-    private void RenderEnumEditor(RenderTreeBuilder builder, ConfigPropertyInfo prop, Type enumType)
+    private void RenderEnumEditor(RenderTreeBuilder builder, RegisteredSubjectProperty prop, Type enumType)
     {
         // For enums, use a string-based select with conversion
         var enumValues = Enum.GetValues(enumType).Cast<object>().ToList();
-        var currentValue = _editValues[prop.PropertyInfo.Name];
+        var currentValue = _editValues[prop.Name];
         var currentStringValue = currentValue?.ToString() ?? "";
 
         var seq = 0;
         builder.OpenComponent<MudSelect<string>>(seq++);
-        builder.AddAttribute(seq++, "Label", prop.DisplayName);
+        builder.AddAttribute(seq++, "Label", prop.GetDisplayName());
         builder.AddAttribute(seq++, "Value", currentStringValue);
         builder.AddAttribute(seq++, "ValueChanged", EventCallback.Factory.Create<string>(this, value =>
         {
             if (!string.IsNullOrEmpty(value))
             {
-                _editValues[prop.PropertyInfo.Name] = Enum.Parse(enumType, value);
+                _editValues[prop.Name] = Enum.Parse(enumType, value);
             }
         }));
         builder.AddAttribute(seq++, "Variant", Variant.Outlined);
@@ -260,27 +284,27 @@
         builder.CloseComponent();
     }
 
-    private void RenderStringFallbackEditor(RenderTreeBuilder builder, ConfigPropertyInfo prop)
+    private void RenderStringFallbackEditor(RenderTreeBuilder builder, RegisteredSubjectProperty prop)
     {
-        var value = _editValues[prop.PropertyInfo.Name];
+        var value = _editValues[prop.Name];
         var stringValue = value?.ToString() ?? "";
 
         var seq = 0;
         builder.OpenComponent<MudTextField<string>>(seq++);
-        builder.AddAttribute(seq++, "Label", $"{prop.DisplayName} ({prop.PropertyInfo.PropertyType.Name})");
+        builder.AddAttribute(seq++, "Label", $"{prop.GetDisplayName()} ({prop.Type.Name})");
         builder.AddAttribute(seq++, "Value", stringValue);
         builder.AddAttribute(seq++, "ValueChanged", EventCallback.Factory.Create<string>(this, newValue =>
         {
             // Try to convert back - this is best effort
             try
             {
-                var converted = Convert.ChangeType(newValue, prop.PropertyInfo.PropertyType);
-                _editValues[prop.PropertyInfo.Name] = converted;
+                var converted = Convert.ChangeType(newValue, prop.Type);
+                _editValues[prop.Name] = converted;
             }
             catch
             {
                 // Keep as string if conversion fails
-                _editValues[prop.PropertyInfo.Name] = newValue;
+                _editValues[prop.Name] = newValue;
             }
         }));
         builder.AddAttribute(seq++, "Variant", Variant.Outlined);
@@ -301,51 +325,56 @@
     {
         if (Subject == null) return;
 
-        // Apply all edited values to the subject
-        foreach (var prop in _configProperties)
-        {
-            var newValue = _editValues[prop.PropertyInfo.Name];
-            var currentValue = prop.PropertyInfo.GetValue(Subject);
-
-            if (!Equals(newValue, currentValue))
-            {
-                try
-                {
-                    // Handle type conversion if needed
-                    var targetType = prop.PropertyInfo.PropertyType;
-                    var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;
-
-                    if (newValue != null && newValue.GetType() != underlyingType)
-                    {
-                        newValue = Convert.ChangeType(newValue, underlyingType);
-                    }
-
-                    prop.PropertyInfo.SetValue(Subject, newValue);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error setting {prop.PropertyInfo.Name}: {ex.Message}");
-                }
-            }
-        }
-
-        // Persist the configuration to disk
+        _isSaving = true;
         try
         {
-            await RootManager.SaveAsync();
+            // Apply all edited values to the subject using registry
+            foreach (var prop in _configProperties)
+            {
+                var newValue = _editValues[prop.Name];
+                var currentValue = prop.GetValue();
+
+                if (!Equals(newValue, currentValue))
+                {
+                    try
+                    {
+                        // Handle type conversion if needed
+                        var underlyingType = Nullable.GetUnderlyingType(prop.Type) ?? prop.Type;
+
+                        if (newValue != null && newValue.GetType() != underlyingType)
+                        {
+                            newValue = Convert.ChangeType(newValue, underlyingType);
+                        }
+
+                        prop.SetValue(newValue);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error setting {prop.Name}: {ex.Message}");
+                    }
+                }
+            }
+
+            // Persist the configuration to disk
+            try
+            {
+                await RootManager.SaveAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error saving configuration: {ex.Message}");
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            Console.WriteLine($"Error saving configuration: {ex.Message}");
+            _isSaving = false;
         }
 
         MudDialog?.Close(DialogResult.Ok(true));
     }
 
-    private class ConfigPropertyInfo
+    public void Dispose()
     {
-        public PropertyInfo PropertyInfo { get; set; } = null!;
-        public string DisplayName { get; set; } = "";
-        public int Order { get; set; }
+        _changeSubscription?.Dispose();
     }
 }

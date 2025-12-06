@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.Core.Subjects;
 
@@ -24,6 +25,12 @@ public partial class Motor : BackgroundService
     [Configuration]
     [State("Target", Order = 2)]
     public partial int TargetSpeed { get; set; }
+
+    [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
+    public partial int TargetSpeed_Minimum { get; set; }
+
+    [PropertyAttribute(nameof(TargetSpeed), "Maximum")]
+    public partial int TargetSpeed_Maximum { get; set; }
 
     /// <summary>
     /// Simulation update interval.
@@ -71,6 +78,8 @@ public partial class Motor : BackgroundService
     {
         Name = string.Empty;
         TargetSpeed = 0;
+        TargetSpeed_Minimum = 0;
+        TargetSpeed_Maximum = 3000;
         SimulationInterval = TimeSpan.FromSeconds(1);
         Status = MotorStatus.Stopped;
     }

@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
-using System.Reflection;
-using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Storage;
+using HomeBlaze.Core.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace HomeBlaze.Core.Services;
@@ -18,22 +18,13 @@ public class StorageService : BackgroundService
     // Direct subject-to-handler mapping for O(1) lookup
     private readonly ConcurrentDictionary<IInterceptorSubject, ISubjectStorageHandler> _subjectHandlers = new();
 
-    private readonly ConcurrentQueue<(IInterceptorSubject Subject, int RetryCount)> _retryQueue = new();
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger<StorageService>? _logger;
 
-    // Cache for [Configuration] property lookup per type
-    private static readonly ConcurrentDictionary<Type, HashSet<string>> _configurationPropertiesCache = new();
-
-    private const int MaxRetries = 5;
-    private static readonly TimeSpan[] RetryDelays =
-    [
-        TimeSpan.FromSeconds(1),
-        TimeSpan.FromSeconds(2),
-        TimeSpan.FromSeconds(5),
-        TimeSpan.FromSeconds(10),
-        TimeSpan.FromSeconds(30)
-    ];
+    // Retry configuration (aligned with Sources library patterns from MqttConnectionMonitor)
+    private static readonly TimeSpan InitialRetryDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan MaxRetryDelay = TimeSpan.FromSeconds(30);
+    private const int MaxRetryAttempts = 5;
 
     public StorageService(
         IInterceptorSubjectContext context,
@@ -91,7 +82,7 @@ public class StorageService : BackgroundService
         {
             try
             {
-                // Create a linked token that cancels after 100ms for periodic retry processing
+                // Create a linked token that cancels after 100ms for periodic processing
                 using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, timeoutCts.Token);
 
@@ -100,9 +91,6 @@ public class StorageService : BackgroundService
                 {
                     await ProcessChangeAsync(change, stoppingToken);
                 }
-
-                // Process retry queue periodically
-                await ProcessRetryQueueAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -110,7 +98,7 @@ public class StorageService : BackgroundService
             }
             catch (OperationCanceledException)
             {
-                // Timeout from TryDequeue - continue to process retry queue
+                // Timeout from TryDequeue - continue
             }
             catch (Exception ex)
             {
@@ -123,7 +111,7 @@ public class StorageService : BackgroundService
 
     private async Task ProcessChangeAsync(SubjectPropertyChange change, CancellationToken ct)
     {
-        // Check if this is a [Configuration] property
+        // Check if this is a [Configuration] property using registry
         if (!IsConfigurationProperty(change.Property))
             return;
 
@@ -134,10 +122,13 @@ public class StorageService : BackgroundService
         _logger?.LogDebug("Configuration property changed: {Type}.{Property}",
             subject.GetType().Name, change.Property.Name);
 
-        await WriteSubjectAsync(subject, retryCount: 0, ct);
+        await WriteWithRetryAsync(subject, ct);
     }
 
-    private async Task WriteSubjectAsync(IInterceptorSubject subject, int retryCount, CancellationToken ct)
+    /// <summary>
+    /// Writes subject with exponential backoff retry (pattern from Sources library).
+    /// </summary>
+    private async Task WriteWithRetryAsync(IInterceptorSubject subject, CancellationToken ct)
     {
         // O(1) lookup for the handler
         if (!_subjectHandlers.TryGetValue(subject, out var handler))
@@ -146,69 +137,52 @@ public class StorageService : BackgroundService
             return;
         }
 
-        try
+        var delay = InitialRetryDelay;
+
+        for (int attempt = 0; attempt <= MaxRetryAttempts; attempt++)
         {
-            if (await handler.WriteAsync(subject, ct))
+            try
             {
-                _logger?.LogDebug("Saved subject via {Handler}: {Type}",
-                    handler.GetType().Name, subject.GetType().Name);
+                if (await handler.WriteAsync(subject, ct))
+                {
+                    _logger?.LogDebug("Saved subject via {Handler}: {Type}",
+                        handler.GetType().Name, subject.GetType().Name);
+                }
+                return; // Success
             }
-        }
-        catch (IOException ex)
-        {
-            _logger?.LogWarning(ex, "Transient I/O error saving {Type}, will retry", subject.GetType().Name);
-
-            if (retryCount < MaxRetries)
+            catch (IOException ex) when (attempt < MaxRetryAttempts)
             {
-                _retryQueue.Enqueue((subject, retryCount + 1));
+                // Exponential backoff with jitter (pattern from MqttConnectionMonitor)
+                var jitter = Random.Shared.NextDouble() * 0.1 + 0.95; // 0.95 to 1.05
+                var actualDelay = TimeSpan.FromMilliseconds(delay.TotalMilliseconds * jitter);
+
+                _logger?.LogWarning(
+                    "I/O error saving {Type} (attempt {Attempt}/{Max}), retrying in {Delay}ms: {Message}",
+                    subject.GetType().Name, attempt + 1, MaxRetryAttempts, (int)actualDelay.TotalMilliseconds, ex.Message);
+
+                await Task.Delay(actualDelay, ct);
+
+                // Double delay for next attempt, capped at max
+                delay = TimeSpan.FromMilliseconds(
+                    Math.Min(delay.TotalMilliseconds * 2, MaxRetryDelay.TotalMilliseconds));
             }
-            else
+            catch (IOException ex)
             {
-                _logger?.LogError("Max retries exceeded for {Type}", subject.GetType().Name);
+                _logger?.LogError(ex, "Failed to save {Type} after {Max} retries",
+                    subject.GetType().Name, MaxRetryAttempts);
             }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error saving subject {Type}", subject.GetType().Name);
-        }
-    }
-
-    private async Task ProcessRetryQueueAsync(CancellationToken ct)
-    {
-        if (_retryQueue.IsEmpty)
-            return;
-
-        // Process up to 10 retries per iteration
-        for (int i = 0; i < 10 && _retryQueue.TryDequeue(out var item); i++)
-        {
-            var (subject, retryCount) = item;
-
-            // Apply exponential backoff delay
-            var delayIndex = Math.Min(retryCount - 1, RetryDelays.Length - 1);
-            await Task.Delay(RetryDelays[delayIndex], ct);
-
-            await WriteSubjectAsync(subject, retryCount, ct);
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error saving subject {Type}", subject.GetType().Name);
+                return; // Don't retry non-IO errors
+            }
         }
     }
 
     private static bool IsConfigurationProperty(PropertyReference property)
     {
-        var subjectType = property.Subject?.GetType();
-        if (subjectType == null)
-            return false;
-
-        var configProperties = GetConfigurationProperties(subjectType);
-        return configProperties.Contains(property.Name);
-    }
-
-    private static HashSet<string> GetConfigurationProperties(Type subjectType)
-    {
-        return _configurationPropertiesCache.GetOrAdd(subjectType, static type =>
-        {
-            return type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .Where(p => p.GetCustomAttribute<ConfigurationAttribute>() != null)
-                .Select(p => p.Name)
-                .ToHashSet(StringComparer.Ordinal);
-        });
+        // Get the registered property directly from the reference using registry
+        var regProperty = property.TryGetRegisteredProperty();
+        return regProperty?.IsConfigurationProperty() ?? false;
     }
 }
