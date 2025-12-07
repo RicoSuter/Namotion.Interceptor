@@ -12,13 +12,13 @@ namespace HomeBlaze.Storage.Internal;
 /// Factory for creating IInterceptorSubject instances from storage blobs
 /// and updating existing subjects from JSON.
 /// </summary>
-internal sealed class SubjectFactory
+internal sealed class FileSubjectFactory
 {
     private readonly SubjectTypeRegistry _typeRegistry;
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly ILogger? _logger;
 
-    public SubjectFactory(
+    public FileSubjectFactory(
         SubjectTypeRegistry typeRegistry,
         ConfigurableSubjectSerializer serializer,
         ILogger? logger = null)
