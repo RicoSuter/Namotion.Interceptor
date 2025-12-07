@@ -7,6 +7,7 @@
 
 @inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
+@inject ISnackbar Snackbar
 
 <MudDialog>
     <DialogContent>
@@ -101,6 +102,10 @@
         else
         {
             _propertiesEditor?.ApplyChanges();
+            if (_propertiesEditor?.HasErrors == true)
+            {
+                return;
+            }
         }
 
         try
@@ -108,12 +113,13 @@
             var saved = await Subject.SaveConfigurationAsync(RootManager, CancellationToken.None);
             if (!saved)
             {
-                Console.WriteLine("Warning: No configuration writer handled the subject");
+                Snackbar.Add("Configuration could not be saved: no handler found.", Severity.Warning);
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error saving configuration: {ex.Message}");
+            Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+            return;
         }
 
         MudDialog?.Close(DialogResult.Ok(true));

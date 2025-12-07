@@ -17,6 +17,16 @@ else
         </MudAlert>
     }
 
+    @if (_errors.Any())
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-3">
+            @foreach (var error in _errors)
+            {
+                <div>@error</div>
+            }
+        </MudAlert>
+    }
+
     <MudForm @bind-IsValid="@_isFormValid">
         @foreach (var prop in _configurationProperties)
         {
@@ -31,6 +41,7 @@ else
     private bool _isFormValid;
     private bool _isSaving;
     private bool _externalChangeDetected;
+    private List<string> _errors = [];
 
     private List<RegisteredSubjectProperty> _configurationProperties = [];
     private Dictionary<string, object?> _editValues = new();
@@ -40,6 +51,8 @@ else
     public IInterceptorSubject? Subject { get; set; }
 
     public bool IsValid => _isFormValid || !_configurationProperties.Any();
+
+    public bool HasErrors => _errors.Any();
     
     protected override void OnParametersSet()
     {
@@ -102,6 +115,7 @@ else
     {
         if (Subject == null) return;
 
+        _errors = [];
         _isSaving = true;
         try
         {
@@ -124,7 +138,7 @@ else
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"Error setting {property.Name}: {ex.Message}");
+                        _errors.Add($"Failed to set '{property.GetDisplayName()}': {ex.Message}");
                     }
                 }
             }
@@ -133,6 +147,8 @@ else
         {
             _isSaving = false;
         }
+
+        StateHasChanged();
     }
 
     public void Dispose()
