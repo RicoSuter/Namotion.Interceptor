@@ -1,7 +1,8 @@
-@using Namotion.Interceptor
 @using Namotion.Interceptor.Registry.Abstractions
 @using System.Collections
+
 @inherits HomeBlazorComponentBase
+
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
 
@@ -13,15 +14,15 @@
 </MudStack>
 
 <div id="scrollContainer" style="height: calc(100% - 48px); width: 100%; overflow-x: auto; overflow-y: hidden; display: flex; padding: 0 16px 16px 16px;">
-    @for (int i = 0; i < _panes.Count; i++)
+    @for (var i = 0; i < _panes.Count; i++)
     {
         var pane = _panes[i];
         var isFirst = i == 0;
         var selectedChild = i < _panes.Count - 1 ? _panes[i + 1].Subject : null;
 
-        <MudPaper Width="@((_paneWidth - 16) + "px")"
+        <MudPaper Width="@((PaneWidth - 16) + "px")"
                   Class="mr-4"
-                  Style="@($"min-width: {_paneWidth - 16}px; flex-shrink: 0; height: 100%; display: flex; flex-direction: column;")">
+                  Style="@($"min-width: {PaneWidth - 16}px; flex-shrink: 0; height: 100%; display: flex; flex-direction: column;")">
             <SubjectPropertyPanel
                 Subject="@pane.Subject"
                 SubjectRegistry="@_subjectRegistry"
@@ -36,17 +37,19 @@
 </div>
 
 @code {
-    private decimal _paneWidth = 400;
+    private const decimal PaneWidth = 400;
 
     [Parameter]
     public string? Path { get; set; }
 
-    private List<SubjectPane> _panes = new();
-    private List<BreadcrumbItem> _breadcrumbs = new();
+    private readonly List<SubjectPane> _panes = [];
+    private readonly List<BreadcrumbItem> _breadcrumbs = [];
+
     private string? _lastNavigatedUrl;
-    private ISubjectRegistry? _subjectRegistry;
     private bool _scrollToLastPane;
+
     private IJSObjectReference? _jsModule;
+    private ISubjectRegistry? _subjectRegistry;
 
     protected override void OnInitialized()
     {
@@ -75,7 +78,7 @@
         if (_scrollToLastPane && _jsModule != null)
         {
             _scrollToLastPane = false;
-            var scrollLeft = _paneWidth * (_panes.Count - 1);
+            var scrollLeft = PaneWidth * (_panes.Count - 1);
             await _jsModule.InvokeVoidAsync("scrollIntoView", "scrollContainer", scrollLeft);
         }
 
@@ -98,7 +101,9 @@
         {
             var decodedSegments = segments.Skip(1).Select(Uri.UnescapeDataString);
             Path = string.Join("/", decodedSegments);
+           
             RebuildFromPath();
+            
             InvokeAsync(StateHasChanged);
         }
     }
@@ -114,7 +119,15 @@
         _subjectRegistry = RootContext?.GetService<ISubjectRegistry>();
 
         // Always show root as first pane
-        _panes.Add(new SubjectPane { Subject = Root, DisplayName = "Root", ObjectPath = "Root", PropertyName = null, Index = null });
+        _panes.Add(new SubjectPane
+        {
+            Subject = Root,
+            DisplayName = "Root",
+            ObjectPath = "Root",
+            PropertyName = null,
+            Index = null
+        });
+
         _breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
 
         if (string.IsNullOrEmpty(Path))
@@ -129,19 +142,15 @@
         var currentObjectPath = "Root";
         RegisteredSubjectProperty? pendingProperty = null;
 
-        for (int i = 0; i < pathSegments.Length; i++)
+        foreach (var segment in pathSegments)
         {
-            var segment = pathSegments[i];
-
             if (pendingProperty == null)
             {
                 // Expecting a property name
                 var registered = _subjectRegistry?.TryGetRegisteredSubject(currentSubject);
-                if (registered == null)
-                    break;
 
-                var property = registered.TryGetProperty(segment);
-                if (property == null || !property.HasChildSubjects)
+                var property = registered?.TryGetProperty(segment);
+                if (property is not { HasChildSubjects: true })
                     break;
 
                 currentPathParts.Add(segment);
@@ -149,8 +158,7 @@
                 // If it's a single subject reference, navigate directly
                 if (property.IsSubjectReference)
                 {
-                    var child = property.GetValue() as IInterceptorSubject;
-                    if (child == null)
+                    if (property.GetValue() is not IInterceptorSubject child)
                         break;
 
                     currentObjectPath = $"{currentObjectPath}.{segment}";
@@ -239,7 +247,14 @@
             : $"{parentPath}.{propertyName}";
 
         // Add the new subject pane
-        _panes.Add(new SubjectPane { Subject = subject, DisplayName = displayName, ObjectPath = objectPath, PropertyName = propertyName, Index = index });
+        _panes.Add(new SubjectPane
+        {
+            Subject = subject, 
+            DisplayName = displayName, 
+            ObjectPath = objectPath,
+            PropertyName = propertyName, 
+            Index = index
+        });
 
         _scrollToLastPane = true;
         UpdateUrl();
@@ -339,10 +354,14 @@
 
     private class SubjectPane
     {
-        public IInterceptorSubject Subject { get; set; } = null!;
-        public string DisplayName { get; set; } = "";
-        public string ObjectPath { get; set; } = "";
-        public string? PropertyName { get; set; }
-        public object? Index { get; set; }
+        public required IInterceptorSubject Subject { get; init; }
+
+        public string DisplayName { get; init; } = "";
+        
+        public string ObjectPath { get; init; } = "";
+        
+        public string? PropertyName { get; init; }
+        
+        public object? Index { get; init; }
     }
 }

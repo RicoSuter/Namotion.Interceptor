@@ -1,10 +1,18 @@
+using HomeBlaze.Abstractions.Storage;
 using HomeBlaze.Storage.Files;
+using Moq;
 using Xunit;
 
 namespace HomeBlaze.Storage.Tests;
 
 public class MarkdownFileTests
 {
+    private static MarkdownFile CreateMarkdownFile(string fileName)
+    {
+        var mockStorage = new Mock<IStorageContainer>();
+        return new MarkdownFile(mockStorage.Object, fileName);
+    }
+
     [Fact]
     public void ExtractTitleFromContent_WithNavigationTitle_ReturnsNavigationTitle()
     {
@@ -135,10 +143,7 @@ public class MarkdownFileTests
     [Fact]
     public void Title_WithCachedTitle_ReturnsCachedTitle()
     {
-        var markdown = new MarkdownFile
-        {
-            FileName = "test.md"
-        };
+        var markdown = CreateMarkdownFile("test.md");
         markdown.SetTitle("Cached Title");
 
         Assert.Equal("Cached Title", markdown.Title);
@@ -147,10 +152,7 @@ public class MarkdownFileTests
     [Fact]
     public void Title_WithoutCachedTitle_ReturnsFileNameWithoutExtension()
     {
-        var markdown = new MarkdownFile
-        {
-            FileName = "my-document.md"
-        };
+        var markdown = CreateMarkdownFile("my-document.md");
 
         Assert.Equal("my-document", markdown.Title);
     }
@@ -158,10 +160,7 @@ public class MarkdownFileTests
     [Fact]
     public void SetTitle_UpdatesTitle()
     {
-        var markdown = new MarkdownFile
-        {
-            FileName = "test.md"
-        };
+        var markdown = CreateMarkdownFile("test.md");
 
         markdown.SetTitle("New Title");
 
@@ -171,7 +170,7 @@ public class MarkdownFileTests
     [Fact]
     public void Icon_ReturnsMarkdownIcon()
     {
-        var markdown = new MarkdownFile();
+        var markdown = CreateMarkdownFile("test.md");
 
         Assert.NotNull(markdown.Icon);
         Assert.Contains("svg", markdown.Icon);

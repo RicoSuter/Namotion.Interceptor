@@ -7,9 +7,7 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Motor))]
 @implements ISubjectEditComponent
 
-<MudPaper Class="pa-4">
-    <MudText Typo="Typo.h6" Class="mb-4">Edit Motor</MudText>
-
+<MudForm>
     <MudTextField @bind-Value="_name"
                   Label="Name"
                   Required="true"
@@ -35,7 +33,7 @@
     <MudText>Current Speed: @Motor?.CurrentSpeed RPM</MudText>
     <MudText>Temperature: @Motor?.Temperature.ToString("F1")°C</MudText>
     <MudText>Status: @Motor?.Status</MudText>
-</MudPaper>
+</MudForm>
 
 @code {
     [Parameter]

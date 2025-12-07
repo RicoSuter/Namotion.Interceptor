@@ -1,17 +1,18 @@
 using HomeBlaze.Abstractions.Storage;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
-namespace HomeBlaze.Core.Services;
+namespace HomeBlaze.Core;
 
 /// <summary>
 /// Manages loading and access to the root subject.
 /// Bootstraps the system from root.json configuration.
 /// </summary>
-public class RootManager : ISubjectStorageHandler, IDisposable
+public class RootManager : BackgroundService, IConfigurationWriter
 {
     private readonly SubjectTypeRegistry _typeRegistry;
-    private readonly SubjectSerializer _serializer;
+    private readonly ConfigurableSubjectSerializer _serializer;
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger<RootManager>? _logger;
     private string? _configPath;
@@ -28,7 +29,7 @@ public class RootManager : ISubjectStorageHandler, IDisposable
 
     public RootManager(
         SubjectTypeRegistry typeRegistry,
-        SubjectSerializer serializer,
+        ConfigurableSubjectSerializer serializer,
         IInterceptorSubjectContext context,
         ILogger<RootManager>? logger = null)
     {
@@ -38,24 +39,19 @@ public class RootManager : ISubjectStorageHandler, IDisposable
         _logger = logger;
     }
 
-    /// <summary>
-    /// Loads the root subject from the configuration file.
-    /// </summary>
-    /// <param name="configPath">Path to the root.json configuration file.</param>
-    /// <param name="postLoad">Optional callback to run after loading (e.g., to resolve relative paths).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task LoadAsync(
-        string configPath = "root.json",
-        Action<IInterceptorSubject, string>? postLoad = null,
-        CancellationToken cancellationToken = default)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await LoadAsync(stoppingToken);
+    }
+
+    private async Task LoadAsync(CancellationToken cancellationToken)
     {
         if (Root != null)
         {
-            _logger?.LogWarning("Root already loaded, skipping");
             return;
         }
 
-        _configPath = Path.GetFullPath(configPath);
+        _configPath = Path.GetFullPath("root.json");
         _logger?.LogInformation("Loading root configuration from: {Path}", _configPath);
 
         if (!File.Exists(_configPath))
@@ -64,28 +60,24 @@ public class RootManager : ISubjectStorageHandler, IDisposable
         }
 
         var json = await File.ReadAllTextAsync(_configPath, cancellationToken);
-        Root = _serializer.Deserialize(json, _context);
 
+        Root = _serializer.Deserialize(json);
         if (Root == null)
         {
             throw new InvalidOperationException("Failed to deserialize root configuration");
         }
 
+        Root.Context.AddFallbackContext(_context);
+
         _logger?.LogInformation("Root loaded: {Type}", Root.GetType().FullName);
-
-        // Allow caller to handle post-load customization (e.g., path resolution)
-        var configDir = Path.GetDirectoryName(_configPath) ?? Environment.CurrentDirectory;
-        postLoad?.Invoke(Root, configDir);
-
-        // Register root in context for easy access
         _context.AddService(Root);
     }
 
     /// <summary>
     /// Writes the root subject configuration to disk if this is the root subject.
-    /// Called by StorageService when [Configuration] properties change.
+    /// Called by ConfigurationManager when [Configuration] properties change.
     /// </summary>
-    public async Task<bool> WriteAsync(IInterceptorSubject subject, CancellationToken ct)
+    public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken ct)
     {
         if (subject != Root)
             return false;
@@ -113,14 +105,6 @@ public class RootManager : ISubjectStorageHandler, IDisposable
             throw new InvalidOperationException("Cannot save: root is not loaded");
         }
 
-        await WriteAsync(Root, cancellationToken);
-    }
-
-    /// <summary>
-    /// Disposes resources (no-op, StorageService handles persistence).
-    /// </summary>
-    public void Dispose()
-    {
-        // No subscriptions to dispose - StorageService handles persistence
+        await WriteConfigurationAsync(Root, cancellationToken);
     }
 }

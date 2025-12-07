@@ -1,9 +1,8 @@
+@using BlazorMonaco.Editor
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Components
-@using HomeBlaze.Storage.Files
-@using BlazorMonaco
-@using BlazorMonaco.Editor
+@using MudBlazor
 @using Namotion.Interceptor
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(MarkdownFile))]
@@ -66,7 +65,9 @@ else
     {
         if (File != null && _isLoading)
         {
-            _originalContent = await File.GetContentAsync();
+            using var stream = await File.ReadAsync();
+            using var reader = new StreamReader(stream);
+            _originalContent = await reader.ReadToEndAsync();
             _currentContent = _originalContent;
             _isLoading = false;
         }
@@ -95,7 +96,8 @@ else
         if (File == null || _editor == null) return;
 
         var content = await _editor.GetValue();
-        await File.SetContentAsync(content);
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+        await File.WriteAsync(stream);
         _originalContent = content;
         _currentContent = content;
         IsDirtyChanged?.Invoke(false);

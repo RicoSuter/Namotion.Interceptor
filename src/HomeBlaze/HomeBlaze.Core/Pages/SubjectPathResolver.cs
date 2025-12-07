@@ -2,7 +2,7 @@ using System.Collections;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 
-namespace HomeBlaze.Core.Services;
+namespace HomeBlaze.Core.Pages;
 
 /// <summary>
 /// Resolves subjects from URL-style paths using the subject registry.

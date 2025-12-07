@@ -5,7 +5,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
-namespace HomeBlaze.Core.Extensions;
+namespace HomeBlaze.Core;
 
 /// <summary>
 /// HomeBlaze-specific extension methods for the interceptor registry.
@@ -16,13 +16,13 @@ public static partial class SubjectRegistryExtensions
     // Cache by (SubjectType, PropertyName) -> attribute info
     // All instances of same subject type have identical attributes
     private static readonly ConcurrentDictionary<(Type, string), bool>
-        _isConfigurationPropertyCache = new();
+        IsConfigurationPropertyCache = new();
 
     private static readonly ConcurrentDictionary<(Type, string), StateAttribute?>
-        _stateAttributeCache = new();
+        StateAttributeCache = new();
 
     private static readonly ConcurrentDictionary<string, string>
-        _camelCaseCache = new();
+        CamelCaseCache = new();
 
     /// <summary>
     /// Gets all properties marked with [Configuration] attribute.
@@ -65,7 +65,7 @@ public static partial class SubjectRegistryExtensions
     public static bool IsConfigurationProperty(this RegisteredSubjectProperty property)
     {
         var key = (property.Subject.GetType(), property.Name);
-        return _isConfigurationPropertyCache.GetOrAdd(key, _ =>
+        return IsConfigurationPropertyCache.GetOrAdd(key, _ =>
         {
             foreach (var attr in property.ReflectionAttributes)
             {
@@ -83,7 +83,7 @@ public static partial class SubjectRegistryExtensions
     public static StateAttribute? GetStateAttribute(this RegisteredSubjectProperty property)
     {
         var key = (property.Subject.GetType(), property.Name);
-        return _stateAttributeCache.GetOrAdd(key, _ =>
+        return StateAttributeCache.GetOrAdd(key, _ =>
         {
             foreach (var attr in property.ReflectionAttributes)
             {
@@ -136,6 +136,6 @@ public static partial class SubjectRegistryExtensions
 
     private static string SplitCamelCase(string input)
     {
-        return _camelCaseCache.GetOrAdd(input, s => CamelCaseRegex().Replace(s, "$1 $2"));
+        return CamelCaseCache.GetOrAdd(input, s => CamelCaseRegex().Replace(s, "$1 $2"));
     }
 }

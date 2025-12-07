@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Storage;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
@@ -20,7 +21,7 @@ internal sealed class SubjectHierarchyManager
         IInterceptorSubject subject,
         Dictionary<string, IInterceptorSubject> children,
         IInterceptorSubjectContext context,
-        FluentStorageContainer storage)
+        IStorageContainer storage)
     {
         path = NormalizePath(path);
         var segments = path.Split('/');
@@ -78,8 +79,6 @@ internal sealed class SubjectHierarchyManager
         }
 
         current.Remove(segments[^1]);
-
-        // TODO: Clean up empty VirtualFolders
     }
 
     private static string NormalizePath(string path)

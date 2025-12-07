@@ -1,8 +1,8 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
-@using HomeBlaze.Core.Extensions
-@using HomeBlaze.Core.Services
-@using Namotion.Interceptor
+@using HomeBlaze.Components.Dialogs
+@using HomeBlaze.Core.Components
+@using HomeBlaze.Core.UI
 @using Namotion.Interceptor.Registry.Abstractions
 
 @inject IDialogService DialogService
@@ -151,6 +151,10 @@
 }
 
 @code {
+    private readonly HashSet<string> _expandedProperties = [];
+
+    private RegisteredSubject? _registeredSubject;
+
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
@@ -174,10 +178,7 @@
 
     [Parameter]
     public EventCallback OnDelete { get; set; }
-
-    private RegisteredSubject? _registeredSubject;
-    private HashSet<string> _expandedProperties = new();
-
+    
     protected override void OnParametersSet()
     {
         base.OnParametersSet();
@@ -191,15 +192,15 @@
         return Subject switch
         {
             null => "No Selection",
-            ITitleProvider titleProvider when !string.IsNullOrEmpty(titleProvider.Title) => titleProvider.Title,
+            IDisplaySubject displayable when !string.IsNullOrEmpty(displayable.Title) => displayable.Title,
             _ => Subject.GetType().Name
         };
     }
 
     private string GetSubjectIcon(IInterceptorSubject? subject)
     {
-        if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.Icon))
-            return iconProvider.Icon;
+        if (subject is IDisplaySubject displayable && !string.IsNullOrEmpty(displayable.Icon))
+            return displayable.Icon;
 
         return Icons.Material.Filled.QuestionMark;
     }
@@ -258,7 +259,7 @@
                 <span style="display: inline-block; width: 24px;"></span>
             }
             <strong>@displayName: </strong>
-            @RenderPropertyValue(prop, value)
+            @prop.GetPropertyDisplayValue(value)
         </MudText>
 
         @if (isExpanded)
@@ -280,34 +281,11 @@
         return property.HasChildSubjects;
     }
 
-    private string RenderPropertyValue(RegisteredSubjectProperty prop, object? value)
-    {
-        if (value == null) return "null";
-
-        // Use StateAttribute's GetDisplayText for unit formatting
-        var stateAttr = prop.GetStateAttribute();
-        if (stateAttr != null && stateAttr.Unit != StateUnit.Default)
-        {
-            return stateAttr.GetDisplayText(value);
-        }
-
-        // Default formatting for common types
-        return value switch
-        {
-            bool b => b ? "Yes" : "No",
-            DateTime dt => dt.ToString("g"),
-            DateTimeOffset dto => dto.ToString("g"),
-            TimeSpan ts => ts.ToString(@"hh\:mm\:ss"),
-            Enum e => e.ToString(),
-            _ => value.ToString() ?? ""
-        };
-    }
-
     private string GetSubjectDisplayName(SubjectPropertyChild child)
     {
         var subject = child.Subject;
-        if (subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
-            return titleProvider.Title;
+        if (subject is IDisplaySubject displayable && !string.IsNullOrEmpty(displayable.Title))
+            return displayable.Title;
 
         return subject?.ToString() ?? "n/a";
     }

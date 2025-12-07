@@ -1,9 +1,10 @@
+@using BlazorMonaco
+@using BlazorMonaco.Editor
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Components
 @using HomeBlaze.Storage.Files
-@using BlazorMonaco
-@using BlazorMonaco.Editor
+@using MudBlazor
 @using Namotion.Interceptor
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(JsonFile))]
@@ -26,6 +27,7 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
+    private bool _isLoaded;
     private JsonFile? File => Subject as JsonFile;
     private StandaloneCodeEditor? _editor;
     private string _originalContent = string.Empty;
@@ -52,19 +54,21 @@
             Theme = "vs-dark"
         };
     }
-
-    protected override void OnParametersSet()
+    
+    protected override async Task OnParametersSetAsync()
     {
-        if (File != null)
+        if (File != null && !_isLoaded)
         {
-            _originalContent = File.Content;
+            await using var stream = await File.ReadAsync();
+            using var reader = new StreamReader(stream);
+            _originalContent = await reader.ReadToEndAsync();
             _currentContent = _originalContent;
+            _isLoaded = true;
         }
     }
 
     private void OnContentChanged(ModelContentChangedEvent e)
     {
-        // Content changed, we'll get the actual value on save
         Task.Run(async () =>
         {
             if (_editor != null)
@@ -84,8 +88,9 @@
         if (File == null || _editor == null) return;
 
         var content = await _editor.GetValue();
-        File.Content = content;
-        await File.SaveAsync();
+      
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+        await File.WriteAsync(stream);
         _originalContent = content;
         _currentContent = content;
         IsDirtyChanged?.Invoke(false);

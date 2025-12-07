@@ -1,32 +1,28 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Components
-@using HomeBlaze.Storage.Files
 @using Markdig
+@using MudBlazor
 @using Namotion.Interceptor
 
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
+
 @implements ISubjectComponent
 
-<MudPaper Class="pa-4" Elevation="0">
-    <MudText Typo="Typo.h4" Class="mb-4">@_title</MudText>
-    <MudDivider Class="mb-4" />
-
-    <div class="markdown-content">
-        @if (_isLoading)
-        {
-            <MudProgressCircular Indeterminate="true" />
-        }
-        else if (!string.IsNullOrEmpty(_error))
-        {
-            <MudAlert Severity="Severity.Error">@_error</MudAlert>
-        }
-        else
-        {
-            @((MarkupString)_htmlContent)
-        }
-    </div>
-</MudPaper>
+<div class="markdown-content">
+    @if (_isLoading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else if (!string.IsNullOrEmpty(_error))
+    {
+        <MudAlert Severity="Severity.Error">@_error</MudAlert>
+    }
+    else
+    {
+        @((MarkupString)_htmlContent)
+    }
+</div>
 
 <style>
     .markdown-content h1 { font-size: 2rem; font-weight: 500; margin: 1.5rem 0 1rem; }
@@ -55,7 +51,6 @@
     private string _htmlContent = string.Empty;
     private string? _error;
     private bool _isLoading = true;
-    private string _title = "";
 
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
@@ -77,12 +72,12 @@
             _isLoading = false;
             return;
         }
-
-        _title = File.Title ?? File.FileName;
-
+        
         try
         {
-            var markdown = await File.GetContentAsync();
+            await using var stream = await File.ReadAsync();
+            using var reader = new StreamReader(stream);
+            var markdown = await reader.ReadToEndAsync();
             _htmlContent = Markdown.ToHtml(markdown, Pipeline);
         }
         catch (Exception ex)

@@ -1,22 +1,29 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Core.Services;
+using HomeBlaze.Core;
+using HomeBlaze.Core.Components;
 
 namespace HomeBlaze.Tests;
 
 public class SubjectComponentRegistryTests
 {
+    private static SubjectComponentRegistry CreateRegistryWithScanning()
+    {
+        var typeProvider = new TypeProvider();
+        typeProvider.AddAssemblies(typeof(SubjectComponentRegistryTests).Assembly);
+        return new SubjectComponentRegistry(typeProvider);
+    }
+
     [Fact]
     public void ScanAssemblies_FindsAttributedComponents()
     {
         // Arrange
-        var registry = new SubjectComponentRegistry();
+        var registry = CreateRegistryWithScanning();
 
-        // Act
-        registry.ScanAssemblies(typeof(SubjectComponentRegistryTests).Assembly);
+        // Act - Lazy scanning happens on first access
+        var component = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Edit);
 
         // Assert
-        var component = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Edit);
         Assert.NotNull(component);
         Assert.Equal(typeof(TestEditComponent), component.ComponentType);
     }
@@ -25,8 +32,7 @@ public class SubjectComponentRegistryTests
     public void GetComponent_ExactMatch_ReturnsRegistration()
     {
         // Arrange
-        var registry = new SubjectComponentRegistry()
-            .Register<TestEditComponent>(SubjectComponentType.Edit, typeof(TestSubject));
+        var registry = CreateRegistryWithScanning();
 
         // Act
         var result = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Edit);
@@ -42,8 +48,9 @@ public class SubjectComponentRegistryTests
     [Fact]
     public void GetComponent_NoMatch_ReturnsNull()
     {
-        // Arrange
-        var registry = new SubjectComponentRegistry();
+        // Arrange - empty registry (no types added)
+        var typeProvider = new TypeProvider();
+        var registry = new SubjectComponentRegistry(typeProvider);
 
         // Act
         var result = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Page);
@@ -56,9 +63,7 @@ public class SubjectComponentRegistryTests
     public void GetComponent_WithName_ReturnsNamedRegistration()
     {
         // Arrange
-        var registry = new SubjectComponentRegistry()
-            .Register<TestWidgetComponent>(SubjectComponentType.Widget, typeof(TestSubject), "status")
-            .Register<TestWidget2Component>(SubjectComponentType.Widget, typeof(TestSubject), "temperature");
+        var registry = CreateRegistryWithScanning();
 
         // Act
         var result1 = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Widget, "status");
@@ -78,10 +83,7 @@ public class SubjectComponentRegistryTests
     public void GetComponents_ReturnsAllOfType()
     {
         // Arrange
-        var registry = new SubjectComponentRegistry()
-            .Register<TestWidgetComponent>(SubjectComponentType.Widget, typeof(TestSubject), "status")
-            .Register<TestWidget2Component>(SubjectComponentType.Widget, typeof(TestSubject), "temperature")
-            .Register<TestEditComponent>(SubjectComponentType.Edit, typeof(TestSubject));
+        var registry = CreateRegistryWithScanning();
 
         // Act
         var widgets = registry.GetComponents(typeof(TestSubject), SubjectComponentType.Widget).ToList();
@@ -96,8 +98,7 @@ public class SubjectComponentRegistryTests
     public void HasComponent_ExistingComponent_ReturnsTrue()
     {
         // Arrange
-        var registry = new SubjectComponentRegistry()
-            .Register<TestEditComponent>(SubjectComponentType.Edit, typeof(TestSubject));
+        var registry = CreateRegistryWithScanning();
 
         // Act & Assert
         Assert.True(registry.HasComponent(typeof(TestSubject), SubjectComponentType.Edit));
@@ -108,8 +109,7 @@ public class SubjectComponentRegistryTests
     public void ScanAssemblies_FindsMultipleAttributes()
     {
         // Arrange
-        var registry = new SubjectComponentRegistry()
-            .ScanAssemblies(typeof(SubjectComponentRegistryTests).Assembly);
+        var registry = CreateRegistryWithScanning();
 
         // Act
         var edit = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Edit);
