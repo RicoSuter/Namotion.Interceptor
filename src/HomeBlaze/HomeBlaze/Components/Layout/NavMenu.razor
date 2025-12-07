@@ -1,5 +1,7 @@
-@inject RootManager RootManager
 @using MarkdownFile = HomeBlaze.Storage.Files.MarkdownFile
+
+@inject RootManager RootManager
+
 @implements IDisposable
 
 <MudNavMenu>
@@ -84,7 +86,7 @@
     private string GetTitle(MarkdownFile markdown)
     {
         // Use filename without extension as title, but make it readable
-        var name = Path.GetFileNameWithoutExtension(markdown.FileName);
+        var name = Path.GetFileNameWithoutExtension(markdown.Name);
         // Convert kebab-case or snake_case to Title Case
         return string.Join(" ", name
             .Replace("-", " ")
@@ -96,7 +98,7 @@
     private int GetOrder(MarkdownFile markdown)
     {
         // readme files go first
-        var name = Path.GetFileNameWithoutExtension(markdown.FileName).ToLower();
+        var name = Path.GetFileNameWithoutExtension(markdown.Name).ToLower();
         return name switch
         {
             "readme" => 0,

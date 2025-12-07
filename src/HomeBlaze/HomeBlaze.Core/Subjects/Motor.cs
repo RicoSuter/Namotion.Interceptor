@@ -10,7 +10,7 @@ namespace HomeBlaze.Core.Subjects;
 /// Sample motor subject with configuration and simulated sensor values.
 /// </summary>
 [InterceptorSubject]
-public partial class Motor : BackgroundService, IPersistentSubject
+public partial class Motor : BackgroundService, IConfigurableSubject, IDisplaySubject
 {
     // Configuration (persisted to JSON)
 
@@ -19,6 +19,10 @@ public partial class Motor : BackgroundService, IPersistentSubject
     /// </summary>
     [Configuration]
     public partial string Name { get; set; }
+
+    public string? Title => Name;
+
+    public string? Icon { get; } = null;
 
     /// <summary>
     /// Target speed in RPM.
@@ -133,9 +137,9 @@ public partial class Motor : BackgroundService, IPersistentSubject
     }
 
     /// <summary>
-    /// IPersistentSubject implementation - called after configuration properties have been updated.
+    /// IConfigurableSubject implementation - called after configuration properties have been updated.
     /// </summary>
-    public Task ReloadAsync(CancellationToken cancellationToken = default)
+    public Task ApplyConfigurationAsync(CancellationToken ct = default)
     {
         // Properties are already updated by the storage container.
         // Override this method if you need to react to configuration changes

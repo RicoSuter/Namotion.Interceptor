@@ -1,8 +1,9 @@
 @page "/pages/{*Path}"
+
 @using HomeBlaze.Abstractions
-@using HomeBlaze.Core.Extensions
-@using HomeBlaze.Core.Services
-@using Namotion.Interceptor
+@using HomeBlaze.Components.Dialogs
+@using HomeBlaze.Core.Components
+@using HomeBlaze.Core.Pages
 @using Namotion.Interceptor.Registry.Abstractions
 
 @inherits HomeBlazorComponentBase
@@ -82,10 +83,10 @@ else
                 SubjectComponentType.Page);
             _componentType = registration?.ComponentType;
 
-            // Get title from ITitleProvider if implemented
-            if (_subject is ITitleProvider titleProvider)
+            // Get title from IDisplaySubject if implemented
+            if (_subject is IDisplaySubject displayable)
             {
-                _title = titleProvider.Title ?? _subject.GetType().Name;
+                _title = displayable.Title ?? _subject.GetType().Name;
             }
             else
             {

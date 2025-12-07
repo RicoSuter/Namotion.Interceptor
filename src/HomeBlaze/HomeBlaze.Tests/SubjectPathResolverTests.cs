@@ -1,4 +1,4 @@
-using HomeBlaze.Core.Services;
+using HomeBlaze.Core.Pages;
 using HomeBlaze.Tests.Models;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;

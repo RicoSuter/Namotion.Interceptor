@@ -1,34 +1,28 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using Namotion.Interceptor;
+using HomeBlaze.Abstractions.Storage;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Files;
 
 /// <summary>
 /// Represents a Markdown file in storage.
-/// Content is accessed via methods to avoid tracking overhead.
 /// </summary>
 [InterceptorSubject]
 [FileExtension(".md")]
 [FileExtension(".markdown")]
-public partial class MarkdownFile : ITitleProvider, IIconProvider, IStorageItem, IPersistentSubject
+public partial class MarkdownFile : IStorageFile, IDisplaySubject
 {
-    // MudBlazor Icons.Material.Filled.Description
     private const string MarkdownIcon = "<svg style=\"width:24px;height:24px\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M9,13V19H7V13H9M15,15V19H17V15H15M11,11V19H13V11H11Z\" /></svg>";
 
-    private readonly FluentStorageContainer? _storage;
     private string? _cachedTitle;
 
-    /// <summary>
-    /// Full path to the file.
-    /// </summary>
-    public partial string FilePath { get; set; }
+    public IStorageContainer Storage { get; }
+    public string FullPath { get; }
+    public string Name { get; }
 
-    /// <summary>
-    /// Name of the file including extension.
-    /// </summary>
-    public partial string FileName { get; set; }
+    public string? Title => _cachedTitle ?? Path.GetFileNameWithoutExtension(Name);
+    public string Icon => MarkdownIcon;
 
     /// <summary>
     /// File size in bytes.
@@ -42,32 +36,21 @@ public partial class MarkdownFile : ITitleProvider, IIconProvider, IStorageItem,
     [State("Modified", Order = 2)]
     public partial DateTime LastModified { get; set; }
 
-    /// <summary>
-    /// Gets the title. Returns cached title from front matter or filename.
-    /// </summary>
-    public string? Title => _cachedTitle ?? Path.GetFileNameWithoutExtension(FileName);
-
-    /// <summary>
-    /// Gets the icon for markdown files.
-    /// </summary>
-    public string Icon => MarkdownIcon;
-
-    public MarkdownFile()
+    public MarkdownFile(IStorageContainer storage, string fullPath)
     {
-        FilePath = string.Empty;
-        FileName = string.Empty;
+        Storage = storage;
+        FullPath = fullPath;
+        Name = Path.GetFileName(fullPath);
     }
 
-    // Constructor used by FluentStorageContainer to create files with storage and path
-    public MarkdownFile(FluentStorageContainer storage, string filePath)
-    {
-        _storage = storage;
-        FilePath = filePath;
-        FileName = Path.GetFileName(filePath);
-    }
+    public Task<Stream> ReadAsync(CancellationToken ct = default)
+        => Storage.ReadBlobAsync(FullPath, ct);
+
+    public Task WriteAsync(Stream content, CancellationToken ct = default)
+        => Storage.WriteBlobAsync(FullPath, content, ct);
 
     /// <summary>
-    /// Sets the cached title (typically called by loader after parsing front matter).
+    /// Sets the cached title (typically called after parsing front matter).
     /// </summary>
     public void SetTitle(string? title)
     {
@@ -75,49 +58,7 @@ public partial class MarkdownFile : ITitleProvider, IIconProvider, IStorageItem,
     }
 
     /// <summary>
-    /// Gets the markdown content of the file.
-    /// </summary>
-    public async Task<string> GetContentAsync(CancellationToken cancellationToken = default)
-    {
-        if (_storage == null || string.IsNullOrEmpty(FilePath))
-            return string.Empty;
-
-        try
-        {
-            using var stream = await _storage.ReadBlobAsync(FilePath, cancellationToken);
-            using var reader = new StreamReader(stream);
-            return await reader.ReadToEndAsync(cancellationToken);
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
-
-    /// <summary>
-    /// Sets the markdown content of the file.
-    /// </summary>
-    public async Task SetContentAsync(string content, CancellationToken cancellationToken = default)
-    {
-        if (_storage == null || string.IsNullOrEmpty(FilePath))
-            throw new InvalidOperationException("Storage or FilePath is not set");
-
-        using var stream = new MemoryStream();
-        using var writer = new StreamWriter(stream);
-        await writer.WriteAsync(content);
-        await writer.FlushAsync();
-        stream.Position = 0;
-
-        await _storage.WriteBlobAsync(FilePath, stream, cancellationToken);
-
-        // Update metadata
-        FileSize = stream.Length;
-        LastModified = DateTime.UtcNow;
-    }
-
-    /// <summary>
     /// Extracts navigation title from YAML front matter in markdown content.
-    /// Looks for: navigation_title, nav_title, or title (in priority order).
     /// </summary>
     public static string? ExtractTitleFromContent(string content)
     {
@@ -132,7 +73,6 @@ public partial class MarkdownFile : ITitleProvider, IIconProvider, IStorageItem,
             if (firstLine != "---")
                 return null;
 
-            // Parse YAML front matter looking for navigation title
             string? navigationTitle = null;
             string? title = null;
             string? line;
@@ -160,7 +100,6 @@ public partial class MarkdownFile : ITitleProvider, IIconProvider, IStorageItem,
         }
         catch
         {
-            // Ignore parsing errors
             return null;
         }
     }
@@ -168,41 +107,11 @@ public partial class MarkdownFile : ITitleProvider, IIconProvider, IStorageItem,
     private static string? ExtractFrontmatterValue(string line, int prefixLength)
     {
         var value = line.Substring(prefixLength).Trim();
-        // Remove quotes if present
         if ((value.StartsWith('"') && value.EndsWith('"')) ||
             (value.StartsWith('\'') && value.EndsWith('\'')))
         {
             value = value.Substring(1, value.Length - 2);
         }
         return string.IsNullOrWhiteSpace(value) ? null : value;
-    }
-
-    /// <summary>
-    /// IPersistentSubject implementation - reloads file metadata and title from file.
-    /// </summary>
-    public async Task ReloadAsync(CancellationToken cancellationToken = default)
-    {
-        if (_storage == null || string.IsNullOrEmpty(FilePath))
-            return;
-
-        try
-        {
-            // Reload content and extract title
-            var content = await GetContentAsync(cancellationToken);
-            _cachedTitle = ExtractTitleFromContent(content);
-
-            // Update file metadata
-            var fullPath = Path.Combine(_storage.ConnectionString, FilePath);
-            if (File.Exists(fullPath))
-            {
-                var fileInfo = new FileInfo(fullPath);
-                FileSize = fileInfo.Length;
-                LastModified = fileInfo.LastWriteTimeUtc;
-            }
-        }
-        catch
-        {
-            // Ignore reload errors
-        }
     }
 }

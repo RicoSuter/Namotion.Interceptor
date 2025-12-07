@@ -1,8 +1,7 @@
-using System.Text.Json;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
-using HomeBlaze.Core.Extensions;
-using HomeBlaze.Core.Services;
+using HomeBlaze.Abstractions.Storage;
+using HomeBlaze.Core;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -16,12 +15,12 @@ namespace HomeBlaze.Storage.Internal;
 internal sealed class SubjectFactory
 {
     private readonly SubjectTypeRegistry _typeRegistry;
-    private readonly SubjectSerializer _serializer;
+    private readonly ConfigurableSubjectSerializer _serializer;
     private readonly ILogger? _logger;
 
     public SubjectFactory(
         SubjectTypeRegistry typeRegistry,
-        SubjectSerializer serializer,
+        ConfigurableSubjectSerializer serializer,
         ILogger? logger = null)
     {
         _typeRegistry = typeRegistry;
@@ -34,7 +33,7 @@ internal sealed class SubjectFactory
     /// </summary>
     public async Task<IInterceptorSubject?> CreateFromBlobAsync(
         IBlobStorage client,
-        FluentStorageContainer storage,
+        IStorageContainer storage,
         Blob blob,
         IInterceptorSubjectContext context,
         CancellationToken ct)
@@ -51,7 +50,7 @@ internal sealed class SubjectFactory
         var mappedType = _typeRegistry.ResolveTypeForExtension(extension);
         if (mappedType != null)
         {
-            var subject = CreateFileSubject(mappedType, storage, blob.FullPath, context);
+            var subject = CreateFileSubject(mappedType, storage, blob.FullPath);
             SetFileMetadata(subject, blob);
 
             if (subject is MarkdownFile markdownFile)
@@ -63,26 +62,24 @@ internal sealed class SubjectFactory
         }
 
         // Default to GenericFile
-        var genericFile = CreateFileSubject(typeof(GenericFile), storage, blob.FullPath, context);
+        var genericFile = new GenericFile(storage, blob.FullPath);
         SetFileMetadata(genericFile, blob);
         return genericFile;
     }
 
     /// <summary>
-    /// Updates an existing subject's configuration properties from JSON and calls ReloadAsync.
+    /// Updates an existing subject's configuration properties from JSON and calls ApplyConfigurationAsync.
     /// </summary>
     public async Task UpdateFromJsonAsync(
         IInterceptorSubject subject,
         string json,
         CancellationToken ct = default)
     {
-        // Update configuration properties from JSON
-        UpdatePropertiesFromJson(subject, json);
+        _serializer.UpdateConfiguration(subject, json);
 
-        // Notify subject that properties have been updated
-        if (subject is IPersistentSubject persistent)
+        if (subject is IConfigurableSubject configurable)
         {
-            await persistent.ReloadAsync(ct);
+            await configurable.ApplyConfigurationAsync(ct);
         }
     }
 
@@ -94,17 +91,16 @@ internal sealed class SubjectFactory
 
     private async Task<IInterceptorSubject?> CreateFromJsonBlobAsync(
         IBlobStorage client,
-        FluentStorageContainer storage,
+        IStorageContainer storage,
         Blob blob,
         IInterceptorSubjectContext context,
         CancellationToken ct)
     {
         var json = await client.ReadTextAsync(blob.FullPath, cancellationToken: ct);
 
-        // Try to deserialize as a configurable subject
         try
         {
-            var subject = _serializer.Deserialize(json, context);
+            var subject = _serializer.Deserialize(json);
             if (subject != null)
             {
                 return subject;
@@ -116,37 +112,7 @@ internal sealed class SubjectFactory
         }
 
         // Create JsonFile for plain JSON
-        return new JsonFile(context, storage, blob.FullPath) { Content = json };
-    }
-
-    private void UpdatePropertiesFromJson(IInterceptorSubject subject, string json)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            foreach (var prop in subject.GetConfigurationProperties())
-            {
-                var jsonName = JsonNamingPolicy.CamelCase.ConvertName(prop.Name);
-                if (root.TryGetProperty(jsonName, out var jsonValue))
-                {
-                    try
-                    {
-                        var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), prop.Type);
-                        prop.SetValue(value);
-                    }
-                    catch
-                    {
-                        // Skip properties that can't be deserialized
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to parse JSON for property update");
-        }
+        return new JsonFile(storage, blob.FullPath);
     }
 
     private async Task LoadMarkdownTitleAsync(
@@ -172,57 +138,16 @@ internal sealed class SubjectFactory
 
     private IInterceptorSubject? CreateFileSubject(
         Type type,
-        FluentStorageContainer storage,
-        string blobPath,
-        IInterceptorSubjectContext context)
+        IStorageContainer storage,
+        string blobPath)
     {
         try
         {
-            // Try constructor with (context, storage, path)
-            var ctor = type.GetConstructor([typeof(IInterceptorSubjectContext), typeof(FluentStorageContainer), typeof(string)]);
-            if (ctor != null)
-            {
-                return (IInterceptorSubject)ctor.Invoke([context, storage, blobPath]);
-            }
-
-            // Try constructor with (storage, path)
-            ctor = type.GetConstructor([typeof(FluentStorageContainer), typeof(string)]);
+            // Try constructor with (IStorageContainer, string)
+            var ctor = type.GetConstructor([typeof(IStorageContainer), typeof(string)]);
             if (ctor != null)
             {
                 return (IInterceptorSubject)ctor.Invoke([storage, blobPath]);
-            }
-
-            // Try constructor with just (path)
-            ctor = type.GetConstructor([typeof(string)]);
-            if (ctor != null)
-            {
-                var subject = (IInterceptorSubject)ctor.Invoke([blobPath]);
-                ReflectionHelper.SetPropertyIfExists(subject, "Storage", storage);
-                return subject;
-            }
-
-            // Try constructor with just context
-            ctor = type.GetConstructor([typeof(IInterceptorSubjectContext)]);
-            if (ctor != null)
-            {
-                var subject = (IInterceptorSubject)ctor.Invoke([context]);
-                ReflectionHelper.SetPropertyIfExists(subject, "Storage", storage);
-                ReflectionHelper.SetPropertyIfExists(subject, "BlobPath", blobPath);
-                ReflectionHelper.SetPropertyIfExists(subject, "FilePath", blobPath);
-                ReflectionHelper.SetPropertyIfExists(subject, "FileName", Path.GetFileName(blobPath));
-                return subject;
-            }
-
-            // Try parameterless constructor
-            ctor = type.GetConstructor([]);
-            if (ctor != null)
-            {
-                var subject = (IInterceptorSubject)ctor.Invoke([]);
-                ReflectionHelper.SetPropertyIfExists(subject, "Storage", storage);
-                ReflectionHelper.SetPropertyIfExists(subject, "BlobPath", blobPath);
-                ReflectionHelper.SetPropertyIfExists(subject, "FilePath", blobPath);
-                ReflectionHelper.SetPropertyIfExists(subject, "FileName", Path.GetFileName(blobPath));
-                return subject;
             }
         }
         catch (Exception ex)
@@ -238,10 +163,23 @@ internal sealed class SubjectFactory
         if (subject == null)
             return;
 
-        ReflectionHelper.SetPropertyIfExists(subject, "FileSize", blob.Size ?? 0L);
-        if (blob.LastModificationTime.HasValue)
+        if (subject is GenericFile genericFile)
         {
-            ReflectionHelper.SetPropertyIfExists(subject, "LastModified", blob.LastModificationTime.Value);
+            genericFile.FileSize = blob.Size ?? 0L;
+            if (blob.LastModificationTime.HasValue)
+                genericFile.LastModified = blob.LastModificationTime.Value.DateTime;
+        }
+        else if (subject is MarkdownFile markdownFile)
+        {
+            markdownFile.FileSize = blob.Size ?? 0L;
+            if (blob.LastModificationTime.HasValue)
+                markdownFile.LastModified = blob.LastModificationTime.Value.DateTime;
+        }
+        else if (subject is JsonFile jsonFile)
+        {
+            jsonFile.FileSize = blob.Size ?? 0L;
+            if (blob.LastModificationTime.HasValue)
+                jsonFile.LastModified = blob.LastModificationTime.Value.DateTime;
         }
     }
 }

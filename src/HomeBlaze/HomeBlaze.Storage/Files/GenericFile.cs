@@ -1,31 +1,27 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Storage;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Files;
 
 /// <summary>
 /// Represents a generic file in storage.
-/// Binary content is accessed via methods to avoid tracking overhead.
 /// </summary>
 [InterceptorSubject]
-public partial class GenericFile : IIconProvider, IStorageItem, ITitleProvider, IPersistentSubject
+public partial class GenericFile : IStorageFile, IDisplaySubject
 {
-    // MudBlazor Icons.Material.Filled.InsertDriveFile
     private const string FileIcon = "<svg style=\"width:24px;height:24px\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M6,2A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2H6M13,3.5L18.5,9H13V3.5Z\" /></svg>";
 
     public string Icon => FileIcon;
-    public string? Title => FileName;
 
-    /// <summary>
-    /// Full path to the file.
-    /// </summary>
-    public partial string FilePath { get; set; }
+    public string? Title => Name;
 
-    /// <summary>
-    /// Name of the file including extension.
-    /// </summary>
-    public partial string FileName { get; set; }
+    public IStorageContainer Storage { get; }
+    
+    public string FullPath { get; }
+
+    public string Name { get; }
 
     /// <summary>
     /// File extension including the dot.
@@ -45,63 +41,18 @@ public partial class GenericFile : IIconProvider, IStorageItem, ITitleProvider, 
     [State("Modified", Order = 3)]
     public partial DateTime LastModified { get; set; }
 
-    public GenericFile()
+    public GenericFile(IStorageContainer storage, string fullPath)
     {
-        FilePath = string.Empty;
-        FileName = string.Empty;
-        Extension = string.Empty;
+        Storage = storage;
+        FullPath = fullPath;
+
+        Name = Path.GetFileName(fullPath);
+        Extension = Path.GetExtension(fullPath);
     }
 
-    /// <summary>
-    /// Gets the file content as bytes.
-    /// </summary>
-    public async Task<byte[]> GetBytesAsync(CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrEmpty(FilePath) || !File.Exists(FilePath))
-            return Array.Empty<byte>();
+    public Task<Stream> ReadAsync(CancellationToken ct = default)
+        => Storage.ReadBlobAsync(FullPath, ct);
 
-        return await File.ReadAllBytesAsync(FilePath, cancellationToken);
-    }
-
-    /// <summary>
-    /// Opens a read stream for the file.
-    /// </summary>
-    public Stream OpenRead()
-    {
-        if (string.IsNullOrEmpty(FilePath) || !File.Exists(FilePath))
-            throw new FileNotFoundException("File not found", FilePath);
-
-        return File.OpenRead(FilePath);
-    }
-
-    /// <summary>
-    /// Writes bytes to the file.
-    /// </summary>
-    public async Task WriteAsync(byte[] data, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrEmpty(FilePath))
-            throw new InvalidOperationException("FilePath is not set");
-
-        await File.WriteAllBytesAsync(FilePath, data, cancellationToken);
-
-        // Update metadata
-        var fileInfo = new FileInfo(FilePath);
-        FileSize = fileInfo.Length;
-        LastModified = fileInfo.LastWriteTimeUtc;
-    }
-
-    /// <summary>
-    /// IPersistentSubject implementation - reloads file metadata.
-    /// </summary>
-    public Task ReloadAsync(CancellationToken cancellationToken = default)
-    {
-        if (!string.IsNullOrEmpty(FilePath) && File.Exists(FilePath))
-        {
-            var fileInfo = new FileInfo(FilePath);
-            FileSize = fileInfo.Length;
-            LastModified = fileInfo.LastWriteTimeUtc;
-        }
-
-        return Task.CompletedTask;
-    }
+    public Task WriteAsync(Stream content, CancellationToken ct = default)
+        => Storage.WriteBlobAsync(FullPath, content, ct);
 }

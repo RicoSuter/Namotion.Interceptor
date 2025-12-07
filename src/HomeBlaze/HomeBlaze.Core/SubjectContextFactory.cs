@@ -5,13 +5,14 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 
-namespace HomeBlaze.Core.Services;
+namespace HomeBlaze.Core;
 
 /// <summary>
 /// Factory for creating a fully configured InterceptorSubjectContext
 /// with all standard interceptors enabled.
 /// </summary>
-public static class SubjectContextFactory
+public static class 
+    SubjectContextFactory
 {
     /// <summary>
     /// Creates an InterceptorSubjectContext with full tracking, registry,
@@ -27,19 +28,5 @@ public static class SubjectContextFactory
             .WithLifecycle()
             .WithDataAnnotationValidation()
             .WithHostedServices(services);
-    }
-
-    /// <summary>
-    /// Creates an InterceptorSubjectContext for testing (no hosted services).
-    /// </summary>
-    public static IInterceptorSubjectContext CreateForTesting()
-    {
-        return InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithRegistry()
-            .WithParents()
-            .WithLifecycle()
-            .WithDataAnnotationValidation();
     }
 }

@@ -1,6 +1,6 @@
 {
-    "Type": "HomeBlaze.Core.Subjects.Motor",
-    "Name": "Cooling Fan",
-    "TargetSpeed": 1500,
-    "SimulationInterval": "00:00:01"
+    "type": "HomeBlaze.Core.Subjects.Motor",
+    "name": "Cooling Fan",
+    "targetSpeed": 1500,
+    "simulationInterval": "00:00:01"
 }

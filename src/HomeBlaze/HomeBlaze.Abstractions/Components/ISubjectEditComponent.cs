@@ -1,5 +1,3 @@
-using MudBlazor;
-
 namespace HomeBlaze.Abstractions.Components;
 
 /// <summary>
@@ -36,5 +34,5 @@ public interface ISubjectEditComponent : ISubjectComponent
     /// <summary>
     /// Gets the preferred dialog size for this edit component.
     /// </summary>
-    MaxWidth PreferredDialogSize => MaxWidth.Small;
+    string PreferredDialogSize => "Small";
 }

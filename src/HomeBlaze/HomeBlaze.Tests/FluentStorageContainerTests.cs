@@ -1,17 +1,27 @@
-using HomeBlaze.Core.Services;
+using HomeBlaze.Abstractions.Storage;
+using HomeBlaze.Core;
 using HomeBlaze.Storage;
+using Moq;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Tests;
 
 public class FluentStorageContainerTests
 {
+    private static (TypeProvider typeProvider, SubjectTypeRegistry typeRegistry, ConfigurableSubjectSerializer serializer) CreateDependencies()
+    {
+        var typeProvider = new TypeProvider();
+        var typeRegistry = new SubjectTypeRegistry(typeProvider);
+        var mockServiceProvider = new Mock<IServiceProvider>();
+        var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
+        return (typeProvider, typeRegistry, serializer);
+    }
+
     [Fact]
     public void Constructor_InitializesProperties()
     {
         // Arrange
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
+        var (_, typeRegistry, serializer) = CreateDependencies();
 
         // Act
         var storage = new FluentStorageContainer(typeRegistry, serializer);
@@ -28,8 +38,7 @@ public class FluentStorageContainerTests
     public void Title_ReturnsConnectionStringFileName_WhenNotEmpty()
     {
         // Arrange
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
+        var (_, typeRegistry, serializer) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer);
 
         // Act
@@ -43,8 +52,7 @@ public class FluentStorageContainerTests
     public void Title_ReturnsStorage_WhenConnectionStringEmpty()
     {
         // Arrange
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
+        var (_, typeRegistry, serializer) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer);
 
         // Act & Assert
@@ -55,8 +63,7 @@ public class FluentStorageContainerTests
     public async Task ConnectAsync_ThrowsWhenConnectionStringEmpty()
     {
         // Arrange
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
+        var (_, typeRegistry, serializer) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer);
 
         // Act & Assert
@@ -67,8 +74,7 @@ public class FluentStorageContainerTests
     public async Task ConnectAsync_ThrowsForUnsupportedStorageType()
     {
         // Arrange
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
+        var (_, typeRegistry, serializer) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer);
 
         storage.ConnectionString = "test-connection";
@@ -83,8 +89,7 @@ public class FluentStorageContainerTests
     public void Status_DefaultsToDisconnected()
     {
         // Arrange
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
+        var (_, typeRegistry, serializer) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer);
 
         // Assert - Initial state
@@ -95,8 +100,7 @@ public class FluentStorageContainerTests
     public void Icon_ReturnsStorageIcon()
     {
         // Arrange
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
+        var (_, typeRegistry, serializer) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer);
 
         // Act
@@ -111,8 +115,7 @@ public class FluentStorageContainerTests
     public void Dispose_SetsStatusToDisconnected()
     {
         // Arrange
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
+        var (_, typeRegistry, serializer) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer);
 
         // Act
@@ -125,13 +128,21 @@ public class FluentStorageContainerTests
 
 public class VirtualFolderTests
 {
+    private static (TypeProvider typeProvider, SubjectTypeRegistry typeRegistry, ConfigurableSubjectSerializer serializer) CreateDependencies()
+    {
+        var typeProvider = new TypeProvider();
+        var typeRegistry = new SubjectTypeRegistry(typeProvider);
+        var mockServiceProvider = new Mock<IServiceProvider>();
+        var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
+        return (typeProvider, typeRegistry, serializer);
+    }
+
     [Fact]
     public void Constructor_InitializesProperties()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
+        var (_, typeRegistry, serializer) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer);
 
         // Act
@@ -149,8 +160,7 @@ public class VirtualFolderTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
+        var (_, typeRegistry, serializer) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer);
 
         // Act
@@ -165,8 +175,7 @@ public class VirtualFolderTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
+        var (_, typeRegistry, serializer) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer);
 
         // Act
@@ -180,36 +189,34 @@ public class VirtualFolderTests
 
 public class JsonFileTests
 {
+    private static IStorageContainer CreateMockStorage()
+    {
+        return new Mock<IStorageContainer>().Object;
+    }
+
     [Fact]
-    public void Constructor_FluentStorage_InitializesProperties()
+    public void Constructor_InitializesProperties()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create();
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
-        var storage = new FluentStorageContainer(typeRegistry, serializer);
+        var storage = CreateMockStorage();
 
         // Act
-        var file = new HomeBlaze.Storage.Files.JsonFile(context, storage, "data/config.json");
+        var file = new HomeBlaze.Storage.Files.JsonFile(storage, "data/config.json");
 
         // Assert
         Assert.Same(storage, file.Storage);
-        Assert.Equal("data/config.json", file.BlobPath);
-        Assert.Equal("config.json", file.FileName);
-        Assert.Equal(string.Empty, file.Content);
+        Assert.Equal("data/config.json", file.FullPath);
+        Assert.Equal("config.json", file.Name);
     }
 
     [Fact]
     public void Title_ReturnsFileNameWithoutExtension()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create();
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
-        var storage = new FluentStorageContainer(typeRegistry, serializer);
+        var storage = CreateMockStorage();
 
         // Act
-        var file = new HomeBlaze.Storage.Files.JsonFile(context, storage, "data/my-config.json");
+        var file = new HomeBlaze.Storage.Files.JsonFile(storage, "data/my-config.json");
 
         // Assert
         Assert.Equal("my-config", file.Title);
@@ -219,30 +226,13 @@ public class JsonFileTests
     public void Icon_ReturnsJsonIcon()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create();
-        var typeRegistry = new SubjectTypeRegistry();
-        var serializer = new SubjectSerializer(typeRegistry, null);
-        var storage = new FluentStorageContainer(typeRegistry, serializer);
+        var storage = CreateMockStorage();
 
         // Act
-        var file = new HomeBlaze.Storage.Files.JsonFile(context, storage, "test.json");
+        var file = new HomeBlaze.Storage.Files.JsonFile(storage, "test.json");
 
         // Assert
         Assert.NotNull(file.Icon);
         Assert.Contains("svg", file.Icon);
-    }
-
-    [Fact]
-    public void DefaultConstructor_InitializesEmptyProperties()
-    {
-        // Act
-        var file = new HomeBlaze.Storage.Files.JsonFile();
-
-        // Assert
-        Assert.Null(file.Storage);
-        Assert.Null(file.BlobPath);
-        Assert.Equal(string.Empty, file.FilePath);
-        Assert.Equal(string.Empty, file.FileName);
-        Assert.Equal(string.Empty, file.Content);
     }
 }

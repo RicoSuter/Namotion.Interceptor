@@ -3,8 +3,9 @@ using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Storage;
-using HomeBlaze.Core.Services;
+using HomeBlaze.Core;
 using HomeBlaze.Storage.Internal;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -12,18 +13,18 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.Storage;
 
 /// <summary>
-/// Storage root using FluentStorage. Implements ISubjectStorageHandler.
+/// Storage root using FluentStorage. Implements IStorageContainer and IConfigurationWriter.
 /// Supports FileSystemWatcher for reactive file monitoring on disk storage.
 /// </summary>
 [InterceptorSubject]
-public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProvider, IIconProvider, IPersistentSubject, IDisposable
+public partial class FluentStorageContainer : 
+    BackgroundService,
+    IStorageContainer, IConfigurationWriter, IDisplaySubject, IConfigurableSubject, IDisposable
 {
-    // MudBlazor Icons.Material.Filled.Storage
     private const string StorageIcon = "<svg style=\"width:24px;height:24px\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M2,20H22V16H2V20M4,17H6V19H4V17M2,4V8H22V4H2M6,7H4V5H6V7M2,14H22V10H2V14M4,11H6V13H4V11Z\" /></svg>";
 
     private IBlobStorage? _client;
 
-    // Internal collaborators
     private readonly StoragePathTracker _pathTracker = new();
     private readonly SubjectFactory _subjectFactory;
     private readonly SubjectHierarchyManager _hierarchyManager;
@@ -67,7 +68,7 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
     [State]
     public partial StorageStatus Status { get; set; }
 
-    public string? Title => string.IsNullOrEmpty(ConnectionString)
+    public string Title => string.IsNullOrEmpty(ConnectionString)
         ? "Storage"
         : Path.GetFileName(ConnectionString.TrimEnd('/', '\\'));
 
@@ -75,7 +76,7 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
 
     public FluentStorageContainer(
         SubjectTypeRegistry typeRegistry,
-        SubjectSerializer serializer,
+        ConfigurableSubjectSerializer serializer,
         ILogger<FluentStorageContainer>? logger = null)
     {
         _subjectFactory = new SubjectFactory(typeRegistry, serializer, logger);
@@ -87,6 +88,20 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
         EnableFileWatching = true;
         Children = new Dictionary<string, IInterceptorSubject>();
         Status = StorageStatus.Disconnected;
+    }
+        
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await ConnectAsync(stoppingToken);
+    }
+
+    /// <summary>
+    /// IConfigurableSubject implementation - called after configuration properties are updated.
+    /// </summary>
+    public Task ApplyConfigurationAsync(CancellationToken ct = default)
+    {
+        // Reconnect if configuration changed
+        return ConnectAsync(ct);
     }
 
     /// <summary>
@@ -154,7 +169,6 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
                     _hierarchyManager.PlaceInHierarchy(blob.FullPath, subject, children, context, this);
                     _pathTracker.Register(subject, blob.FullPath);
 
-                    // Compute initial hashes for JSON files
                     if (Path.GetExtension(blob.FullPath).Equals(".json", StringComparison.OrdinalIgnoreCase))
                     {
                         try
@@ -236,10 +250,9 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
         if (!_pathTracker.TryGetSubject(relativePath, out var existingSubject))
             return;
 
-        if (existingSubject is not IPersistentSubject)
+        if (existingSubject is not IConfigurableSubject)
             return;
 
-        // Fast path: check file size first
         long newSize;
         try
         {
@@ -248,12 +261,11 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
         }
         catch
         {
-            return; // File may be locked or deleted
+            return;
         }
 
         bool sizeChanged = _pathTracker.HasSizeChanged(relativePath, newSize);
 
-        // Compute hash using stream
         string? newHash = null;
         for (int retry = 0; retry < 3; retry++)
         {
@@ -275,18 +287,15 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
             return;
         }
 
-        // Check if content changed
         if (!sizeChanged && !_pathTracker.HasHashChanged(relativePath, newHash))
         {
             _logger?.LogDebug("File unchanged (same hash), skipping reload: {Path}", relativePath);
             return;
         }
 
-        // Update tracking
         _pathTracker.UpdateSize(relativePath, newSize);
         _pathTracker.UpdateHash(relativePath, newHash);
 
-        // For JSON-based subjects: read content and update properties, then call ReloadAsync
         if (Path.GetExtension(relativePath).Equals(".json", StringComparison.OrdinalIgnoreCase))
         {
             try
@@ -299,10 +308,9 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
                 _logger?.LogWarning(ex, "Failed to update from JSON: {Path}", relativePath);
             }
         }
-        else if (existingSubject is IPersistentSubject persistent)
+        else if (existingSubject is IConfigurableSubject configurable)
         {
-            // For file-based subjects: just call ReloadAsync
-            await persistent.ReloadAsync();
+            await configurable.ApplyConfigurationAsync();
         }
 
         _logger?.LogInformation("Reloaded: {Path}", relativePath);
@@ -329,9 +337,9 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
     }
 
     /// <summary>
-    /// ISubjectStorageHandler - called by StorageService background thread.
+    /// IConfigurationWriter - called by ConfigurationManager background thread.
     /// </summary>
-    public async Task<bool> WriteAsync(IInterceptorSubject subject, CancellationToken ct)
+    public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken ct)
     {
         if (_client == null)
             return false;
@@ -397,18 +405,18 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
     }
 
     /// <summary>
-    /// Reads blob text content from storage.
+    /// IStorageContainer - Reads a blob from storage.
     /// </summary>
-    public async Task<string> ReadBlobTextAsync(string path, CancellationToken ct = default)
+    public async Task<Stream> ReadBlobAsync(string path, CancellationToken ct = default)
     {
         if (_client == null)
             throw new InvalidOperationException("Storage not connected");
 
-        return await _client.ReadTextAsync(path, cancellationToken: ct);
+        return await _client.OpenReadAsync(path, cancellationToken: ct);
     }
 
     /// <summary>
-    /// Writes a blob to storage.
+    /// IStorageContainer - Writes a blob to storage.
     /// </summary>
     public async Task WriteBlobAsync(string path, Stream content, CancellationToken ct = default)
     {
@@ -423,7 +431,7 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
     }
 
     /// <summary>
-    /// Deletes a blob from storage.
+    /// IStorageContainer - Deletes a blob from storage.
     /// </summary>
     public async Task DeleteBlobAsync(string path, CancellationToken ct = default)
     {
@@ -438,29 +446,22 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
     }
 
     /// <summary>
-    /// Reads a blob from storage.
+    /// Reads blob text content from storage.
     /// </summary>
-    public async Task<Stream> ReadBlobAsync(string path, CancellationToken ct = default)
+    public async Task<string> ReadBlobTextAsync(string path, CancellationToken ct = default)
     {
         if (_client == null)
             throw new InvalidOperationException("Storage not connected");
 
-        return await _client.OpenReadAsync(path, cancellationToken: ct);
+        return await _client.ReadTextAsync(path, cancellationToken: ct);
     }
 
-    /// <summary>
-    /// IPersistentSubject implementation - for the storage root, this is a no-op.
-    /// </summary>
-    public Task ReloadAsync(CancellationToken cancellationToken = default)
-    {
-        return Task.CompletedTask;
-    }
-
-    public void Dispose()
+    public override void Dispose()
     {
         _watcherService?.Dispose();
         _client?.Dispose();
         _client = null;
         Status = StorageStatus.Disconnected;
+        base.Dispose();
     }
 }
