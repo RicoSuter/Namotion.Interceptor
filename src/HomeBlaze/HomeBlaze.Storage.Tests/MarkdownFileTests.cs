@@ -28,7 +28,7 @@ public class MarkdownFileTests
         var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
         Assert.NotNull(result);
-        Assert.Equal("My Nav Title", result.GetNavTitle());
+        Assert.Equal("My Nav Title", result.NavTitle);
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public class MarkdownFileTests
         var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
         Assert.NotNull(result);
-        Assert.Equal("My Nav Title", result.GetNavTitle());
+        Assert.Equal("My Nav Title", result.NavTitle);
     }
 
     [Fact]
