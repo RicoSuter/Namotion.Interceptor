@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Pages;
 using HomeBlaze.Abstractions.Storage;
 using HomeBlaze.Storage.Internal;
 using MudBlazor;
