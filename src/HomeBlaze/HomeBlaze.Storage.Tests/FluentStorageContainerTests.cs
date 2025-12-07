@@ -1,10 +1,8 @@
 using HomeBlaze.Abstractions.Storage;
 using HomeBlaze.Core;
-using HomeBlaze.Storage;
 using Moq;
-using Namotion.Interceptor;
 
-namespace HomeBlaze.Tests;
+namespace HomeBlaze.Storage.Tests;
 
 public class FluentStorageContainerTests
 {
@@ -123,116 +121,5 @@ public class FluentStorageContainerTests
 
         // Assert
         Assert.Equal(StorageStatus.Disconnected, storage.Status);
-    }
-}
-
-public class VirtualFolderTests
-{
-    private static (TypeProvider typeProvider, SubjectTypeRegistry typeRegistry, ConfigurableSubjectSerializer serializer) CreateDependencies()
-    {
-        var typeProvider = new TypeProvider();
-        var typeRegistry = new SubjectTypeRegistry(typeProvider);
-        var mockServiceProvider = new Mock<IServiceProvider>();
-        var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
-        return (typeProvider, typeRegistry, serializer);
-    }
-
-    [Fact]
-    public void Constructor_InitializesProperties()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create();
-        var (_, typeRegistry, serializer) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer);
-
-        // Act
-        var folder = new VirtualFolder(context, storage, "test/folder/");
-
-        // Assert
-        Assert.Same(storage, folder.Storage);
-        Assert.Equal("test/folder/", folder.RelativePath);
-        Assert.NotNull(folder.Children);
-        Assert.Empty(folder.Children);
-    }
-
-    [Fact]
-    public void Title_ReturnsFolderName()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create();
-        var (_, typeRegistry, serializer) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer);
-
-        // Act
-        var folder = new VirtualFolder(context, storage, "parent/child/");
-
-        // Assert
-        Assert.Equal("child", folder.Title);
-    }
-
-    [Fact]
-    public void Icon_ReturnsFolderIcon()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create();
-        var (_, typeRegistry, serializer) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer);
-
-        // Act
-        var folder = new VirtualFolder(context, storage, "test/");
-
-        // Assert
-        Assert.NotNull(folder.Icon);
-        Assert.True(folder.Icon.Contains("<path") || folder.Icon.Contains("<g>"), "Icon should be a MudBlazor SVG path string");
-    }
-}
-
-public class JsonFileTests
-{
-    private static IStorageContainer CreateMockStorage()
-    {
-        return new Mock<IStorageContainer>().Object;
-    }
-
-    [Fact]
-    public void Constructor_InitializesProperties()
-    {
-        // Arrange
-        var storage = CreateMockStorage();
-
-        // Act
-        var file = new HomeBlaze.Storage.Files.JsonFile(storage, "data/config.json");
-
-        // Assert
-        Assert.Same(storage, file.Storage);
-        Assert.Equal("data/config.json", file.FullPath);
-        Assert.Equal("config.json", file.Name);
-    }
-
-    [Fact]
-    public void Title_ReturnsFileNameWithoutExtension()
-    {
-        // Arrange
-        var storage = CreateMockStorage();
-
-        // Act
-        var file = new HomeBlaze.Storage.Files.JsonFile(storage, "data/my-config.json");
-
-        // Assert
-        Assert.Equal("my-config", file.Title);
-    }
-
-    [Fact]
-    public void Icon_ReturnsJsonIcon()
-    {
-        // Arrange
-        var storage = CreateMockStorage();
-
-        // Act
-        var file = new HomeBlaze.Storage.Files.JsonFile(storage, "test.json");
-
-        // Assert
-        Assert.NotNull(file.Icon);
-        Assert.True(file.Icon.Contains("<path") || file.Icon.Contains("<g>"), "Icon should be a MudBlazor SVG path string");
     }
 }

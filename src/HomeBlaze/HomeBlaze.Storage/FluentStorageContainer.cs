@@ -143,7 +143,7 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Scans the storage and builds the subject hierarchy.
     /// </summary>
-    public async Task ScanAsync(CancellationToken ct = default)
+    private async Task ScanAsync(CancellationToken ct = default)
     {
         if (_client == null)
             throw new InvalidOperationException("Storage not connected");
@@ -196,6 +196,7 @@ public partial class FluentStorageContainer :
             ProcessFileEventAsync,
             () => ScanAsync(CancellationToken.None),
             _logger);
+
         _fileWatcher.Start();
     }
 
@@ -263,14 +264,14 @@ public partial class FluentStorageContainer :
             return;
         }
 
-        bool sizeChanged = _pathRegistry.HasSizeChanged(relativePath, newSize);
+        var sizeChanged = _pathRegistry.HasSizeChanged(relativePath, newSize);
 
         string? newHash = null;
-        for (int retry = 0; retry < 3; retry++)
+        for (var retry = 0; retry < 3; retry++)
         {
             try
             {
-                using var stream = await _client!.OpenReadAsync(relativePath);
+                await using var stream = await _client!.OpenReadAsync(relativePath);
                 newHash = await StoragePathRegistry.ComputeHashAsync(stream);
                 break;
             }
@@ -441,17 +442,6 @@ public partial class FluentStorageContainer :
 
         await _client.DeleteAsync(path, cancellationToken: ct);
         _logger?.LogDebug("Deleted blob from storage: {Path}", path);
-    }
-
-    /// <summary>
-    /// Reads blob text content from storage.
-    /// </summary>
-    public async Task<string> ReadBlobTextAsync(string path, CancellationToken ct = default)
-    {
-        if (_client == null)
-            throw new InvalidOperationException("Storage not connected");
-
-        return await _client.ReadTextAsync(path, cancellationToken: ct);
     }
 
     public override void Dispose()

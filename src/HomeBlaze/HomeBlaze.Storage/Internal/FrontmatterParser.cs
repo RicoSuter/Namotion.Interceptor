@@ -49,7 +49,7 @@ public static class FrontmatterParser
         if (string.IsNullOrEmpty(content) || !content.StartsWith("---"))
             return content;
 
-        var endIndex = content.IndexOf("---", 3);
+        var endIndex = content.IndexOf("---", 3, StringComparison.Ordinal);
         if (endIndex < 0)
             return content;
 
