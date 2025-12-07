@@ -1,10 +1,12 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Core.Extensions
+@using HomeBlaze.Core.Services
 @using Namotion.Interceptor
 @using Namotion.Interceptor.Registry.Abstractions
 
 @inject IDialogService DialogService
+@inject SubjectComponentRegistry ComponentRegistry
 
 @inherits HomeBlazorComponentBase
 
@@ -30,9 +32,9 @@
     <div style="flex: 1; overflow-y: auto; overflow-x: hidden;">
         <MudListSubheader Style="word-break: break-word;">
             @* Action Buttons *@
-            @if (HasConfigurationProperties())
+            @if (CanEdit())
             {
-                <MudIconButton OnClick="@OpenConfigurationDialog"
+                <MudIconButton OnClick="@OpenEditDialog"
                                Icon="@Icons.Material.Filled.Edit"
                                Variant="Variant.Filled"
                                Color="Color.Primary"
@@ -331,28 +333,42 @@
 
     public record PropertyClickEventArgs(string PropertyName, object? Index, IInterceptorSubject Subject);
 
-    private bool HasConfigurationProperties()
+    private bool CanEdit()
     {
-        return Subject?.HasConfigurationProperties() ?? false;
+        if (Subject == null) return false;
+
+        // Can edit if there's a custom edit component or configuration properties
+        var hasEditComponent = ComponentRegistry.HasComponent(
+            Subject.GetType(),
+            SubjectComponentType.Edit);
+
+        return hasEditComponent || Subject.HasConfigurationProperties();
     }
 
-    private async Task OpenConfigurationDialog()
+    private async Task OpenEditDialog()
     {
         if (Subject == null) return;
 
-        var parameters = new DialogParameters<SubjectConfigurationDialog>
+        var parameters = new DialogParameters<SubjectEditDialog>
         {
             { x => x.Subject, Subject }
         };
 
+        // Check if custom edit component exists to determine dialog size
+        var editRegistration = ComponentRegistry.GetComponent(
+            Subject.GetType(),
+            SubjectComponentType.Edit);
+
+        var maxWidth = editRegistration != null ? MaxWidth.Large : MaxWidth.Small;
+
         var options = new DialogOptions
         {
-            MaxWidth = MaxWidth.Small,
+            MaxWidth = maxWidth,
             FullWidth = true,
             CloseButton = true
         };
 
         var title = GetSubjectTitle();
-        await DialogService.ShowAsync<SubjectConfigurationDialog>($"Edit {title}", parameters, options);
+        await DialogService.ShowAsync<SubjectEditDialog>($"Edit {title}", parameters, options);
     }
 }

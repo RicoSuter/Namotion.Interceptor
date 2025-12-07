@@ -464,14 +464,3 @@ public partial class FluentStorageContainer : ISubjectStorageHandler, ITitleProv
         Status = StorageStatus.Disconnected;
     }
 }
-
-/// <summary>
-/// Status of a storage connection.
-/// </summary>
-public enum StorageStatus
-{
-    Disconnected,
-    Initializing,
-    Connected,
-    Error
-}

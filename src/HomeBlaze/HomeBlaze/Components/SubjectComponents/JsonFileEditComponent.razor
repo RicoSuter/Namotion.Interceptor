@@ -1,0 +1,93 @@
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Abstractions.Components
+@using HomeBlaze.Storage.Files
+@using BlazorMonaco
+@using BlazorMonaco.Editor
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(JsonFile))]
+@implements ISubjectEditComponent
+
+<StandaloneCodeEditor @ref="_editor"
+    Id="json-editor"
+    CssClass="monaco-editor-container"
+    ConstructionOptions="GetEditorOptions"
+    OnDidChangeModelContent="OnContentChanged" />
+
+<style>
+    .monaco-editor-container {
+        min-height: 500px;
+        height: 60vh;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private JsonFile? File => Subject as JsonFile;
+    private StandaloneCodeEditor? _editor;
+    private string _originalContent = string.Empty;
+    private string _currentContent = string.Empty;
+
+    public bool IsValid => true;
+    public bool IsDirty => _currentContent != _originalContent;
+    public MaxWidth PreferredDialogSize => MaxWidth.Large;
+
+    public event Action<bool>? IsValidChanged
+    {
+        add { }
+        remove { }
+    }
+    public event Action<bool>? IsDirtyChanged;
+
+    private StandaloneEditorConstructionOptions GetEditorOptions(StandaloneCodeEditor editor)
+    {
+        return new StandaloneEditorConstructionOptions
+        {
+            AutomaticLayout = true,
+            Language = "json",
+            Value = _originalContent,
+            Theme = "vs-dark"
+        };
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (File != null)
+        {
+            _originalContent = File.Content;
+            _currentContent = _originalContent;
+        }
+    }
+
+    private void OnContentChanged(ModelContentChangedEvent e)
+    {
+        // Content changed, we'll get the actual value on save
+        Task.Run(async () =>
+        {
+            if (_editor != null)
+            {
+                _currentContent = await _editor.GetValue();
+                await InvokeAsync(() =>
+                {
+                    IsDirtyChanged?.Invoke(IsDirty);
+                    StateHasChanged();
+                });
+            }
+        });
+    }
+
+    public async Task SaveAsync()
+    {
+        if (File == null || _editor == null) return;
+
+        var content = await _editor.GetValue();
+        File.Content = content;
+        await File.SaveAsync();
+        _originalContent = content;
+        _currentContent = content;
+        IsDirtyChanged?.Invoke(false);
+    }
+}

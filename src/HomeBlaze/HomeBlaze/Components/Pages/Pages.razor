@@ -1,5 +1,6 @@
 @page "/pages/{*Path}"
 @using HomeBlaze.Abstractions
+@using HomeBlaze.Core.Extensions
 @using HomeBlaze.Core.Services
 @using Namotion.Interceptor
 @using Namotion.Interceptor.Registry.Abstractions
@@ -7,8 +8,22 @@
 @inherits HomeBlazorComponentBase
 
 @inject SubjectComponentRegistry ComponentRegistry
+@inject IDialogService DialogService
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
+
+<MudStack Row="true" Class="mb-4" AlignItems="AlignItems.Center">
+    <MudText Typo="Typo.h4">@_title</MudText>
+    <MudSpacer />
+    @if (CanEdit())
+    {
+        <MudIconButton OnClick="@OpenEditDialog"
+                       Icon="@Icons.Material.Filled.Edit"
+                       Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Size="Size.Small" />
+    }
+</MudStack>
 
 @if (_subject == null)
 {
@@ -16,7 +31,7 @@
 }
 else if (_componentType != null)
 {
-    <DynamicComponent Type="_componentType"
+    <DynamicComponent @key="_componentKey" Type="_componentType"
         Parameters="@(new Dictionary<string, object?> { ["Subject"] = _subject })" />
 }
 else
@@ -31,6 +46,7 @@ else
     private IInterceptorSubject? _subject;
     private Type? _componentType;
     private string _title = "";
+    private int _componentKey;
 
     protected override void OnParametersSet()
     {
@@ -75,6 +91,52 @@ else
             {
                 _title = _subject.GetType().Name;
             }
+        }
+    }
+
+    private bool CanEdit()
+    {
+        if (_subject == null) return false;
+
+        // Can edit if there's a custom edit component or configuration properties
+        var hasEditComponent = ComponentRegistry.HasComponent(
+            _subject.GetType(),
+            SubjectComponentType.Edit);
+
+        return hasEditComponent || _subject.HasConfigurationProperties();
+    }
+
+    private async Task OpenEditDialog()
+    {
+        if (_subject == null) return;
+
+        var parameters = new DialogParameters<SubjectEditDialog>
+        {
+            { x => x.Subject, _subject }
+        };
+
+        // Check if custom edit component exists to determine dialog size
+        var editRegistration = ComponentRegistry.GetComponent(
+            _subject.GetType(),
+            SubjectComponentType.Edit);
+
+        var maxWidth = editRegistration != null ? MaxWidth.Large : MaxWidth.Small;
+
+        var options = new DialogOptions
+        {
+            MaxWidth = maxWidth,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        var dialogRef = await DialogService.ShowAsync<SubjectEditDialog>($"Edit {_title}", parameters, options);
+        var result = await dialogRef.Result;
+
+        // Force page component to reload by changing key
+        if (result != null && !result.Canceled)
+        {
+            _componentKey++;
+            StateHasChanged();
         }
     }
 }
