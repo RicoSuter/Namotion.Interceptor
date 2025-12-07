@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Storage;
+using MudBlazor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Files;
@@ -11,11 +12,9 @@ namespace HomeBlaze.Storage.Files;
 [InterceptorSubject]
 public partial class GenericFile : IStorageFile, IDisplaySubject
 {
-    private const string FileIcon = "<svg style=\"width:24px;height:24px\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M6,2A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2H6M13,3.5L18.5,9H13V3.5Z\" /></svg>";
-
-    public string Icon => FileIcon;
-
     public string? Title => Name;
+
+    public string Icon => Icons.Material.Filled.InsertDriveFile;
 
     public IStorageContainer Storage { get; }
     

@@ -1,10 +1,7 @@
-@using BlazorMonaco
 @using BlazorMonaco.Editor
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Components
-@using HomeBlaze.Storage.Files
-@using MudBlazor
 @using Namotion.Interceptor
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(JsonFile))]
@@ -35,13 +32,10 @@
 
     public bool IsValid => true;
     public bool IsDirty => _currentContent != _originalContent;
-    public MaxWidth PreferredDialogSize => MaxWidth.Large;
 
-    public event Action<bool>? IsValidChanged
-    {
-        add { }
-        remove { }
-    }
+#pragma warning disable CS0067 // Event is never used - required by ISubjectEditComponent
+    public event Action<bool>? IsValidChanged;
+#pragma warning restore CS0067
     public event Action<bool>? IsDirtyChanged;
 
     private StandaloneEditorConstructionOptions GetEditorOptions(StandaloneCodeEditor editor)

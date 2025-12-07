@@ -7,6 +7,7 @@ using HomeBlaze.Core;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using MudBlazor;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
@@ -21,8 +22,6 @@ public partial class FluentStorageContainer :
     BackgroundService,
     IStorageContainer, IConfigurationWriter, IDisplaySubject, IConfigurableSubject, IDisposable
 {
-    private const string StorageIcon = "<svg style=\"width:24px;height:24px\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M2,20H22V16H2V20M4,17H6V19H4V17M2,4V8H22V4H2M6,7H4V5H6V7M2,14H22V10H2V14M4,11H6V13H4V11Z\" /></svg>";
-
     private IBlobStorage? _client;
 
     private readonly StoragePathRegistry _pathRegistry = new();
@@ -72,7 +71,7 @@ public partial class FluentStorageContainer :
         ? "Storage"
         : Path.GetFileName(ConnectionString.TrimEnd('/', '\\'));
 
-    public string Icon => StorageIcon;
+    public string Icon => Icons.Material.Filled.Storage;
 
     public FluentStorageContainer(
         SubjectTypeRegistry typeRegistry,
@@ -163,7 +162,7 @@ public partial class FluentStorageContainer :
 
             try
             {
-                var subject = await _subjectFactory.CreateFromBlobAsync(_client, this, blob, context, ct);
+                var subject = await _subjectFactory.CreateFromBlobAsync(_client, this, blob, ct);
                 if (subject != null)
                 {
                     _hierarchyManager.PlaceInHierarchy(blob.FullPath, subject, children, context, this);
@@ -220,8 +219,7 @@ public partial class FluentStorageContainer :
         _logger?.LogDebug("File created: {Path}", relativePath);
 
         var blob = new Blob(relativePath);
-        var context = ((IInterceptorSubject)this).Context;
-        var subject = await _subjectFactory.CreateFromBlobAsync(_client!, this, blob, context, CancellationToken.None);
+        var subject = await _subjectFactory.CreateFromBlobAsync(_client!, this, blob, CancellationToken.None);
 
         if (subject != null)
         {
@@ -237,6 +235,7 @@ public partial class FluentStorageContainer :
 
             _pathRegistry.Register(subject, relativePath);
 
+            var context = ((IInterceptorSubject)this).Context;
             var children = new Dictionary<string, IInterceptorSubject>(Children);
             _hierarchyManager.PlaceInHierarchy(relativePath, subject, children, context, this);
             Children = children;
@@ -301,7 +300,7 @@ public partial class FluentStorageContainer :
             try
             {
                 var json = await _client!.ReadTextAsync(relativePath);
-                await _subjectFactory.UpdateFromJsonAsync(existingSubject, json);
+                await _subjectFactory.UpdateFromJsonAsync(existingSubject, json, CancellationToken.None);
             }
             catch (Exception ex)
             {

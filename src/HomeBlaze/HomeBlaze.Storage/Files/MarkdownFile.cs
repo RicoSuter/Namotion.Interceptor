@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Storage;
+using MudBlazor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Files;
@@ -13,8 +14,6 @@ namespace HomeBlaze.Storage.Files;
 [FileExtension(".markdown")]
 public partial class MarkdownFile : IStorageFile, IDisplaySubject
 {
-    private const string MarkdownIcon = "<svg style=\"width:24px;height:24px\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M9,13V19H7V13H9M15,15V19H17V15H15M11,11V19H13V11H11Z\" /></svg>";
-
     private string? _cachedTitle;
 
     public IStorageContainer Storage { get; }
@@ -22,7 +21,7 @@ public partial class MarkdownFile : IStorageFile, IDisplaySubject
     public string Name { get; }
 
     public string? Title => _cachedTitle ?? Path.GetFileNameWithoutExtension(Name);
-    public string Icon => MarkdownIcon;
+    public string Icon => Icons.Material.Filled.Article;
 
     /// <summary>
     /// File size in bytes.

@@ -21,6 +21,16 @@ public interface IStorageFile
     IStorageContainer Storage { get; }
 
     /// <summary>
+    /// Gets or sets the file size in bytes.
+    /// </summary>
+    long FileSize { get; set; }
+
+    /// <summary>
+    /// Gets or sets the last modification time (UTC).
+    /// </summary>
+    DateTime LastModified { get; set; }
+
+    /// <summary>
     /// Reads the file content.
     /// </summary>
     Task<Stream> ReadAsync(CancellationToken ct = default);

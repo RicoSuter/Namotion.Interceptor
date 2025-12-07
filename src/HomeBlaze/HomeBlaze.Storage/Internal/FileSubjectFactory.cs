@@ -35,15 +35,12 @@ internal sealed class FileSubjectFactory
         IBlobStorage client,
         IStorageContainer storage,
         Blob blob,
-        IInterceptorSubjectContext context,
-        CancellationToken ct)
+        CancellationToken cancellationToken)
     {
         var extension = Path.GetExtension(blob.FullPath).ToLowerInvariant();
-
-        // JSON files - check if configurable type
         if (extension == ".json")
         {
-            return await CreateFromJsonBlobAsync(client, storage, blob, context, ct);
+            return await CreateFromJsonBlobAsync(client, storage, blob, cancellationToken);
         }
 
         // Check for registered extension mapping
@@ -55,7 +52,7 @@ internal sealed class FileSubjectFactory
 
             if (subject is MarkdownFile markdownFile)
             {
-                await LoadMarkdownTitleAsync(client, markdownFile, blob, ct);
+                await LoadMarkdownTitleAsync(client, markdownFile, blob, cancellationToken);
             }
 
             return subject;
@@ -71,15 +68,13 @@ internal sealed class FileSubjectFactory
     /// Updates an existing subject's configuration properties from JSON and calls ApplyConfigurationAsync.
     /// </summary>
     public async Task UpdateFromJsonAsync(
-        IInterceptorSubject subject,
-        string json,
-        CancellationToken ct = default)
+        IInterceptorSubject subject, string json, CancellationToken cancellationToken)
     {
         _serializer.UpdateConfiguration(subject, json);
 
         if (subject is IConfigurableSubject configurable)
         {
-            await configurable.ApplyConfigurationAsync(ct);
+            await configurable.ApplyConfigurationAsync(cancellationToken);
         }
     }
 
@@ -93,11 +88,9 @@ internal sealed class FileSubjectFactory
         IBlobStorage client,
         IStorageContainer storage,
         Blob blob,
-        IInterceptorSubjectContext context,
-        CancellationToken ct)
+        CancellationToken cancellationToken)
     {
-        var json = await client.ReadTextAsync(blob.FullPath, cancellationToken: ct);
-
+        var json = await client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
         try
         {
             var subject = _serializer.Deserialize(json);
@@ -136,10 +129,7 @@ internal sealed class FileSubjectFactory
         }
     }
 
-    private IInterceptorSubject? CreateFileSubject(
-        Type type,
-        IStorageContainer storage,
-        string blobPath)
+    private IInterceptorSubject? CreateFileSubject(Type type, IStorageContainer storage, string blobPath)
     {
         try
         {
@@ -160,26 +150,13 @@ internal sealed class FileSubjectFactory
 
     private static void SetFileMetadata(IInterceptorSubject? subject, Blob blob)
     {
-        if (subject == null)
-            return;
-
-        if (subject is GenericFile genericFile)
+        if (subject is IStorageFile file)
         {
-            genericFile.FileSize = blob.Size ?? 0L;
+            file.FileSize = blob.Size ?? 0L;
             if (blob.LastModificationTime.HasValue)
-                genericFile.LastModified = blob.LastModificationTime.Value.DateTime;
-        }
-        else if (subject is MarkdownFile markdownFile)
-        {
-            markdownFile.FileSize = blob.Size ?? 0L;
-            if (blob.LastModificationTime.HasValue)
-                markdownFile.LastModified = blob.LastModificationTime.Value.DateTime;
-        }
-        else if (subject is JsonFile jsonFile)
-        {
-            jsonFile.FileSize = blob.Size ?? 0L;
-            if (blob.LastModificationTime.HasValue)
-                jsonFile.LastModified = blob.LastModificationTime.Value.DateTime;
+            {
+                file.LastModified = blob.LastModificationTime.Value.DateTime;
+            }
         }
     }
 }
