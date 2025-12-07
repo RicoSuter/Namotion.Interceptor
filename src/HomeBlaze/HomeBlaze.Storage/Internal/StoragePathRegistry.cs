@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Internal;
@@ -7,7 +9,7 @@ namespace HomeBlaze.Storage.Internal;
 /// Thread-safe bidirectional mapping between subjects and storage paths.
 /// Tracks content hashes and file sizes for change detection.
 /// </summary>
-internal sealed class StoragePathTracker
+internal sealed class StoragePathRegistry
 {
     private readonly ConcurrentDictionary<IInterceptorSubject, string> _subjectPaths = new();
     private readonly ConcurrentDictionary<string, IInterceptorSubject> _pathToSubject = new();
@@ -63,5 +65,23 @@ internal sealed class StoragePathTracker
         _pathToSubject.Clear();
         _contentHashes.Clear();
         _fileSizes.Clear();
+    }
+
+    /// <summary>
+    /// Computes a SHA256 hash of the content string.
+    /// </summary>
+    public static string ComputeHash(string content)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
+        return Convert.ToHexString(hash);
+    }
+
+    /// <summary>
+    /// Computes a SHA256 hash of the stream content.
+    /// </summary>
+    public static async Task<string> ComputeHashAsync(Stream stream)
+    {
+        var hash = await SHA256.HashDataAsync(stream);
+        return Convert.ToHexString(hash);
     }
 }

@@ -25,10 +25,10 @@ public partial class FluentStorageContainer :
 
     private IBlobStorage? _client;
 
-    private readonly StoragePathTracker _pathTracker = new();
-    private readonly SubjectFactory _subjectFactory;
-    private readonly SubjectHierarchyManager _hierarchyManager;
-    private FileSystemWatcherService? _watcherService;
+    private readonly StoragePathRegistry _pathRegistry = new();
+    private readonly FileSubjectFactory _subjectFactory;
+    private readonly StorageHierarchyManager _hierarchyManager;
+    private StorageFileWatcher? _fileWatcher;
 
     private readonly ILogger<FluentStorageContainer>? _logger;
 
@@ -79,8 +79,8 @@ public partial class FluentStorageContainer :
         ConfigurableSubjectSerializer serializer,
         ILogger<FluentStorageContainer>? logger = null)
     {
-        _subjectFactory = new SubjectFactory(typeRegistry, serializer, logger);
-        _hierarchyManager = new SubjectHierarchyManager(logger);
+        _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, logger);
+        _hierarchyManager = new StorageHierarchyManager(logger);
         _logger = logger;
 
         StorageType = "disk";
@@ -153,7 +153,7 @@ public partial class FluentStorageContainer :
 
         var blobs = await _client.ListAsync(recurse: true, cancellationToken: ct);
 
-        _pathTracker.Clear();
+        _pathRegistry.Clear();
         var children = new Dictionary<string, IInterceptorSubject>();
         var context = ((IInterceptorSubject)this).Context;
 
@@ -167,14 +167,14 @@ public partial class FluentStorageContainer :
                 if (subject != null)
                 {
                     _hierarchyManager.PlaceInHierarchy(blob.FullPath, subject, children, context, this);
-                    _pathTracker.Register(subject, blob.FullPath);
+                    _pathRegistry.Register(subject, blob.FullPath);
 
                     if (Path.GetExtension(blob.FullPath).Equals(".json", StringComparison.OrdinalIgnoreCase))
                     {
                         try
                         {
                             var content = await _client.ReadTextAsync(blob.FullPath, cancellationToken: ct);
-                            _pathTracker.UpdateHash(blob.FullPath, ContentHashUtility.ComputeHash(content));
+                            _pathRegistry.UpdateHash(blob.FullPath, StoragePathRegistry.ComputeHash(content));
                         }
                         catch { /* Ignore hash computation errors */ }
                     }
@@ -187,22 +187,22 @@ public partial class FluentStorageContainer :
         }
 
         Children = children;
-        _logger?.LogInformation("Scan complete. Found {Count} subjects", _pathTracker.Count);
+        _logger?.LogInformation("Scan complete. Found {Count} subjects", _pathRegistry.Count);
     }
 
     private void StartFileWatching()
     {
-        _watcherService = new FileSystemWatcherService(
+        _fileWatcher = new StorageFileWatcher(
             Path.GetFullPath(ConnectionString),
             ProcessFileEventAsync,
             () => ScanAsync(CancellationToken.None),
             _logger);
-        _watcherService.Start();
+        _fileWatcher.Start();
     }
 
     private Task ProcessFileEventAsync(FileSystemEventArgs e)
     {
-        var relativePath = _watcherService!.GetRelativePath(e.FullPath);
+        var relativePath = _fileWatcher!.GetRelativePath(e.FullPath);
 
         return e.ChangeType switch
         {
@@ -210,7 +210,7 @@ public partial class FluentStorageContainer :
             WatcherChangeTypes.Changed => HandleFileChangedAsync(relativePath, e.FullPath),
             WatcherChangeTypes.Deleted => HandleFileDeletedAsync(relativePath),
             WatcherChangeTypes.Renamed when e is RenamedEventArgs re =>
-                HandleFileRenamedAsync(relativePath, _watcherService.GetRelativePath(re.OldFullPath)),
+                HandleFileRenamedAsync(relativePath, _fileWatcher.GetRelativePath(re.OldFullPath)),
             _ => Task.CompletedTask
         };
     }
@@ -230,12 +230,12 @@ public partial class FluentStorageContainer :
                 try
                 {
                     var content = await _client!.ReadTextAsync(relativePath);
-                    _pathTracker.UpdateHash(relativePath, ContentHashUtility.ComputeHash(content));
+                    _pathRegistry.UpdateHash(relativePath, StoragePathRegistry.ComputeHash(content));
                 }
                 catch { /* Ignore */ }
             }
 
-            _pathTracker.Register(subject, relativePath);
+            _pathRegistry.Register(subject, relativePath);
 
             var children = new Dictionary<string, IInterceptorSubject>(Children);
             _hierarchyManager.PlaceInHierarchy(relativePath, subject, children, context, this);
@@ -247,7 +247,7 @@ public partial class FluentStorageContainer :
 
     private async Task HandleFileChangedAsync(string relativePath, string fullPath)
     {
-        if (!_pathTracker.TryGetSubject(relativePath, out var existingSubject))
+        if (!_pathRegistry.TryGetSubject(relativePath, out var existingSubject))
             return;
 
         if (existingSubject is not IConfigurableSubject)
@@ -264,7 +264,7 @@ public partial class FluentStorageContainer :
             return;
         }
 
-        bool sizeChanged = _pathTracker.HasSizeChanged(relativePath, newSize);
+        bool sizeChanged = _pathRegistry.HasSizeChanged(relativePath, newSize);
 
         string? newHash = null;
         for (int retry = 0; retry < 3; retry++)
@@ -272,7 +272,7 @@ public partial class FluentStorageContainer :
             try
             {
                 using var stream = await _client!.OpenReadAsync(relativePath);
-                newHash = await ContentHashUtility.ComputeHashAsync(stream);
+                newHash = await StoragePathRegistry.ComputeHashAsync(stream);
                 break;
             }
             catch (IOException) when (retry < 2)
@@ -287,14 +287,14 @@ public partial class FluentStorageContainer :
             return;
         }
 
-        if (!sizeChanged && !_pathTracker.HasHashChanged(relativePath, newHash))
+        if (!sizeChanged && !_pathRegistry.HasHashChanged(relativePath, newHash))
         {
             _logger?.LogDebug("File unchanged (same hash), skipping reload: {Path}", relativePath);
             return;
         }
 
-        _pathTracker.UpdateSize(relativePath, newSize);
-        _pathTracker.UpdateHash(relativePath, newHash);
+        _pathRegistry.UpdateSize(relativePath, newSize);
+        _pathRegistry.UpdateHash(relativePath, newHash);
 
         if (Path.GetExtension(relativePath).Equals(".json", StringComparison.OrdinalIgnoreCase))
         {
@@ -320,7 +320,7 @@ public partial class FluentStorageContainer :
     {
         _logger?.LogDebug("File deleted: {Path}", relativePath);
 
-        _pathTracker.Unregister(relativePath);
+        _pathRegistry.Unregister(relativePath);
 
         var children = new Dictionary<string, IInterceptorSubject>(Children);
         _hierarchyManager.RemoveFromHierarchy(relativePath, children);
@@ -344,14 +344,14 @@ public partial class FluentStorageContainer :
         if (_client == null)
             return false;
 
-        if (!_pathTracker.TryGetPath(subject, out var path))
+        if (!_pathRegistry.TryGetPath(subject, out var path))
             return false;
 
         var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
-        _watcherService?.MarkAsOwnWrite(fullPath);
+        _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         var json = _subjectFactory.Serialize(subject);
-        _pathTracker.UpdateHash(path, ContentHashUtility.ComputeHash(json));
+        _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
 
         await _client.WriteTextAsync(path, json, cancellationToken: ct);
 
@@ -368,17 +368,17 @@ public partial class FluentStorageContainer :
             throw new InvalidOperationException("Storage not connected");
 
         var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
-        _watcherService?.MarkAsOwnWrite(fullPath);
+        _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         var json = _subjectFactory.Serialize(subject);
-        _pathTracker.UpdateHash(path, ContentHashUtility.ComputeHash(json));
+        _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
 
         await _client.WriteTextAsync(path, json, cancellationToken: ct);
 
         var context = ((IInterceptorSubject)this).Context;
         var children = new Dictionary<string, IInterceptorSubject>(Children);
 
-        _pathTracker.Register(subject, path);
+        _pathRegistry.Register(subject, path);
         _hierarchyManager.PlaceInHierarchy(path, subject, children, context, this);
 
         Children = children;
@@ -395,11 +395,11 @@ public partial class FluentStorageContainer :
             throw new InvalidOperationException("Storage not connected");
 
         var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
-        _watcherService?.MarkAsOwnWrite(fullPath);
+        _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         await _client.DeleteAsync(path, cancellationToken: ct);
 
-        _pathTracker.Unregister(path);
+        _pathRegistry.Unregister(path);
 
         _logger?.LogInformation("Deleted from storage: {Path}", path);
     }
@@ -424,7 +424,7 @@ public partial class FluentStorageContainer :
             throw new InvalidOperationException("Storage not connected");
 
         var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
-        _watcherService?.MarkAsOwnWrite(fullPath);
+        _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         await _client.WriteAsync(path, content, append: false, cancellationToken: ct);
         _logger?.LogDebug("Wrote blob to storage: {Path}", path);
@@ -439,7 +439,7 @@ public partial class FluentStorageContainer :
             throw new InvalidOperationException("Storage not connected");
 
         var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
-        _watcherService?.MarkAsOwnWrite(fullPath);
+        _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         await _client.DeleteAsync(path, cancellationToken: ct);
         _logger?.LogDebug("Deleted blob from storage: {Path}", path);
@@ -458,7 +458,7 @@ public partial class FluentStorageContainer :
 
     public override void Dispose()
     {
-        _watcherService?.Dispose();
+        _fileWatcher?.Dispose();
         _client?.Dispose();
         _client = null;
         Status = StorageStatus.Disconnected;

@@ -7,11 +7,11 @@ namespace HomeBlaze.Storage.Internal;
 /// <summary>
 /// Manages hierarchical subject placement within nested folder structures.
 /// </summary>
-internal sealed class SubjectHierarchyManager
+internal sealed class StorageHierarchyManager
 {
     private readonly ILogger? _logger;
 
-    public SubjectHierarchyManager(ILogger? logger = null)
+    public StorageHierarchyManager(ILogger? logger = null)
     {
         _logger = logger;
     }

@@ -8,7 +8,7 @@ namespace HomeBlaze.Storage.Internal;
 /// <summary>
 /// Manages FileSystemWatcher with Rx-based debouncing and self-write tracking.
 /// </summary>
-internal sealed class FileSystemWatcherService : IDisposable
+internal sealed class StorageFileWatcher : IDisposable
 {
     private static readonly TimeSpan WriteGracePeriod = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan DebounceInterval = TimeSpan.FromSeconds(1);
@@ -24,7 +24,7 @@ internal sealed class FileSystemWatcherService : IDisposable
     private FileSystemWatcher? _watcher;
     private IDisposable? _fileEventSubscription;
 
-    public FileSystemWatcherService(
+    public StorageFileWatcher(
         string basePath,
         Func<FileSystemEventArgs, Task> onFileEvent,
         Func<Task> onRescanRequired,
