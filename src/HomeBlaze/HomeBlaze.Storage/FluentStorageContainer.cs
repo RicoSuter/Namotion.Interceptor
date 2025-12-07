@@ -397,7 +397,6 @@ public partial class FluentStorageContainer :
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         await _client.DeleteAsync(path, cancellationToken: ct);
-
         _pathRegistry.Unregister(path);
 
         _logger?.LogInformation("Deleted from storage: {Path}", path);
