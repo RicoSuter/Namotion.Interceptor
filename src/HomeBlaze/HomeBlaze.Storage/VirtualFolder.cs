@@ -11,7 +11,7 @@ namespace HomeBlaze.Storage;
 /// Hierarchical grouping for virtual folders. Does NOT implement IStorageContainer.
 /// </summary>
 [InterceptorSubject]
-public partial class VirtualFolder : IDisplaySubject
+public partial class VirtualFolder : ITitleProvider, IIconProvider
 {
     private const string FolderIcon = Icons.Material.Filled.Folder;
         

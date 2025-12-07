@@ -1,3 +1,4 @@
+using HomeBlaze.Core.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
@@ -11,8 +12,7 @@ namespace HomeBlaze.Core;
 /// Factory for creating a fully configured InterceptorSubjectContext
 /// with all standard interceptors enabled.
 /// </summary>
-public static class 
-    SubjectContextFactory
+public static class SubjectContextFactory
 {
     /// <summary>
     /// Creates an InterceptorSubjectContext with full tracking, registry,
@@ -26,6 +26,7 @@ public static class
             .WithRegistry()
             .WithParents()
             .WithLifecycle()
+            .WithPathResolver()
             .WithDataAnnotationValidation()
             .WithHostedServices(services);
     }

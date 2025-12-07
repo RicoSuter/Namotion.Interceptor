@@ -18,9 +18,9 @@ namespace HomeBlaze.Storage;
 /// Supports FileSystemWatcher for reactive file monitoring on disk storage.
 /// </summary>
 [InterceptorSubject]
-public partial class FluentStorageContainer : 
+public partial class FluentStorageContainer :
     BackgroundService,
-    IStorageContainer, IConfigurationWriter, IDisplaySubject, IConfigurableSubject, IDisposable
+    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurableSubject, IDisposable
 {
     private IBlobStorage? _client;
 

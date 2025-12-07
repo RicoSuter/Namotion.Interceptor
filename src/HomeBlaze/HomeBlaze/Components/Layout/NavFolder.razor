@@ -1,0 +1,42 @@
+@using HomeBlaze.Core.Pages
+
+<MudNavGroup Title="@Item.Title" Icon="@Item.Icon" Expanded="_expanded" ExpandedChanged="OnExpandedChanged">
+    @if (_expanded && _children != null)
+    {
+        @foreach (var child in _children)
+        {
+            @if (child.IsPage && !child.IsFolder)
+            {
+                <MudNavLink Href="@($"pages/{child.Path}")"
+                            Match="NavLinkMatch.All"
+                            Icon="@child.Icon">
+                    @child.Title
+                </MudNavLink>
+            }
+            else if (child.IsFolder)
+            {
+                <NavFolder Item="child" NavigationResolver="NavigationResolver" />
+            }
+        }
+    }
+</MudNavGroup>
+
+@code {
+    [Parameter, EditorRequired]
+    public required NavigationItem Item { get; set; }
+
+    [Parameter, EditorRequired]
+    public required NavigationItemResolver NavigationResolver { get; set; }
+
+    private bool _expanded;
+    private List<NavigationItem>? _children;
+
+    private void OnExpandedChanged(bool expanded)
+    {
+        _expanded = expanded;
+        if (_expanded && _children == null)
+        {
+            _children = NavigationResolver.GetChildItems(Item.Subject).ToList();
+        }
+    }
+}

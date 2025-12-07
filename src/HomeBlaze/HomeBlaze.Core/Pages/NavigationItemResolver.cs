@@ -1,0 +1,106 @@
+using HomeBlaze.Abstractions;
+using HomeBlaze.Core.Components;
+using HomeBlaze.Core.UI;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+
+namespace HomeBlaze.Core.Pages;
+
+/// <summary>
+/// Resolves navigation items from the subject tree.
+/// </summary>
+public class NavigationItemResolver
+{
+    private readonly SubjectComponentRegistry _componentRegistry;
+    private readonly RoutePathResolver _routePathResolver;
+
+    public NavigationItemResolver(
+        SubjectComponentRegistry componentRegistry,
+        RoutePathResolver routePathResolver)
+    {
+        _componentRegistry = componentRegistry;
+        _routePathResolver = routePathResolver;
+    }
+
+    /// <summary>
+    /// Gets navigation items for direct children of a subject.
+    /// </summary>
+    public IEnumerable<NavigationItem> GetChildItems(IInterceptorSubject parent)
+    {
+        var items = new List<NavigationItem>();
+        var registered = parent.TryGetRegisteredSubject();
+        if (registered == null)
+            return items;
+
+        foreach (var prop in registered.Properties)
+        {
+            if (!prop.HasChildSubjects)
+                continue;
+
+            foreach (var childInfo in prop.Children)
+            {
+                var child = childInfo.Subject;
+                if (child == null)
+                    continue;
+
+                var key = childInfo.Index?.ToString() ?? prop.Name;
+                var path = _routePathResolver.GetRoutePath(child);
+                if (path == null)
+                    continue;
+
+                var isPage = _componentRegistry.HasComponent(child.GetType(), SubjectComponentType.Page);
+                var isFolder = HasPageDescendants(child);
+
+                // Only include if it's a page or has page descendants
+                if (isPage || isFolder)
+                {
+                    items.Add(new NavigationItem
+                    {
+                        Subject = child,
+                        Title = child.GetNavigationTitle(key),
+                        Icon = child.GetIcon(),
+                        Path = path,
+                        IsPage = isPage,
+                        IsFolder = isFolder,
+                        Order = child.GetNavigationOrder(key)
+                    });
+                }
+            }
+        }
+
+        return items.OrderBy(i => i.Order).ThenBy(i => i.Title);
+    }
+
+    /// <summary>
+    /// Checks if subject has any direct child that is a page or a folder.
+    /// </summary>
+    private bool HasPageDescendants(IInterceptorSubject subject)
+    {
+        var registered = subject.TryGetRegisteredSubject();
+        if (registered == null)
+            return false;
+
+        foreach (var prop in registered.Properties)
+        {
+            if (!prop.HasChildSubjects)
+                continue;
+
+            foreach (var childInfo in prop.Children)
+            {
+                var child = childInfo.Subject;
+                if (child == null)
+                    continue;
+
+                // Direct child is a page
+                if (_componentRegistry.HasComponent(child.GetType(), SubjectComponentType.Page))
+                    return true;
+
+                // Direct child is a VirtualFolder (potential container) - check by type name to avoid assembly reference
+                if (child.GetType().Name == "VirtualFolder")
+                    return true;
+            }
+        }
+
+        return false;
+    }
+}

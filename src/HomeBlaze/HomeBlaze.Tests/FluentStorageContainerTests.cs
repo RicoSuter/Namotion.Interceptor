@@ -108,7 +108,7 @@ public class FluentStorageContainerTests
 
         // Assert
         Assert.NotNull(icon);
-        Assert.Contains("svg", icon);
+        Assert.True(icon.Contains("<path") || icon.Contains("<g>"), "Icon should be a MudBlazor SVG path string");
     }
 
     [Fact]
@@ -183,7 +183,7 @@ public class VirtualFolderTests
 
         // Assert
         Assert.NotNull(folder.Icon);
-        Assert.Contains("svg", folder.Icon);
+        Assert.True(folder.Icon.Contains("<path") || folder.Icon.Contains("<g>"), "Icon should be a MudBlazor SVG path string");
     }
 }
 
@@ -233,6 +233,6 @@ public class JsonFileTests
 
         // Assert
         Assert.NotNull(file.Icon);
-        Assert.Contains("svg", file.Icon);
+        Assert.True(file.Icon.Contains("<path") || file.Icon.Contains("<g>"), "Icon should be a MudBlazor SVG path string");
     }
 }

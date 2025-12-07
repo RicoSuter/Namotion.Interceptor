@@ -1,6 +1,7 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Components
+@using HomeBlaze.Storage.Internal
 @using Markdig
 @using MudBlazor
 @using Namotion.Interceptor
@@ -78,7 +79,10 @@
             await using var stream = await File.ReadAsync();
             using var reader = new StreamReader(stream);
             var markdown = await reader.ReadToEndAsync();
-            _htmlContent = Markdown.ToHtml(markdown, Pipeline);
+
+            // Strip YAML frontmatter before rendering
+            var content = FrontmatterParser.GetContentAfterFrontmatter(markdown);
+            _htmlContent = Markdown.ToHtml(content, Pipeline);
         }
         catch (Exception ex)
         {

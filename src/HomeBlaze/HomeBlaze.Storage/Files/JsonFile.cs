@@ -10,7 +10,7 @@ namespace HomeBlaze.Storage.Files;
 /// Represents a JSON file in storage (non-configurable JSON).
 /// </summary>
 [InterceptorSubject]
-public partial class JsonFile : IStorageFile, IDisplaySubject
+public partial class JsonFile : IStorageFile, ITitleProvider, IIconProvider
 {
     public string? Title => Path.GetFileNameWithoutExtension(FullPath);
 

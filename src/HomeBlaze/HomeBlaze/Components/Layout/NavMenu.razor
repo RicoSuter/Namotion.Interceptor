@@ -1,23 +1,32 @@
-@using MarkdownFile = HomeBlaze.Storage.Files.MarkdownFile
+@using HomeBlaze.Core.Pages
+@using HomeBlaze.Core
 
 @inject RootManager RootManager
+@inject NavigationItemResolver NavigationResolver
 
 @implements IDisposable
 
 <MudNavMenu>
-    @if (_markdownFiles.Any())
+    @if (RootManager.Root != null)
     {
-        @foreach (var file in _markdownFiles)
+        @foreach (var item in GetRootItems())
         {
-            <MudNavLink Href="@($"pages/{file.Path}")"
-                        Match="NavLinkMatch.All"
-                        Icon="@Icons.Material.Filled.Description">
-                @file.Title
-            </MudNavLink>
+            @if (item.IsPage && !item.IsFolder)
+            {
+                <MudNavLink Href="@($"pages/{item.Path}")"
+                            Match="NavLinkMatch.All"
+                            Icon="@item.Icon">
+                    @item.Title
+                </MudNavLink>
+            }
+            else if (item.IsFolder)
+            {
+                <NavFolder Item="item" NavigationResolver="NavigationResolver" />
+            }
         }
-        <MudDivider Class="my-2" />
     }
 
+    <MudDivider Class="my-2" />
     <MudNavLink Href="browser"
                 Match="NavLinkMatch.Prefix"
                 Icon="@Icons.Material.Filled.FolderOpen">
@@ -26,96 +35,33 @@
 </MudNavMenu>
 
 @code {
-    private List<MarkdownFileInfo> _markdownFiles = new();
     private Timer? _refreshTimer;
 
     protected override void OnInitialized()
     {
-        RefreshMarkdownFiles();
         // Periodically refresh to catch new files
-        _refreshTimer = new Timer(_ => InvokeAsync(() =>
-        {
-            RefreshMarkdownFiles();
-            StateHasChanged();
-        }), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        _refreshTimer = new Timer(_ => InvokeAsync(StateHasChanged),
+            null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
 
-    private void RefreshMarkdownFiles()
+    private IEnumerable<NavigationItem> GetRootItems()
     {
-        _markdownFiles.Clear();
+        if (RootManager.Root == null)
+            return Enumerable.Empty<NavigationItem>();
 
-        var root = RootManager.Root;
-        if (root is FluentStorageContainer storage)
+        try
         {
-            // Start with "Children" property path
-            CollectMarkdownFiles(storage.Children, "Children");
+            return NavigationResolver.GetChildItems(RootManager.Root);
         }
-    }
-
-    private void CollectMarkdownFiles(Dictionary<string, IInterceptorSubject> children, string basePath)
-    {
-        foreach (var (name, child) in children)
+        catch (Exception ex)
         {
-            if (child is MarkdownFile markdown)
-            {
-                // Property path format: Children/key
-                var path = $"{basePath}/{name}";
-
-                _markdownFiles.Add(new MarkdownFileInfo
-                {
-                    Title = GetTitle(markdown),
-                    Path = path,
-                    Order = GetOrder(markdown)
-                });
-            }
-            else if (child is VirtualFolder folder)
-            {
-                // Property path format: basePath/key/Children
-                var subPath = $"{basePath}/{name}/Children";
-                CollectMarkdownFiles(folder.Children, subPath);
-            }
+            Console.WriteLine($"Error getting navigation items: {ex}");
+            return Enumerable.Empty<NavigationItem>();
         }
-
-        // Sort by order, then by title
-        _markdownFiles = _markdownFiles
-            .OrderBy(f => f.Order)
-            .ThenBy(f => f.Title)
-            .ToList();
-    }
-
-    private string GetTitle(MarkdownFile markdown)
-    {
-        // Use filename without extension as title, but make it readable
-        var name = Path.GetFileNameWithoutExtension(markdown.Name);
-        // Convert kebab-case or snake_case to Title Case
-        return string.Join(" ", name
-            .Replace("-", " ")
-            .Replace("_", " ")
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Select(word => char.ToUpper(word[0]) + word[1..].ToLower()));
-    }
-
-    private int GetOrder(MarkdownFile markdown)
-    {
-        // readme files go first
-        var name = Path.GetFileNameWithoutExtension(markdown.Name).ToLower();
-        return name switch
-        {
-            "readme" => 0,
-            "index" => 1,
-            _ => 100
-        };
     }
 
     public void Dispose()
     {
         _refreshTimer?.Dispose();
-    }
-
-    private class MarkdownFileInfo
-    {
-        public string Title { get; set; } = "";
-        public string Path { get; set; } = "";
-        public int Order { get; set; }
     }
 }

@@ -1,3 +1,9 @@
+---
+title: HomeBlaze v2
+navTitle: Home
+order: 0
+---
+
 # HomeBlaze v2
 
 Welcome to HomeBlaze v2, a complete rewrite built on Namotion.Interceptor.
