@@ -72,7 +72,7 @@
         if (firstRender)
         {
             _jsModule = await JsRuntime.InvokeAsync<IJSObjectReference>(
-                "import", "./Components/SubjectBrowser.razor.js");
+                "import", "./Components/Browser/SubjectBrowser.razor.js");
         }
 
         if (_scrollToLastPane && _jsModule != null)
