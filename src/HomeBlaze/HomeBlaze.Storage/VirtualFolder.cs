@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Storage;
+using MudBlazor;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
@@ -12,8 +13,8 @@ namespace HomeBlaze.Storage;
 [InterceptorSubject]
 public partial class VirtualFolder : IDisplaySubject
 {
-    private const string FolderIcon = "<svg style=\"width:24px;height:24px\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z\" /></svg>";
-
+    private const string FolderIcon = Icons.Material.Filled.Folder;
+        
     /// <summary>
     /// Reference to the root storage.
     /// </summary>

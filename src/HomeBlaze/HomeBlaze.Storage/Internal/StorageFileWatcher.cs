@@ -48,10 +48,10 @@ internal sealed class StorageFileWatcher : IDisposable
         };
 
         // Route all events to the Rx subject
-        _watcher.Created += (s, e) => _fileEvents.OnNext(e);
-        _watcher.Changed += (s, e) => _fileEvents.OnNext(e);
-        _watcher.Deleted += (s, e) => _fileEvents.OnNext(e);
-        _watcher.Renamed += (s, e) => _fileEvents.OnNext(e);
+        _watcher.Created += (_, e) => _fileEvents.OnNext(e);
+        _watcher.Changed += (_, e) => _fileEvents.OnNext(e);
+        _watcher.Deleted += (_, e) => _fileEvents.OnNext(e);
+        _watcher.Renamed += (_, e) => _fileEvents.OnNext(e);
         _watcher.Error += OnWatcherError;
 
         // Process events with proper debouncing using System.Reactive

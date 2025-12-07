@@ -40,7 +40,6 @@ else
 
     public bool IsValid => true;
     public bool IsDirty => _currentContent != _originalContent;
-    public MaxWidth PreferredDialogSize => MaxWidth.Large;
 
     public event Action<bool>? IsValidChanged
     {
@@ -65,7 +64,7 @@ else
     {
         if (File != null && _isLoading)
         {
-            using var stream = await File.ReadAsync();
+            await using var stream = await File.ReadAsync();
             using var reader = new StreamReader(stream);
             _originalContent = await reader.ReadToEndAsync();
             _currentContent = _originalContent;
