@@ -1,3 +1,5 @@
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Abstractions.Components
 @using HomeBlaze.Core.Extensions
 @using HomeBlaze.Core.Services
 @using Microsoft.AspNetCore.Components.Rendering
@@ -7,34 +9,44 @@
 @using Namotion.Interceptor.Tracking
 @implements IDisposable
 @inject RootManager RootManager
+@inject SubjectComponentRegistry ComponentRegistry
 
 <MudDialog>
     <DialogContent>
-        @if (Subject != null && _configProperties.Any())
+        @if (Subject != null)
         {
-            @if (_externalChangeDetected)
+            @if (_editComponentType != null)
             {
-                <MudAlert Severity="Severity.Warning" Class="mb-3">
-                    Configuration was changed externally. Your unsaved changes may be overwritten.
-                </MudAlert>
+                <DynamicComponent Type="_editComponentType"
+                    @ref="_dynamicComponentRef"
+                    Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })" />
             }
-            <MudForm @ref="_form" @bind-IsValid="@_isValid">
-                @foreach (var prop in _configProperties)
+            else if (_configProperties.Any())
+            {
+                @if (_externalChangeDetected)
                 {
-                    @RenderPropertyEditor(prop)
+                    <MudAlert Severity="Severity.Warning" Class="mb-3">
+                        Configuration was changed externally. Your unsaved changes may be overwritten.
+                    </MudAlert>
                 }
-            </MudForm>
-        }
-        else
-        {
-            <MudText>No configuration properties found.</MudText>
+                <MudForm @ref="_form" @bind-IsValid="@_isFormValid">
+                    @foreach (var prop in _configProperties)
+                    {
+                        @RenderPropertyEditor(prop)
+                    }
+                </MudForm>
+            }
+            else
+            {
+                <MudText>No configuration properties found.</MudText>
+            }
         }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
         <MudButton Color="Color.Primary"
                    OnClick="Save"
-                   Disabled="@(!_isValid)">Save</MudButton>
+                   Disabled="@(!IsValid)">Save</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -45,13 +57,29 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
+    // Custom edit component state
+    private Type? _editComponentType;
+    private DynamicComponent? _dynamicComponentRef;
+    private ISubjectEditComponent? _editComponent;
+
+    // Fallback property editor state
     private MudForm? _form;
-    private bool _isValid;
+    private bool _isFormValid;
     private bool _isSaving;
     private bool _externalChangeDetected;
     private List<RegisteredSubjectProperty> _configProperties = new();
     private Dictionary<string, object?> _editValues = new();
     private IDisposable? _changeSubscription;
+
+    private bool IsValid => _editComponent?.IsValid ?? _isFormValid;
+
+    /// <summary>
+    /// Gets the preferred dialog size based on the edit component.
+    /// </summary>
+    public MaxWidth GetPreferredDialogSize()
+    {
+        return _editComponent?.PreferredDialogSize ?? MaxWidth.Small;
+    }
 
     protected override void OnParametersSet()
     {
@@ -60,22 +88,62 @@
         // Clean up previous subscription
         _changeSubscription?.Dispose();
         _changeSubscription = null;
+        _editComponent = null;
 
         if (Subject != null)
         {
-            // Use registry instead of reflection
-            _configProperties = Subject.GetConfigurationProperties()
-                .Where(p => p.HasSetter)
-                .OrderBy(p => p.GetDisplayOrder())
-                .ToList();
+            // Check for custom edit component
+            var registration = ComponentRegistry.GetComponent(
+                Subject.GetType(),
+                SubjectComponentType.Edit);
 
-            _editValues = _configProperties.ToDictionary(
-                p => p.Name,
-                p => p.GetValue());
+            if (registration != null)
+            {
+                _editComponentType = registration.ComponentType;
+                _configProperties = new();
+            }
+            else
+            {
+                _editComponentType = null;
 
-            // Subscribe to property changes on this subject
-            SubscribeToPropertyChanges();
+                // Use fallback property editor
+                _configProperties = Subject.GetConfigurationProperties()
+                    .Where(p => p.HasSetter)
+                    .OrderBy(p => p.GetDisplayOrder())
+                    .ToList();
+
+                _editValues = _configProperties.ToDictionary(
+                    p => p.Name,
+                    p => p.GetValue());
+
+                // Subscribe to property changes on this subject
+                SubscribeToPropertyChanges();
+            }
         }
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        base.OnAfterRender(firstRender);
+
+        // Get reference to edit component after render
+        if (_dynamicComponentRef?.Instance is ISubjectEditComponent editComponent && _editComponent == null)
+        {
+            _editComponent = editComponent;
+            _editComponent.IsValidChanged += OnIsValidChanged;
+            _editComponent.IsDirtyChanged += OnIsDirtyChanged;
+            StateHasChanged();
+        }
+    }
+
+    private void OnIsValidChanged(bool isValid)
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnIsDirtyChanged(bool isDirty)
+    {
+        InvokeAsync(StateHasChanged);
     }
 
     private void SubscribeToPropertyChanges()
@@ -328,29 +396,37 @@
         _isSaving = true;
         try
         {
-            // Apply all edited values to the subject using registry
-            foreach (var prop in _configProperties)
+            if (_editComponent != null)
             {
-                var newValue = _editValues[prop.Name];
-                var currentValue = prop.GetValue();
-
-                if (!Equals(newValue, currentValue))
+                // Use custom edit component's save
+                await _editComponent.SaveAsync();
+            }
+            else
+            {
+                // Apply all edited values to the subject using registry
+                foreach (var prop in _configProperties)
                 {
-                    try
-                    {
-                        // Handle type conversion if needed
-                        var underlyingType = Nullable.GetUnderlyingType(prop.Type) ?? prop.Type;
+                    var newValue = _editValues[prop.Name];
+                    var currentValue = prop.GetValue();
 
-                        if (newValue != null && newValue.GetType() != underlyingType)
+                    if (!Equals(newValue, currentValue))
+                    {
+                        try
                         {
-                            newValue = Convert.ChangeType(newValue, underlyingType);
-                        }
+                            // Handle type conversion if needed
+                            var underlyingType = Nullable.GetUnderlyingType(prop.Type) ?? prop.Type;
 
-                        prop.SetValue(newValue);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error setting {prop.Name}: {ex.Message}");
+                            if (newValue != null && newValue.GetType() != underlyingType)
+                            {
+                                newValue = Convert.ChangeType(newValue, underlyingType);
+                            }
+
+                            prop.SetValue(newValue);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error setting {prop.Name}: {ex.Message}");
+                        }
                     }
                 }
             }
@@ -376,5 +452,11 @@
     public void Dispose()
     {
         _changeSubscription?.Dispose();
+
+        if (_editComponent != null)
+        {
+            _editComponent.IsValidChanged -= OnIsValidChanged;
+            _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
+        }
     }
 }

@@ -1,3 +1,5 @@
+using MudBlazor;
+
 namespace HomeBlaze.Abstractions.Components;
 
 /// <summary>
@@ -30,4 +32,9 @@ public interface ISubjectEditComponent : ISubjectComponent
     /// Saves the changes to the subject.
     /// </summary>
     Task SaveAsync();
+
+    /// <summary>
+    /// Gets the preferred dialog size for this edit component.
+    /// </summary>
+    MaxWidth PreferredDialogSize => MaxWidth.Small;
 }

@@ -3,11 +3,12 @@
     "allow": [
       "Bash(dotnet build:*)",
       "Bash(dotnet test:*)",
-      "Bash(dotnet run:*)",
-      "WebSearch",
-      "WebFetch(domain:github.com)"
+      "Bash(dotnet run:*)"
     ],
     "deny": [],
-    "ask": []
+    "ask": [],
+    "additionalDirectories": [
+      "C:\\Users\\rsute\\GitHub\\HomeBlaze"
+    ]
   }
 }
