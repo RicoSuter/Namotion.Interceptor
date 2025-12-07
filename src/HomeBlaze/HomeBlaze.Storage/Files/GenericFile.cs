@@ -10,7 +10,7 @@ namespace HomeBlaze.Storage.Files;
 /// Represents a generic file in storage.
 /// </summary>
 [InterceptorSubject]
-public partial class GenericFile : IStorageFile, IDisplaySubject
+public partial class GenericFile : IStorageFile, ITitleProvider, IIconProvider
 {
     public string? Title => Name;
 

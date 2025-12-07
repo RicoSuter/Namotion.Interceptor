@@ -192,15 +192,15 @@
         return Subject switch
         {
             null => "No Selection",
-            IDisplaySubject displayable when !string.IsNullOrEmpty(displayable.Title) => displayable.Title,
+            ITitleProvider titleProvider when !string.IsNullOrEmpty(titleProvider.Title) => titleProvider.Title,
             _ => Subject.GetType().Name
         };
     }
 
     private string GetSubjectIcon(IInterceptorSubject? subject)
     {
-        if (subject is IDisplaySubject displayable && !string.IsNullOrEmpty(displayable.Icon))
-            return displayable.Icon;
+        if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.Icon))
+            return iconProvider.Icon;
 
         return Icons.Material.Filled.QuestionMark;
     }
@@ -284,8 +284,8 @@
     private string GetSubjectDisplayName(SubjectPropertyChild child)
     {
         var subject = child.Subject;
-        if (subject is IDisplaySubject displayable && !string.IsNullOrEmpty(displayable.Title))
-            return displayable.Title;
+        if (subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
+            return titleProvider.Title;
 
         return subject?.ToString() ?? "n/a";
     }

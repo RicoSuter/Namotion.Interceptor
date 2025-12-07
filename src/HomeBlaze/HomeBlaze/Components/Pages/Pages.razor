@@ -4,18 +4,16 @@
 @using HomeBlaze.Components.Dialogs
 @using HomeBlaze.Core.Components
 @using HomeBlaze.Core.Pages
-@using Namotion.Interceptor.Registry.Abstractions
 
 @inherits HomeBlazorComponentBase
 
 @inject SubjectComponentRegistry ComponentRegistry
+@inject RoutePathResolver RouteResolver
 @inject IDialogService DialogService
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
 
 <MudStack Row="true" Class="mb-4" AlignItems="AlignItems.Center">
-    <MudText Typo="Typo.h4">@_title</MudText>
-    <MudSpacer />
     @if (CanEdit())
     {
         <MudIconButton OnClick="@OpenEditDialog"
@@ -64,17 +62,13 @@ else
         if (Root == null)
             return;
 
-        var registry = RootContext?.GetService<ISubjectRegistry>();
-        if (registry == null)
-            return;
-
         // Ensure root is registered by accessing a property
         if (Root is FluentStorageContainer storage)
         {
             _ = storage.Children; // Trigger registration
         }
 
-        _subject = SubjectPathResolver.ResolveSubject(Root, registry, Path ?? "");
+        _subject = RouteResolver.ResolveFromRoute(Root, Path ?? "");
 
         if (_subject != null)
         {
@@ -83,10 +77,10 @@ else
                 SubjectComponentType.Page);
             _componentType = registration?.ComponentType;
 
-            // Get title from IDisplaySubject if implemented
-            if (_subject is IDisplaySubject displayable)
+            // Get title from ITitleProvider if implemented
+            if (_subject is ITitleProvider titleProvider)
             {
-                _title = displayable.Title ?? _subject.GetType().Name;
+                _title = titleProvider.Title ?? _subject.GetType().Name;
             }
             else
             {

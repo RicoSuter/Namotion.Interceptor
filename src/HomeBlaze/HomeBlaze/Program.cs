@@ -2,6 +2,7 @@ using MudBlazor.Services;
 using HomeBlaze.Components;
 using HomeBlaze.Core;
 using HomeBlaze.Core.Components;
+using HomeBlaze.Core.Pages;
 using HomeBlaze.Core.Subjects;
 using HomeBlaze.Storage;
 
@@ -29,6 +30,11 @@ builder.Services.AddSingleton(context);
 builder.Services.AddSingleton(typeProvider);
 builder.Services.AddSingleton(typeRegistry);
 builder.Services.AddSingleton(componentRegistry);
+
+// Register navigation services
+var routePathResolver = new RoutePathResolver();
+builder.Services.AddSingleton(routePathResolver);
+builder.Services.AddSingleton(new NavigationItemResolver(componentRegistry, routePathResolver));
 
 // Register serializer with factory pattern
 builder.Services.AddSingleton(sp => new ConfigurableSubjectSerializer(typeRegistry, sp));

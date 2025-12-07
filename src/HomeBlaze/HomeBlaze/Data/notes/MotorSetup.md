@@ -1,3 +1,9 @@
+---
+title: Motor Setup Guide
+navTitle: Setup
+order: 1
+---
+
 # Motor Setup Guide
 
 This guide explains how to configure the sample motor.

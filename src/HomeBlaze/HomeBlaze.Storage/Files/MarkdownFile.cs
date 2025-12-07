@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Storage;
+using HomeBlaze.Storage.Internal;
 using MudBlazor;
 using Namotion.Interceptor.Attributes;
 
@@ -12,16 +13,20 @@ namespace HomeBlaze.Storage.Files;
 [InterceptorSubject]
 [FileExtension(".md")]
 [FileExtension(".markdown")]
-public partial class MarkdownFile : IStorageFile, IDisplaySubject
+public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPageNavigationProvider
 {
-    private string? _cachedTitle;
+    private MarkdownFrontmatter? _frontmatter;
+    private bool _frontmatterParsed;
+    private string? _cachedContent;
 
     public IStorageContainer Storage { get; }
     public string FullPath { get; }
     public string Name { get; }
 
-    public string? Title => _cachedTitle ?? Path.GetFileNameWithoutExtension(Name);
-    public string Icon => Icons.Material.Filled.Article;
+    public string? Title => GetFrontmatter()?.Title ?? FormatFilename(Name);
+    public string? Icon => GetFrontmatter()?.Icon ?? Icons.Material.Filled.Article;
+    public string? NavigationTitle => GetFrontmatter()?.NavTitle;
+    public int? NavigationOrder => GetFrontmatter()?.Order;
 
     /// <summary>
     /// File size in bytes.
@@ -49,68 +54,40 @@ public partial class MarkdownFile : IStorageFile, IDisplaySubject
         => Storage.WriteBlobAsync(FullPath, content, ct);
 
     /// <summary>
-    /// Sets the cached title (typically called after parsing front matter).
+    /// Gets the parsed frontmatter, parsing on first access.
     /// </summary>
-    public void SetTitle(string? title)
+    private MarkdownFrontmatter? GetFrontmatter()
     {
-        _cachedTitle = title;
+        if (_frontmatterParsed)
+            return _frontmatter;
+
+        _frontmatterParsed = true;
+
+        if (_cachedContent != null)
+        {
+            _frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(_cachedContent);
+        }
+
+        return _frontmatter;
     }
 
     /// <summary>
-    /// Extracts navigation title from YAML front matter in markdown content.
+    /// Sets the cached content (called after reading file).
     /// </summary>
-    public static string? ExtractTitleFromContent(string content)
+    public void SetContent(string content)
     {
-        if (string.IsNullOrEmpty(content))
-            return null;
-
-        try
-        {
-            using var reader = new StringReader(content);
-            var firstLine = reader.ReadLine();
-
-            if (firstLine != "---")
-                return null;
-
-            string? navigationTitle = null;
-            string? title = null;
-            string? line;
-
-            while ((line = reader.ReadLine()) != null)
-            {
-                if (line == "---")
-                    break;
-
-                if (line.StartsWith("navigation_title:", StringComparison.OrdinalIgnoreCase))
-                {
-                    navigationTitle = ExtractFrontmatterValue(line, 17);
-                }
-                else if (line.StartsWith("nav_title:", StringComparison.OrdinalIgnoreCase))
-                {
-                    navigationTitle ??= ExtractFrontmatterValue(line, 10);
-                }
-                else if (line.StartsWith("title:", StringComparison.OrdinalIgnoreCase))
-                {
-                    title = ExtractFrontmatterValue(line, 6);
-                }
-            }
-
-            return navigationTitle ?? title;
-        }
-        catch
-        {
-            return null;
-        }
+        _cachedContent = content;
+        _frontmatterParsed = false;
+        _frontmatter = null;
     }
 
-    private static string? ExtractFrontmatterValue(string line, int prefixLength)
+    private static string FormatFilename(string name)
     {
-        var value = line.Substring(prefixLength).Trim();
-        if ((value.StartsWith('"') && value.EndsWith('"')) ||
-            (value.StartsWith('\'') && value.EndsWith('\'')))
-        {
-            value = value.Substring(1, value.Length - 2);
-        }
-        return string.IsNullOrWhiteSpace(value) ? null : value;
+        var baseName = Path.GetFileNameWithoutExtension(name);
+        return string.Join(" ", baseName
+            .Replace("-", " ")
+            .Replace("_", " ")
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => w.Length > 0 ? char.ToUpper(w[0]) + w[1..] : w));
     }
 }

@@ -117,15 +117,11 @@ internal sealed class FileSubjectFactory
         try
         {
             var content = await client.ReadTextAsync(blob.FullPath, cancellationToken: ct);
-            var title = MarkdownFile.ExtractTitleFromContent(content);
-            if (title != null)
-            {
-                markdownFile.SetTitle(title);
-            }
+            markdownFile.SetContent(content);
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to load markdown title for: {Path}", blob.FullPath);
+            _logger?.LogWarning(ex, "Failed to load markdown content for: {Path}", blob.FullPath);
         }
     }
 

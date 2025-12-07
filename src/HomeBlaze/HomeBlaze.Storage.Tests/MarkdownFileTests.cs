@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions.Storage;
 using HomeBlaze.Storage.Files;
+using HomeBlaze.Storage.Internal;
 using Moq;
 using Xunit;
 
@@ -14,23 +15,24 @@ public class MarkdownFileTests
     }
 
     [Fact]
-    public void ExtractTitleFromContent_WithNavigationTitle_ReturnsNavigationTitle()
+    public void FrontmatterParser_WithNavigationTitle_ReturnsNavigationTitle()
     {
         var content = """
             ---
-            navigation_title: My Nav Title
+            navTitle: My Nav Title
             title: Regular Title
             ---
             # Content
             """;
 
-        var result = MarkdownFile.ExtractTitleFromContent(content);
+        var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
-        Assert.Equal("My Nav Title", result);
+        Assert.NotNull(result);
+        Assert.Equal("My Nav Title", result.GetNavTitle());
     }
 
     [Fact]
-    public void ExtractTitleFromContent_WithNavTitle_ReturnsNavTitle()
+    public void FrontmatterParser_WithNavTitle_ReturnsNavTitle()
     {
         var content = """
             ---
@@ -40,13 +42,14 @@ public class MarkdownFileTests
             # Content
             """;
 
-        var result = MarkdownFile.ExtractTitleFromContent(content);
+        var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
-        Assert.Equal("My Nav Title", result);
+        Assert.NotNull(result);
+        Assert.Equal("My Nav Title", result.GetNavTitle());
     }
 
     [Fact]
-    public void ExtractTitleFromContent_WithOnlyTitle_ReturnsTitle()
+    public void FrontmatterParser_WithOnlyTitle_ReturnsTitle()
     {
         var content = """
             ---
@@ -55,13 +58,14 @@ public class MarkdownFileTests
             # Content
             """;
 
-        var result = MarkdownFile.ExtractTitleFromContent(content);
+        var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
-        Assert.Equal("Regular Title", result);
+        Assert.NotNull(result);
+        Assert.Equal("Regular Title", result.Title);
     }
 
     [Fact]
-    public void ExtractTitleFromContent_WithQuotedTitle_RemovesQuotes()
+    public void FrontmatterParser_WithQuotedTitle_RemovesQuotes()
     {
         var content = """
             ---
@@ -70,38 +74,58 @@ public class MarkdownFileTests
             # Content
             """;
 
-        var result = MarkdownFile.ExtractTitleFromContent(content);
+        var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
-        Assert.Equal("Quoted Title", result);
+        Assert.NotNull(result);
+        Assert.Equal("Quoted Title", result.Title);
     }
 
     [Fact]
-    public void ExtractTitleFromContent_WithSingleQuotedTitle_RemovesQuotes()
+    public void FrontmatterParser_WithOrder_ReturnsOrder()
     {
         var content = """
             ---
-            title: 'Single Quoted'
+            title: Test
+            order: 5
             ---
             # Content
             """;
 
-        var result = MarkdownFile.ExtractTitleFromContent(content);
+        var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
-        Assert.Equal("Single Quoted", result);
+        Assert.NotNull(result);
+        Assert.Equal(5, result.Order);
     }
 
     [Fact]
-    public void ExtractTitleFromContent_WithoutFrontMatter_ReturnsNull()
+    public void FrontmatterParser_WithIcon_ReturnsIcon()
+    {
+        var content = """
+            ---
+            title: Test
+            icon: mdi-home
+            ---
+            # Content
+            """;
+
+        var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
+
+        Assert.NotNull(result);
+        Assert.Equal("mdi-home", result.Icon);
+    }
+
+    [Fact]
+    public void FrontmatterParser_WithoutFrontMatter_ReturnsNull()
     {
         var content = "# Just Content\nNo front matter here";
 
-        var result = MarkdownFile.ExtractTitleFromContent(content);
+        var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
         Assert.Null(result);
     }
 
     [Fact]
-    public void ExtractTitleFromContent_WithEmptyFrontMatter_ReturnsNull()
+    public void FrontmatterParser_WithEmptyFrontMatter_ReturnsNull()
     {
         var content = """
             ---
@@ -109,70 +133,149 @@ public class MarkdownFileTests
             # Content
             """;
 
-        var result = MarkdownFile.ExtractTitleFromContent(content);
+        var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
         Assert.Null(result);
     }
 
     [Fact]
-    public void ExtractTitleFromContent_WithEmptyContent_ReturnsNull()
+    public void FrontmatterParser_WithEmptyContent_ReturnsNull()
     {
-        var result = MarkdownFile.ExtractTitleFromContent("");
+        var result = FrontmatterParser.Parse<MarkdownFrontmatter>("");
 
         Assert.Null(result);
     }
 
     [Fact]
-    public void ExtractTitleFromContent_WithNavigationTitlePriority_ReturnsNavigationTitle()
+    public void GetContentAfterFrontmatter_RemovesFrontmatter()
     {
+        var content = """
+            ---
+            title: Test
+            ---
+            # Content Here
+            """;
+
+        var result = FrontmatterParser.GetContentAfterFrontmatter(content);
+
+        Assert.Equal("# Content Here", result);
+    }
+
+    [Fact]
+    public void GetContentAfterFrontmatter_WithoutFrontmatter_ReturnsOriginal()
+    {
+        var content = "# Content Here";
+
+        var result = FrontmatterParser.GetContentAfterFrontmatter(content);
+
+        Assert.Equal(content, result);
+    }
+
+    [Fact]
+    public void MarkdownFile_Title_WithFrontmatter_ReturnsFrontmatterTitle()
+    {
+        var markdown = CreateMarkdownFile("test.md");
+        var content = """
+            ---
+            title: Frontmatter Title
+            ---
+            # Content
+            """;
+
+        markdown.SetContent(content);
+
+        Assert.Equal("Frontmatter Title", markdown.Title);
+    }
+
+    [Fact]
+    public void MarkdownFile_Title_WithoutFrontmatter_ReturnsFormattedFilename()
+    {
+        var markdown = CreateMarkdownFile("my-test-document.md");
+
+        Assert.Equal("My Test Document", markdown.Title);
+    }
+
+    [Fact]
+    public void MarkdownFile_NavigationTitle_WithFrontmatter_ReturnsNavTitle()
+    {
+        var markdown = CreateMarkdownFile("test.md");
         var content = """
             ---
             title: Regular Title
-            nav_title: Nav Title
-            navigation_title: Navigation Title
+            navTitle: Nav Title
             ---
             # Content
             """;
 
-        var result = MarkdownFile.ExtractTitleFromContent(content);
+        markdown.SetContent(content);
 
-        // navigation_title has highest priority
-        Assert.Equal("Navigation Title", result);
+        Assert.Equal("Nav Title", markdown.NavigationTitle);
     }
 
     [Fact]
-    public void Title_WithCachedTitle_ReturnsCachedTitle()
+    public void MarkdownFile_NavigationOrder_WithFrontmatter_ReturnsOrder()
     {
         var markdown = CreateMarkdownFile("test.md");
-        markdown.SetTitle("Cached Title");
+        var content = """
+            ---
+            title: Test
+            order: 3
+            ---
+            # Content
+            """;
 
-        Assert.Equal("Cached Title", markdown.Title);
+        markdown.SetContent(content);
+
+        Assert.Equal(3, markdown.NavigationOrder);
     }
 
     [Fact]
-    public void Title_WithoutCachedTitle_ReturnsFileNameWithoutExtension()
-    {
-        var markdown = CreateMarkdownFile("my-document.md");
-
-        Assert.Equal("my-document", markdown.Title);
-    }
-
-    [Fact]
-    public void SetTitle_UpdatesTitle()
+    public void MarkdownFile_Icon_WithFrontmatter_ReturnsCustomIcon()
     {
         var markdown = CreateMarkdownFile("test.md");
+        var content = """
+            ---
+            title: Test
+            icon: mdi-custom
+            ---
+            # Content
+            """;
 
-        markdown.SetTitle("New Title");
+        markdown.SetContent(content);
 
-        Assert.Equal("New Title", markdown.Title);
+        Assert.Equal("mdi-custom", markdown.Icon);
     }
 
     [Fact]
-    public void Icon_ReturnsMarkdownIcon()
+    public void MarkdownFile_Icon_WithoutFrontmatter_ReturnsDefaultIcon()
     {
         var markdown = CreateMarkdownFile("test.md");
 
         Assert.NotNull(markdown.Icon);
-        Assert.Contains("svg", markdown.Icon);
+        Assert.Contains("path", markdown.Icon); // MudBlazor icons contain SVG path data
+    }
+
+    [Fact]
+    public void MarkdownFile_SetContent_ClearsCachedFrontmatter()
+    {
+        var markdown = CreateMarkdownFile("test.md");
+
+        var content1 = """
+            ---
+            title: First Title
+            ---
+            # Content
+            """;
+        markdown.SetContent(content1);
+        Assert.Equal("First Title", markdown.Title);
+
+        var content2 = """
+            ---
+            title: Second Title
+            ---
+            # Content
+            """;
+        markdown.SetContent(content2);
+        Assert.Equal("Second Title", markdown.Title);
     }
 }

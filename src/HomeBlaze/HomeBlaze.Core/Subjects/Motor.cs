@@ -10,7 +10,7 @@ namespace HomeBlaze.Core.Subjects;
 /// Sample motor subject with configuration and simulated sensor values.
 /// </summary>
 [InterceptorSubject]
-public partial class Motor : BackgroundService, IConfigurableSubject, IDisplaySubject
+public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProvider, IIconProvider
 {
     // Configuration (persisted to JSON)
 

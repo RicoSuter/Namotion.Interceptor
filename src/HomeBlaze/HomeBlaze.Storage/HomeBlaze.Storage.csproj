@@ -9,6 +9,7 @@
     <ItemGroup>
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
         <PackageReference Include="MudBlazor" Version="8.*" />
+        <PackageReference Include="YamlDotNet" Version="16.*" />
     </ItemGroup>
 
     <ItemGroup>
