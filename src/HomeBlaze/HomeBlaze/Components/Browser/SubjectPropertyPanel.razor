@@ -1,19 +1,14 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Components.Dialogs
-@using HomeBlaze.Core
 @using HomeBlaze.Core.Components
 @using HomeBlaze.Core.Services
 @using HomeBlaze.Core.UI
-@using Namotion.Interceptor
 @using Namotion.Interceptor.Blazor
 @using Namotion.Interceptor.Registry.Abstractions
 
-@implements IDisposable
-
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
-@inject RootManager RootManager
 @inject DeveloperModeService DeveloperMode
 
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
@@ -81,6 +76,7 @@
                     @{
                         var child = children[0];
                         var isSelected = child.Subject == SelectedChild;
+                        var childCount = GetChildCount(child);
                     }
                     <MudListItem Value="@child.Subject"
                                  OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
@@ -93,9 +89,9 @@
                             </div>
                         }
                         <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
-                        @if (HasChildren(child))
+                        @if (childCount > 0)
                         {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Dark">@GetChildCount(child)</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Dark">@childCount</MudChip>
                         }
                     </MudListItem>
                     <MudDivider />
@@ -113,6 +109,8 @@
                             @foreach (var child in children)
                             {
                                 var isSelected = child.Subject == SelectedChild;
+                                var childCount = GetChildCount(child);
+                                
                                 <MudListItem Value="@child.Subject"
                                              OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
                                              Icon="@GetSubjectIcon(child.Subject)"
@@ -124,9 +122,9 @@
                                         </div>
                                     }
                                     <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
-                                    @if (HasChildren(child))
+                                    @if (childCount > 0)
                                     {
-                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark">@GetChildCount(child)</MudChip>
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark">@childCount</MudChip>
                                     }
                                 </MudListItem>
                                 <MudDivider />
@@ -187,23 +185,12 @@
     [Parameter]
     public EventCallback OnDelete { get; set; }
     
-    protected override void OnInitialized()
-    {
-        base.OnInitialized();
-        DeveloperMode.OnChange += OnDeveloperModeChanged;
-    }
-
     protected override void OnParametersSet()
     {
         base.OnParametersSet();
         _registeredSubject = Subject != null && SubjectRegistry != null
             ? SubjectRegistry.TryGetRegisteredSubject(Subject)
             : null;
-    }
-
-    private void OnDeveloperModeChanged()
-    {
-        InvokeAsync(StateHasChanged);
     }
 
     private string GetSubjectTitle()
@@ -310,14 +297,6 @@
         return subject?.ToString() ?? "n/a";
     }
 
-    private bool HasChildren(SubjectPropertyChild child)
-    {
-        var subject = child.Subject;
-        var registered = SubjectRegistry?.TryGetRegisteredSubject(subject);
-        return registered != null && 
-               registered.Properties.Any(p => !p.IsAttribute && HasChildSubjects(p));
-    }
-
     private int GetChildCount(SubjectPropertyChild child)
     {
         var subject = child.Subject;
@@ -368,10 +347,5 @@
 
         var title = GetSubjectTitle();
         await DialogService.ShowAsync<SubjectEditDialog>($"Edit {title}", parameters, options);
-    }
-
-    public void Dispose()
-    {
-        DeveloperMode.OnChange -= OnDeveloperModeChanged;
     }
 }
