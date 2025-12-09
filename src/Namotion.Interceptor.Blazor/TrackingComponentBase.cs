@@ -1,193 +1,110 @@
-﻿using System.Collections.Concurrent;
-using System.Reflection;
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.Components.Rendering;
-using Microsoft.AspNetCore.Components.RenderTree;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Recorder;
 
-// ReSharper disable StaticMemberInGenericType
-
 namespace Namotion.Interceptor.Blazor;
 
-public class TrackingComponentBase<TSubject> : ComponentBase, IDisposable
-    where TSubject : IInterceptorSubject
+/// <summary>
+/// A component base that automatically tracks property reads during rendering
+/// and only re-renders when tracked properties change.
+/// </summary>
+/// <remarks>
+/// Requires ReadPropertyRecorder to be registered in the context at startup
+/// via WithReadPropertyRecorder().
+/// </remarks>
+public abstract class TrackingComponentBase : ComponentBase, IDisposable
 {
     private IDisposable? _subscription;
+    private ReadPropertyRecorderScope? _currentScope;
 
     private ConcurrentDictionary<PropertyReference, bool> _collectingProperties = [];
     private ConcurrentDictionary<PropertyReference, bool> _properties = [];
 
-    // Cache
-    private static readonly BindingFlags NonPublicInstance = BindingFlags.NonPublic | BindingFlags.Instance;
+    /// <summary>
+    /// The context to track for property changes.
+    /// Implement this property to provide the context from your specific source.
+    /// </summary>
+    protected abstract IInterceptorSubjectContext? TrackingContext { get; }
 
-    private static readonly FieldInfo? ComponentBaseRenderFragmentField;
-    private static readonly FieldInfo? BuilderEntriesField;
-    private static readonly FieldInfo? EntriesItemsField;
-    private static readonly FieldInfo? EntriesCountField;
-    private static readonly FieldInfo? FrameComponentKeyField;
-    private static readonly FieldInfo? FrameElementKeyField;
-    private static readonly FieldInfo? FrameAttributeValueField;
+    /// <summary>
+    /// Gets the properties that were accessed during the last render.
+    /// Useful for debugging tracking behavior.
+    /// </summary>
+    protected IEnumerable<string> TrackedPropertyNames =>
+        _properties.Keys.Select(p => $"{p.Subject.GetType().Name}.{p.Name}");
 
-    private static readonly MethodInfo? WrapGenericDef;
-    private static readonly ConcurrentDictionary<Type, MethodInfo> WrapGenericCache = new();
-
-    [Inject]
-    public TSubject? Subject { get; set; }
+    /// <summary>
+    /// Gets the dictionary used for collecting property reads during the current render cycle.
+    /// Use this with RegisteredSubjectProperty.GetValueAndRecord() for explicit property tracking
+    /// in RenderFragment callbacks where ambient context doesn't flow.
+    /// </summary>
+    protected ConcurrentDictionary<PropertyReference, bool> PropertyRecorder => _collectingProperties;
 
     protected override void OnInitialized()
     {
-        _subscription = Subject?
-            .Context
+        _subscription = TrackingContext?
             .GetPropertyChangeObservable()
             .Subscribe(change =>
             {
-                // TODO: Find fix for thsi
-                
-                //if (_properties.TryGetValue(change.Property, out _))
+                if (_properties.TryGetValue(change.Property, out _))
                 {
                     InvokeAsync(StateHasChanged);
                 }
             });
-        
-        // Wrap the root render fragment
-        if (ComponentBaseRenderFragmentField?.GetValue(this) is RenderFragment renderFragment)
+    }
+
+    protected override void OnParametersSet()
+    {
+        StartRecording();
+        base.OnParametersSet();
+    }
+
+    protected override bool ShouldRender()
+    {
+        StartRecording();
+        return base.ShouldRender();
+    }
+
+    private void StartRecording()
+    {
+        if (_currentScope == null && TrackingContext != null)
         {
-            // This render fragment will be called before OnAfterRender
-            ComponentBaseRenderFragmentField.SetValue(this, (RenderFragment)(builder =>
-            {
-                _collectingProperties.Clear();
-
-                using var recorder = ReadPropertyRecorder.Start(_collectingProperties);
-                renderFragment(builder);
-
-                WrapNestedFragmentsInBuilderFrames(builder, recorder);
-            }));
+            _collectingProperties.Clear();
+            _currentScope = ReadPropertyRecorder.Start(TrackingContext, _collectingProperties);
         }
     }
 
     protected override void OnAfterRender(bool firstRender)
     {
-        (_properties, _collectingProperties) = (_collectingProperties, _properties);
+        StopRecording();
+
+        // Only swap if we collected properties during this render.
+        // This prevents losing tracking when a spurious render happens without executing RenderFragments.
+        if (_collectingProperties.Count > 0)
+        {
+            (_properties, _collectingProperties) = (_collectingProperties, _properties);
+            _collectingProperties.Clear();
+        }
+
         base.OnAfterRender(firstRender);
     }
 
-    private static RenderFragment WrapRenderFragment(RenderFragment renderFragment, ReadPropertyRecorderScope? scope)
+    private void StopRecording()
     {
-        scope ??= ReadPropertyRecorder.Scopes.Value!.Single().Key;
-        return builder =>
-        { 
-            using var recorder = ReadPropertyRecorder.Start(scope);
-            renderFragment(builder);
-
-            WrapNestedFragmentsInBuilderFrames(builder, scope);
-        };
-    }
-
-    private static RenderFragment<T> WrapRenderFragment<T>(RenderFragment<T> renderFragment, ReadPropertyRecorderScope? scope)
-    {
-        scope ??= ReadPropertyRecorder.Scopes.Value!.Single().Key;
-        return value => builder =>
+        if (_currentScope != null)
         {
-            using var recorder = ReadPropertyRecorder.Start(scope);
-            var inner = renderFragment(value);
-            inner(builder);
-
-            WrapNestedFragmentsInBuilderFrames(builder, scope);
-        };
-    }
-
-#pragma warning disable BL0006
-
-    private static void WrapNestedFragmentsInBuilderFrames(RenderTreeBuilder builder, ReadPropertyRecorderScope scope)
-    {
-        if (BuilderEntriesField?.GetValue(builder) is {} entries && 
-            EntriesItemsField?.GetValue(entries) is RenderTreeFrame[] frames)
-        {
-            var countObj = EntriesCountField?.GetValue(entries);
-            var count = countObj is int i ? i : frames.Length;
-
-            for (var index = 0; index < count; index++)
-            {
-                var frame = frames[index];
-
-                if (FrameComponentKeyField is not null)
-                {
-                    frame = WrapFieldIfFragment(frame, FrameComponentKeyField, scope);
-                }
-
-                if (FrameElementKeyField is not null)
-                {
-                    frame = WrapFieldIfFragment(frame, FrameElementKeyField, scope);
-                }
-
-                if (FrameAttributeValueField is not null)
-                {
-                    frame = WrapFieldIfFragment(frame, FrameAttributeValueField, scope);
-                }
-
-                frames[index] = frame;
-            }
+            _currentScope.Dispose();
+            _currentScope = null;
         }
     }
-
-    private static RenderTreeFrame WrapFieldIfFragment(RenderTreeFrame frame, FieldInfo field, ReadPropertyRecorderScope scope)
-    {
-        var value = field.GetValue(frame);
-        if (value is RenderFragment rf)
-        {
-            var tr = __makeref(frame);
-            field.SetValueDirect(tr, WrapRenderFragment(rf, scope));
-            return frame;
-        }
-        
-        if (value is Delegate del)
-        {
-            var delType = del.GetType();
-            if (delType.IsGenericType && delType.GetGenericTypeDefinition() == typeof(RenderFragment<>))
-            {
-                var tArg = delType.GetGenericArguments()[0];
-                var closed = WrapGenericCache.GetOrAdd(tArg, static (t, def) => def.MakeGenericMethod(t), WrapGenericDef!);
-                var wrapped = closed.Invoke(null, new object[] { del, scope });
-                var tr = __makeref(frame);
-                field.SetValueDirect(tr, wrapped!);
-                return frame;
-            }
-        }
-
-        return frame;
-    }
-
-#pragma warning restore BL0006
 
     public virtual void Dispose()
     {
+        StopRecording();
         _subscription?.Dispose();
-    }
-
-    static TrackingComponentBase()
-    {
-        // Cache ComponentBase internals
-        ComponentBaseRenderFragmentField = typeof(ComponentBase).GetField("_renderFragment", NonPublicInstance);
-
-        // Cache RenderTreeBuilder internals
-        var builderType = typeof(RenderTreeBuilder);
-        BuilderEntriesField = builderType.GetField("_entries", NonPublicInstance);
-        var entriesType = BuilderEntriesField?.FieldType;
-        if (entriesType is not null)
-        {
-            EntriesItemsField = entriesType.GetField("_items", NonPublicInstance);
-            EntriesCountField = entriesType.GetField("_count", NonPublicInstance);
-        }
-
-        // Cache RenderTreeFrame fields that can hold fragments
-        var frameType = typeof(RenderTreeFrame);
-        FrameComponentKeyField = frameType.GetField("ComponentKeyField", NonPublicInstance);
-        FrameElementKeyField = frameType.GetField("ElementKeyField", NonPublicInstance);
-        FrameAttributeValueField = frameType.GetField("AttributeValueField", NonPublicInstance);
-
-        WrapGenericDef = typeof(TrackingComponentBase<TSubject>)
-            .GetMethods(BindingFlags.NonPublic | BindingFlags.Static)
-            .FirstOrDefault(m => m.Name == nameof(WrapRenderFragment) && m.IsGenericMethodDefinition && m.GetParameters().Length == 2);
+        _subscription = null;
+        _properties.Clear();
+        _collectingProperties.Clear();
     }
 }

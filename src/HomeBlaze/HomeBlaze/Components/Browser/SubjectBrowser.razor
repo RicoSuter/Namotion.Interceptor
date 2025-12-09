@@ -20,10 +20,10 @@
         var isFirst = i == 0;
         var selectedChild = i < _panes.Count - 1 ? _panes[i + 1].Subject : null;
 
-        <MudPaper Width="@((PaneWidth - 16) + "px")"
+        <MudPaper @key="pane.Subject" Width="@((PaneWidth - 16) + "px")"
                   Class="mr-4"
                   Style="@($"min-width: {PaneWidth - 16}px; flex-shrink: 0; height: 100%; display: flex; flex-direction: column;")">
-            <SubjectPropertyPanel
+            <SubjectPropertyPanel @key="pane.Subject"
                 Subject="@pane.Subject"
                 SubjectRegistry="@_subjectRegistry"
                 ObjectPath="@pane.ObjectPath"

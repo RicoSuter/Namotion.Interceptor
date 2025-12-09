@@ -7,9 +7,9 @@ namespace HomeBlaze.Components;
 
 /// <summary>
 /// Base class for HomeBlaze Blazor components that automatically
-/// subscribes to property changes on the root subject.
+/// tracks property reads and only re-renders when those properties change.
 /// </summary>
-public abstract class HomeBlazorComponentBase : ContextTrackingComponentBase
+public abstract class HomeBlazorComponentBase : TrackingComponentBase
 {
     [Inject]
     protected RootManager RootManager { get; set; } = null!;

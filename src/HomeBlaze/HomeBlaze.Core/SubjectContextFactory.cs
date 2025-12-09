@@ -23,6 +23,7 @@ public static class SubjectContextFactory
         return InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
+            .WithReadPropertyRecorder()
             .WithRegistry()
             .WithParents()
             .WithLifecycle()

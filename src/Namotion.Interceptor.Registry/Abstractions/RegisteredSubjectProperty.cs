@@ -154,6 +154,19 @@ public class RegisteredSubjectProperty
     }
 
     /// <summary>
+    /// Gets the current value of the property and records the read to the provided dictionary.
+    /// Use this method in Blazor components where ambient context (AsyncLocal/ThreadLocal)
+    /// doesn't flow through RenderFragment execution.
+    /// </summary>
+    /// <param name="recorder">The dictionary to record property reads to. Can be null to skip recording.</param>
+    /// <returns>The value.</returns>
+    public object? GetValueAndRecord(ConcurrentDictionary<PropertyReference, bool>? recorder)
+    {
+        recorder?.TryAdd(Reference, false);
+        return Reference.Metadata.GetValue?.Invoke(Subject);
+    }
+
+    /// <summary>
     /// Sets the value of the property.
     /// </summary>
     /// <param name="value">The value.</param>
