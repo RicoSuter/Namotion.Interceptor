@@ -16,6 +16,43 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
         CancellationToken cancellationToken)
     {
         // 1. Group changes by source
+        var (changesBySource, changesWithoutSource) = GroupChangesBySource(changes);
+
+        // 2. Validate SingleWrite requirement
+        if (requirement == TransactionRequirement.SingleWrite)
+        {
+            var validationError = ValidateSingleWriteRequirement(changesBySource, changesWithoutSource);
+            if (validationError != null)
+            {
+                return new TransactionWriteResult(changesWithoutSource, [validationError]);
+            }
+        }
+
+        // 3. Write to each source
+        var (successfulChanges, successfulSourceWrites, failedChanges) =
+            await WriteToSourcesAsync(changesBySource, changesWithoutSource, cancellationToken);
+
+        // 4. Handle rollback mode - attempt to revert successful writes on failure
+        if (mode == TransactionMode.Rollback && failedChanges.Count > 0 && successfulSourceWrites.Count > 0)
+        {
+            var revertFailures = await TryRevertSuccessfulWritesAsync(successfulSourceWrites, cancellationToken);
+            failedChanges.AddRange(revertFailures);
+
+            // In rollback mode with failures, report no successful changes
+            // (either they failed originally or were reverted)
+            return new TransactionWriteResult(changesWithoutSource, failedChanges);
+        }
+
+        return new TransactionWriteResult(successfulChanges, failedChanges);
+    }
+
+    /// <summary>
+    /// Groups changes by their associated source.
+    /// </summary>
+    private static (Dictionary<ISubjectSource, List<SubjectPropertyChange>> BySource,
+                    List<SubjectPropertyChange> WithoutSource)
+        GroupChangesBySource(IReadOnlyList<SubjectPropertyChange> changes)
+    {
         var changesBySource = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>();
         var changesWithoutSource = new List<SubjectPropertyChange>();
 
@@ -36,17 +73,20 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
             }
         }
 
-        // 2. Validate SingleWrite requirement
-        if (requirement == TransactionRequirement.SingleWrite)
-        {
-            var validationError = ValidateSingleWriteRequirement(changesBySource, changesWithoutSource);
-            if (validationError != null)
-            {
-                return new TransactionWriteResult(changesWithoutSource, [validationError]);
-            }
-        }
+        return (changesBySource, changesWithoutSource);
+    }
 
-        // 3. Write to each source, tracking successful writes for potential rollback
+    /// <summary>
+    /// Writes changes to all sources and collects results.
+    /// </summary>
+    private static async Task<(List<SubjectPropertyChange> SuccessfulChanges,
+                               List<(ISubjectSource Source, List<SubjectPropertyChange> Changes)> SuccessfulSourceWrites,
+                               List<SourceWriteFailure> FailedChanges)>
+        WriteToSourcesAsync(
+            Dictionary<ISubjectSource, List<SubjectPropertyChange>> changesBySource,
+            List<SubjectPropertyChange> changesWithoutSource,
+            CancellationToken cancellationToken)
+    {
         var successfulChanges = new List<SubjectPropertyChange>(changesWithoutSource);
         var successfulSourceWrites = new List<(ISubjectSource Source, List<SubjectPropertyChange> Changes)>();
         var failedChanges = new List<SourceWriteFailure>();
@@ -56,54 +96,60 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
             var memory = new ReadOnlyMemory<SubjectPropertyChange>(sourceChanges.ToArray());
             var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
 
-            if (result.Error is not null)
-            {
-                // Add SourceWriteFailure for each failed change
-                // If FailedChanges is empty, all changes in this source failed
-                var failedList = result.FailedChanges.Length > 0
-                    ? result.FailedChanges.ToArray()
-                    : sourceChanges.ToArray();
-
-                foreach (var failedChange in failedList)
-                {
-                    failedChanges.Add(new SourceWriteFailure(
-                        failedChange,
-                        source,
-                        new SourceWriteException(source, [failedChange], result.Error)));
-                }
-
-                // Track successful changes (those not in failed list)
-                var failedSet = new HashSet<SubjectPropertyChange>(failedList);
-                var writtenList = sourceChanges.Where(c => !failedSet.Contains(c)).ToList();
-                if (writtenList.Count > 0)
-                {
-                    successfulChanges.AddRange(writtenList);
-                    successfulSourceWrites.Add((source, writtenList));
-                }
-            }
-            else
-            {
-                // All succeeded
-                successfulChanges.AddRange(sourceChanges);
-                successfulSourceWrites.Add((source, sourceChanges));
-            }
-        }
-
-        // 4. Handle rollback mode - attempt to revert successful writes on failure
-        if (mode == TransactionMode.Rollback && failedChanges.Count > 0 && successfulSourceWrites.Count > 0)
-        {
-            var revertFailures = await TryRevertSuccessfulWritesAsync(
+            ProcessSourceWriteResult(
+                source,
+                sourceChanges,
+                result,
+                successfulChanges,
                 successfulSourceWrites,
-                cancellationToken);
-
-            failedChanges.AddRange(revertFailures);
-
-            // In rollback mode with failures, report no successful changes
-            // (either they failed originally or were reverted)
-            return new TransactionWriteResult(changesWithoutSource, failedChanges);
+                failedChanges);
         }
 
-        return new TransactionWriteResult(successfulChanges, failedChanges);
+        return (successfulChanges, successfulSourceWrites, failedChanges);
+    }
+
+    /// <summary>
+    /// Processes the result of writing to a single source.
+    /// </summary>
+    private static void ProcessSourceWriteResult(
+        ISubjectSource source,
+        List<SubjectPropertyChange> sourceChanges,
+        WriteResult result,
+        List<SubjectPropertyChange> successfulChanges,
+        List<(ISubjectSource Source, List<SubjectPropertyChange> Changes)> successfulSourceWrites,
+        List<SourceWriteFailure> failedChanges)
+    {
+        if (result.Error is not null)
+        {
+            // Determine which changes failed
+            var failedList = result.FailedChanges.Length > 0
+                ? result.FailedChanges.ToArray()
+                : sourceChanges.ToArray();
+
+            // Add SourceWriteFailure for each failed change
+            foreach (var failedChange in failedList)
+            {
+                failedChanges.Add(new SourceWriteFailure(
+                    failedChange,
+                    source,
+                    new SourceWriteException(source, [failedChange], result.Error)));
+            }
+
+            // Track successful changes (those not in failed list)
+            var failedSet = new HashSet<SubjectPropertyChange>(failedList);
+            var writtenList = sourceChanges.Where(c => !failedSet.Contains(c)).ToList();
+            if (writtenList.Count > 0)
+            {
+                successfulChanges.AddRange(writtenList);
+                successfulSourceWrites.Add((source, writtenList));
+            }
+        }
+        else
+        {
+            // All succeeded
+            successfulChanges.AddRange(sourceChanges);
+            successfulSourceWrites.Add((source, sourceChanges));
+        }
     }
 
     /// <summary>
@@ -165,23 +211,25 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
 
         if (changesBySource.Count > 1)
         {
-            var error = new InvalidOperationException(
+            var exception = new InvalidOperationException(
                 $"SingleWrite requirement violated: Transaction contains changes for {changesBySource.Count} sources, but only 1 is allowed.");
+         
             var firstChange = changesBySource.First().Value.First();
             var firstSource = changesBySource.First().Key;
-            return new SourceWriteFailure(firstChange, firstSource, error);
+           
+            return new SourceWriteFailure(firstChange, firstSource, exception);
         }
 
         // Single source - check batch size
         var (source, sourceChanges) = changesBySource.Single();
         var batchSize = source.WriteBatchSize;
-
         if (batchSize > 0 && sourceChanges.Count > batchSize)
         {
-            var error = new InvalidOperationException(
+            var exception = new InvalidOperationException(
                 $"SingleWrite requirement violated: Transaction contains {sourceChanges.Count} changes for source '{source.GetType().Name}', " +
                 $"but WriteBatchSize is {batchSize}. Reduce the number of changes or use a different transaction requirement.");
-            return new SourceWriteFailure(sourceChanges.First(), source, error);
+
+            return new SourceWriteFailure(sourceChanges.First(), source, exception);
         }
 
         return null;

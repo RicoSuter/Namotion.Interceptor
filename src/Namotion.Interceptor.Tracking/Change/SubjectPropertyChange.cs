@@ -3,7 +3,7 @@ using Namotion.Interceptor.Tracking.Change.Performance;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-public readonly struct SubjectPropertyChange
+public readonly record struct SubjectPropertyChange
 {
     // Discriminated union: either inline storage OR boxed holder (per value)
     private readonly InlineValueStorage _oldValueStorage;
