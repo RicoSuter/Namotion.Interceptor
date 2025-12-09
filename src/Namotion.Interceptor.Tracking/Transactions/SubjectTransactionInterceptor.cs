@@ -4,9 +4,6 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
 
-// Import for GetLastChangedTimestamp extension method
-using static Namotion.Interceptor.Tracking.Change.PropertyTimestampExtensions;
-
 /// <summary>
 /// Interceptor that captures property changes during transactions.
 /// Should be registered before PropertyChangeObservable/Queue to suppress notifications during capture.
@@ -20,22 +17,10 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         var transaction = SubjectTransaction.Current;
 
         // Return pending value if transaction active and not committing
-        if (transaction is { IsCommitting: false })
+        if (transaction is { IsCommitting: false } &&
+            transaction.PendingChanges.TryGetValue(context.Property, out var change))
         {
-            // Check for conflicts if FailOnConflict behavior is enabled
-            if (transaction.ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
-            {
-                var lastChangedTimestamp = context.Property.GetLastChangedTimestamp();
-                if (lastChangedTimestamp.HasValue && lastChangedTimestamp.Value > transaction.StartTimestamp)
-                {
-                    throw new TransactionConflictException([context.Property]);
-                }
-            }
-
-            if (transaction.PendingChanges.TryGetValue(context.Property, out var change))
-            {
-                return change.GetNewValue<TProperty>();
-            }
+            return change.GetNewValue<TProperty>();
         }
 
         return next(ref context);
@@ -51,14 +36,11 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         if (transaction is { IsCommitting: false } &&
             !context.Property.Metadata.IsDerived)
         {
-            // Validate context matches (only for context-bound transactions)
-            // Check if the subject's context can access the same TransactionLock
-            // This handles the case where subject.Context is an InterceptorExecutor
-            // with the transaction's context as a fallback
-            if (transaction.Context != null)
+            // Validate context binding (only when transaction is bound to a context)
+            if (transaction.Context is { } transactionContext)
             {
                 var subjectContext = context.Property.Subject.Context;
-                var transactionLock = transaction.Context.TryGetService<TransactionLock>();
+                var transactionLock = transactionContext.TryGetService<TransactionLock>();
                 var subjectLock = subjectContext.TryGetService<TransactionLock>();
 
                 if (transactionLock != subjectLock)
@@ -68,19 +50,9 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
                 }
             }
 
-            // Check for conflicts if FailOnConflict behavior is enabled
-            if (transaction.ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
-            {
-                var lastChangedTimestamp = context.Property.GetLastChangedTimestamp();
-                if (lastChangedTimestamp.HasValue && lastChangedTimestamp.Value > transaction.StartTimestamp)
-                {
-                    throw new TransactionConflictException([context.Property]);
-                }
-            }
-
             var currentContext = SubjectChangeContext.Current;
 
-            // Preserve original old value for first write
+            // Preserve original old value for first write (used for conflict detection at commit)
             if (!transaction.PendingChanges.TryGetValue(context.Property, out var existingChange))
             {
                 var change = SubjectPropertyChange.Create(

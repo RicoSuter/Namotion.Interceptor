@@ -38,7 +38,6 @@ public static class SubjectSourceExtensions
             var batch = changes.Slice(i, currentBatchSize);
 
             var batchResult = await source.WriteChangesAsync(batch, cancellationToken).ConfigureAwait(false);
-
             if (batchResult.Error is not null)
             {
                 // This batch failed - return remaining changes as failed

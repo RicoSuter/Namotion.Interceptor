@@ -257,88 +257,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task WriteProperty_WithFailOnConflict_ThrowsWhenPropertyChangedAfterTransactionStart()
-    {
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithFullPropertyTracking();
-
-        var person = new Person(context);
-
-        // Start transaction first
-        await using var tx = await context.BeginTransactionAsync(
-            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
-
-        // Simulate an external change happening AFTER the transaction started
-        // This is what happens when another source (e.g., OPC UA, MQTT) updates the property
-        // while a transaction is in progress
-        var firstNameRef = person.GetPropertyReference(nameof(Person.FirstName));
-        var externalChangeTimestamp = DateTimeOffset.UtcNow.AddMilliseconds(100);
-        firstNameRef.SetPropertyData("LastChangedTimestamp", externalChangeTimestamp);
-
-        // Verify the external timestamp is after the transaction start
-        var timestamp = firstNameRef.GetLastChangedTimestamp();
-        Assert.NotNull(timestamp);
-        Assert.True(timestamp.Value > tx.StartTimestamp, "External change timestamp should be after transaction start");
-
-        // This should throw because LastChangedTimestamp > StartTimestamp
-        var ex = Assert.Throws<TransactionConflictException>(() => person.FirstName = "Conflict");
-        Assert.Contains(nameof(Person.FirstName), ex.Message);
-        Assert.Single(ex.ConflictingProperties);
-    }
-
-    [Fact]
-    public async Task WriteProperty_WithIgnoreConflict_DoesNotThrowWhenPropertyChanged()
-    {
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithFullPropertyTracking();
-
-        var person = new Person(context);
-
-        // Start transaction with Ignore behavior
-        await using var tx = await context.BeginTransactionAsync(
-            conflictBehavior: TransactionConflictBehavior.Ignore);
-
-        // Simulate an external change happening AFTER the transaction started
-        var firstNameRef = person.GetPropertyReference(nameof(Person.FirstName));
-        var externalChangeTimestamp = DateTimeOffset.UtcNow.AddMilliseconds(100);
-        firstNameRef.SetPropertyData("LastChangedTimestamp", externalChangeTimestamp);
-
-        // This should NOT throw even though LastChangedTimestamp > StartTimestamp
-        // because ConflictBehavior is Ignore
-        person.FirstName = "NewValue";
-
-        var changes = tx.GetPendingChanges();
-        Assert.Single(changes);
-    }
-
-    [Fact]
-    public async Task WriteProperty_WithFailOnConflict_AllowsWriteWhenNoConflict()
-    {
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithFullPropertyTracking();
-
-        var person = new Person(context);
-
-        // Start transaction BEFORE any writes (no LastChangedTimestamp yet)
-        await using var tx = await context.BeginTransactionAsync(
-            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
-
-        // This should succeed - property has no LastChangedTimestamp
-        person.FirstName = "NewValue";
-
-        var changes = tx.GetPendingChanges();
-        Assert.Single(changes);
-        Assert.Equal("NewValue", changes[0].GetNewValue<string>());
-    }
-
-    [Fact]
-    public async Task ReadProperty_WithFailOnConflict_ThrowsWhenPropertyChangedAfterTransactionStart()
+    public async Task CommitAsync_WithFailOnConflict_ThrowsWhenValueChangedExternally()
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -347,110 +266,41 @@ public class SubjectTransactionAsyncTests
 
         var person = new Person(context);
         person.FirstName = "Original";
-
-        // Start transaction first
-        await using var tx = await context.BeginTransactionAsync(
-            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
-
-        // Simulate an external change happening AFTER the transaction started
-        var firstNameRef = person.GetPropertyReference(nameof(Person.FirstName));
-        var externalChangeTimestamp = DateTimeOffset.UtcNow.AddMilliseconds(100);
-        firstNameRef.SetPropertyData("LastChangedTimestamp", externalChangeTimestamp);
-
-        // This should throw because LastChangedTimestamp > StartTimestamp
-        var ex = Assert.Throws<TransactionConflictException>(() => _ = person.FirstName);
-        Assert.Contains(nameof(Person.FirstName), ex.Message);
-        Assert.Single(ex.ConflictingProperties);
-    }
-
-    [Fact]
-    public async Task ReadProperty_WithIgnoreConflict_DoesNotThrowWhenPropertyChanged()
-    {
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithFullPropertyTracking();
-
-        var person = new Person(context);
-        person.FirstName = "Original";
-
-        // Start transaction with Ignore behavior
-        await using var tx = await context.BeginTransactionAsync(
-            conflictBehavior: TransactionConflictBehavior.Ignore);
-
-        // Simulate an external change happening AFTER the transaction started
-        var firstNameRef = person.GetPropertyReference(nameof(Person.FirstName));
-        var externalChangeTimestamp = DateTimeOffset.UtcNow.AddMilliseconds(100);
-        firstNameRef.SetPropertyData("LastChangedTimestamp", externalChangeTimestamp);
-
-        // This should NOT throw because ConflictBehavior is Ignore
-        var value = person.FirstName;
-        Assert.Equal("Original", value);
-    }
-
-    [Fact]
-    public async Task ReadProperty_WithFailOnConflict_AllowsReadWhenNoConflict()
-    {
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithFullPropertyTracking();
-
-        var person = new Person(context);
-        person.FirstName = "Original";
-
-        // Small delay to ensure transaction starts after the property was set
-        await Task.Delay(10);
-
-        // Start transaction - timestamp is before transaction start, so no conflict
-        await using var tx = await context.BeginTransactionAsync(
-            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
-
-        // Verify timestamp is before transaction start (no external change simulation)
-        var firstNameRef = person.GetPropertyReference(nameof(Person.FirstName));
-        var timestamp = firstNameRef.GetLastChangedTimestamp();
-        Assert.NotNull(timestamp);
-        Assert.True(timestamp.Value < tx.StartTimestamp, "Timestamp should be before transaction start");
-
-        // This should succeed - no conflict detected
-        var value = person.FirstName;
-        Assert.Equal("Original", value);
-    }
-
-    [Fact]
-    public async Task CommitAsync_WithFailOnConflict_ThrowsWhenPropertyChangedDuringTransaction()
-    {
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithFullPropertyTracking();
-
-        var person = new Person(context);
 
         // Start transaction with FailOnConflict
         await using var tx = await context.BeginTransactionAsync(
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
 
-        // Make a change within the transaction (no conflict yet - property has no timestamp)
+        // Make a change within the transaction - captures OldValue = "Original"
         person.FirstName = "TransactionValue";
 
         // Verify change was captured
         var changes = tx.GetPendingChanges();
         Assert.Single(changes);
+        Assert.Equal("Original", changes[0].GetOldValue<string>());
 
-        // Simulate an external change happening AFTER the write but BEFORE commit
-        var firstNameRef = person.GetPropertyReference(nameof(Person.FirstName));
-        var externalChangeTimestamp = DateTimeOffset.UtcNow.AddMilliseconds(100);
-        firstNameRef.SetPropertyData("LastChangedTimestamp", externalChangeTimestamp);
+        // Simulate an external change by running outside the transaction's AsyncLocal context
+        // This mimics another thread/process modifying the underlying value
+        Task externalTask;
+        var asyncFlowControl = ExecutionContext.SuppressFlow();
+        try
+        {
+            externalTask = Task.Run(() => person.FirstName = "ExternalChange");
+        }
+        finally
+        {
+            asyncFlowControl.Undo();
+        }
+        await externalTask;
 
-        // CommitAsync should throw because the property was modified externally
+        // CommitAsync should throw because current value != captured OldValue
         var ex = await Assert.ThrowsAsync<TransactionConflictException>(() => tx.CommitAsync());
         Assert.Contains(nameof(Person.FirstName), ex.Message);
         Assert.Single(ex.ConflictingProperties);
     }
 
     [Fact]
-    public async Task CommitAsync_WithIgnoreConflict_DoesNotThrowWhenPropertyChanged()
+    public async Task CommitAsync_WithIgnoreConflict_DoesNotThrowWhenValueChangedExternally()
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -458,6 +308,7 @@ public class SubjectTransactionAsyncTests
             .WithFullPropertyTracking();
 
         var person = new Person(context);
+        person.FirstName = "Original";
 
         // Start transaction with Ignore behavior
         await using var tx = await context.BeginTransactionAsync(
@@ -466,15 +317,23 @@ public class SubjectTransactionAsyncTests
         // Make a change within the transaction
         person.FirstName = "TransactionValue";
 
-        // Simulate an external change happening AFTER the write but BEFORE commit
-        var firstNameRef = person.GetPropertyReference(nameof(Person.FirstName));
-        var externalChangeTimestamp = DateTimeOffset.UtcNow.AddMilliseconds(100);
-        firstNameRef.SetPropertyData("LastChangedTimestamp", externalChangeTimestamp);
+        // Simulate an external change by running outside the transaction's AsyncLocal context
+        Task externalTask;
+        var asyncFlowControl = ExecutionContext.SuppressFlow();
+        try
+        {
+            externalTask = Task.Run(() => person.FirstName = "ExternalChange");
+        }
+        finally
+        {
+            asyncFlowControl.Undo();
+        }
+        await externalTask;
 
         // CommitAsync should NOT throw because ConflictBehavior is Ignore
         await tx.CommitAsync();
 
-        // Verify the value was applied
+        // Verify the transaction value was applied (overwrites external change)
         Assert.Equal("TransactionValue", person.FirstName);
     }
 
@@ -487,18 +346,70 @@ public class SubjectTransactionAsyncTests
             .WithFullPropertyTracking();
 
         var person = new Person(context);
+        person.FirstName = "Original";
 
         // Start transaction with FailOnConflict
         await using var tx = await context.BeginTransactionAsync(
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
 
-        // Make a change within the transaction (no conflict - property has no timestamp)
+        // Make a change within the transaction
         person.FirstName = "TransactionValue";
 
-        // CommitAsync should succeed - no external changes
+        // CommitAsync should succeed - no external changes to underlying value
         await tx.CommitAsync();
 
         // Verify the value was applied
         Assert.Equal("TransactionValue", person.FirstName);
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithFailOnConflict_SucceedsWhenStartingFromNull()
+    {
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        // FirstName starts as null
+
+        // Start transaction with FailOnConflict
+        await using var tx = await context.BeginTransactionAsync(
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+
+        // Make a change within the transaction - captures OldValue = null
+        person.FirstName = "NewValue";
+
+        // CommitAsync should succeed - underlying value is still null
+        await tx.CommitAsync();
+
+        // Verify the value was applied
+        Assert.Equal("NewValue", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WriteProperty_CapturesOriginalOldValue_ForConflictDetection()
+    {
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        person.FirstName = "Original";
+
+        await using var tx = await context.BeginTransactionAsync(
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+
+        // First write captures OldValue = "Original"
+        person.FirstName = "First";
+
+        // Second write should preserve OldValue = "Original" (not "First")
+        person.FirstName = "Second";
+
+        var changes = tx.GetPendingChanges();
+        Assert.Single(changes);
+        Assert.Equal("Original", changes[0].GetOldValue<string>());
+        Assert.Equal("Second", changes[0].GetNewValue<string>());
     }
 }
