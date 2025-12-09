@@ -1,5 +1,9 @@
 ﻿@inherits LayoutComponentBase
 
+@inject HomeBlaze.Core.Services.DeveloperModeService DeveloperMode
+
+@implements IDisposable
+
 <MudThemeProvider Theme="@_theme" IsDarkMode="_isDarkMode"/>
 <MudPopoverProvider/>
 <MudDialogProvider/>
@@ -10,6 +14,10 @@
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@((e) => DrawerToggle())"/>
         <MudText Typo="Typo.h5" Class="ml-3">HomeBlaze</MudText>
         <MudSpacer/>
+        <MudIconButton Icon="@(DeveloperModeIcon)"
+                       Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
+                       OnClick="@DeveloperMode.Toggle"
+                       title="Toggle Developer Mode"/>
         <MudIconButton Icon="@(DarkLightModeButtonIcon)" Color="Color.Inherit" OnClick="@DarkModeToggle"/>
         <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" Edge="Edge.End"/>
     </MudAppBar>
@@ -35,6 +43,7 @@
     protected override void OnInitialized()
     {
         base.OnInitialized();
+        DeveloperMode.OnChange += StateHasChanged;
 
         _theme = new()
         {
@@ -62,4 +71,13 @@
         true => Icons.Material.Rounded.AutoMode,
         false => Icons.Material.Outlined.DarkMode,
     };
+
+    public string DeveloperModeIcon => DeveloperMode.IsEnabled
+        ? Icons.Material.Filled.DeveloperMode
+        : Icons.Material.Outlined.DeveloperMode;
+
+    public void Dispose()
+    {
+        DeveloperMode.OnChange -= StateHasChanged;
+    }
 }

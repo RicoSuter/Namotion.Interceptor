@@ -6,6 +6,7 @@
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
 
+@implements IDisposable
 @implements IAsyncDisposable
 
 <MudStack Row="true" Class="browser-toolbar mb-2">
@@ -330,10 +331,9 @@
         }
     }
 
-    public override void Dispose()
+    public void Dispose()
     {
         NavigationManager.LocationChanged -= OnLocationChanged;
-        base.Dispose();
     }
 
     public async ValueTask DisposeAsync()

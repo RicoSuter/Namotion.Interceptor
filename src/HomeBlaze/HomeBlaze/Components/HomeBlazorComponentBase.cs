@@ -1,15 +1,14 @@
 using HomeBlaze.Core;
 using Microsoft.AspNetCore.Components;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Blazor;
 
 namespace HomeBlaze.Components;
 
 /// <summary>
-/// Base class for HomeBlaze Blazor components that automatically
-/// tracks property reads and only re-renders when those properties change.
+/// Base class for HomeBlaze Blazor components with access to the root subject and context.
+/// Property tracking is now handled by <see cref="Namotion.Interceptor.Blazor.TrackingScope"/>.
 /// </summary>
-public abstract class HomeBlazorComponentBase : TrackingComponentBase
+public abstract class HomeBlazorComponentBase : ComponentBase
 {
     [Inject]
     protected RootManager RootManager { get; set; } = null!;
@@ -23,9 +22,4 @@ public abstract class HomeBlazorComponentBase : TrackingComponentBase
     /// The root subject's context. Available after OnInitialized.
     /// </summary>
     protected IInterceptorSubjectContext? RootContext => Root?.Context;
-
-    /// <summary>
-    /// The tracking context from the root subject.
-    /// </summary>
-    protected override IInterceptorSubjectContext? TrackingContext => RootContext;
 }

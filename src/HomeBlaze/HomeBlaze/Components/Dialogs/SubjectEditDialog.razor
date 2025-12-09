@@ -3,28 +3,33 @@
 @using HomeBlaze.Abstractions.Components
 @using HomeBlaze.Components.Editors
 @using HomeBlaze.Core.Components
+@using HomeBlaze.Core.Services
+@using Namotion.Interceptor.Blazor
 
 @implements IDisposable
 
 @inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
 @inject ISnackbar Snackbar
+@inject DeveloperModeService DeveloperMode
 
 <MudDialog>
     <DialogContent>
-        @if (Subject != null)
-        {
-            @if (_editComponentType != null)
+        <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
+            @if (Subject != null)
             {
-                <DynamicComponent Type="_editComponentType"
-                                  @ref="_dynamicComponentRef"
-                                  Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })"/>
+                @if (_editComponentType != null)
+                {
+                    <DynamicComponent Type="_editComponentType"
+                                      @ref="_dynamicComponentRef"
+                                      Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })"/>
+                }
+                else
+                {
+                    <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" />
+                }
             }
-            else
-            {
-                <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" />
-            }
-        }
+        </TrackingScope>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
