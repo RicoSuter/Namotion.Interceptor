@@ -63,6 +63,8 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                                         "private",
 
                                     IsPartial = p.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)),
+                                    IsVirtual = p.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword)),
+                                    IsOverride = p.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword)),
                                     IsDerived = HasDerivedAttribute(p, declarationModel, ct),
                                     IsRequired = p.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword)),
                                     HasGetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
@@ -262,12 +264,23 @@ namespace {namespaceName}
                         var fullyQualifiedName = property.Type.Type!.ToString();
                         var propertyName = property.Property.Identifier.Value;
                         var propertyModifier = property.AccessModifier;
+                        
+                        // Build modifier string (virtual/override)
+                        var additionalModifiers = "";
+                        if (property.IsVirtual)
+                        {
+                            additionalModifiers = "virtual ";
+                        }
+                        else if (property.IsOverride)
+                        {
+                            additionalModifiers = "override ";
+                        }
 
                         generatedCode +=
     $@"
         private {fullyQualifiedName} _{propertyName};
 
-        {propertyModifier} {(property.IsRequired ? "required " : "")}partial {fullyQualifiedName} {propertyName}
+        {propertyModifier} {(property.IsRequired ? "required " : "")}{additionalModifiers}partial {fullyQualifiedName} {propertyName}
         {{";
                         if (property.HasGetter)
                         {
