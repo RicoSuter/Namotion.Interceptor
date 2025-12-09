@@ -183,23 +183,38 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
 
         var changes = PendingChanges.Values.ToList();
 
-        // 1. Check for conflicts at commit time if FailOnConflict behavior is enabled
-        if (_conflictBehavior == TransactionConflictBehavior.FailOnConflict)
+        // Mark as committing early so reads pass through to get underlying values
+        _isCommitting = true;
+
+        try
         {
-            var conflictingProperties = new List<PropertyReference>();
-            foreach (var change in changes)
+            // 1. Check for conflicts at commit time if FailOnConflict behavior is enabled
+            //    Value-based conflict detection: compare captured OldValue with current actual value
+            if (_conflictBehavior == TransactionConflictBehavior.FailOnConflict)
             {
-                var lastChangedTimestamp = change.Property.GetLastChangedTimestamp();
-                if (lastChangedTimestamp.HasValue && lastChangedTimestamp.Value > StartTimestamp)
+                var conflictingProperties = new List<PropertyReference>();
+                foreach (var change in changes)
                 {
-                    conflictingProperties.Add(change.Property);
+                    var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
+                    var capturedOldValue = change.GetOldValue<object?>();
+
+                    if (!Equals(currentValue, capturedOldValue))
+                    {
+                        conflictingProperties.Add(change.Property);
+                    }
+                }
+
+                if (conflictingProperties.Count > 0)
+                {
+                    _isCommitting = false; // Reset so Dispose works correctly
+                    throw new TransactionConflictException(conflictingProperties);
                 }
             }
-
-            if (conflictingProperties.Count > 0)
-            {
-                throw new TransactionConflictException(conflictingProperties);
-            }
+        }
+        catch
+        {
+            _isCommitting = false;
+            throw;
         }
 
         // 2. Group changes by context and call write handlers (external source writes)
@@ -236,14 +251,12 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
             _ => true
         };
 
-        // 4. Mark as committing (interceptor passes through)
-        _isCommitting = true;
-
+        // _isCommitting already set to true above (for conflict detection)
         try
         {
             if (shouldApplyChanges)
             {
-                // 5. Apply successful changes to in-process model (full interceptor chain runs)
+                // 4. Apply successful changes to in-process model (full interceptor chain runs)
                 foreach (var change in allSuccessfulChanges)
                 {
                     var metadata = change.Property.Metadata;
@@ -253,13 +266,13 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
         }
         finally
         {
-            // 6. Partial cleanup - clear pending changes but let Dispose handle AsyncLocal
+            // 5. Partial cleanup - clear pending changes but let Dispose handle AsyncLocal
             // AsyncLocal changes in async context don't propagate back to caller
             PendingChanges.Clear();
             _isCommitted = true;
         }
 
-        // 7. Throw if any external writes failed
+        // 6. Throw if any external writes failed
         if (allFailedChanges.Count > 0)
         {
             var message = _mode switch
