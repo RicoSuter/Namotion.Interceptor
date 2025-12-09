@@ -56,25 +56,36 @@ internal sealed class SourceTransactionWriteHandler : ITransactionWriteHandler
             var memory = new ReadOnlyMemory<SubjectPropertyChange>(sourceChanges.ToArray());
             var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
 
-            // Track successful changes (may be partial or complete)
-            var writtenList = result.SuccessfulChanges.ToArray().ToList();
-            if (writtenList.Count > 0)
-            {
-                successfulChanges.AddRange(writtenList);
-                successfulSourceWrites.Add((source, writtenList));
-            }
-
-            // Record any failures
             if (result.Error is not null)
             {
                 // Add SourceWriteFailure for each failed change
-                foreach (var failedChange in sourceChanges.Except(writtenList))
+                // If FailedChanges is empty, all changes in this source failed
+                var failedList = result.FailedChanges.Length > 0
+                    ? result.FailedChanges.ToArray()
+                    : sourceChanges.ToArray();
+
+                foreach (var failedChange in failedList)
                 {
                     failedChanges.Add(new SourceWriteFailure(
                         failedChange,
                         source,
                         new SourceWriteException(source, [failedChange], result.Error)));
                 }
+
+                // Track successful changes (those not in failed list)
+                var failedSet = new HashSet<SubjectPropertyChange>(failedList);
+                var writtenList = sourceChanges.Where(c => !failedSet.Contains(c)).ToList();
+                if (writtenList.Count > 0)
+                {
+                    successfulChanges.AddRange(writtenList);
+                    successfulSourceWrites.Add((source, writtenList));
+                }
+            }
+            else
+            {
+                // All succeeded
+                successfulChanges.AddRange(sourceChanges);
+                successfulSourceWrites.Add((source, sourceChanges));
             }
         }
 

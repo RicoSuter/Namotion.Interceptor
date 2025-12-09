@@ -310,8 +310,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     /// <summary>
     /// Writes changes to OPC UA server with per-node result tracking.
-    /// Returns a <see cref="WriteResult"/> indicating which nodes succeeded.
+    /// Returns a <see cref="WriteResult"/> indicating which nodes failed.
     /// Thread-safe: uses internal lock to serialize concurrent calls.
+    /// Zero-allocation on success path.
     /// </summary>
     public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
@@ -324,14 +325,14 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 return WriteResult.Failure(new InvalidOperationException("OPC UA session is not connected."));
             }
 
-            var (writeValues, changesList) = CreateWriteValuesCollection(changes);
+            var writeValues = CreateWriteValuesCollection(changes);
             if (writeValues.Count is 0)
             {
-                return WriteResult.Success(ReadOnlyMemory<SubjectPropertyChange>.Empty);
+                return WriteResult.Success();
             }
 
             var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
-            return ProcessWriteResults(writeResponse.Results, changesList);
+            return ProcessWriteResults(writeResponse.Results, changes);
         }
         catch (Exception ex)
         {
@@ -344,51 +345,69 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     }
 
     /// <summary>
-    /// Processes write results and returns a WriteResult with per-node success tracking.
+    /// Processes write results. Zero-allocation on success path.
     /// </summary>
-    private WriteResult ProcessWriteResults(StatusCodeCollection results, List<SubjectPropertyChange> writtenChanges)
+    private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
     {
-        var successfulChanges = new List<SubjectPropertyChange>();
-        var transientFailureCount = 0;
-        var permanentFailureCount = 0;
-
+        // Fast path: check if all succeeded (common case)
+        var failureCount = 0;
         for (var i = 0; i < results.Count; i++)
         {
-            if (StatusCode.IsGood(results[i]))
+            if (!StatusCode.IsGood(results[i]))
             {
-                successfulChanges.Add(writtenChanges[i]);
-            }
-            else if (IsTransientWriteError(results[i]))
-            {
-                transientFailureCount++;
-            }
-            else
-            {
-                permanentFailureCount++;
+                failureCount++;
             }
         }
 
-        if (transientFailureCount > 0 || permanentFailureCount > 0)
+        if (failureCount == 0)
         {
-            _logger.LogWarning(
-                "OPC UA write batch partial failure: {SuccessCount} succeeded, {TransientCount} transient failures, {PermanentCount} permanent failures out of {TotalCount} writes.",
-                successfulChanges.Count, transientFailureCount, permanentFailureCount, results.Count);
-
-            var error = new OpcUaWriteException(transientFailureCount, permanentFailureCount, results.Count);
-            return successfulChanges.Count > 0
-                ? WriteResult.PartialSuccess(successfulChanges.ToArray(), error)
-                : WriteResult.Failure(error);
+            return WriteResult.Success();
         }
 
-        // All succeeded - return the original changes array (zero allocation)
-        return WriteResult.Success(writtenChanges.ToArray());
+        // Failure case: re-scan to collect failed changes
+        var failedChanges = new List<SubjectPropertyChange>(failureCount);
+        var transientCount = 0;
+        var resultIndex = 0;
+        var span = allChanges.Span;
+        for (var i = 0; i < span.Length && resultIndex < results.Count; i++)
+        {
+            var change = span[i];
+            if (!IsWritableOpcUaProperty(change))
+                continue;
+
+            if (!StatusCode.IsGood(results[resultIndex]))
+            {
+                failedChanges.Add(change);
+                if (IsTransientWriteError(results[resultIndex]))
+                    transientCount++;
+            }
+            resultIndex++;
+        }
+
+        var successCount = results.Count - failedChanges.Count;
+        var permanentCount = failedChanges.Count - transientCount;
+
+        _logger.LogWarning(
+            "OPC UA write batch partial failure: {SuccessCount} succeeded, {TransientCount} transient, {PermanentCount} permanent out of {TotalCount}.",
+            successCount, transientCount, permanentCount, results.Count);
+
+        var error = new OpcUaWriteException(transientCount, permanentCount, results.Count);
+        return successCount > 0
+            ? WriteResult.PartialFailure(failedChanges.ToArray(), error)
+            : WriteResult.Failure(failedChanges.ToArray(), error);
     }
 
-    private (WriteValueCollection WriteValues, List<SubjectPropertyChange> IncludedChanges) CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
+    private bool IsWritableOpcUaProperty(SubjectPropertyChange change)
+    {
+        return change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeId)
+            && nodeId is NodeId
+            && change.Property.TryGetRegisteredProperty() is { HasSetter: true };
+    }
+
+    private WriteValueCollection CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
         var span = changes.Span;
         var writeValues = new WriteValueCollection(span.Length);
-        var includedChanges = new List<SubjectPropertyChange>(span.Length);
 
         for (var i = 0; i < span.Length; i++)
         {
@@ -419,11 +438,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     SourceTimestamp = change.ChangedTimestamp.UtcDateTime
                 }
             });
-
-            includedChanges.Add(change);
         }
 
-        return (writeValues, includedChanges);
+        return writeValues;
     }
 
     /// <summary>
