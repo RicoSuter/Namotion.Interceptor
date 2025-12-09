@@ -41,9 +41,26 @@ public partial class JsonFile : IStorageFile, ITitleProvider, IIconProvider
         Name = Path.GetFileName(fullPath);
     }
 
-    public Task<Stream> ReadAsync(CancellationToken ct = default)
-        => Storage.ReadBlobAsync(FullPath, ct);
+    public Task<Stream> ReadAsync(CancellationToken cancellationToken = default)
+        => Storage.ReadBlobAsync(FullPath, cancellationToken);
 
-    public Task WriteAsync(Stream content, CancellationToken ct = default)
-        => Storage.WriteBlobAsync(FullPath, content, ct);
+    public Task WriteAsync(Stream content, CancellationToken cancellationToken = default)
+        => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
+
+    public Task RefreshAsync(CancellationToken cancellationToken = default)
+    {
+        // Update metadata
+        try
+        {
+            if (Storage is FluentStorageContainer container)
+            {
+                var fileInfo = new FileInfo(Path.Combine(container.ConnectionString, FullPath));
+                FileSize = fileInfo.Length;
+                LastModified = fileInfo.LastWriteTimeUtc;
+            }
+        }
+        catch { /* Ignore metadata errors */ }
+
+        return Task.CompletedTask;
+    }
 }

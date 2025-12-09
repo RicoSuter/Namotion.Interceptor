@@ -6,12 +6,13 @@ using Microsoft.Extensions.Logging;
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Manages FileSystemWatcher with Rx-based debouncing and self-write tracking.
+/// Manages FileSystemWatcher with Rx-based debouncing, event coalescing, and self-write tracking.
+/// Coalesces delete+create patterns (from editors using temp files) into update events.
 /// </summary>
 internal sealed class StorageFileWatcher : IDisposable
 {
     private static readonly TimeSpan WriteGracePeriod = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan DebounceInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan CoalesceWindow = TimeSpan.FromMilliseconds(500);
 
     private readonly string _basePath;
     private readonly Func<FileSystemEventArgs, Task> _onFileEvent;
@@ -54,16 +55,97 @@ internal sealed class StorageFileWatcher : IDisposable
         _watcher.Renamed += (_, e) => _fileEvents.OnNext(e);
         _watcher.Error += OnWatcherError;
 
-        // Process events with proper debouncing using System.Reactive
+        // Process events with coalescing: group by path, collect events in time window, then coalesce
+        // Note: We don't filter temp files here - they're handled in coalescing logic
         _fileEventSubscription = _fileEvents
-            .GroupBy(e => e.FullPath)
-            .SelectMany(group => group.Throttle(DebounceInterval))
             .Where(e => !IsOwnWrite(e.FullPath))
+            .GroupBy(e => GetCanonicalPath(e.FullPath))
+            .SelectMany(group => group
+                .Buffer(CoalesceWindow)
+                .Where(batch => batch.Count > 0)
+                .Select(batch => CoalesceEvents(group.Key, batch)))
+            .Where(e => e != null)
             .Subscribe(
-                onNext: async e => await ProcessEventSafeAsync(e),
+                onNext: async e => await ProcessEventSafeAsync(e!),
                 onError: ex => _logger?.LogError(ex, "Error in file event stream"));
 
         _logger?.LogInformation("File watching enabled for: {Path}", _basePath);
+    }
+
+    /// <summary>
+    /// Coalesces a batch of events for the same path into a single effective event.
+    /// Key insight: if a file is deleted and (re)appears in same window = update.
+    /// Filters out temp file events at the end.
+    /// </summary>
+    private FileSystemEventArgs? CoalesceEvents(string canonicalPath, IList<FileSystemEventArgs> events)
+    {
+        if (events.Count == 0)
+            return null;
+
+        // Skip temp files entirely - return null to filter them out
+        if (IsTempFile(canonicalPath))
+            return null;
+
+        var hasDelete = events.Any(e => e.ChangeType == WatcherChangeTypes.Deleted);
+        var hasCreate = events.Any(e => e.ChangeType == WatcherChangeTypes.Created);
+        var hasChange = events.Any(e => e.ChangeType == WatcherChangeTypes.Changed);
+        var renamed = events.OfType<RenamedEventArgs>().LastOrDefault();
+
+        // Delete + (Create OR Rename-to-this-path) = Update
+        // This handles: delete+create, AND delete+rename-from-temp patterns
+        if (hasDelete && (hasCreate || renamed != null))
+        {
+            _logger?.LogDebug("Coalesced delete+reappear to update for: {Path}", canonicalPath);
+            return new FileSystemEventArgs(WatcherChangeTypes.Changed,
+                Path.GetDirectoryName(canonicalPath) ?? _basePath,
+                Path.GetFileName(canonicalPath));
+        }
+
+        // Handle genuine rename (not from temp file)
+        if (renamed != null && !IsTempFile(renamed.OldFullPath))
+            return renamed;
+
+        // Rename from temp file (without prior delete) = effectively a create/update
+        if (renamed != null && IsTempFile(renamed.OldFullPath))
+        {
+            _logger?.LogDebug("Treating rename-from-temp as update for: {Path}", canonicalPath);
+            return new FileSystemEventArgs(WatcherChangeTypes.Changed,
+                Path.GetDirectoryName(canonicalPath) ?? _basePath,
+                Path.GetFileName(canonicalPath));
+        }
+
+        // Just delete
+        if (hasDelete && !hasCreate)
+            return events.First(e => e.ChangeType == WatcherChangeTypes.Deleted);
+
+        // Just create
+        if (hasCreate && !hasDelete)
+            return events.First(e => e.ChangeType == WatcherChangeTypes.Created);
+
+        // Change events (deduplicate)
+        if (hasChange)
+            return events.First(e => e.ChangeType == WatcherChangeTypes.Changed);
+
+        // Fallback: return last event
+        return events.Last();
+    }
+
+    /// <summary>
+    /// Gets canonical path for grouping (handles case-insensitivity on Windows).
+    /// </summary>
+    private string GetCanonicalPath(string fullPath)
+        => fullPath.ToLowerInvariant();
+
+    /// <summary>
+    /// Checks if path is a temporary file created by editors.
+    /// </summary>
+    private static bool IsTempFile(string fullPath)
+    {
+        var fileName = Path.GetFileName(fullPath);
+        return fileName.StartsWith("~") ||
+               fileName.EndsWith("~") ||
+               fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Contains(".tmp.", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

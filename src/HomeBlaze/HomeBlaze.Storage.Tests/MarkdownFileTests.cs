@@ -182,7 +182,7 @@ public class MarkdownFileTests
             # Content
             """;
 
-        markdown.SetContent(content);
+        markdown.Content = content;
 
         Assert.Equal("Frontmatter Title", markdown.Title);
     }
@@ -207,7 +207,7 @@ public class MarkdownFileTests
             # Content
             """;
 
-        markdown.SetContent(content);
+        markdown.Content = content;
 
         Assert.Equal("Nav Title", markdown.NavigationTitle);
     }
@@ -224,7 +224,7 @@ public class MarkdownFileTests
             # Content
             """;
 
-        markdown.SetContent(content);
+        markdown.Content = content;
 
         Assert.Equal(3, markdown.NavigationOrder);
     }
@@ -241,7 +241,7 @@ public class MarkdownFileTests
             # Content
             """;
 
-        markdown.SetContent(content);
+        markdown.Content = content;
 
         Assert.Equal("mdi-custom", markdown.Icon);
     }
@@ -256,7 +256,7 @@ public class MarkdownFileTests
     }
 
     [Fact]
-    public void MarkdownFile_SetContent_ClearsCachedFrontmatter()
+    public void MarkdownFile_Content_ClearsCachedFrontmatter()
     {
         var markdown = CreateMarkdownFile("test.md");
 
@@ -266,7 +266,7 @@ public class MarkdownFileTests
             ---
             # Content
             """;
-        markdown.SetContent(content1);
+        markdown.Content = content1;
         Assert.Equal("First Title", markdown.Title);
 
         var content2 = """
@@ -275,7 +275,7 @@ public class MarkdownFileTests
             ---
             # Content
             """;
-        markdown.SetContent(content2);
+        markdown.Content = content2;
         Assert.Equal("Second Title", markdown.Title);
     }
 }
