@@ -1,4 +1,5 @@
-﻿using System.Reactive.Concurrency;
+﻿using System.Collections.Concurrent;
+using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -9,6 +10,33 @@ namespace Namotion.Interceptor.Tracking;
 
 public static class InterceptorSubjectContextExtensions
 {
+    // Static dictionary to store context-specific data since the interface doesn't have a Data property
+    private static readonly ConcurrentDictionary<IInterceptorSubjectContext, ConcurrentDictionary<string, object>> _contextData = new();
+
+    /// <summary>
+    /// Gets or adds data to the context.
+    /// </summary>
+    public static TValue GetOrAddData<TValue>(this IInterceptorSubjectContext context, string key, Func<TValue> valueFactory) where TValue : class
+    {
+        var data = _contextData.GetOrAdd(context, _ => new ConcurrentDictionary<string, object>());
+        return (TValue)data.GetOrAdd(key, _ => valueFactory()!);
+    }
+
+    /// <summary>
+    /// Tries to get data from the context.
+    /// </summary>
+    public static bool TryGetData<TValue>(this IInterceptorSubjectContext context, string key, out TValue? value) where TValue : class
+    {
+        if (_contextData.TryGetValue(context, out var data) && data.TryGetValue(key, out var obj))
+        {
+            value = (TValue)obj;
+            return true;
+        }
+
+        value = default;
+        return false;
+    }
+
     /// <summary>
     /// Registers full property tracking including equality checks, context inheritance, derived property change detection, and property changed observable.
     /// </summary>

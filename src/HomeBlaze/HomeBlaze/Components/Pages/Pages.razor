@@ -5,12 +5,15 @@
 @using HomeBlaze.Components.Dialogs
 @using HomeBlaze.Core.Components
 @using HomeBlaze.Core.Pages
+@using HomeBlaze.Core.Services
+@using Namotion.Interceptor.Blazor
 
 @inherits HomeBlazorComponentBase
 
 @inject SubjectComponentRegistry ComponentRegistry
 @inject RoutePathResolver RouteResolver
 @inject IDialogService DialogService
+@inject DeveloperModeService DeveloperMode
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
 
@@ -25,19 +28,21 @@
     }
 </MudStack>
 
-@if (_subject == null)
-{
-    <MudAlert Severity="Severity.Warning">Subject not found at path: @Path</MudAlert>
-}
-else if (_componentType != null)
-{
-    <DynamicComponent @key="_componentKey" Type="_componentType"
-        Parameters="@(new Dictionary<string, object?> { ["Subject"] = _subject })" />
-}
-else
-{
-    <MudText>No page component registered for @_subject.GetType().Name</MudText>
-}
+<TrackingScope Context="_subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
+    @if (_subject == null)
+    {
+        <MudAlert Severity="Severity.Warning">Subject not found at path: @Path</MudAlert>
+    }
+    else if (_componentType != null)
+    {
+        <DynamicComponent @key="_componentKey" Type="_componentType"
+            Parameters="@(new Dictionary<string, object?> { ["Subject"] = _subject })" />
+    }
+    else
+    {
+        <MudText>No page component registered for @_subject.GetType().Name</MudText>
+    }
+</TrackingScope>
 
 @code {
     [Parameter]

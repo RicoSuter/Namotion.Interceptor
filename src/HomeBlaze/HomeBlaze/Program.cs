@@ -3,6 +3,7 @@ using HomeBlaze.Components;
 using HomeBlaze.Core;
 using HomeBlaze.Core.Components;
 using HomeBlaze.Core.Pages;
+using HomeBlaze.Core.Services;
 using HomeBlaze.Core.Subjects;
 using HomeBlaze.Storage;
 
@@ -35,6 +36,9 @@ builder.Services.AddSingleton(componentRegistry);
 var routePathResolver = new RoutePathResolver();
 builder.Services.AddSingleton(routePathResolver);
 builder.Services.AddSingleton(new NavigationItemResolver(componentRegistry, routePathResolver));
+
+// Register developer mode service (scoped per session)
+builder.Services.AddScoped<DeveloperModeService>();
 
 // Register serializer with factory pattern
 builder.Services.AddSingleton(sp => new ConfigurableSubjectSerializer(typeRegistry, sp));

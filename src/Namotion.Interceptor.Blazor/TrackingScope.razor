@@ -1,0 +1,160 @@
+@using System.Collections.Concurrent
+@using Namotion.Interceptor.Tracking
+@using Namotion.Interceptor.Tracking.Recorder
+
+@implements IDisposable
+
+@if (ShowDebugInfo)
+{
+    <style>
+        @@keyframes tracking-glow {
+            0% {
+                box-shadow: 0 0 15px 5px #4CAF50;
+            }
+            100% {
+                box-shadow: none;
+            }
+        }
+    </style>
+    <div @key="_glowCounter" style="@GetDebugBorderStyle()" title="@GetTooltipText()">
+        @ChildContent
+    </div>
+}
+else
+{
+    @ChildContent
+}
+
+@code {
+    private IDisposable? _subscription;
+    private IInterceptorSubjectContext? _subscribedContext;
+    private ReadPropertyRecorderScope? _currentScope;
+    private int _glowCounter;
+
+    private ConcurrentDictionary<PropertyReference, bool> _collectingProperties = [];
+    private ConcurrentDictionary<PropertyReference, bool> _properties = [];
+
+    /// <summary>
+    /// The interceptor subject context to track for property changes.
+    /// All property reads on subjects sharing this context will be automatically tracked.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public IInterceptorSubjectContext? Context { get; set; }
+
+    /// <summary>
+    /// When true, displays debug information (border and tooltip with tracked properties).
+    /// </summary>
+    [Parameter]
+    public bool ShowDebugInfo { get; set; }
+
+    /// <summary>
+    /// The content to render within the tracking scope.
+    /// Property reads within this content are automatically tracked.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>
+    /// Gets the names of currently tracked properties (for debugging).
+    /// </summary>
+    public IEnumerable<string> TrackedPropertyNames =>
+        _properties.Keys.Select(p => $"{p.Subject.GetType().Name}.{p.Name}");
+
+    protected override void OnParametersSet()
+    {
+        // Handle Context changes - resubscribe if context changed
+        if (_subscribedContext != Context)
+        {
+            _subscription?.Dispose();
+            _subscription = null;
+            _subscribedContext = Context;
+
+            _subscription = Context?
+                .GetPropertyChangeObservable()
+                .Subscribe(change =>
+                {
+                    if (_properties.TryGetValue(change.Property, out _))
+                    {
+                        _glowCounter++;
+                        InvokeAsync(StateHasChanged);
+                    }
+                });
+        }
+
+        StartRecording();
+        base.OnParametersSet();
+    }
+
+    protected override bool ShouldRender()
+    {
+        StartRecording();
+        return base.ShouldRender();
+    }
+
+    private void StartRecording()
+    {
+        if (_currentScope == null && Context != null)
+        {
+            _collectingProperties.Clear();
+            _currentScope = ReadPropertyRecorder.Start(Context, _collectingProperties);
+        }
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        StopRecording();
+
+        // Only swap if we collected properties during this render.
+        // This prevents losing tracking when a spurious render happens without executing RenderFragments.
+        if (_collectingProperties.Count > 0)
+        {
+            (_properties, _collectingProperties) = (_collectingProperties, _properties);
+            _collectingProperties.Clear();
+        }
+
+        base.OnAfterRender(firstRender);
+    }
+
+    private void StopRecording()
+    {
+        if (_currentScope != null)
+        {
+            _currentScope.Dispose();
+            _currentScope = null;
+        }
+    }
+
+    private string GetDebugBorderStyle()
+    {
+        var count = _properties.Count;
+        if (count == 0)
+            return "border: 1px dashed gray;";
+
+        // Green border with glow animation when tracking properties
+        // The @key on the div forces recreation, restarting the animation on each property change
+        return "border: 2px solid #4CAF50; animation: tracking-glow 1s ease-out; --glow-color: #4CAF50;";
+    }
+
+    private string GetTooltipText()
+    {
+        var count = _properties.Count;
+        if (count == 0)
+            return "No tracked properties";
+
+        var names = string.Join("\n", TrackedPropertyNames.Take(20));
+        if (count > 20)
+            names += $"\n... and {count - 20} more";
+
+        return $"Tracked Properties ({count}):\n{names}";
+    }
+
+    public void Dispose()
+    {
+        StopRecording();
+        _subscription?.Dispose();
+        _subscription = null;
+        _subscribedContext = null;
+        _properties.Clear();
+        _collectingProperties.Clear();
+    }
+}

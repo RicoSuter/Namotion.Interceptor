@@ -1,15 +1,22 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Components.Dialogs
+@using HomeBlaze.Core
 @using HomeBlaze.Core.Components
+@using HomeBlaze.Core.Services
 @using HomeBlaze.Core.UI
+@using Namotion.Interceptor
+@using Namotion.Interceptor.Blazor
 @using Namotion.Interceptor.Registry.Abstractions
+
+@implements IDisposable
 
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
+@inject RootManager RootManager
+@inject DeveloperModeService DeveloperMode
 
-@inherits HomeBlazorComponentBase
-
+<TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
 @if (Subject != null)
 {
     @* Header - Fixed at top *@
@@ -149,6 +156,7 @@
         </MudExpansionPanels>
     </div>
 }
+</TrackingScope>
 
 @code {
     private readonly HashSet<string> _expandedProperties = [];
@@ -179,12 +187,23 @@
     [Parameter]
     public EventCallback OnDelete { get; set; }
     
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        DeveloperMode.OnChange += OnDeveloperModeChanged;
+    }
+
     protected override void OnParametersSet()
     {
         base.OnParametersSet();
         _registeredSubject = Subject != null && SubjectRegistry != null
             ? SubjectRegistry.TryGetRegisteredSubject(Subject)
             : null;
+    }
+
+    private void OnDeveloperModeChanged()
+    {
+        InvokeAsync(StateHasChanged);
     }
 
     private string GetSubjectTitle()
@@ -238,8 +257,8 @@
 
     private RenderFragment RenderProperty(RegisteredSubjectProperty prop, int depth) => __builder =>
     {
-        // Use explicit recording since ambient context (AsyncLocal/ThreadLocal) doesn't flow through RenderFragment execution
-        var value = prop.GetValueAndRecord(PropertyRecorder);
+        // Property reads are automatically recorded via the context-based ReadPropertyRecorder
+        var value = prop.GetValue();
         var attributes = prop.Attributes.ToArray();
         var hasAttributes = attributes.Length > 0;
         var isExpanded = _expandedProperties.Contains(prop.Name);
@@ -349,5 +368,10 @@
 
         var title = GetSubjectTitle();
         await DialogService.ShowAsync<SubjectEditDialog>($"Edit {title}", parameters, options);
+    }
+
+    public void Dispose()
+    {
+        DeveloperMode.OnChange -= OnDeveloperModeChanged;
     }
 }
