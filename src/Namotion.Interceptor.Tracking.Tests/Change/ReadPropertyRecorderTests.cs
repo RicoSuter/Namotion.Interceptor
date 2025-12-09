@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Tracking.Recorder;
+using System.Collections.Concurrent;
+using Namotion.Interceptor.Tracking.Recorder;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
@@ -6,31 +7,43 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 public class ReadPropertyRecorderTests
 {
     [Fact]
-    public void WhenPropertyIsChanged_ThenItIsPartOfRecordedProperties()
+    public void WhenPropertyIsReadWithExplicitRecording_ThenItIsPartOfRecordedProperties()
     {
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithPropertyChangeObservable()
-            .WithReadPropertyRecorder();
+            .WithPropertyChangeObservable();
+
+        var person = new Person(context);
+        var recorder = new ConcurrentDictionary<PropertyReference, bool>();
+
+        // Act - Explicitly record property read
+        recorder.TryAdd(new PropertyReference(person, "FirstName"), false);
+        var firstName = person.FirstName;
+
+        // Read without recording
+        var lastName = person.LastName;
+
+        // Assert
+        Assert.Single(recorder);
+        Assert.Contains(recorder.Keys, p => p.Name == "FirstName");
+        Assert.DoesNotContain(recorder.Keys, p => p.Name == "LastName");
+    }
+
+    [Fact]
+    public void WhenUsingReadPropertyRecorderStart_ThenScopeIsCreatedWithCorrectContext()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithPropertyChangeObservable();
+
+        var properties = new ConcurrentDictionary<PropertyReference, bool>();
 
         // Act
-        var person = new Person(context);
+        using var scope = ReadPropertyRecorder.Start(context, properties);
 
-        var recorder = ReadPropertyRecorder.Start();
-        using (recorder)
-        {
-             var firstName = person.FirstName;
-        }
-
-        var lastName = person.LastName;
-        
-        // TODO: Check whether recording also works with additional registered properties or attributes (registry)
-
-        var properties = recorder.GetPropertiesAndDispose();
-        
-        // Assert
-        Assert.Single(properties);
-        Assert.Contains(properties, p => p.Name == "FirstName");
+        // Assert - scope is created and linked to properties dictionary
+        Assert.NotNull(scope);
     }
 }

@@ -238,7 +238,8 @@
 
     private RenderFragment RenderProperty(RegisteredSubjectProperty prop, int depth) => __builder =>
     {
-        var value = prop.GetValue();
+        // Use explicit recording since ambient context (AsyncLocal/ThreadLocal) doesn't flow through RenderFragment execution
+        var value = prop.GetValueAndRecord(PropertyRecorder);
         var attributes = prop.Attributes.ToArray();
         var hasAttributes = attributes.Length > 0;
         var isExpanded = _expandedProperties.Contains(prop.Name);

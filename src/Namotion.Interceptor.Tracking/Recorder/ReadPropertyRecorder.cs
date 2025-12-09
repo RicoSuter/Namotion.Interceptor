@@ -1,49 +1,48 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Recorder;
 
+/// <summary>
+/// A utility class for property read recording and an optional interceptor.
+/// For Blazor components, use explicit recording via RegisteredSubjectProperty.GetValueAndRecord()
+/// since ambient context (AsyncLocal/ThreadLocal) doesn't flow through RenderFragment execution.
+/// </summary>
 public class ReadPropertyRecorder : IReadInterceptor
 {
-    public static AsyncLocal<ConcurrentDictionary<ReadPropertyRecorderScope, bool>?> Scopes { get; } = new();
-    
     /// <summary>
-    /// Starts the recording of property read accesses.
+    /// Starts recording property reads to a new scope.
+    /// Note: For Blazor components, prefer using RegisteredSubjectProperty.GetValueAndRecord()
+    /// with the component's PropertyRecorder for explicit recording.
     /// </summary>
-    /// <param name="properties">The preallocated properties bag.</param>
-    /// <returns>The recording scope.</returns>
-    public static ReadPropertyRecorderScope Start(ConcurrentDictionary<PropertyReference, bool>? properties = null)
+    /// <param name="context">The context to record for (kept for API compatibility).</param>
+    /// <param name="properties">Optional preallocated properties dictionary.</param>
+    /// <returns>The recording scope. Dispose to stop recording.</returns>
+    public static ReadPropertyRecorderScope Start(IInterceptorSubjectContext context, ConcurrentDictionary<PropertyReference, bool>? properties = null)
     {
-        Scopes.Value ??= [];
-
-        var scope = new ReadPropertyRecorderScope(properties);
-        Scopes.Value.TryAdd(scope, false);
-        return scope;
+        return new ReadPropertyRecorderScope(context, properties);
     }
-    
+
     /// <summary>
-    /// Starts the recording of property read accesses.
+    /// Gets the current number of active scopes for a context (for debugging).
+    /// Note: Returns 0 as ambient context-based recording is no longer used.
     /// </summary>
-    /// <returns>The recording scope.</returns>
-    public static ReadPropertyRecorderScope Start(ReadPropertyRecorderScope scope)
+    [Obsolete("Ambient context-based recording is no longer used. Use explicit recording with GetValueAndRecord() instead.")]
+    public static int GetActiveScopeCount(IInterceptorSubjectContext context)
     {
-        Scopes.Value ??= [];
-        Scopes.Value.TryAdd(scope, false);
-
-        return scope;
+        return 0;
     }
-    
+
+    /// <summary>
+    /// Gets the current number of active scopes (for debugging).
+    /// Returns -1 to indicate this method is no longer valid without context.
+    /// </summary>
+    [Obsolete("Use GetActiveScopeCount(context) instead.")]
+    public static int ActiveScopeCount => -1;
+
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
-        var scopes = Scopes.Value;
-        if (scopes is not null && !scopes.IsEmpty)
-        {
-            foreach (var scope in scopes)
-            {
-                scope.Key.AddProperty(context.Property);
-            }
-        }
-
+        // No ambient recording - explicit recording via GetValueAndRecord() is preferred
         return next(ref context);
     }
 }

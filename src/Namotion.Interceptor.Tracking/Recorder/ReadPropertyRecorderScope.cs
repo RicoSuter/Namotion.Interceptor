@@ -1,16 +1,22 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 
 namespace Namotion.Interceptor.Tracking.Recorder;
 
+/// <summary>
+/// A scope for recording property reads.
+/// Used by TrackingComponentBase for tracking which properties are accessed during rendering.
+/// For Blazor components, explicit recording via RegisteredSubjectProperty.GetValueAndRecord()
+/// is preferred since ambient context doesn't flow through RenderFragment execution.
+/// </summary>
 public class ReadPropertyRecorderScope : IDisposable
 {
     private readonly ConcurrentDictionary<PropertyReference, bool> _properties;
     private volatile int _disposed;
-    
-    internal ReadPropertyRecorderScope(ConcurrentDictionary<PropertyReference, bool>? properties)
+
+    internal ReadPropertyRecorderScope(IInterceptorSubjectContext? context, ConcurrentDictionary<PropertyReference, bool>? properties)
     {
         _properties = properties ?? [];
-        _properties.Clear();
+        // Note: Do NOT clear here - the caller (TrackingComponentBase) manages clearing
     }
 
     internal void AddProperty(PropertyReference property)
@@ -32,9 +38,6 @@ public class ReadPropertyRecorderScope : IDisposable
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 0)
-        {
-            ReadPropertyRecorder.Scopes.Value?.TryRemove(this, out _);
-        }
+        Interlocked.Exchange(ref _disposed, 1);
     }
 }
