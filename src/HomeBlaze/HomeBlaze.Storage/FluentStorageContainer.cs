@@ -250,6 +250,22 @@ public partial class FluentStorageContainer :
         if (!_pathRegistry.TryGetSubject(relativePath, out var existingSubject))
             return;
 
+        // Refresh all IStorageFile subjects (updates metadata + content)
+        if (existingSubject is IStorageFile storageFile)
+        {
+            try
+            {
+                await storageFile.RefreshAsync(CancellationToken.None);
+                _logger?.LogInformation("Refreshed file: {Path}", relativePath);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to refresh file: {Path}", relativePath);
+            }
+            return;
+        }
+
+        // Continue with JSON reload for IConfigurableSubject (existing logic)
         if (existingSubject is not IConfigurableSubject)
             return;
 
@@ -401,6 +417,26 @@ public partial class FluentStorageContainer :
         _pathRegistry.Unregister(path);
 
         _logger?.LogInformation("Deleted from storage: {Path}", path);
+    }
+
+    /// <summary>
+    /// IStorageContainer - Gets metadata about a blob.
+    /// </summary>
+    public async Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken ct = default)
+    {
+        if (_client == null)
+            throw new InvalidOperationException("Storage not connected");
+
+        var blobs = await _client.ListAsync(folderPath: Path.GetDirectoryName(path)?.Replace('\\', '/'),
+            recurse: false, cancellationToken: ct);
+        var blob = blobs.FirstOrDefault(b =>
+            b.FullPath.Equals(path, StringComparison.OrdinalIgnoreCase) ||
+            b.FullPath.TrimStart('/').Equals(path.TrimStart('/'), StringComparison.OrdinalIgnoreCase));
+
+        if (blob == null)
+            return null;
+
+        return new BlobMetadata(blob.Size ?? 0, blob.LastModificationTime?.UtcDateTime);
     }
 
     /// <summary>

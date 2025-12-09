@@ -117,7 +117,7 @@ internal sealed class FileSubjectFactory
         try
         {
             var content = await client.ReadTextAsync(blob.FullPath, cancellationToken: ct);
-            markdownFile.SetContent(content);
+            markdownFile.Content = content;
         }
         catch (Exception ex)
         {

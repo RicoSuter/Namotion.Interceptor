@@ -13,6 +13,16 @@ public class MarkdownFrontmatter
     [YamlMember(Alias = "navTitle")]
     public string? NavTitle { get; set; }
 
+    /// <summary>
+    /// Alternative snake_case mapping for nav_title.
+    /// </summary>
+    [YamlMember(Alias = "nav_title")]
+    public string? NavTitleSnakeCase
+    {
+        get => NavTitle;
+        set => NavTitle ??= value;
+    }
+
     [YamlMember(Alias = "order")]
     public int? Order { get; set; }
 

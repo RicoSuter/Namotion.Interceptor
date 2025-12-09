@@ -13,6 +13,11 @@
     </ItemGroup>
 
     <ItemGroup>
+        <InternalsVisibleTo Include="HomeBlaze.Storage.Tests" />
+    </ItemGroup>
+    
+    <ItemGroup>
+        <ProjectReference Include="..\..\Namotion.Interceptor.Blazor\Namotion.Interceptor.Blazor.csproj" />
         <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
         <ProjectReference Include="..\HomeBlaze.Core\HomeBlaze.Core.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />

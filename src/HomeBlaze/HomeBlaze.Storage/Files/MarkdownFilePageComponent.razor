@@ -1,4 +1,3 @@
-@using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Components
 @using HomeBlaze.Storage.Internal
@@ -11,17 +10,13 @@
 @implements ISubjectComponent
 
 <div class="markdown-content">
-    @if (_isLoading)
+    @if (IsLoading)
     {
         <MudProgressCircular Indeterminate="true" />
     }
-    else if (!string.IsNullOrEmpty(_error))
-    {
-        <MudAlert Severity="Severity.Error">@_error</MudAlert>
-    }
     else
     {
-        @((MarkupString)_htmlContent)
+        @((MarkupString)HtmlContent)
     }
 </div>
 
@@ -49,48 +44,19 @@
 
     private MarkdownFile? File => Subject as MarkdownFile;
 
-    private string _htmlContent = string.Empty;
-    private string? _error;
-    private bool _isLoading = true;
+    private bool IsLoading => File?.Content is null;
 
+    private string HtmlContent
+    {
+        get
+        {
+            var json = File?.Content;
+            var content = json is not null ? FrontmatterParser.GetContentAfterFrontmatter(json) : "Loading...";
+            return Markdown.ToHtml(content, Pipeline);
+        }
+    }
+    
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
         .Build();
-
-    protected override async Task OnParametersSetAsync()
-    {
-        await LoadContentAsync();
-    }
-
-    private async Task LoadContentAsync()
-    {
-        _isLoading = true;
-        _error = null;
-        _htmlContent = string.Empty;
-
-        if (File == null)
-        {
-            _isLoading = false;
-            return;
-        }
-        
-        try
-        {
-            await using var stream = await File.ReadAsync();
-            using var reader = new StreamReader(stream);
-            var markdown = await reader.ReadToEndAsync();
-
-            // Strip YAML frontmatter before rendering
-            var content = FrontmatterParser.GetContentAfterFrontmatter(markdown);
-            _htmlContent = Markdown.ToHtml(content, Pipeline);
-        }
-        catch (Exception ex)
-        {
-            _error = $"Failed to load content: {ex.Message}";
-        }
-        finally
-        {
-            _isLoading = false;
-        }
-    }
 }
