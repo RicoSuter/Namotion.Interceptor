@@ -19,7 +19,7 @@ public class WriteRetryQueueTests
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 writtenChanges = changes.ToArray();
-                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+                return new ValueTask<WriteResult>(WriteResult.Success());
             });
 
         // Act
@@ -63,7 +63,7 @@ public class WriteRetryQueueTests
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 writtenChanges = changes.ToArray();
-                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+                return new ValueTask<WriteResult>(WriteResult.Success());
             });
 
         // Act
@@ -152,7 +152,7 @@ public class WriteRetryQueueTests
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 totalWritten += changes.Length;
-                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+                return new ValueTask<WriteResult>(WriteResult.Success());
             });
 
         // Act - enqueue more than MaxBatchSize (1024)
@@ -204,7 +204,7 @@ public class WriteRetryQueueTests
             {
                 Interlocked.Increment(ref callCount);
                 await tcs.Task; // Block until released
-                return WriteResult.Success(changes);
+                return WriteResult.Success();
             });
 
         queue.Enqueue(CreateChanges(3));
@@ -237,7 +237,7 @@ public class WriteRetryQueueTests
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 batchSizes.Add(changes.Length);
-                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+                return new ValueTask<WriteResult>(WriteResult.Success());
             });
 
         // Act
@@ -281,7 +281,7 @@ public class WriteRetryQueueTests
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
-                new ValueTask<WriteResult>(WriteResult.Success(changes)));
+                new ValueTask<WriteResult>(WriteResult.Success()));
 
         // Act
         queue.Enqueue(CreateChanges(10));
@@ -305,7 +305,7 @@ public class WriteRetryQueueTests
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 totalWritten += changes.Length;
-                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+                return new ValueTask<WriteResult>(WriteResult.Success());
             });
 
         // Act - enqueue exactly MaxBatchSize (1024)

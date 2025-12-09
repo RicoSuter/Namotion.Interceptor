@@ -155,15 +155,16 @@ internal sealed class WriteRetryQueue : IDisposable
                 {
                     _logger.LogWarning(result.Error, "Failed to flush {Count} queued writes to source, re-queuing failed items.", count);
 
-                    // Re-queue the items that failed (not the ones that succeeded)
-                    var failedChanges = memory.Slice(result.SuccessfulChanges.Length).ToArray();
-                    if (failedChanges.Length > 0)
+                    // Re-queue the items that failed
+                    // If FailedChanges is empty but Error is set, it means complete failure - re-queue all
+                    var failedChanges = result.FailedChanges.Length > 0
+                        ? result.FailedChanges
+                        : memory;
+
+                    lock (_lock)
                     {
-                        lock (_lock)
-                        {
-                            _pendingWrites.InsertRange(0, failedChanges);
-                            Volatile.Write(ref _count, _pendingWrites.Count);
-                        }
+                        _pendingWrites.InsertRange(0, failedChanges.ToArray());
+                        Volatile.Write(ref _count, _pendingWrites.Count);
                     }
 
                     return false;

@@ -7,11 +7,11 @@ public static class SubjectSourceExtensions
 {
     /// <summary>
     /// Writes changes to the source in batches, respecting the source's maximum batch size.
-    /// Returns a <see cref="WriteResult"/> containing which changes succeeded.
+    /// Returns a <see cref="WriteResult"/> containing which changes failed.
     /// Never throws for write failures - errors are reported in the result.
-    /// Zero-allocation on success path (returns slice of original memory).
+    /// Zero-allocation on success path.
     /// </summary>
-    /// <returns>A <see cref="WriteResult"/> containing successful changes and any error.</returns>
+    /// <returns>A <see cref="WriteResult"/> containing failed changes and any error.</returns>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     public static async ValueTask<WriteResult> WriteChangesInBatchesAsync(
         this ISubjectSource source,
@@ -21,7 +21,7 @@ public static class SubjectSourceExtensions
         var count = changes.Length;
         if (count == 0)
         {
-            return WriteResult.Success(ReadOnlyMemory<SubjectPropertyChange>.Empty);
+            return WriteResult.Success();
         }
 
         var batchSize = source.WriteBatchSize;
@@ -31,9 +31,7 @@ public static class SubjectSourceExtensions
             return await source.WriteChangesAsync(changes, cancellationToken).ConfigureAwait(false);
         }
 
-        // Multi-batch: track cumulative success count (zero allocation for success path)
-        var successfulCount = 0;
-
+        // Multi-batch: process sequentially, stop on first failure
         for (var i = 0; i < count; i += batchSize)
         {
             var currentBatchSize = Math.Min(batchSize, count - i);
@@ -41,47 +39,23 @@ public static class SubjectSourceExtensions
 
             var batchResult = await source.WriteChangesAsync(batch, cancellationToken).ConfigureAwait(false);
 
-            // Track successful count from this batch
-            successfulCount += batchResult.SuccessfulChanges.Length;
-
-            // If this batch had an error, return partial success
-            // Use slice of original memory for previously completed batches
-            // plus the partial success from current batch
             if (batchResult.Error is not null)
             {
-                // Optimization: if all successes are from complete batches, just slice
-                if (batchResult.SuccessfulChanges.Length == 0)
+                // This batch failed - return remaining changes as failed
+                // Include any specific failures from this batch plus all unprocessed batches
+                var remainingStart = i + currentBatchSize - batchResult.FailedChanges.Length;
+                if (batchResult.FailedChanges.Length == 0)
                 {
-                    // No partial success in failed batch - just return slice of completed batches
-                    var completedCount = successfulCount;
-                    return WriteResult.PartialSuccess(changes.Slice(0, completedCount), batchResult.Error);
+                    // Complete batch failure - all remaining changes failed
+                    remainingStart = i;
                 }
-                else
-                {
-                    // Partial success in failed batch - need to combine (rare case, allocates)
-                    var combined = CombineSuccessfulChanges(changes, i, batchResult.SuccessfulChanges);
-                    return WriteResult.PartialSuccess(combined, batchResult.Error);
-                }
+
+                var failedChanges = changes.Slice(remainingStart);
+                return WriteResult.PartialFailure(failedChanges, batchResult.Error);
             }
         }
 
-        // All batches succeeded - return original memory slice (zero allocation)
-        return WriteResult.Success(changes);
-    }
-
-    /// <summary>
-    /// Combines previously completed batch changes with partial success from current batch.
-    /// Only called in the rare case of partial success within a batch.
-    /// </summary>
-    private static SubjectPropertyChange[] CombineSuccessfulChanges(
-        ReadOnlyMemory<SubjectPropertyChange> allChanges,
-        int completedBatchesEndIndex,
-        ReadOnlyMemory<SubjectPropertyChange> partialBatchSuccess)
-    {
-        var combined = new SubjectPropertyChange[completedBatchesEndIndex + partialBatchSuccess.Length];
-        allChanges.Slice(0, completedBatchesEndIndex).CopyTo(combined);
-        partialBatchSuccess.CopyTo(combined.AsMemory(completedBatchesEndIndex));
-        return combined;
+        // All batches succeeded (zero allocation)
+        return WriteResult.Success();
     }
 }
-

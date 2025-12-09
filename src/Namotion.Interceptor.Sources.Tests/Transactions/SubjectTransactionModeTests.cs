@@ -68,7 +68,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         successSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback(() => writeCallCount++)
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
-                new ValueTask<WriteResult>(WriteResult.Success(changes)));
+                new ValueTask<WriteResult>(WriteResult.Success()));
 
         var failSource = CreateFailingSource();
 
@@ -101,7 +101,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
             {
                 callCount++;
                 if (callCount == 1)
-                    return new ValueTask<WriteResult>(WriteResult.Success(changes)); // Initial write succeeds
+                    return new ValueTask<WriteResult>(WriteResult.Success()); // Initial write succeeds
                 else
                     return new ValueTask<WriteResult>(WriteResult.Failure(new InvalidOperationException("Revert failed"))); // Revert fails
             });

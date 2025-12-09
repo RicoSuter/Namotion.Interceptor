@@ -25,7 +25,7 @@ public abstract class TransactionTestBase
                 It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
                 It.IsAny<CancellationToken>()))
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
-                new ValueTask<WriteResult>(WriteResult.Success(changes)));
+                new ValueTask<WriteResult>(WriteResult.Success()));
         return mock;
     }
 
@@ -48,7 +48,7 @@ public abstract class TransactionTestBase
                 It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
                 It.IsAny<CancellationToken>()))
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
-                new ValueTask<WriteResult>(WriteResult.Success(changes)));
+                new ValueTask<WriteResult>(WriteResult.Success()));
         return mock;
     }
 }

@@ -160,7 +160,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 source1Writes.Add(changes.Length);
-                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+                return new ValueTask<WriteResult>(WriteResult.Success());
             });
 
         var source2Writes = new List<int>();
@@ -170,7 +170,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 source2Writes.Add(changes.Length);
-                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+                return new ValueTask<WriteResult>(WriteResult.Success());
             });
 
         var firstNameProp = new PropertyReference(person, nameof(Person.FirstName));
@@ -204,7 +204,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             {
                 if (ct.IsCancellationRequested)
                     return new ValueTask<WriteResult>(WriteResult.Failure(new OperationCanceledException(ct)));
-                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+                return new ValueTask<WriteResult>(WriteResult.Success());
             });
 
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
@@ -242,7 +242,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
                 {
                     capturedChanges.Add(change);
                 }
-                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+                return new ValueTask<WriteResult>(WriteResult.Success());
             });
 
         var firstNameProp = new PropertyReference(person, nameof(Person.FirstName));
@@ -283,7 +283,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 source1Writes.Add(changes.Length);
-                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+                return new ValueTask<WriteResult>(WriteResult.Success());
             });
 
         var source2Writes = new List<int>();
@@ -293,7 +293,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 source2Writes.Add(changes.Length);
-                return new ValueTask<WriteResult>(WriteResult.Success(changes));
+                return new ValueTask<WriteResult>(WriteResult.Success());
             });
 
         new PropertyReference(person1, nameof(Person.FirstName)).SetSource(source1Mock.Object);
