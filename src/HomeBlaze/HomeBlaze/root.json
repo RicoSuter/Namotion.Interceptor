@@ -1,7 +1,7 @@
 {
   "type": "HomeBlaze.Storage.FluentStorageContainer",
   "storageType": "disk",
-  "connectionString": "C:\\Users\\rsute\\GitHub\\Namotion.Interceptor\\src\\HomeBlaze\\HomeBlaze\\Data",
+  "connectionString": "./Data",
   "containerName": null,
   "enableFileWatching": true
 }

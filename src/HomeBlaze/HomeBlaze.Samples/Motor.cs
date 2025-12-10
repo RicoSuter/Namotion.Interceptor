@@ -22,7 +22,7 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
 
     public string? Title => Name;
 
-    public string? Icon { get; } = null;
+    public string? Icon => "Settings";
 
     /// <summary>
     /// Target speed in RPM.
