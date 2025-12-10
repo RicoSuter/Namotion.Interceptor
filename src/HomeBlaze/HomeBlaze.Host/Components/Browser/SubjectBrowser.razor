@@ -1,5 +1,3 @@
-@using System.Collections
-
 @inherits HomeBlazorComponentBase
 
 @inject NavigationManager NavigationManager
@@ -133,6 +131,7 @@
         if (string.IsNullOrEmpty(Path))
             return;
 
+        // Use RoutePathResolver to navigate the path and build panes
         var pathSegments = Path.Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Select(Uri.UnescapeDataString)
             .ToArray();
@@ -140,91 +139,51 @@
         IInterceptorSubject currentSubject = Root;
         var currentPathParts = new List<string>();
         var currentObjectPath = "Root";
-        RegisteredSubjectProperty? pendingProperty = null;
+        var i = 0;
 
-        foreach (var segment in pathSegments)
+        while (i < pathSegments.Length)
         {
-            if (pendingProperty == null)
-            {
-                // Expecting a property name
-                var registered = _subjectRegistry?.TryGetRegisteredSubject(currentSubject);
+            var propertyName = pathSegments[i++];
+            var registered = currentSubject.TryGetRegisteredSubject();
+            var property = registered?.TryGetProperty(propertyName);
 
-                var property = registered?.TryGetProperty(segment);
-                if (property is not { HasChildSubjects: true })
+            if (property == null || !property.HasChildSubjects)
+                break;
+
+            currentPathParts.Add(propertyName);
+
+            if (property.IsSubjectReference)
+            {
+                // Direct subject property
+                if (property.GetValue() is not IInterceptorSubject child)
                     break;
 
-                currentPathParts.Add(segment);
-
-                // If it's a single subject reference, navigate directly
-                if (property.IsSubjectReference)
-                {
-                    if (property.GetValue() is not IInterceptorSubject child)
-                        break;
-
-                    currentObjectPath = $"{currentObjectPath}.{segment}";
-                    var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
-                    _breadcrumbs.Add(new BreadcrumbItem(segment, breadcrumbPath));
-                    _panes.Add(new SubjectPane { Subject = child, DisplayName = segment, ObjectPath = currentObjectPath, PropertyName = segment, Index = null });
-                    currentSubject = child;
-                }
-                else
-                {
-                    // Collection or dictionary - next segment will be the index/key
-                    pendingProperty = property;
-                }
+                currentObjectPath = $"{currentObjectPath}.{propertyName}";
+                var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
+                _breadcrumbs.Add(new BreadcrumbItem(propertyName, breadcrumbPath));
+                _panes.Add(new SubjectPane { Subject = child, DisplayName = propertyName, ObjectPath = currentObjectPath, PropertyName = propertyName, Index = null });
+                currentSubject = child;
             }
             else
             {
-                // Expecting an index/key for the pending property
-                var child = FindChildByIndex(pendingProperty, segment);
+                // Collection - next segment is the index
+                if (i >= pathSegments.Length)
+                    break;
+
+                var indexStr = pathSegments[i++];
+                var child = RoutePathResolver.FindChildByIndex(property, indexStr);
                 if (child == null)
                     break;
 
-                currentPathParts.Add(segment);
-                currentObjectPath = $"{currentObjectPath}.{pendingProperty.Name}[{segment}]";
+                currentPathParts.Add(indexStr);
+                currentObjectPath = $"{currentObjectPath}.{propertyName}[{indexStr}]";
                 var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
-                var displayName = $"{pendingProperty.Name}[{segment}]";
+                var displayName = $"{propertyName}[{indexStr}]";
                 _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, ObjectPath = currentObjectPath, PropertyName = pendingProperty.Name, Index = segment });
+                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, ObjectPath = currentObjectPath, PropertyName = propertyName, Index = indexStr });
                 currentSubject = child;
-                pendingProperty = null;
             }
         }
-    }
-
-    private IInterceptorSubject? FindChildByIndex(RegisteredSubjectProperty property, string indexStr)
-    {
-        // Get the property value directly instead of using cached registry children
-        var value = property.GetValue();
-        if (value == null)
-            return null;
-
-        // Handle Dictionary<string, IInterceptorSubject>
-        if (value is IDictionary dictionary)
-        {
-            foreach (DictionaryEntry entry in dictionary)
-            {
-                var key = entry.Key?.ToString();
-                if (key == indexStr && entry.Value is IInterceptorSubject subject)
-                    return subject;
-            }
-        }
-        // Handle List/Array with numeric index
-        else if (value is IEnumerable enumerable and not string)
-        {
-            if (int.TryParse(indexStr, out var index))
-            {
-                var i = 0;
-                foreach (var item in enumerable)
-                {
-                    if (i == index && item is IInterceptorSubject subject)
-                        return subject;
-                    i++;
-                }
-            }
-        }
-
-        return null;
     }
 
     private void OnPropertyClick(SubjectPane clickedPane, string propertyName, object? index, IInterceptorSubject subject)

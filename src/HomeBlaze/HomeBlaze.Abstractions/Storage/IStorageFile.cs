@@ -41,8 +41,8 @@ public interface IStorageFile
     Task WriteAsync(Stream content, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Refreshes the file metadata and content from storage.
-    /// Called when external changes are detected.
+    /// Callback when the file changes on disk.
+    /// Implementation decides whether to reload content or do nothing.
     /// </summary>
-    Task RefreshAsync(CancellationToken cancellationToken);
+    Task OnFileChangedAsync(CancellationToken cancellationToken);
 }

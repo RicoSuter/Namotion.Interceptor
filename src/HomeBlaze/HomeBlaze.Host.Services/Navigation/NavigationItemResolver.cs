@@ -89,8 +89,6 @@ public class NavigationItemResolver
             foreach (var childInfo in prop.Children)
             {
                 var child = childInfo.Subject;
-                if (child == null)
-                    continue;
 
                 // Direct child is a page
                 if (_componentRegistry.HasComponent(child.GetType(), SubjectComponentType.Page))

@@ -15,30 +15,35 @@ namespace HomeBlaze.Storage.Files;
 [FileExtension(".markdown")]
 public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPageNavigationProvider
 {
-    private MarkdownFrontmatter? _frontmatter;
-    private bool _isLoading;
-
     public IStorageContainer Storage { get; }
     public string FullPath { get; }
     public string Name { get; }
 
-    public string? Title => GetFrontmatter()?.Title ?? FormatFilename(Name);
-    public string? Icon => GetFrontmatter()?.Icon ?? "Article";
-    public string? NavigationTitle => GetFrontmatter()?.NavTitle;
-    public int? NavigationOrder => GetFrontmatter()?.Order;
+    [Derived]
+    public string? Title => Frontmatter?.Title ?? FormatFilename(Name);
+    
+    [Derived]
+    public string? Icon => Frontmatter?.Icon ?? "Article";
+    
+    [Derived]
+    public string? NavigationTitle => Frontmatter?.NavTitle;
+    
+    [Derived]
+    public int? NavigationOrder => Frontmatter?.Order;
+
+    public partial MarkdownFrontmatter? Frontmatter { get; private set; }
 
     /// <summary>
     /// Tracked content property - triggers UI refresh on change.
     /// </summary>
-    [State]
-    public partial string? Content { get; internal set; }
+    public partial string? Content { get; private set; }
 
     /// <summary>
     /// File size in bytes.
     /// </summary>
     [State("Size", Order = 1)]
     public partial long FileSize { get; set; }
-
+    
     /// <summary>
     /// Last modification time (UTC).
     /// </summary>
@@ -52,45 +57,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         Name = Path.GetFileName(fullPath);
     }
 
-    /// <summary>
-    /// Partial method hook - triggers lazy loading on first content access.
-    /// </summary>
-    partial void OnGetContent(ref string? value)
+    private async Task LoadFileAsync(CancellationToken cancellationToken)
     {
-        if (value == null && !_isLoading)
-        {
-            _isLoading = true;
-            _ = LoadContentAsync();
-        }
-        // Returns current value (null on first access, last known during refresh)
-    }
-
-    /// <summary>
-    /// Partial method hook - clears cached frontmatter when content changes.
-    /// </summary>
-    partial void OnSetContent(ref string? value)
-    {
-        _frontmatter = null;
-    }
-
-    private async Task LoadContentAsync()
-    {
-        try
-        {
-            await using var stream = await Storage.ReadBlobAsync(FullPath, CancellationToken.None);
-            using var reader = new StreamReader(stream);
-            Content = await reader.ReadToEndAsync();
-            _frontmatter = null;  // Reset to re-parse frontmatter
-        }
-        finally
-        {
-            _isLoading = false;
-        }
-    }
-
-    public async Task RefreshAsync(CancellationToken cancellationToken)
-    {
-        // Update metadata using storage abstraction
         var metadata = await Storage.GetBlobMetadataAsync(FullPath, cancellationToken);
         if (metadata != null)
         {
@@ -98,19 +66,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             LastModified = metadata.LastModifiedUtc ?? DateTime.UtcNow;
         }
 
-        // Reload content (keeps last known until new content loads)
-        _isLoading = true;
-        try
-        {
-            await using var stream = await Storage.ReadBlobAsync(FullPath, cancellationToken);
-            using var reader = new StreamReader(stream);
-            Content = await reader.ReadToEndAsync();
-            _frontmatter = null;
-        }
-        finally
-        {
-            _isLoading = false;
-        }
+        await using var stream = await Storage.ReadBlobAsync(FullPath, cancellationToken);
+        using var reader = new StreamReader(stream);
+        Content = await reader.ReadToEndAsync(cancellationToken);
+        Frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(Content);
+    }
+    
+    public Task OnFileChangedAsync(CancellationToken cancellationToken)
+    {
+        return LoadFileAsync(cancellationToken);
     }
 
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
@@ -118,16 +82,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     public Task WriteAsync(Stream content, CancellationToken cancellationToken)
         => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
-
-    private MarkdownFrontmatter? GetFrontmatter()
-    {
-        if (_frontmatter != null || Content == null)
-            return _frontmatter;
-
-        _frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(Content);
-        return _frontmatter;
-    }
-
+    
     private static string FormatFilename(string name)
     {
         var baseName = Path.GetFileNameWithoutExtension(name);

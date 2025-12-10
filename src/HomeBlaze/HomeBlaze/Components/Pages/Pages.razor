@@ -68,7 +68,7 @@
             _ = storage.Children; // Trigger registration
         }
 
-        _subject = RouteResolver.ResolveFromRoute(Root, Path ?? "");
+        _subject = RouteResolver.ResolveFromRoute(Path ?? "");
 
         if (_subject != null)
         {
