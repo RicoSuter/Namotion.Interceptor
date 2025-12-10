@@ -178,7 +178,7 @@ public class MarkdownFileTests
         await WriteFileAsync(storage, "test.md", content);
 
         var markdown = new MarkdownFile(storage, "test.md");
-        await markdown.RefreshAsync(CancellationToken.None);
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Frontmatter Title", markdown.Title);
     }
@@ -190,7 +190,7 @@ public class MarkdownFileTests
         await WriteFileAsync(storage, "my-test-document.md", "# Content");
 
         var markdown = new MarkdownFile(storage, "my-test-document.md");
-        await markdown.RefreshAsync(CancellationToken.None);
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("My Test Document", markdown.Title);
     }
@@ -209,7 +209,7 @@ public class MarkdownFileTests
         await WriteFileAsync(storage, "test.md", content);
 
         var markdown = new MarkdownFile(storage, "test.md");
-        await markdown.RefreshAsync(CancellationToken.None);
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Nav Title", markdown.NavigationTitle);
     }
@@ -228,7 +228,7 @@ public class MarkdownFileTests
         await WriteFileAsync(storage, "test.md", content);
 
         var markdown = new MarkdownFile(storage, "test.md");
-        await markdown.RefreshAsync(CancellationToken.None);
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal(3, markdown.NavigationOrder);
     }
@@ -247,7 +247,7 @@ public class MarkdownFileTests
         await WriteFileAsync(storage, "test.md", content);
 
         var markdown = new MarkdownFile(storage, "test.md");
-        await markdown.RefreshAsync(CancellationToken.None);
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("mdi-custom", markdown.Icon);
     }
@@ -259,7 +259,7 @@ public class MarkdownFileTests
         await WriteFileAsync(storage, "test.md", "# Content");
 
         var markdown = new MarkdownFile(storage, "test.md");
-        await markdown.RefreshAsync(CancellationToken.None);
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Article", markdown.Icon);
     }
@@ -277,7 +277,7 @@ public class MarkdownFileTests
         await WriteFileAsync(storage, "test.md", content1);
 
         var markdown = new MarkdownFile(storage, "test.md");
-        await markdown.RefreshAsync(CancellationToken.None);
+        await markdown.OnFileChangedAsync(CancellationToken.None);
         Assert.Equal("First Title", markdown.Title);
 
         var content2 = """
@@ -287,7 +287,7 @@ public class MarkdownFileTests
             # Content
             """;
         await WriteFileAsync(storage, "test.md", content2);
-        await markdown.RefreshAsync(CancellationToken.None);
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Second Title", markdown.Title);
     }
