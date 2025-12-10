@@ -43,21 +43,6 @@ public class ReadPropertyRecorder : IReadInterceptor
         }
     }
 
-    /// <summary>
-    /// Gets the current number of active scopes for a context (for debugging).
-    /// </summary>
-    public static int GetActiveScopeCount(IInterceptorSubjectContext context)
-    {
-        if (context.TryGetData<List<ReadPropertyRecorderScope>>(ActiveScopesKey, out var scopes) && scopes is not null)
-        {
-            lock (scopes)
-            {
-                return scopes.Count;
-            }
-        }
-        return 0;
-    }
-
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
         var result = next(ref context);
