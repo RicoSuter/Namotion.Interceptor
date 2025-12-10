@@ -1,5 +1,5 @@
 using HomeBlaze.Abstractions.Storage;
-using HomeBlaze.Core;
+using HomeBlaze.Services;
 using Moq;
 
 namespace HomeBlaze.Storage.Tests;
@@ -65,7 +65,7 @@ public class FluentStorageContainerTests
         var storage = new FluentStorageContainer(typeRegistry, serializer);
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => storage.ConnectAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => storage.ConnectAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class FluentStorageContainerTests
         storage.StorageType = "unsupported-type";
 
         // Act & Assert
-        var ex = await Assert.ThrowsAsync<NotSupportedException>(() => storage.ConnectAsync());
+        var ex = await Assert.ThrowsAsync<NotSupportedException>(() => storage.ConnectAsync(CancellationToken.None));
         Assert.Contains("unsupported-type", ex.Message);
     }
 
@@ -105,8 +105,7 @@ public class FluentStorageContainerTests
         var icon = storage.Icon;
 
         // Assert
-        Assert.NotNull(icon);
-        Assert.True(icon.Contains("<path") || icon.Contains("<g>"), "Icon should be a MudBlazor SVG path string");
+        Assert.Equal("Storage", icon);
     }
 
     [Fact]

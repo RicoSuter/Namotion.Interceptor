@@ -1,12 +1,14 @@
 ---
 title: Motor Setup Guide
-navTitle: Setup
+navTitle: Motor Setup
 order: 1
 ---
 
 # Motor Setup Guide
 
-This guide explains how to configure the sample motor.
+> **Note:** This guide refers to the motor examples in the `demo/` folder. See [Demo Setup Guide](../demo/setup.md) for a complete overview.
+
+This guide explains how to configure motor subjects.
 
 ## Configuration Properties
 
@@ -31,11 +33,19 @@ These properties are updated in real-time by the simulation:
 
 ## Example Configuration
 
+See the demo files for real examples:
+- `demo/conveyor.json` - Slow speed (600 RPM) for material handling
+- `demo/exhaust-fan.json` - Medium speed (1500 RPM) for ventilation
+- `demo/compressor.json` - High speed (3000 RPM) for air compression
+
 ```json
 {
-    "Type": "HomeBlaze.Core.Subjects.Motor",
+    "Type": "HomeBlaze.Samples.Motor",
     "Name": "Cooling Fan",
-    "TargetSpeed": 1500,
+    "TargetSpeed": 1800,
     "SimulationInterval": "00:00:01"
 }
 ```
+
+👉 **[Explore all demo motors](../demo/setup.md)**
+

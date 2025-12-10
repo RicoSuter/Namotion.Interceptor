@@ -1,7 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Core;
-using HomeBlaze.Core.Components;
+using HomeBlaze.Host.Services.Components;
+using HomeBlaze.Services;
 
 namespace HomeBlaze.Tests;
 

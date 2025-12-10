@@ -1,6 +1,0 @@
-{
-    "type": "HomeBlaze.Core.Subjects.Motor",
-    "name": "Exhaust Fan",
-    "targetSpeed": 1200,
-    "simulationInterval": "00:00:01"
-}

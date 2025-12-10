@@ -1,0 +1,134 @@
+@implements IDisposable
+
+@inject SubjectComponentRegistry ComponentRegistry
+@inject RootManager RootManager
+@inject ISnackbar Snackbar
+@inject DeveloperModeService DeveloperMode
+
+<MudDialog>
+    <DialogContent>
+        <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
+            @if (Subject != null)
+            {
+                @if (_editComponentType != null)
+                {
+                    <DynamicComponent Type="_editComponentType"
+                                      @ref="_dynamicComponentRef"
+                                      Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })"/>
+                }
+                else
+                {
+                    <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" />
+                }
+            }
+        </TrackingScope>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   OnClick="Save"
+                   Disabled="@(!IsValid)">Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    private Type? _editComponentType;
+    private DynamicComponent? _dynamicComponentRef;
+    private ISubjectEditComponent? _editComponent;
+    private ConfigurationPropertiesEditor? _propertiesEditor;
+
+    private bool IsValid => _editComponent?.IsValid ?? _propertiesEditor?.IsValid ?? true;
+
+    public MaxWidth GetPreferredDialogSize()
+    {
+        return _editComponent?.PreferredDialogSize is { } size
+            ? (MaxWidth)Enum.Parse(typeof(MaxWidth), size)
+            : MaxWidth.Small;
+    }
+
+    protected override void OnParametersSet()
+    {
+        base.OnParametersSet();
+        _editComponent = null;
+
+        if (Subject != null)
+        {
+            var registration = ComponentRegistry.GetComponent(
+                Subject.GetType(),
+                SubjectComponentType.Edit);
+
+            _editComponentType = registration?.ComponentType;
+        }
+        else
+        {
+            _editComponentType = null;
+        }
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        base.OnAfterRender(firstRender);
+
+        if (_dynamicComponentRef?.Instance is ISubjectEditComponent editComponent && _editComponent == null)
+        {
+            _editComponent = editComponent;
+            _editComponent.IsValidChanged += OnIsValidChanged;
+            _editComponent.IsDirtyChanged += OnIsDirtyChanged;
+            StateHasChanged();
+        }
+    }
+
+    private void OnIsValidChanged(bool isValid) => InvokeAsync(StateHasChanged);
+
+    private void OnIsDirtyChanged(bool isDirty) => InvokeAsync(StateHasChanged);
+
+    private void Cancel() => MudDialog?.Cancel();
+
+    private async Task Save()
+    {
+        if (Subject == null) return;
+
+        if (_editComponent != null)
+        {
+            await _editComponent.SaveAsync();
+        }
+        else
+        {
+            _propertiesEditor?.ApplyChanges();
+            if (_propertiesEditor?.HasErrors == true)
+            {
+                return;
+            }
+        }
+
+        try
+        {
+            var saved = await Subject.SaveConfigurationAsync(RootManager, CancellationToken.None);
+            if (!saved)
+            {
+                Snackbar.Add("Configuration could not be saved: no handler found.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+            return;
+        }
+
+        MudDialog?.Close(DialogResult.Ok(true));
+    }
+
+    public void Dispose()
+    {
+        if (_editComponent != null)
+        {
+            _editComponent.IsValidChanged -= OnIsValidChanged;
+            _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
+        }
+    }
+}

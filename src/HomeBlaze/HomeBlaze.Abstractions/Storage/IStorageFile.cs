@@ -33,16 +33,16 @@ public interface IStorageFile
     /// <summary>
     /// Reads the file content.
     /// </summary>
-    Task<Stream> ReadAsync(CancellationToken cancellationToken = default);
+    Task<Stream> ReadAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Writes content to the file.
     /// </summary>
-    Task WriteAsync(Stream content, CancellationToken cancellationToken = default);
+    Task WriteAsync(Stream content, CancellationToken cancellationToken);
 
     /// <summary>
     /// Refreshes the file metadata and content from storage.
     /// Called when external changes are detected.
     /// </summary>
-    Task RefreshAsync(CancellationToken cancellationToken = default);
+    Task RefreshAsync(CancellationToken cancellationToken);
 }

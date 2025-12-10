@@ -50,6 +50,8 @@ root.json          -->         FluentStorageContainer
 
 ## Quick Start
 
+> **Try the Demo!** The `demo/` folder includes 5 pre-configured motors. Navigate to the **Browser** to see them live, or read the [Demo Setup Guide](demo/setup.md).
+
 ### Step 1: Configure Storage
 
 Edit `root.json` to point to your data folder:
@@ -169,12 +171,27 @@ HomeBlaze supports multiple storage backends via FluentStorage:
 
 ---
 
+## Demo System
+
+The `demo/` folder contains a working example with 5 motors simulating a small factory:
+
+| Equipment | Speed | Purpose |
+|-----------|-------|---------|
+| Conveyor Belt | 600 RPM | Material handling |
+| Exhaust Fan | 1,500 RPM | Ventilation |
+| Cooling Fan | 1,800 RPM | Temperature control |
+| Water Pump | 2,400 RPM | Water circulation |
+| Compressor | 3,000 RPM | Compressed air |
+
+👉 **[View Demo Setup Guide](demo/setup.md)** for detailed exploration steps.
+
 ## What's Next?
 
-- [ ] Explore the [docs folder](/docs) for more documentation
-- [ ] Check out the sample `motor.json` subject
-- [ ] Try editing this file externally and watch it update!
-- [ ] Browse the object graph using the **Browser** link
+1. 📂 **Explore the Demo** - Check out the [demo folder](demo/) with live motor simulations
+2. 📖 **Read Documentation** - Browse the [docs folder](docs/) for in-depth guides
+3. 🔧 **Edit a Motor** - Click any motor in the Browser and change its target speed
+4. 📝 **External Edits** - Try editing `demo/cooling-fan.json` externally and watch it update!
+5. 🌐 **Protocol Access** - Connect via OPC UA (`opc.tcp://localhost:4840`) or MQTT
 
 ---
 

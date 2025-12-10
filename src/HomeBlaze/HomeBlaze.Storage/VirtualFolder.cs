@@ -1,7 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Storage;
-using MudBlazor;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
@@ -13,8 +12,6 @@ namespace HomeBlaze.Storage;
 [InterceptorSubject]
 public partial class VirtualFolder : ITitleProvider, IIconProvider
 {
-    private const string FolderIcon = Icons.Material.Filled.Folder;
-        
     /// <summary>
     /// Reference to the root storage.
     /// </summary>
@@ -33,7 +30,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider
 
     public string? Title => Path.GetFileName(RelativePath.TrimEnd('/'));
 
-    public string Icon => FolderIcon;
+    public string Icon => "Folder";
 
     public VirtualFolder(IInterceptorSubjectContext context, IStorageContainer storage, string relativePath)
     {

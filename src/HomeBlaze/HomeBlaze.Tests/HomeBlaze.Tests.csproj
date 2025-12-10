@@ -25,7 +25,8 @@
 
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
-        <ProjectReference Include="..\HomeBlaze.Core\HomeBlaze.Core.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Host.Services\HomeBlaze.Host.Services.csproj" />
         <ProjectReference Include="..\HomeBlaze.Storage\HomeBlaze.Storage.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />

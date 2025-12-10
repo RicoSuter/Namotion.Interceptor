@@ -1,7 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Storage;
-using MudBlazor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Files;
@@ -14,7 +13,7 @@ public partial class JsonFile : IStorageFile, ITitleProvider, IIconProvider
 {
     public string? Title => Path.GetFileNameWithoutExtension(FullPath);
 
-    public string Icon => Icons.Material.Filled.DataObject;
+    public string Icon => "DataObject";
     
     public IStorageContainer Storage { get; }
     
@@ -41,13 +40,13 @@ public partial class JsonFile : IStorageFile, ITitleProvider, IIconProvider
         Name = Path.GetFileName(fullPath);
     }
 
-    public Task<Stream> ReadAsync(CancellationToken cancellationToken = default)
+    public Task<Stream> ReadAsync(CancellationToken cancellationToken)
         => Storage.ReadBlobAsync(FullPath, cancellationToken);
 
-    public Task WriteAsync(Stream content, CancellationToken cancellationToken = default)
+    public Task WriteAsync(Stream content, CancellationToken cancellationToken)
         => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
 
-    public Task RefreshAsync(CancellationToken cancellationToken = default)
+    public Task RefreshAsync(CancellationToken cancellationToken)
     {
         // Update metadata
         try

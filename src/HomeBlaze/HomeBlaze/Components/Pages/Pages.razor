@@ -2,10 +2,8 @@
 
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
-@using HomeBlaze.Components.Dialogs
-@using HomeBlaze.Core.Components
-@using HomeBlaze.Core.Pages
-@using HomeBlaze.Core.Services
+@using HomeBlaze.Host.Components.Dialogs
+@using HomeBlaze.Host.Services.Components
 @using Namotion.Interceptor.Blazor
 
 @inherits HomeBlazorComponentBase
@@ -17,18 +15,16 @@
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
 
-<MudStack Row="true" Class="mb-4" AlignItems="AlignItems.Center">
+<TrackingScope Context="_subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
     @if (CanEdit())
     {
-        <MudIconButton OnClick="@OpenEditDialog"
-                       Icon="@Icons.Material.Filled.Edit"
-                       Variant="Variant.Filled"
-                       Color="Color.Primary"
-                       Size="Size.Small" />
+        <MudFab Style="position: fixed; top: 80px; right: 24px; z-index: 1000;"
+                OnClick="@OpenEditDialog"
+                StartIcon="@Icons.Material.Filled.Edit"
+                Color="Color.Primary"
+                Size="Size.Small"/>
     }
-</MudStack>
 
-<TrackingScope Context="_subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
     @if (_subject == null)
     {
         <MudAlert Severity="Severity.Warning">Subject not found at path: @Path</MudAlert>
@@ -36,7 +32,7 @@
     else if (_componentType != null)
     {
         <DynamicComponent @key="_componentKey" Type="_componentType"
-            Parameters="@(new Dictionary<string, object?> { ["Subject"] = _subject })" />
+                          Parameters="@(new Dictionary<string, object?> { ["Subject"] = _subject })"/>
     }
     else
     {
@@ -45,8 +41,7 @@
 </TrackingScope>
 
 @code {
-    [Parameter]
-    public string? Path { get; set; }
+    [Parameter] public string? Path { get; set; }
 
     private IInterceptorSubject? _subject;
     private Type? _componentType;
@@ -139,4 +134,5 @@
             StateHasChanged();
         }
     }
+
 }
