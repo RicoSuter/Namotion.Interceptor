@@ -81,17 +81,45 @@ namespace YourDefaultNamespace
 
         public partial string FirstName
         {
-             get => GetPropertyValue<string>(nameof(FirstName), static (o) => ((Person)o)._FirstName);
-             set => SetPropertyValue(nameof(FirstName), value, static (o) => ((Person)o)._FirstName, static (o, v) => ((Person)o)._FirstName = v);
+             get
+            {
+                var value = GetPropertyValue<string>(nameof(FirstName), static (o) => ((Person)o)._FirstName);
+                OnGetFirstName(ref value);
+                return value;
+            }
+             set
+            {
+                var newValue = value;
+                OnSetFirstName(ref newValue);
+                SetPropertyValue(nameof(FirstName), newValue, static (o) => ((Person)o)._FirstName, static (o, v) => ((Person)o)._FirstName = v);
+            }
         }
+
+        partial void OnGetFirstName(ref string value);
+
+        partial void OnSetFirstName(ref string value);
 
         private string _LastName;
 
         public partial string LastName
         {
-             get => GetPropertyValue<string>(nameof(LastName), static (o) => ((Person)o)._LastName);
-             set => SetPropertyValue(nameof(LastName), value, static (o) => ((Person)o)._LastName, static (o, v) => ((Person)o)._LastName = v);
+             get
+            {
+                var value = GetPropertyValue<string>(nameof(LastName), static (o) => ((Person)o)._LastName);
+                OnGetLastName(ref value);
+                return value;
+            }
+             set
+            {
+                var newValue = value;
+                OnSetLastName(ref newValue);
+                SetPropertyValue(nameof(LastName), newValue, static (o) => ((Person)o)._LastName, static (o, v) => ((Person)o)._LastName = v);
+            }
         }
+
+        partial void OnGetLastName(ref string value);
+
+        partial void OnSetLastName(ref string value);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
@@ -195,9 +223,23 @@ namespace YourDefaultNamespace
 
         public partial string MainCourse
         {
-             get => GetPropertyValue<string>(nameof(MainCourse), static (o) => ((Teacher)o)._MainCourse);
-             set => SetPropertyValue(nameof(MainCourse), value, static (o) => ((Teacher)o)._MainCourse, static (o, v) => ((Teacher)o)._MainCourse = v);
+             get
+            {
+                var value = GetPropertyValue<string>(nameof(MainCourse), static (o) => ((Teacher)o)._MainCourse);
+                OnGetMainCourse(ref value);
+                return value;
+            }
+             set
+            {
+                var newValue = value;
+                OnSetMainCourse(ref newValue);
+                SetPropertyValue(nameof(MainCourse), newValue, static (o) => ((Teacher)o)._MainCourse, static (o, v) => ((Teacher)o)._MainCourse = v);
+            }
         }
+
+        partial void OnGetMainCourse(ref string value);
+
+        partial void OnSetMainCourse(ref string value);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)

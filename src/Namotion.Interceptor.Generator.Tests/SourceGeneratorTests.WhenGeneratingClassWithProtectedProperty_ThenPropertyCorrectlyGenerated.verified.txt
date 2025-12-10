@@ -90,17 +90,45 @@ namespace YourDefaultNamespace
 
         public partial int Value
         {
-             get => GetPropertyValue<int>(nameof(Value), static (o) => ((SampleSubject)o)._Value);
-             set => SetPropertyValue(nameof(Value), value, static (o) => ((SampleSubject)o)._Value, static (o, v) => ((SampleSubject)o)._Value = v);
+             get
+            {
+                var value = GetPropertyValue<int>(nameof(Value), static (o) => ((SampleSubject)o)._Value);
+                OnGetValue(ref value);
+                return value;
+            }
+             set
+            {
+                var newValue = value;
+                OnSetValue(ref newValue);
+                SetPropertyValue(nameof(Value), newValue, static (o) => ((SampleSubject)o)._Value, static (o, v) => ((SampleSubject)o)._Value = v);
+            }
         }
+
+        partial void OnGetValue(ref int value);
+
+        partial void OnSetValue(ref int value);
 
         private string _Name;
 
         public partial string Name
         {
-             get => GetPropertyValue<string>(nameof(Name), static (o) => ((SampleSubject)o)._Name);
-             set => SetPropertyValue(nameof(Name), value, static (o) => ((SampleSubject)o)._Name, static (o, v) => ((SampleSubject)o)._Name = v);
+             get
+            {
+                var value = GetPropertyValue<string>(nameof(Name), static (o) => ((SampleSubject)o)._Name);
+                OnGetName(ref value);
+                return value;
+            }
+             set
+            {
+                var newValue = value;
+                OnSetName(ref newValue);
+                SetPropertyValue(nameof(Name), newValue, static (o) => ((SampleSubject)o)._Name, static (o, v) => ((SampleSubject)o)._Name = v);
+            }
         }
+
+        partial void OnGetName(ref string value);
+
+        partial void OnSetName(ref string value);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)

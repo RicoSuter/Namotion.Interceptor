@@ -1,0 +1,64 @@
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Abstractions.Components
+@using HomeBlaze.Storage
+@using HomeBlaze.Storage.Files
+@using HomeBlaze.Storage.Internal
+@using Markdig
+@using MudBlazor
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
+
+@implements ISubjectComponent
+
+<div class="markdown-content">
+    @if (IsLoading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else
+    {
+        @((MarkupString)HtmlContent)
+    }
+</div>
+
+<style>
+    .markdown-content h1 { font-size: 2rem; font-weight: 500; margin: 1.5rem 0 1rem; }
+    .markdown-content h2 { font-size: 1.5rem; font-weight: 500; margin: 1.25rem 0 0.75rem; }
+    .markdown-content h3 { font-size: 1.25rem; font-weight: 500; margin: 1rem 0 0.5rem; }
+    .markdown-content p { margin: 0.75rem 0; line-height: 1.6; }
+    .markdown-content ul, .markdown-content ol { margin: 0.75rem 0; padding-left: 1.5rem; }
+    .markdown-content li { margin: 0.25rem 0; }
+    .markdown-content code { background: rgba(0,0,0,0.1); padding: 0.2em 0.4em; border-radius: 4px; font-family: monospace; }
+    .markdown-content pre { background: rgba(0,0,0,0.1); padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 1rem 0; }
+    .markdown-content pre code { background: transparent; padding: 0; }
+    .markdown-content table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    .markdown-content th, .markdown-content td { border: 1px solid rgba(128,128,128,0.3); padding: 0.5rem; text-align: left; }
+    .markdown-content th { background: rgba(0,0,0,0.05); font-weight: 500; }
+    .markdown-content blockquote { border-left: 4px solid rgba(128,128,128,0.3); margin: 1rem 0; padding-left: 1rem; color: rgba(128,128,128,0.8); }
+    .markdown-content a { color: #7e6fff; text-decoration: none; }
+    .markdown-content a:hover { text-decoration: underline; }
+</style>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private MarkdownFile? File => Subject as MarkdownFile;
+
+    private bool IsLoading => File?.Content is null;
+
+    private string HtmlContent
+    {
+        get
+        {
+            var json = File?.Content;
+            var content = json is not null ? FrontmatterParser.GetContentAfterFrontmatter(json) : "Loading...";
+            return Markdown.ToHtml(content, Pipeline);
+        }
+    }
+
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
+}
