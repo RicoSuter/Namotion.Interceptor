@@ -10,24 +10,26 @@ namespace Namotion.Interceptor.Tracking;
 
 public static class InterceptorSubjectContextExtensions
 {
+    // TODO: This seems a bit hacky - find a better way to store context-specific data (only used in recorder for now)
+
     // Static dictionary to store context-specific data since the interface doesn't have a Data property
-    private static readonly ConcurrentDictionary<IInterceptorSubjectContext, ConcurrentDictionary<string, object>> _contextData = new();
+    private static readonly ConcurrentDictionary<IInterceptorSubjectContext, ConcurrentDictionary<string, object>> ContextData = new();
 
     /// <summary>
     /// Gets or adds data to the context.
     /// </summary>
-    public static TValue GetOrAddData<TValue>(this IInterceptorSubjectContext context, string key, Func<TValue> valueFactory) where TValue : class
+    internal static TValue GetOrAddData<TValue>(this IInterceptorSubjectContext context, string key, Func<TValue> valueFactory) where TValue : class
     {
-        var data = _contextData.GetOrAdd(context, _ => new ConcurrentDictionary<string, object>());
+        var data = ContextData.GetOrAdd(context, _ => new ConcurrentDictionary<string, object>());
         return (TValue)data.GetOrAdd(key, _ => valueFactory()!);
     }
 
     /// <summary>
     /// Tries to get data from the context.
     /// </summary>
-    public static bool TryGetData<TValue>(this IInterceptorSubjectContext context, string key, out TValue? value) where TValue : class
+    internal static bool TryGetData<TValue>(this IInterceptorSubjectContext context, string key, out TValue? value) where TValue : class
     {
-        if (_contextData.TryGetValue(context, out var data) && data.TryGetValue(key, out var obj))
+        if (ContextData.TryGetValue(context, out var data) && data.TryGetValue(key, out var obj))
         {
             value = (TValue)obj;
             return true;
