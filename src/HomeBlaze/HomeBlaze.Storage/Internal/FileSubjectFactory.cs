@@ -50,9 +50,10 @@ internal sealed class FileSubjectFactory
             var subject = CreateFileSubject(mappedType, storage, blob.FullPath);
             SetFileMetadata(subject, blob);
 
-            if (subject is MarkdownFile markdownFile)
+            // Eager load content for storage files
+            if (subject is IStorageFile storageFile)
             {
-                await LoadMarkdownTitleAsync(client, markdownFile, blob, cancellationToken);
+                await storageFile.OnFileChangedAsync(cancellationToken);
             }
 
             return subject;
@@ -61,6 +62,7 @@ internal sealed class FileSubjectFactory
         // Default to GenericFile
         var genericFile = new GenericFile(storage, blob.FullPath);
         SetFileMetadata(genericFile, blob);
+        await genericFile.OnFileChangedAsync(cancellationToken);
         return genericFile;
     }
 
@@ -106,23 +108,6 @@ internal sealed class FileSubjectFactory
 
         // Create JsonFile for plain JSON
         return new JsonFile(storage, blob.FullPath);
-    }
-
-    private async Task LoadMarkdownTitleAsync(
-        IBlobStorage client,
-        MarkdownFile markdownFile,
-        Blob blob,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var content = await client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
-            markdownFile.Content = content;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to load markdown content for: {Path}", blob.FullPath);
-        }
     }
 
     private IInterceptorSubject? CreateFileSubject(Type type, IStorageContainer storage, string blobPath)

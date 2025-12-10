@@ -54,7 +54,7 @@ public partial class GenericFile : IStorageFile, ITitleProvider, IIconProvider
     public Task WriteAsync(Stream content, CancellationToken cancellationToken)
         => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
 
-    public Task RefreshAsync(CancellationToken cancellationToken)
+    public Task OnFileChangedAsync(CancellationToken cancellationToken)
     {
         // Update metadata
         try
