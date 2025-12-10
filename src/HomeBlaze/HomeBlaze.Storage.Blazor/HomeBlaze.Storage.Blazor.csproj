@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+        <ProjectReference Include="..\HomeBlaze.Storage\HomeBlaze.Storage.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
+        <PackageReference Include="MudBlazor" Version="8.*" />
+        <PackageReference Include="BlazorMonaco" Version="3.4.0" />
+        <PackageReference Include="Markdig" Version="0.*" />
+    </ItemGroup>
+
+</Project>

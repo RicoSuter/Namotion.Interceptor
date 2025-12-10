@@ -6,6 +6,9 @@
       "Bash(dotnet run:*)"
     ],
     "deny": [],
-    "ask": []
+    "ask": [],
+    "additionalDirectories": [
+      "C:\\Users\\rsute\\GitHub\\HomeBlaze"
+    ]
   }
 }

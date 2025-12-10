@@ -63,6 +63,8 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                                         "private",
 
                                     IsPartial = p.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)),
+                                    IsVirtual = p.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword)),
+                                    IsOverride = p.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword)),
                                     IsDerived = HasDerivedAttribute(p, declarationModel, ct),
                                     IsRequired = p.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword)),
                                     HasGetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
@@ -263,11 +265,22 @@ namespace {namespaceName}
                         var propertyName = property.Property.Identifier.Value;
                         var propertyModifier = property.AccessModifier;
 
+                        // Build modifier string (virtual/override)
+                        var additionalModifiers = "";
+                        if (property.IsVirtual)
+                        {
+                            additionalModifiers = "virtual ";
+                        }
+                        else if (property.IsOverride)
+                        {
+                            additionalModifiers = "override ";
+                        }
+
                         generatedCode +=
     $@"
         private {fullyQualifiedName} _{propertyName};
 
-        {propertyModifier} {(property.IsRequired ? "required " : "")}partial {fullyQualifiedName} {propertyName}
+        {propertyModifier} {(property.IsRequired ? "required " : "")}{additionalModifiers}partial {fullyQualifiedName} {propertyName}
         {{";
                         if (property.HasGetter)
                         {
@@ -276,14 +289,19 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} get => GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), static (o) => (({className})o)._{propertyName});";
+            {modifiers} get
+            {{
+                var value = GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), static (o) => (({className})o)._{propertyName});
+                OnGet{propertyName}(ref value);
+                return value;
+            }}";
 
                         }
 
                         if (property.HasSetter || property.HasInit)
                         {
                             var accessor = property.Property.AccessorList?
-                                .Accessors.Single(a => a.IsKind(SyntaxKind.SetAccessorDeclaration) || a.IsKind(SyntaxKind.InitAccessorDeclaration)) 
+                                .Accessors.Single(a => a.IsKind(SyntaxKind.SetAccessorDeclaration) || a.IsKind(SyntaxKind.InitAccessorDeclaration))
                                 ?? throw new InvalidOperationException("Accessor not found.");
 
                             var accessorText = accessor.IsKind(SyntaxKind.InitAccessorDeclaration) ? "init" : "set";
@@ -291,13 +309,34 @@ namespace {namespaceName}
 
                             generatedCode +=
     $@"
-            {modifiers} {accessorText} => SetPropertyValue(nameof({propertyName}), value, static (o) => (({className})o)._{propertyName}, static (o, v) => (({className})o)._{propertyName} = v);";
+            {modifiers} {accessorText}
+            {{
+                var newValue = value;
+                OnSet{propertyName}(ref newValue);
+                SetPropertyValue(nameof({propertyName}), newValue, static (o) => (({className})o)._{propertyName}, static (o, v) => (({className})o)._{propertyName} = v);
+            }}";
                         }
 
                         generatedCode +=
     $@"
         }}
 ";
+                        // Generate partial method hooks for property
+                        if (property.HasGetter)
+                        {
+                            generatedCode +=
+    $@"
+        partial void OnGet{propertyName}(ref {fullyQualifiedName} value);
+";
+                        }
+
+                        if (property.HasSetter || property.HasInit)
+                        {
+                            generatedCode +=
+    $@"
+        partial void OnSet{propertyName}(ref {fullyQualifiedName} value);
+";
+                        }
                     }
 
                     foreach (var method in cls.Methods)
