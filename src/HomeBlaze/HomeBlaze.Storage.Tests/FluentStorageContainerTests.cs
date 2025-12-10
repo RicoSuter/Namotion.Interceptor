@@ -40,7 +40,7 @@ public class FluentStorageContainerTests
         var storage = new FluentStorageContainer(typeRegistry, serializer);
 
         // Act
-        storage.ConnectionString = @"C:\Users\test\Documents\Storage";
+        storage.ConnectionString = @"Foo/Bar/Storage";
 
         // Assert
         Assert.Equal("Storage", storage.Title);
