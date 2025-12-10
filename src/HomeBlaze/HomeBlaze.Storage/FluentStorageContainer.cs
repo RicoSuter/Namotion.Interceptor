@@ -3,11 +3,10 @@ using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Storage;
-using HomeBlaze.Core;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using MudBlazor;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
@@ -71,7 +70,7 @@ public partial class FluentStorageContainer :
         ? "Storage"
         : Path.GetFileName(ConnectionString.TrimEnd('/', '\\'));
 
-    public string Icon => Icons.Material.Filled.Storage;
+    public string Icon => "Storage";
 
     public FluentStorageContainer(
         SubjectTypeRegistry typeRegistry,
@@ -97,16 +96,16 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// IConfigurableSubject implementation - called after configuration properties are updated.
     /// </summary>
-    public Task ApplyConfigurationAsync(CancellationToken ct = default)
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         // Reconnect if configuration changed
-        return ConnectAsync(ct);
+        return ConnectAsync(cancellationToken);
     }
 
     /// <summary>
     /// Initializes the storage client based on configuration.
     /// </summary>
-    public async Task ConnectAsync(CancellationToken ct = default)
+    public async Task ConnectAsync(CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(ConnectionString))
             throw new InvalidOperationException("ConnectionString is not configured");
@@ -125,7 +124,7 @@ public partial class FluentStorageContainer :
             Status = StorageStatus.Connected;
             _logger?.LogInformation("Connected to storage: {Type} at {Path}", StorageType, ConnectionString);
 
-            await ScanAsync(ct);
+            await ScanAsync(cancellationToken);
 
             if (EnableFileWatching && StorageType.ToLowerInvariant() is "disk" or "filesystem")
             {
@@ -143,14 +142,14 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Scans the storage and builds the subject hierarchy.
     /// </summary>
-    private async Task ScanAsync(CancellationToken ct = default)
+    private async Task ScanAsync(CancellationToken cancellationToken)
     {
         if (_client == null)
             throw new InvalidOperationException("Storage not connected");
 
         _logger?.LogInformation("Scanning storage...");
 
-        var blobs = await _client.ListAsync(recurse: true, cancellationToken: ct);
+        var blobs = await _client.ListAsync(recurse: true, cancellationToken: cancellationToken);
 
         _pathRegistry.Clear();
         var children = new Dictionary<string, IInterceptorSubject>();
@@ -158,11 +157,11 @@ public partial class FluentStorageContainer :
 
         foreach (var blob in blobs.Where(b => !b.IsFolder))
         {
-            ct.ThrowIfCancellationRequested();
+            cancellationToken.ThrowIfCancellationRequested();
 
             try
             {
-                var subject = await _subjectFactory.CreateFromBlobAsync(_client, this, blob, ct);
+                var subject = await _subjectFactory.CreateFromBlobAsync(_client, this, blob, cancellationToken);
                 if (subject != null)
                 {
                     _hierarchyManager.PlaceInHierarchy(blob.FullPath, subject, children, context, this);
@@ -172,7 +171,7 @@ public partial class FluentStorageContainer :
                     {
                         try
                         {
-                            var content = await _client.ReadTextAsync(blob.FullPath, cancellationToken: ct);
+                            var content = await _client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
                             _pathRegistry.UpdateHash(blob.FullPath, StoragePathRegistry.ComputeHash(content));
                         }
                         catch { /* Ignore hash computation errors */ }
@@ -326,7 +325,7 @@ public partial class FluentStorageContainer :
         }
         else if (existingSubject is IConfigurableSubject configurable)
         {
-            await configurable.ApplyConfigurationAsync();
+            await configurable.ApplyConfigurationAsync(CancellationToken.None);
         }
 
         _logger?.LogInformation("Reloaded: {Path}", relativePath);
@@ -355,7 +354,7 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// IConfigurationWriter - called by ConfigurationManager background thread.
     /// </summary>
-    public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken ct)
+    public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         if (_client == null)
             return false;
@@ -369,7 +368,7 @@ public partial class FluentStorageContainer :
         var json = _subjectFactory.Serialize(subject);
         _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
 
-        await _client.WriteTextAsync(path, json, cancellationToken: ct);
+        await _client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
 
         _logger?.LogDebug("Saved subject to storage: {Path}", path);
         return true;
@@ -378,7 +377,7 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Adds a new subject to storage at the specified path.
     /// </summary>
-    public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken ct = default)
+    public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         if (_client == null)
             throw new InvalidOperationException("Storage not connected");
@@ -389,7 +388,7 @@ public partial class FluentStorageContainer :
         var json = _subjectFactory.Serialize(subject);
         _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
 
-        await _client.WriteTextAsync(path, json, cancellationToken: ct);
+        await _client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
 
         var context = ((IInterceptorSubject)this).Context;
         var children = new Dictionary<string, IInterceptorSubject>(Children);
@@ -405,7 +404,7 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Deletes a subject from storage.
     /// </summary>
-    public async Task DeleteSubjectAsync(string path, CancellationToken ct = default)
+    public async Task DeleteSubjectAsync(string path, CancellationToken cancellationToken)
     {
         if (_client == null)
             throw new InvalidOperationException("Storage not connected");
@@ -413,7 +412,7 @@ public partial class FluentStorageContainer :
         var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
-        await _client.DeleteAsync(path, cancellationToken: ct);
+        await _client.DeleteAsync(path, cancellationToken: cancellationToken);
         _pathRegistry.Unregister(path);
 
         _logger?.LogInformation("Deleted from storage: {Path}", path);
@@ -422,13 +421,13 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// IStorageContainer - Gets metadata about a blob.
     /// </summary>
-    public async Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken ct = default)
+    public async Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken cancellationToken)
     {
         if (_client == null)
             throw new InvalidOperationException("Storage not connected");
 
         var blobs = await _client.ListAsync(folderPath: Path.GetDirectoryName(path)?.Replace('\\', '/'),
-            recurse: false, cancellationToken: ct);
+            recurse: false, cancellationToken: cancellationToken);
         var blob = blobs.FirstOrDefault(b =>
             b.FullPath.Equals(path, StringComparison.OrdinalIgnoreCase) ||
             b.FullPath.TrimStart('/').Equals(path.TrimStart('/'), StringComparison.OrdinalIgnoreCase));
@@ -442,18 +441,18 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// IStorageContainer - Reads a blob from storage.
     /// </summary>
-    public async Task<Stream> ReadBlobAsync(string path, CancellationToken ct = default)
+    public async Task<Stream> ReadBlobAsync(string path, CancellationToken cancellationToken)
     {
         if (_client == null)
             throw new InvalidOperationException("Storage not connected");
 
-        return await _client.OpenReadAsync(path, cancellationToken: ct);
+        return await _client.OpenReadAsync(path, cancellationToken: cancellationToken);
     }
 
     /// <summary>
     /// IStorageContainer - Writes a blob to storage.
     /// </summary>
-    public async Task WriteBlobAsync(string path, Stream content, CancellationToken ct = default)
+    public async Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken)
     {
         if (_client == null)
             throw new InvalidOperationException("Storage not connected");
@@ -461,14 +460,14 @@ public partial class FluentStorageContainer :
         var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
-        await _client.WriteAsync(path, content, append: false, cancellationToken: ct);
+        await _client.WriteAsync(path, content, append: false, cancellationToken: cancellationToken);
         _logger?.LogDebug("Wrote blob to storage: {Path}", path);
     }
 
     /// <summary>
     /// IStorageContainer - Deletes a blob from storage.
     /// </summary>
-    public async Task DeleteBlobAsync(string path, CancellationToken ct = default)
+    public async Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
     {
         if (_client == null)
             throw new InvalidOperationException("Storage not connected");
@@ -476,7 +475,7 @@ public partial class FluentStorageContainer :
         var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
-        await _client.DeleteAsync(path, cancellationToken: ct);
+        await _client.DeleteAsync(path, cancellationToken: cancellationToken);
         _logger?.LogDebug("Deleted blob from storage: {Path}", path);
     }
 

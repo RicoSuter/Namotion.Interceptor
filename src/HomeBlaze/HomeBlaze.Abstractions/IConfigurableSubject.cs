@@ -9,5 +9,5 @@ public interface IConfigurableSubject
     /// Called after configuration properties have been updated from storage.
     /// Implementations should apply any side effects from the new configuration.
     /// </summary>
-    Task ApplyConfigurationAsync(CancellationToken ct = default);
+    Task ApplyConfigurationAsync(CancellationToken cancellationToken);
 }

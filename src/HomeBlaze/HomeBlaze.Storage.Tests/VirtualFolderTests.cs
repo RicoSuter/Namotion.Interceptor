@@ -1,4 +1,4 @@
-﻿using HomeBlaze.Core;
+﻿using HomeBlaze.Services;
 using Moq;
 using Namotion.Interceptor;
 
@@ -60,7 +60,6 @@ public class VirtualFolderTests
         var folder = new VirtualFolder(context, storage, "test/");
 
         // Assert
-        Assert.NotNull(folder.Icon);
-        Assert.True(folder.Icon.Contains("<path") || folder.Icon.Contains("<g>"), "Icon should be a MudBlazor SVG path string");
+        Assert.Equal("Folder", folder.Icon);
     }
 }

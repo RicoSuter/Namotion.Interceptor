@@ -1,7 +1,7 @@
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Storage;
-using HomeBlaze.Core;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -112,11 +112,11 @@ internal sealed class FileSubjectFactory
         IBlobStorage client,
         MarkdownFile markdownFile,
         Blob blob,
-        CancellationToken ct)
+        CancellationToken cancellationToken)
     {
         try
         {
-            var content = await client.ReadTextAsync(blob.FullPath, cancellationToken: ct);
+            var content = await client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
             markdownFile.Content = content;
         }
         catch (Exception ex)

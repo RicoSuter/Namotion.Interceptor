@@ -251,8 +251,7 @@ public class MarkdownFileTests
     {
         var markdown = CreateMarkdownFile("test.md");
 
-        Assert.NotNull(markdown.Icon);
-        Assert.Contains("path", markdown.Icon); // MudBlazor icons contain SVG path data
+        Assert.Equal("Article", markdown.Icon);
     }
 
     [Fact]

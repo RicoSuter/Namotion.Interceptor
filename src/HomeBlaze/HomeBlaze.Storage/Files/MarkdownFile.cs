@@ -3,7 +3,6 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Pages;
 using HomeBlaze.Abstractions.Storage;
 using HomeBlaze.Storage.Internal;
-using MudBlazor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Files;
@@ -24,7 +23,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public string Name { get; }
 
     public string? Title => GetFrontmatter()?.Title ?? FormatFilename(Name);
-    public string? Icon => GetFrontmatter()?.Icon ?? Icons.Material.Filled.Article;
+    public string? Icon => GetFrontmatter()?.Icon ?? "Article";
     public string? NavigationTitle => GetFrontmatter()?.NavTitle;
     public int? NavigationOrder => GetFrontmatter()?.Order;
 
@@ -89,7 +88,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
-    public async Task RefreshAsync(CancellationToken cancellationToken = default)
+    public async Task RefreshAsync(CancellationToken cancellationToken)
     {
         // Update metadata using storage abstraction
         var metadata = await Storage.GetBlobMetadataAsync(FullPath, cancellationToken);
@@ -114,10 +113,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
-    public Task<Stream> ReadAsync(CancellationToken cancellationToken = default)
+    public Task<Stream> ReadAsync(CancellationToken cancellationToken)
         => Storage.ReadBlobAsync(FullPath, cancellationToken);
 
-    public Task WriteAsync(Stream content, CancellationToken cancellationToken = default)
+    public Task WriteAsync(Stream content, CancellationToken cancellationToken)
         => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
 
     private MarkdownFrontmatter? GetFrontmatter()

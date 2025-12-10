@@ -48,7 +48,6 @@ public class JsonFileTests
         var file = new HomeBlaze.Storage.Files.JsonFile(storage, "test.json");
 
         // Assert
-        Assert.NotNull(file.Icon);
-        Assert.True(file.Icon.Contains("<path") || file.Icon.Contains("<g>"), "Icon should be a MudBlazor SVG path string");
+        Assert.Equal("DataObject", file.Icon);
     }
 }

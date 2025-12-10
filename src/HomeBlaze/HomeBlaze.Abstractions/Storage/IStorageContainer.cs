@@ -18,20 +18,20 @@ public interface IStorageContainer
     /// <summary>
     /// Gets metadata about a blob (size, last modified, etc.).
     /// </summary>
-    Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken ct = default);
+    Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken cancellationToken);
 
     /// <summary>
     /// Reads a blob from storage.
     /// </summary>
-    Task<Stream> ReadBlobAsync(string path, CancellationToken ct = default);
+    Task<Stream> ReadBlobAsync(string path, CancellationToken cancellationToken);
 
     /// <summary>
     /// Writes a blob to storage.
     /// </summary>
-    Task WriteBlobAsync(string path, Stream content, CancellationToken ct = default);
+    Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken);
 
     /// <summary>
     /// Deletes a blob from storage.
     /// </summary>
-    Task DeleteBlobAsync(string path, CancellationToken ct = default);
+    Task DeleteBlobAsync(string path, CancellationToken cancellationToken);
 }

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Razor">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net9.0</TargetFramework>
@@ -7,25 +7,19 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <FrameworkReference Include="Microsoft.AspNetCore.App" />
-        <PackageReference Include="MudBlazor" Version="8.*" />
-        <PackageReference Include="YamlDotNet" Version="16.*" />
+        <InternalsVisibleTo Include="HomeBlaze.Storage.Tests" />
+        <InternalsVisibleTo Include="HomeBlaze.Storage.Blazor" />
     </ItemGroup>
 
     <ItemGroup>
-        <InternalsVisibleTo Include="HomeBlaze.Storage.Tests" />
-    </ItemGroup>
-    
-    <ItemGroup>
-        <ProjectReference Include="..\..\Namotion.Interceptor.Blazor\Namotion.Interceptor.Blazor.csproj" />
         <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
-        <ProjectReference Include="..\HomeBlaze.Core\HomeBlaze.Core.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Hosting\Namotion.Interceptor.Hosting.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
-        <PackageReference Include="BlazorMonaco" Version="3.4.0" />
         <PackageReference Include="FluentStorage" Version="5.*" />
         <PackageReference Include="Markdig" Version="0.*" />
+        <PackageReference Include="YamlDotNet" Version="16.*" />
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.*" />
     </ItemGroup>
 
