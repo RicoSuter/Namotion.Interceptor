@@ -2,7 +2,9 @@ using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Storage;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Navigation;
 using HomeBlaze.Storage.Files;
+using HomeBlaze.Widgets.Internal;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
@@ -16,15 +18,19 @@ internal sealed class FileSubjectFactory
 {
     private readonly SubjectTypeRegistry _typeRegistry;
     private readonly ConfigurableSubjectSerializer _serializer;
+    private readonly MarkdownContentParser _markdownParser;
     private readonly ILogger? _logger;
 
     public FileSubjectFactory(
         SubjectTypeRegistry typeRegistry,
         ConfigurableSubjectSerializer serializer,
+        SubjectPathResolver pathResolver,
+        RootManager rootManager,
         ILogger? logger = null)
     {
         _typeRegistry = typeRegistry;
         _serializer = serializer;
+        _markdownParser = new MarkdownContentParser(serializer, pathResolver, rootManager);
         _logger = logger;
     }
 
@@ -114,6 +120,12 @@ internal sealed class FileSubjectFactory
     {
         try
         {
+            // Special case for MarkdownFile - needs parser injection
+            if (type == typeof(MarkdownFile))
+            {
+                return new MarkdownFile(storage, blobPath, _markdownParser);
+            }
+
             // Try constructor with (IStorageContainer, string)
             var ctor = type.GetConstructor([typeof(IStorageContainer), typeof(string)]);
             if (ctor != null)

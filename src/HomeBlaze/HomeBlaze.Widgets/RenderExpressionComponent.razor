@@ -1,0 +1,15 @@
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Abstractions.Components
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(RenderExpression))]
+@implements ISubjectComponent
+
+@Expression?.Value
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private RenderExpression? Expression => Subject as RenderExpression;
+}
