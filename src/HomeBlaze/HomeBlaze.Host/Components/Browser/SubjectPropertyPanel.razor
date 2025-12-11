@@ -23,38 +23,31 @@
             @GetSubjectTitle()
         </h1>
     </MudListSubheader>
-
-    <div style="flex: 1; overflow-y: auto; overflow-x: hidden;">
-        <MudListSubheader Style="word-break: break-word;">
-            @* Action Buttons *@
-            @if (CanEdit())
-            {
-                <MudIconButton OnClick="@OpenEditDialog"
-                               Icon="@Icons.Material.Filled.Edit"
-                               Variant="Variant.Filled"
-                               Color="Color.Primary"
-                               Size="Size.Small"
-                               Class="mr-2" />
-            }
-            <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
-                           Icon="@Icons.Material.Filled.Delete"
+    <MudListSubheader Style="word-break: break-word;">
+        @* Action Buttons *@
+        @if (CanEdit())
+        {
+            <MudIconButton OnClick="@OpenEditDialog"
+                           Icon="@Icons.Material.Filled.Edit"
                            Variant="Variant.Filled"
-                           Color="Color.Error"
+                           Color="Color.Primary"
                            Size="Size.Small"
                            Class="mr-2" />
+        }
+        <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
+                       Icon="@Icons.Material.Filled.Delete"
+                       Variant="Variant.Filled"
+                       Color="Color.Error"
+                       Size="Size.Small"
+                       Class="mr-2" />
+    </MudListSubheader>
 
-            <br />
-            <br />
-
+    <div style="max-height: calc(100vh - 300px); overflow-y: auto; overflow-x: hidden;">
+        <MudListSubheader Style="word-break: break-word;">
             @* Primitive Properties *@
             @foreach (var prop in GetPrimitiveProperties())
             {
                 @RenderProperty(prop, 0)
-            }
-
-            @if (GetPrimitiveProperties().Any())
-            {
-                <br />
             }
         </MudListSubheader>
 
@@ -129,7 +122,6 @@
         }
 
         @* Details Accordion *@
-        <br />
         <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Style="overflow: hidden;">
             <MudExpansionPanel Expanded="false" Gutters="false" Class="px-4">
                 <TitleContent>
