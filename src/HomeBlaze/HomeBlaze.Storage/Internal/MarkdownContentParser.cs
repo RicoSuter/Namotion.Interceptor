@@ -8,6 +8,7 @@ using HomeBlaze.Services;
 using HomeBlaze.Services.Navigation;
 using HomeBlaze.Storage.Files;
 using Markdig;
+using Markdig.Renderers;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Internal;
@@ -30,10 +31,104 @@ public sealed partial class MarkdownContentParser
     
     // TODO: Review class
 
-    // Shared pipeline - single instance
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
         .Build();
+
+    /// <summary>
+    /// Converts markdown to HTML with relative link rewriting.
+    /// </summary>
+    private static string ToHtml(string markdown, string basePath)
+    {
+        var document = Markdown.Parse(markdown, Pipeline);
+
+        using var writer = new StringWriter();
+        var renderer = new HtmlRenderer(writer)
+        {
+            LinkRewriter = url => RewriteLink(url, basePath)
+        };
+        Pipeline.Setup(renderer);
+        renderer.Render(document);
+        writer.Flush();
+
+        return writer.ToString();
+    }
+
+    /// <summary>
+    /// Rewrites relative .md links to /pages/... route format with Children segments.
+    /// </summary>
+    private static string RewriteLink(string url, string basePath)
+    {
+        // Skip absolute URLs and anchors
+        if (string.IsNullOrEmpty(url) ||
+            url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+            url.StartsWith("#") ||
+            url.StartsWith("/"))
+        {
+            return url;
+        }
+
+        // Only process .md links
+        if (!url.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+        {
+            return url;
+        }
+
+        // Resolve relative path against base path
+        var resolvedPath = ResolvePath(basePath, url);
+
+        // Convert to /pages/... format with Children segments
+        // e.g., "foo/bar/baz.md" => "/pages/Children/foo/Children/bar/Children/baz.md"
+        var segments = resolvedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var result = new StringBuilder("/pages");
+
+        foreach (var segment in segments)
+        {
+            result.Append("/Children/");
+            result.Append(segment);
+        }
+
+        return result.ToString();
+    }
+
+    /// <summary>
+    /// Resolves a relative path against a base path, handling .. navigation.
+    /// </summary>
+    private static string ResolvePath(string basePath, string relativePath)
+    {
+        // Normalize to forward slashes
+        basePath = basePath.Replace('\\', '/').TrimStart('/');
+        relativePath = relativePath.Replace('\\', '/');
+
+        // Remove ./ prefix
+        if (relativePath.StartsWith("./"))
+        {
+            relativePath = relativePath[2..];
+        }
+
+        // Split base path into segments
+        var baseSegments = basePath.Split('/', StringSplitOptions.RemoveEmptyEntries).ToList();
+
+        // Process relative path
+        var relativeSegments = relativePath.Split('/');
+        foreach (var segment in relativeSegments)
+        {
+            if (segment == "..")
+            {
+                if (baseSegments.Count > 0)
+                {
+                    baseSegments.RemoveAt(baseSegments.Count - 1);
+                }
+            }
+            else if (segment != "." && !string.IsNullOrEmpty(segment))
+            {
+                baseSegments.Add(segment);
+            }
+        }
+
+        return string.Join("/", baseSegments);
+    }
 
     public MarkdownContentParser(
         ConfigurableSubjectSerializer serializer,
@@ -69,7 +164,9 @@ public sealed partial class MarkdownContentParser
         var contentWithoutFrontmatter = FrontmatterParser.GetContentAfterFrontmatter(content);
         var (markdownWithMarkers, subjectBlocks) = ExtractSubjectBlocks(contentWithoutFrontmatter);
 
-        var html = Markdown.ToHtml(markdownWithMarkers, Pipeline);
+        // Get directory path for relative link resolution
+        var basePath = Path.GetDirectoryName(parent.FullPath)?.Replace('\\', '/') ?? string.Empty;
+        var html = ToHtml(markdownWithMarkers, basePath);
         var segments = ParseHtmlSegments(html, subjectBlocks);
         return await ReconcileChildrenAsync(segments, parent, existingChildren, cancellationToken);
     }

@@ -19,7 +19,7 @@ HomeBlaze v2 is a complete rewrite that treats your file system as the source of
 | **Live Tracking** | Property changes propagate instantly to the UI |
 | **Auto-Persistence** | `[Configuration]` properties save automatically |
 | **File Watching** | External file edits sync in real-time |
-| **Protocol Exposure** | Access via OPC UA and MQTT |
+| **Protocol Exposure** | *Planned:* OPC UA and MQTT integration |
 | **Markdown Docs** | Write docs in markdown, view them beautifully |
 
 ---
@@ -50,7 +50,7 @@ root.json          -->         FluentStorageContainer
 
 ## Quick Start
 
-> **Try the Demo!** The `demo/` folder includes 5 pre-configured motors. Navigate to the **Browser** to see them live, or read the [Demo Setup Guide](demo/setup.md).
+> **Try the Demo!** The `demo/` folder includes 5 pre-configured motors. Navigate to the **Browser** to see them live, or read the [Demo Setup Guide](demo/Setup.md).
 
 ### Step 1: Configure Storage
 
@@ -58,21 +58,21 @@ Edit `root.json` to point to your data folder:
 
 ```json
 {
-    "Type": "HomeBlaze.Storage.FluentStorageContainer",
-    "StorageType": "disk",
-    "ConnectionString": "./Data"
+    "type": "HomeBlaze.Storage.FluentStorageContainer",
+    "storageType": "disk",
+    "connectionString": "./Data"
 }
 ```
 
 ### Step 2: Add Subjects
 
-Create JSON files with a `Type` discriminator:
+Create JSON files with a `type` discriminator:
 
 ```json
 {
-    "Type": "HomeBlaze.Subjects.Motor",
-    "Name": "Cooling Fan",
-    "TargetSpeed": 1500
+    "type": "HomeBlaze.Samples.Motor",
+    "name": "Cooling Fan",
+    "targetSpeed": 1500
 }
 ```
 
@@ -86,10 +86,10 @@ Create markdown files anywhere in the data folder. They'll appear in the navigat
 
 | Extension | Subject Type | Description |
 |-----------|--------------|-------------|
-| `.json` | *Polymorphic* | Deserialized via `Type` property |
+| `.json` | *Polymorphic* | Deserialized via `type` property |
 | `.md` | `MarkdownFile` | Rendered markdown with frontmatter |
 | `.markdown` | `MarkdownFile` | Alternative extension |
-| *folder* | `Folder` | Container for nested subjects |
+| *folder* | `VirtualFolder` | Container for nested subjects |
 
 ---
 
@@ -152,6 +152,7 @@ Paths use familiar C# syntax:
 > ---
 > title: My Page
 > navTitle: Short Name
+> icon: Article
 > order: 1
 > ---
 > ```
@@ -183,7 +184,7 @@ The `demo/` folder contains a working example with 5 motors simulating a small f
 | Water Pump | 2,400 RPM | Water circulation |
 | Compressor | 3,000 RPM | Compressed air |
 
-👉 **[View Demo Setup Guide](demo/setup.md)** for detailed exploration steps.
+👉 **[View Demo Setup Guide](demo/Setup.md)** for detailed exploration steps.
 
 ## What's Next?
 
@@ -191,7 +192,6 @@ The `demo/` folder contains a working example with 5 motors simulating a small f
 2. 📖 **Read Documentation** - Browse the [docs folder](docs/) for in-depth guides
 3. 🔧 **Edit a Motor** - Click any motor in the Browser and change its target speed
 4. 📝 **External Edits** - Try editing `demo/cooling-fan.json` externally and watch it update!
-5. 🌐 **Protocol Access** - Connect via OPC UA (`opc.tcp://localhost:4840`) or MQTT
 
 ---
 
