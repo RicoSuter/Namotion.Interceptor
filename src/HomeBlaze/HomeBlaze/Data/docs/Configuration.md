@@ -12,14 +12,15 @@ The `root.json` file defines the storage location:
 
 ```json
 {
-    "Type": "HomeBlaze.Storage.FluentStorageContainer",
-    "Path": "./Data"
+    "type": "HomeBlaze.Storage.FluentStorageContainer",
+    "storageType": "disk",
+    "connectionString": "./Data"
 }
 ```
 
 ## Adding Subjects
 
-Create JSON files with a `Type` discriminator to add subjects.
+Create JSON files with a `type` discriminator to add subjects.
 
 ### Example: Adding a Motor
 

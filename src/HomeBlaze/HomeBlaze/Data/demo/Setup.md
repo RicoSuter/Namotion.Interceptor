@@ -102,11 +102,11 @@ Try editing a JSON file externally:
 3. See all 5 motors with live state updates
 4. Use filters to show only running motors
 
-### Scenario 3: Protocol Exposure
-The motors are automatically exposed via:
-- **OPC UA** - Browse nodes at `opc.tcp://localhost:4840`
-- **MQTT** - Subscribe to `homeblaze/demo/+/state`
-- **GraphQL** - Query at `/graphql`
+### Scenario 3: Protocol Exposure (Coming Soon)
+Protocol exposure is planned for future releases:
+- **OPC UA** - Browse nodes via OPC UA server
+- **MQTT** - Subscribe to state changes
+- **GraphQL** - Query subjects via GraphQL API
 
 ## Adding More Motors
 

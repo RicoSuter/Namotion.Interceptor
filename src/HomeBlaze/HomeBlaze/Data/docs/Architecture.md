@@ -23,7 +23,7 @@ Arrows point from implementation to what it depends on (impl -> base):
    HomeBlaze.Services                    HomeBlaze.Storage
           ^                                      ^
           |                                      |
-   HomeBlaze.Services.UI               HomeBlaze.Storage.Blazor
+   HomeBlaze.Host.Services             HomeBlaze.Storage.Blazor
           ^                                      ^
           +----------+    +----------------------+
                      |    |
@@ -39,7 +39,7 @@ Arrows point from implementation to what it depends on (impl -> base):
 |---------|-----|---------|
 | `HomeBlaze.Abstractions` | Microsoft.NET.Sdk | Pure interfaces, attributes, enums |
 | `HomeBlaze.Services` | Microsoft.NET.Sdk | Backend domain services (no UI) |
-| `HomeBlaze.Services.UI` | Microsoft.NET.Sdk | UI-agnostic services (no MudBlazor) |
+| `HomeBlaze.Host.Services` | Microsoft.NET.Sdk | UI-agnostic services (no MudBlazor) |
 | `HomeBlaze.Storage` | Microsoft.NET.Sdk | File storage domain logic (no UI) |
 | `HomeBlaze.Storage.Blazor` | Microsoft.NET.Sdk.Razor | Storage UI (Monaco editor, icons) |
 | `HomeBlaze.Host` | Microsoft.NET.Sdk.Razor | Shared Blazor components (MudBlazor) |
@@ -50,9 +50,8 @@ Arrows point from implementation to what it depends on (impl -> base):
 | Project | Tests For |
 |---------|-----------|
 | `HomeBlaze.Services.Tests` | HomeBlaze.Services |
-| `HomeBlaze.Services.UI.Tests` | HomeBlaze.Services.UI |
+| `HomeBlaze.Host.Services.Tests` | HomeBlaze.Host.Services |
 | `HomeBlaze.Storage.Tests` | HomeBlaze.Storage |
-| `HomeBlaze.Host.Tests` | HomeBlaze.Host (optional, integration) |
 
 ---
 
@@ -96,7 +95,7 @@ Arrows point from implementation to what it depends on (impl -> base):
 
 ---
 
-### HomeBlaze.Services.UI
+### HomeBlaze.Host.Services
 
 **Purpose**: Services that support UI rendering but don't depend on specific UI frameworks like MudBlazor.
 
@@ -206,35 +205,23 @@ Each project provides an extension method to register its services in DI:
 ### Registration Methods
 
 ```csharp
-// HomeBlaze.Services
+// HomeBlaze.Services - Core backend services
 services.AddHomeBlazeServices();
 
-// HomeBlaze.Services.UI
-services.AddHomeBlazeUIServices();  // also calls AddHomeBlazeServices()
+// HomeBlaze.Host.Services - UI services (also calls AddHomeBlazeServices)
+services.AddHomeBlazeHostServices();
 
-// HomeBlaze.Storage
-services.AddHomeBlazeStorage();
-
-// HomeBlaze.Storage.Blazor
-services.AddHomeBlazeStorageBlazor();  // also calls AddHomeBlazeStorage()
-
-// HomeBlaze.Host
-services.AddHomeBlazeBlazor();  // also calls AddHomeBlazeUIServices(), AddHomeBlazeStorageBlazor()
-
-// Convenience: Register everything
-services.AddHomeBlaze();  // calls AddHomeBlazeBlazor() + all transitive dependencies
+// HomeBlaze.Host - Full Blazor host (also calls AddHomeBlazeHostServices)
+services.AddHomeBlazeHost();
 ```
 
 ### What Each Method Registers
 
 | Method | Services |
 |--------|----------|
-| `AddHomeBlazeServices()` | `RootManager`, `SubjectContextFactory`, `SubjectTypeRegistry`, `ConfigurableSubjectSerializer` |
-| `AddHomeBlazeUIServices()` | `SubjectComponentRegistry`, `NavigationItemResolver`, `RoutePathResolver`, `DeveloperModeService` |
-| `AddHomeBlazeStorage()` | `StorageHierarchyManager`, `FileSubjectFactory`, `StoragePathRegistry` |
-| `AddHomeBlazeStorageBlazor()` | Storage component registrations |
-| `AddHomeBlazeBlazor()` | All UI component registrations |
-| `AddHomeBlaze()` | Everything above |
+| `AddHomeBlazeServices()` | `TypeProvider`, `SubjectTypeRegistry`, `ConfigurableSubjectSerializer`, `SubjectPathResolver`, `RootManager`, `IInterceptorSubjectContext` |
+| `AddHomeBlazeHostServices()` | `SubjectComponentRegistry`, `RoutePathResolver`, `NavigationItemResolver`, `DeveloperModeService` |
+| `AddHomeBlazeHost()` | MudBlazor services + all above |
 
 ---
 
@@ -250,7 +237,7 @@ Reference: HomeBlaze.Services + HomeBlaze.Storage
 
 ### Scenario 2: Custom UI Framework (MAUI, WPF, Avalonia)
 ```
-Reference: HomeBlaze.Services.UI + HomeBlaze.Storage
+Reference: HomeBlaze.Host.Services + HomeBlaze.Storage
 ```
 - Domain logic + navigation/display helpers
 - Use navigation tree and display extensions
