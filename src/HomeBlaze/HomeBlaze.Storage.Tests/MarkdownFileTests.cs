@@ -1,7 +1,10 @@
 using System.Text;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Navigation;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Widgets;
+using HomeBlaze.Widgets.Internal;
 using Moq;
 
 namespace HomeBlaze.Storage.Tests;
@@ -177,7 +180,7 @@ public class MarkdownFileTests
             """;
         await WriteFileAsync(storage, "test.md", content);
 
-        var markdown = new MarkdownFile(storage, "test.md");
+        var markdown = CreateMarkdownFile(storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Frontmatter Title", markdown.Title);
@@ -189,7 +192,7 @@ public class MarkdownFileTests
         var storage = await CreateInMemoryStorageAsync();
         await WriteFileAsync(storage, "my-test-document.md", "# Content");
 
-        var markdown = new MarkdownFile(storage, "my-test-document.md");
+        var markdown = CreateMarkdownFile(storage, "my-test-document.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("My Test Document", markdown.Title);
@@ -208,7 +211,7 @@ public class MarkdownFileTests
             """;
         await WriteFileAsync(storage, "test.md", content);
 
-        var markdown = new MarkdownFile(storage, "test.md");
+        var markdown = CreateMarkdownFile(storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Nav Title", markdown.NavigationTitle);
@@ -227,7 +230,7 @@ public class MarkdownFileTests
             """;
         await WriteFileAsync(storage, "test.md", content);
 
-        var markdown = new MarkdownFile(storage, "test.md");
+        var markdown = CreateMarkdownFile(storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal(3, markdown.NavigationOrder);
@@ -246,7 +249,7 @@ public class MarkdownFileTests
             """;
         await WriteFileAsync(storage, "test.md", content);
 
-        var markdown = new MarkdownFile(storage, "test.md");
+        var markdown = CreateMarkdownFile(storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("mdi-custom", markdown.Icon);
@@ -258,7 +261,7 @@ public class MarkdownFileTests
         var storage = await CreateInMemoryStorageAsync();
         await WriteFileAsync(storage, "test.md", "# Content");
 
-        var markdown = new MarkdownFile(storage, "test.md");
+        var markdown = CreateMarkdownFile(storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Article", markdown.Icon);
@@ -276,7 +279,7 @@ public class MarkdownFileTests
             """;
         await WriteFileAsync(storage, "test.md", content1);
 
-        var markdown = new MarkdownFile(storage, "test.md");
+        var markdown = CreateMarkdownFile(storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
         Assert.Equal("First Title", markdown.Title);
 
@@ -298,10 +301,24 @@ public class MarkdownFileTests
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
         var mockServiceProvider = new Mock<IServiceProvider>();
         var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
-        var storage = new FluentStorageContainer(typeRegistry, serializer);
+        var pathResolver = new SubjectPathResolver();
+        var rootManager = new RootManager(typeRegistry, serializer, null!);
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
         storage.StorageType = "inmemory";
         await storage.ConnectAsync(CancellationToken.None);
         return storage;
+    }
+
+    private static MarkdownFile CreateMarkdownFile(FluentStorageContainer storage, string path)
+    {
+        var typeProvider = new TypeProvider();
+        var typeRegistry = new SubjectTypeRegistry(typeProvider);
+        var mockServiceProvider = new Mock<IServiceProvider>();
+        var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
+        var pathResolver = new SubjectPathResolver();
+        var rootManager = new RootManager(typeRegistry, serializer, null!);
+        var parser = new MarkdownContentParser(serializer, pathResolver, rootManager);
+        return new MarkdownFile(storage, path, parser);
     }
 
     private static async Task WriteFileAsync(FluentStorageContainer storage, string path, string content)

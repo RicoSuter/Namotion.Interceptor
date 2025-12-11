@@ -1,6 +1,6 @@
 using YamlDotNet.Serialization;
 
-namespace HomeBlaze.Storage.Internal;
+namespace HomeBlaze.Widgets;
 
 /// <summary>
 /// Parses YAML frontmatter from markdown content.

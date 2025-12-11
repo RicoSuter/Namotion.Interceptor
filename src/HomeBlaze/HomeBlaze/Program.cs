@@ -4,6 +4,7 @@ using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor.Files;
+using HomeBlaze.Widgets;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,6 +24,7 @@ var typeProvider = app.Services.GetRequiredService<TypeProvider>();
 typeProvider.AddAssemblies(
     typeof(FluentStorageContainer).Assembly,      // HomeBlaze.Storage
     typeof(MarkdownFilePageComponent).Assembly,   // HomeBlaze.Storage.Blazor
+    typeof(RenderExpressionComponent).Assembly,   // HomeBlaze.Widgets
     typeof(Motor).Assembly,                       // HomeBlaze.Samples
     typeof(App).Assembly);                        // HomeBlaze UI components
 

@@ -4,6 +4,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Storage;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Navigation;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -77,9 +78,11 @@ public partial class FluentStorageContainer :
     public FluentStorageContainer(
         SubjectTypeRegistry typeRegistry,
         ConfigurableSubjectSerializer serializer,
+        SubjectPathResolver pathResolver,
+        RootManager rootManager,
         ILogger<FluentStorageContainer>? logger = null)
     {
-        _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, logger);
+        _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, pathResolver, rootManager, logger);
         _hierarchyManager = new StorageHierarchyManager(logger);
         _serializer = serializer;
         _logger = logger;

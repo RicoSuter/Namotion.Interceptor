@@ -1,15 +1,17 @@
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Components
+@using HomeBlaze.Host.Services.Components
 @using HomeBlaze.Storage
 @using HomeBlaze.Storage.Files
-@using HomeBlaze.Storage.Internal
-@using Markdig
+@using HomeBlaze.Widgets
 @using MudBlazor
 @using Namotion.Interceptor
 
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
 
 @implements ISubjectComponent
+
+@inject SubjectComponentRegistry ComponentRegistry
 
 <div class="markdown-content">
     @if (IsLoading)
@@ -18,7 +20,29 @@
     }
     else
     {
-        @((MarkupString)HtmlContent)
+        @foreach (var child in File?.Children.Values ?? [])
+        {
+            if (child is HtmlSegment html)
+            {
+                @((MarkupString)html.Html)
+            }
+            else
+            {
+                var widgetType = ComponentRegistry.GetComponent(
+                    child.GetType(), SubjectComponentType.Widget)?.ComponentType;
+                if (widgetType != null)
+                {
+                    <DynamicComponent Type="widgetType"
+                        Parameters="@(new Dictionary<string, object?> { ["Subject"] = child })" />
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="my-2">
+                        No widget registered for type: @child.GetType().Name
+                    </MudAlert>
+                }
+            }
+        }
     }
 </div>
 
@@ -47,18 +71,4 @@
     private MarkdownFile? File => Subject as MarkdownFile;
 
     private bool IsLoading => File?.Content is null;
-
-    private string HtmlContent
-    {
-        get
-        {
-            var json = File?.Content;
-            var content = json is not null ? FrontmatterParser.GetContentAfterFrontmatter(json) : "Loading...";
-            return Markdown.ToHtml(content, Pipeline);
-        }
-    }
-
-    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .Build();
 }

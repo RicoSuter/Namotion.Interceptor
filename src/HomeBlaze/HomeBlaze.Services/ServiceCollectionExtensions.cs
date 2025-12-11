@@ -1,3 +1,4 @@
+using HomeBlaze.Services.Navigation;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 
@@ -17,6 +18,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<TypeProvider>();
         services.AddSingleton<SubjectTypeRegistry>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
+        services.AddSingleton<SubjectPathResolver>();
         services.AddSingleton<RootManager>();
         services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
 

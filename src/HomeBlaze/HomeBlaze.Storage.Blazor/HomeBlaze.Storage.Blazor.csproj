@@ -9,7 +9,9 @@
     <ItemGroup>
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
         <ProjectReference Include="..\HomeBlaze.Storage\HomeBlaze.Storage.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Widgets\HomeBlaze.Widgets.csproj" />
         <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Host.Services\HomeBlaze.Host.Services.csproj" />
         <PackageReference Include="MudBlazor" Version="8.*" />
         <PackageReference Include="BlazorMonaco" Version="3.4.0" />
         <PackageReference Include="Markdig" Version="0.*" />

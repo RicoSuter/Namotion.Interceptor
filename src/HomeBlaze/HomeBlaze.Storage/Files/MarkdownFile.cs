@@ -3,31 +3,36 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Pages;
 using HomeBlaze.Abstractions.Storage;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Widgets;
+using HomeBlaze.Widgets.Internal;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Files;
 
 /// <summary>
-/// Represents a Markdown file in storage.
+/// Represents a Markdown file in storage with support for embedded subjects and expressions.
 /// </summary>
 [InterceptorSubject]
 [FileExtension(".md")]
 [FileExtension(".markdown")]
 public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPageNavigationProvider
 {
+    private readonly MarkdownContentParser _parser;
+
     public IStorageContainer Storage { get; }
     public string FullPath { get; }
     public string Name { get; }
 
     [Derived]
     public string? Title => Frontmatter?.Title ?? FormatFilename(Name);
-    
+
     [Derived]
     public string? Icon => Frontmatter?.Icon ?? "Article";
-    
+
     [Derived]
     public string? NavigationTitle => Frontmatter?.NavTitle;
-    
+
     [Derived]
     public int? NavigationOrder => Frontmatter?.Order;
 
@@ -39,22 +44,30 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public partial string? Content { get; private set; }
 
     /// <summary>
+    /// Child subjects parsed from markdown content.
+    /// Contains HtmlSegments, RenderExpressions, and embedded subjects.
+    /// </summary>
+    public partial IDictionary<string, IInterceptorSubject> Children { get; private set; }
+
+    /// <summary>
     /// File size in bytes.
     /// </summary>
     [State("Size", Order = 1)]
     public partial long FileSize { get; set; }
-    
+
     /// <summary>
     /// Last modification time (UTC).
     /// </summary>
     [State("Modified", Order = 2)]
     public partial DateTime LastModified { get; set; }
 
-    public MarkdownFile(IStorageContainer storage, string fullPath)
+    public MarkdownFile(IStorageContainer storage, string fullPath, MarkdownContentParser parser)
     {
         Storage = storage;
         FullPath = fullPath;
         Name = Path.GetFileName(fullPath);
+        Children = new Dictionary<string, IInterceptorSubject>();
+        _parser = parser;
     }
 
     private async Task LoadFileAsync(CancellationToken cancellationToken)
@@ -70,8 +83,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         using var reader = new StreamReader(stream);
         Content = await reader.ReadToEndAsync(cancellationToken);
         Frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(Content);
+
+        Children = await _parser.ParseAsync(Content, this, Children, cancellationToken);
     }
-    
+
     public Task OnFileChangedAsync(CancellationToken cancellationToken)
     {
         return LoadFileAsync(cancellationToken);
@@ -82,7 +97,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     public Task WriteAsync(Stream content, CancellationToken cancellationToken)
         => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
-    
+
     private static string FormatFilename(string name)
     {
         var baseName = Path.GetFileNameWithoutExtension(name);
