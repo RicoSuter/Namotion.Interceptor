@@ -3,10 +3,9 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Pages;
 using HomeBlaze.Abstractions.Storage;
 using HomeBlaze.Storage.Internal;
-using HomeBlaze.Widgets;
-using HomeBlaze.Widgets.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using MarkdownContentParser = HomeBlaze.Storage.Internal.MarkdownContentParser;
 
 namespace HomeBlaze.Storage.Files;
 
@@ -83,7 +82,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         using var reader = new StreamReader(stream);
         Content = await reader.ReadToEndAsync(cancellationToken);
         Frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(Content);
-
         Children = await _parser.ParseAsync(Content, this, Children, cancellationToken);
     }
 

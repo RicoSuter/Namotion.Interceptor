@@ -6,10 +6,11 @@ using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Navigation;
+using HomeBlaze.Storage.Files;
 using Markdig;
 using Namotion.Interceptor;
 
-namespace HomeBlaze.Widgets.Internal;
+namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
 /// Parses markdown content for embedded subjects and expressions.
@@ -26,6 +27,8 @@ public sealed partial class MarkdownContentParser
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
     private readonly RootManager _rootManager;
+    
+    // TODO: Review class
 
     // Shared pipeline - single instance
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
@@ -54,7 +57,7 @@ public sealed partial class MarkdownContentParser
     /// </summary>
     public async Task<IDictionary<string, IInterceptorSubject>> ParseAsync(
         string? content,
-        IInterceptorSubject parent,
+        MarkdownFile parent,
         IDictionary<string, IInterceptorSubject> existingChildren,
         CancellationToken cancellationToken)
     {
@@ -71,10 +74,6 @@ public sealed partial class MarkdownContentParser
         return await ReconcileChildrenAsync(segments, parent, existingChildren, cancellationToken);
     }
 
-    // Public for testing
-    internal static (string markdown, Dictionary<string, string> subjectBlocks) ExtractSubjectBlocksPublic(string markdown)
-        => ExtractSubjectBlocks(markdown);
-
     private static (string markdown, Dictionary<string, string> subjectBlocks) ExtractSubjectBlocks(string markdown)
     {
         var subjectBlocks = new Dictionary<string, string>();
@@ -89,10 +88,6 @@ public sealed partial class MarkdownContentParser
 
         return (result, subjectBlocks);
     }
-
-    // Public for testing
-    internal static List<ParsedSegment> ParseHtmlSegmentsPublic(string html, Dictionary<string, string> subjectBlocks)
-        => ParseHtmlSegments(html, subjectBlocks);
 
     private static List<ParsedSegment> ParseHtmlSegments(string html, Dictionary<string, string> subjectBlocks)
     {
@@ -138,7 +133,7 @@ public sealed partial class MarkdownContentParser
 
     private async Task<IDictionary<string, IInterceptorSubject>> ReconcileChildrenAsync(
         List<ParsedSegment> segments,
-        IInterceptorSubject parent,
+        MarkdownFile parent,
         IDictionary<string, IInterceptorSubject> oldChildren,
         CancellationToken cancellationToken)
     {
@@ -150,7 +145,7 @@ public sealed partial class MarkdownContentParser
             {
                 case HtmlParsedSegment html:
                     var htmlKey = $"{HtmlKeyPrefix}{ComputeHash(html.Html)}";
-                    if (oldChildren.TryGetValue(htmlKey, out var existingHtml) && existingHtml is HtmlSegment)
+                    if (oldChildren.TryGetValue(htmlKey, out var existingHtml) && existingHtml is Storage.Internal.HtmlSegment)
                     {
                         newChildren[htmlKey] = existingHtml;
                     }

@@ -3,8 +3,6 @@ using HomeBlaze.Services;
 using HomeBlaze.Services.Navigation;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
-using HomeBlaze.Widgets;
-using HomeBlaze.Widgets.Internal;
 using Moq;
 
 namespace HomeBlaze.Storage.Tests;

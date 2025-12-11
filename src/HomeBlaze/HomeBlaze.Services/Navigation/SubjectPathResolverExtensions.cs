@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 
@@ -20,30 +21,35 @@ public static partial class SubjectPathResolverExtensions
 
     /// <summary>
     /// Resolves a property value from a bracket-notation path.
-    /// Path format: "Children[key].Property" or "Property[index].SubProperty"
+    /// Path format: "Children[key].Property" or "Root.Property[index].SubProperty"
     /// </summary>
     public static object? ResolveValue(this SubjectPathResolver resolver, IInterceptorSubject root, string path)
     {
-        // Split "Children[key].Property" into "Children[key]" and "Property"
-        var lastDot = path.LastIndexOf('.');
-        if (lastDot < 0) return null;
+        // TODO: Implement alloc free (span?) and make simpler (hacky)
+        var segments = path.Split(['.', '/', '[', ']'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToArray();
 
-        var subjectPath = path.Substring(0, lastDot);
-        var propertyName = path.Substring(lastDot + 1);
+        var variable = segments.FirstOrDefault();
+        if (variable != null)
+        {
+            var propertyName = segments.Last();
+            var subjectPath = string.Join('/', segments.Skip(1).Take(segments.Length - 2).ToArray());
 
-        var subject = resolver.ResolveSubject(root, ConvertBracketPath(subjectPath));
-        if (subject == null) return null;
+            var x = resolver.ResolveSubject(root, subjectPath);
+            if (x == null) return null;
+           
+            root = x;
 
-        // Try registry first for tracked property access
-        var registry = root.Context.TryGetService<ISubjectRegistry>();
-        var registered = registry?.TryGetRegisteredSubject(subject);
-        var property = registered?.TryGetProperty(propertyName);
+            var subject = resolver.ResolveSubject(root, ConvertBracketPath(subjectPath));
+            if (subject == null) return null;
 
-        if (property != null)
-            return property.GetValue();
+            var property = subject.TryGetRegisteredProperty(propertyName);
+            if (property != null)
+                return property.GetValue();
+        }
 
-        // Fallback to reflection
-        return subject.GetType().GetProperty(propertyName)?.GetValue(subject);
+        return null;
     }
 
     /// <summary>

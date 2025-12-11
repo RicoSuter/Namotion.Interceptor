@@ -1,10 +1,8 @@
 using FluentStorage.Blobs;
-using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Storage;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Navigation;
 using HomeBlaze.Storage.Files;
-using HomeBlaze.Widgets.Internal;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
@@ -54,7 +52,7 @@ internal sealed class FileSubjectFactory
         if (mappedType != null)
         {
             var subject = CreateFileSubject(mappedType, storage, blob.FullPath);
-            SetFileMetadata(subject, blob);
+            UpdateFileMetadata(subject, blob);
 
             // Eager load content for storage files
             if (subject is IStorageFile storageFile)
@@ -67,23 +65,9 @@ internal sealed class FileSubjectFactory
 
         // Default to GenericFile
         var genericFile = new GenericFile(storage, blob.FullPath);
-        SetFileMetadata(genericFile, blob);
+        UpdateFileMetadata(genericFile, blob);
         await genericFile.OnFileChangedAsync(cancellationToken);
         return genericFile;
-    }
-
-    /// <summary>
-    /// Updates an existing subject's configuration properties from JSON and calls ApplyConfigurationAsync.
-    /// </summary>
-    public async Task UpdateFromJsonAsync(
-        IInterceptorSubject subject, string json, CancellationToken cancellationToken)
-    {
-        _serializer.UpdateConfiguration(subject, json);
-
-        if (subject is IConfigurableSubject configurable)
-        {
-            await configurable.ApplyConfigurationAsync(cancellationToken);
-        }
     }
 
     /// <summary>
@@ -123,6 +107,8 @@ internal sealed class FileSubjectFactory
             // Special case for MarkdownFile - needs parser injection
             if (type == typeof(MarkdownFile))
             {
+                // TODO: Add abstraction for IStorageContainer + string constructor creation, 
+                // and remove this special case (reference to MarkdownFile).
                 return new MarkdownFile(storage, blobPath, _markdownParser);
             }
 
@@ -141,7 +127,7 @@ internal sealed class FileSubjectFactory
         return null;
     }
 
-    private static void SetFileMetadata(IInterceptorSubject? subject, Blob blob)
+    private static void UpdateFileMetadata(IInterceptorSubject? subject, Blob blob)
     {
         if (subject is IStorageFile file)
         {

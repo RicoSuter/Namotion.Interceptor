@@ -1,9 +1,10 @@
+@using System.Text
+@using System.Web
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Components
 @using HomeBlaze.Host.Services.Components
-@using HomeBlaze.Storage
 @using HomeBlaze.Storage.Files
-@using HomeBlaze.Widgets
+@using HomeBlaze.Storage.Internal
 @using MudBlazor
 @using Namotion.Interceptor
 
@@ -20,25 +21,26 @@
     }
     else
     {
-        @foreach (var child in File?.Children.Values ?? [])
+        @foreach (var segment in GetRenderSegments())
         {
-            if (child is HtmlSegment html)
+            @if (segment.Html != null)
             {
-                @((MarkupString)html.Html)
+                @((MarkupString)segment.Html)
             }
-            else
+            else if (segment.Widget != null)
             {
-                var widgetType = ComponentRegistry.GetComponent(
-                    child.GetType(), SubjectComponentType.Widget)?.ComponentType;
+                var widgetType = ComponentRegistry
+                    .GetComponent(segment.Widget.GetType(), SubjectComponentType.Widget)?.ComponentType;
+
                 if (widgetType != null)
                 {
                     <DynamicComponent Type="widgetType"
-                        Parameters="@(new Dictionary<string, object?> { ["Subject"] = child })" />
+                        Parameters="@(new Dictionary<string, object?> { ["Subject"] = segment.Widget })" />
                 }
                 else
                 {
                     <MudAlert Severity="Severity.Warning" Dense="true" Class="my-2">
-                        No widget registered for type: @child.GetType().Name
+                        No widget registered for type: @segment.Widget.GetType().Name
                     </MudAlert>
                 }
             }
@@ -71,4 +73,47 @@
     private MarkdownFile? File => Subject as MarkdownFile;
 
     private bool IsLoading => File?.Content is null;
+
+    private record RenderSegment(string? Html, IInterceptorSubject? Widget);
+
+    private List<RenderSegment> GetRenderSegments()
+    {
+        var result = new List<RenderSegment>();
+        if (File?.Children is null)
+            return result;
+
+        StringBuilder? sb = null;
+
+        foreach (var child in File.Children.Values)
+        {
+            if (child is HtmlSegment html)
+            {
+                sb ??= new StringBuilder();
+                sb.Append(html.Html);
+            }
+            else if (child is RenderExpression expr)
+            {
+                sb ??= new StringBuilder();
+                sb.Append(HttpUtility.HtmlEncode(expr.Value?.ToString() ?? string.Empty));
+            }
+            else
+            {
+                // Flush accumulated HTML before widget
+                if (sb is { Length: > 0 })
+                {
+                    result.Add(new RenderSegment(sb.ToString(), null));
+                    sb.Clear();
+                }
+                result.Add(new RenderSegment(null, child));
+            }
+        }
+
+        // Flush remaining HTML
+        if (sb is { Length: > 0 })
+        {
+            result.Add(new RenderSegment(sb.ToString(), null));
+        }
+
+        return result;
+    }
 }

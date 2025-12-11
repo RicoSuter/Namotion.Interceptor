@@ -1,7 +1,6 @@
-using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Widgets;
+namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
 /// Represents a raw HTML segment within a MarkdownFile.
