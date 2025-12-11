@@ -11,26 +11,28 @@
     <MudSpacer />
 </MudStack>
 
-<div id="scrollContainer" style="height: calc(100% - 48px); width: 100%; overflow-x: auto; overflow-y: hidden; display: flex; padding: 0 16px 16px 16px;">
+<div id="scrollContainer" style="height: calc(100vh - 130px); width: 100%; overflow-x: auto; overflow-y: hidden; display: flex;">
     @for (var i = 0; i < _panes.Count; i++)
     {
         var pane = _panes[i];
         var isFirst = i == 0;
         var selectedChild = i < _panes.Count - 1 ? _panes[i + 1].Subject : null;
 
-        <MudPaper @key="pane.Subject" Width="@((PaneWidth - 16) + "px")"
-                  Class="mr-4"
-                  Style="@($"min-width: {PaneWidth - 16}px; flex-shrink: 0; height: 100%; display: flex; flex-direction: column;")">
-            <SubjectPropertyPanel @key="pane.Subject"
-                Subject="@pane.Subject"
-                SubjectRegistry="@_subjectRegistry"
-                ObjectPath="@pane.ObjectPath"
-                SelectedChild="@selectedChild"
-                CanClose="@(!isFirst)"
-                OnPropertyClick="@((args) => OnPropertyClick(pane, args.PropertyName, args.Index, args.Subject))"
-                OnClose="@(() => OnPaneClose(pane))"
-                OnDelete="@(() => OnPaneDelete(pane))" />
-        </MudPaper>
+        <div style="display: flex; flex-direction: column;" class="pb-4">
+            <MudPaper @key="pane.Subject" Width="@((PaneWidth - 16) + "px")"
+                      Class="mr-4"
+                      Style="@($"min-width: {PaneWidth - 16}px; flex-shrink: 0; height: 100%;")">
+                <SubjectPropertyPanel @key="pane.Subject"
+                                      Subject="@pane.Subject"
+                                      SubjectRegistry="@_subjectRegistry"
+                                      ObjectPath="@pane.ObjectPath"
+                                      SelectedChild="@selectedChild"
+                                      CanClose="@(!isFirst)"
+                                      OnPropertyClick="@((args) => OnPropertyClick(pane, args.PropertyName, args.Index, args.Subject))"
+                                      OnClose="@(() => OnPaneClose(pane))"
+                                      OnDelete="@(() => OnPaneDelete(pane))" />
+            </MudPaper>
+        </div>
     }
 </div>
 
