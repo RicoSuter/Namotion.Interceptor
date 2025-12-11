@@ -43,7 +43,7 @@
     protected override void OnInitialized()
     {
         base.OnInitialized();
-        DeveloperMode.OnChange += StateHasChanged;
+        DeveloperMode.OnChange += OnStateHasChanged;
 
         _theme = new()
         {
@@ -78,6 +78,11 @@
 
     public void Dispose()
     {
-        DeveloperMode.OnChange -= StateHasChanged;
+        DeveloperMode.OnChange -= OnStateHasChanged;
+    }
+
+    private void OnStateHasChanged()
+    {
+        InvokeAsync(StateHasChanged);
     }
 }

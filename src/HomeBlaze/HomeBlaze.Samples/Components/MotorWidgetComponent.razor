@@ -1,0 +1,105 @@
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Abstractions.Components
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Motor))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4" Elevation="2" Style="min-width: 280px;">
+    <div class="d-flex align-center mb-3">
+        <MudIcon Icon="@Icons.Material.Filled.Settings"
+                 Color="@GetStatusColor()"
+                 Class="mr-2" />
+        <MudText Typo="Typo.h6">@(MotorSubject?.Name ?? "Motor")</MudText>
+        <MudSpacer />
+        <MudChip T="string"
+                 Size="Size.Small"
+                 Color="@GetStatusColor()"
+                 Variant="Variant.Filled">
+            @MotorSubject?.Status
+        </MudChip>
+    </div>
+
+    <MudDivider Class="mb-3" />
+
+    <div class="d-flex justify-space-between align-center mb-2">
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Speed</MudText>
+        <MudText Typo="Typo.body1">
+            <strong>@MotorSubject?.CurrentSpeed</strong> / @MotorSubject?.TargetSpeed RPM
+        </MudText>
+    </div>
+
+    <MudProgressLinear Value="@GetSpeedPercentage()"
+                       Color="@GetSpeedColor()"
+                       Class="mb-3"
+                       Rounded="true" />
+
+    <div class="d-flex justify-space-between align-center mb-2">
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Temperature</MudText>
+        <MudText Typo="Typo.body1">
+            <MudIcon Icon="@Icons.Material.Filled.Thermostat"
+                     Size="Size.Small"
+                     Color="@GetTemperatureColor()"
+                     Class="mr-1" />
+            <strong>@MotorSubject?.Temperature.ToString("F1")</strong> °C
+        </MudText>
+    </div>
+
+    @if (MotorSubject?.IsAtTargetSpeed == true)
+    {
+        <MudAlert Severity="Severity.Success" Dense="true" Class="mt-2">
+            At target speed
+        </MudAlert>
+    }
+    else if (MotorSubject?.Status == MotorStatus.Running)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+            Adjusting... (@MotorSubject?.SpeedDelta RPM delta)
+        </MudAlert>
+    }
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private Motor? MotorSubject => Subject as Motor;
+
+    private Color GetStatusColor()
+    {
+        return MotorSubject?.Status switch
+        {
+            MotorStatus.Running => Color.Success,
+            MotorStatus.Starting or MotorStatus.Stopping => Color.Warning,
+            MotorStatus.Error => Color.Error,
+            _ => Color.Default
+        };
+    }
+
+    private double GetSpeedPercentage()
+    {
+        if (MotorSubject?.TargetSpeed is null or 0)
+            return 0;
+
+        return Math.Min(100, (double)MotorSubject.CurrentSpeed / MotorSubject.TargetSpeed * 100);
+    }
+
+    private Color GetSpeedColor()
+    {
+        if (MotorSubject?.IsAtTargetSpeed == true)
+            return Color.Success;
+
+        if (MotorSubject?.CurrentSpeed < MotorSubject?.TargetSpeed)
+            return Color.Info;
+
+        return Color.Warning;
+    }
+
+    private Color GetTemperatureColor()
+    {
+        var temp = MotorSubject?.Temperature ?? 25;
+        if (temp < 30) return Color.Success;
+        if (temp < 50) return Color.Warning;
+        return Color.Error;
+    }
+}
