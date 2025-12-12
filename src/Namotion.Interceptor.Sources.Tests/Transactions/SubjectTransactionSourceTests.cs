@@ -212,7 +212,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
-        await using (var transaction = SubjectTransaction.BeginTransaction())
+        using (var transaction = SubjectTransaction.BeginTransaction())
         {
             person.FirstName = "John";
 

@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Represents a transaction that captures property changes and commits them atomically.
 /// Changes are buffered until <see cref="CommitAsync"/> is called.
 /// </summary>
-public sealed class SubjectTransaction : IDisposable, IAsyncDisposable // TODO: Do we need to implement IAsyncDisposable?
+public sealed class SubjectTransaction : IDisposable
 {
     private static readonly AsyncLocal<SubjectTransaction?> CurrentTransaction = new();
 
@@ -121,8 +121,6 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable // TODO: 
         TransactionConflictBehavior conflictBehavior,
         CancellationToken cancellationToken)
     {
-        // TODO: Move whole method into the extension method and remove here? possible
-        
         // Get the transaction interceptor from the context - it holds the per-context lock
         var interceptor = context.TryGetService<SubjectTransactionInterceptor>()
             ?? throw new InvalidOperationException(
@@ -304,14 +302,5 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable // TODO: 
             _lockReleaser?.Dispose();
             _isDisposed = true;
         }
-    }
-
-    /// <summary>
-    /// Asynchronously disposes the transaction, discarding any uncommitted changes.
-    /// </summary>
-    public ValueTask DisposeAsync()
-    {
-        Dispose();
-        return ValueTask.CompletedTask;
     }
 }
