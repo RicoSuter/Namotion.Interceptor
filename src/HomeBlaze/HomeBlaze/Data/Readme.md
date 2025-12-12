@@ -138,8 +138,8 @@ Paths use familiar C# syntax:
 | Path | Description |
 |------|-------------|
 | `Root` | The root storage container |
-| `Root.Children[Motor]` | A subject named "Motor" |
-| `Root.Children[docs].Children[0]` | First child of docs folder |
+| `Root.Children[motor.json]` | A subject named "motor.json" |
+| `Root.Children[demo].Children[conveyor.json]` | Conveyor motor in demo folder |
 
 ---
 
@@ -176,13 +176,13 @@ HomeBlaze supports multiple storage backends via FluentStorage:
 
 The `demo/` folder contains a working example with 5 motors simulating a small factory:
 
-| Equipment | Speed | Purpose |
-|-----------|-------|---------|
-| Conveyor Belt | 600 RPM | Material handling |
-| Exhaust Fan | 1,500 RPM | Ventilation |
-| Cooling Fan | 1,800 RPM | Temperature control |
-| Water Pump | 2,400 RPM | Water circulation |
-| Compressor | 3,000 RPM | Compressed air |
+| Equipment | Current Speed | Target Speed | Temperature |
+|-----------|---------------|--------------|-------------|
+| Conveyor Belt | {{ Root.Children[demo].Children[conveyor.json].CurrentSpeed }} | {{ Root.Children[demo].Children[conveyor.json].TargetSpeed }} | {{ Root.Children[demo].Children[conveyor.json].Temperature }} |
+| Exhaust Fan | {{ Root.Children[demo].Children[exhaust-fan.json].CurrentSpeed }} | {{ Root.Children[demo].Children[exhaust-fan.json].TargetSpeed }} | {{ Root.Children[demo].Children[exhaust-fan.json].Temperature }} |
+| Cooling Fan | {{ Root.Children[demo].Children[cooling-fan.json].CurrentSpeed }} | {{ Root.Children[demo].Children[cooling-fan.json].TargetSpeed }} | {{ Root.Children[demo].Children[cooling-fan.json].Temperature }} |
+| Water Pump | {{ Root.Children[demo].Children[water-pump.json].CurrentSpeed }} | {{ Root.Children[demo].Children[water-pump.json].TargetSpeed }} | {{ Root.Children[demo].Children[water-pump.json].Temperature }} |
+| Compressor | {{ Root.Children[demo].Children[compressor.json].CurrentSpeed }} | {{ Root.Children[demo].Children[compressor.json].TargetSpeed }} | {{ Root.Children[demo].Children[compressor.json].Temperature }} |
 
 👉 **[View Demo Setup Guide](demo/Setup.md)** for detailed exploration steps.
 

@@ -231,7 +231,7 @@ public class MarkdownFileTests
         var markdown = CreateMarkdownFile(storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
-        Assert.Equal(3, markdown.NavigationOrder);
+        Assert.Equal(3, markdown.PagePosition);
     }
 
     [Fact]

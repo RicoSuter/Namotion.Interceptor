@@ -63,7 +63,7 @@ Arrows point from implementation to what it depends on (impl -> base):
 
 **Features**:
 - Subject lifecycle contracts (`IConfigurableSubject`)
-- Display metadata interfaces (`ITitleProvider`, `IIconProvider`, `IPageNavigationProvider`)
+- Display metadata interfaces (`ITitleProvider`, `IIconProvider`, `IPage`)
 - Configuration persistence (`IConfigurationWriter`)
 - Storage abstraction (`IStorageContainer`, `IStorageFile`)
 - Component discovery (`[SubjectComponent]` attribute)
@@ -101,7 +101,7 @@ Arrows point from implementation to what it depends on (impl -> base):
 
 **Features**:
 - **Component Discovery**: Find registered Blazor components (Page, Edit, Widget) for any subject type
-- **Navigation Tree**: Build hierarchical navigation from subject graph, respecting `IPageNavigationProvider`
+- **Navigation Tree**: Build hierarchical navigation from subject graph, respecting `IPage`
 - **Route Resolution**: Convert subjects to URL-friendly paths (e.g., `docs/readme.md`) for browser routing
 - **Display Helpers**: Get title, icon, formatted state values with units (°C, %, kWh, etc.)
 - **Developer Mode**: Toggle developer features across the application

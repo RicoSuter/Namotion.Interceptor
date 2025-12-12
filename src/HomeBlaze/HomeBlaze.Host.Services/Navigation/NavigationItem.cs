@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Pages;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Host.Services.Navigation;
@@ -41,4 +42,19 @@ public class NavigationItem
     /// The sort order for the navigation item.
     /// </summary>
     public int Order { get; init; }
+
+    /// <summary>
+    /// Where this item should appear (NavBar or AppBar).
+    /// </summary>
+    public NavigationLocation Location { get; init; }
+
+    /// <summary>
+    /// AppBar alignment (Left or Right). Only used when Location is AppBar.
+    /// </summary>
+    public AppBarAlignment Alignment { get; init; }
+
+    /// <summary>
+    /// Gets the full page URL for navigation.
+    /// </summary>
+    public string PageUrl => $"pages/{Path}";
 }

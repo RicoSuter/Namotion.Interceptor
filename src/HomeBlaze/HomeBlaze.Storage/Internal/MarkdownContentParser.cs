@@ -235,13 +235,15 @@ public sealed partial class MarkdownContentParser
         CancellationToken cancellationToken)
     {
         var newChildren = new Dictionary<string, IInterceptorSubject>();
+        var segmentIndex = 0;
 
         foreach (var segment in segments)
         {
             switch (segment)
             {
                 case HtmlParsedSegment html:
-                    var htmlKey = $"{HtmlKeyPrefix}{ComputeHash(html.Html)}";
+                    // Include index in key to handle duplicate HTML segments (e.g., "</td><td>" between cells)
+                    var htmlKey = $"{HtmlKeyPrefix}{segmentIndex}_{ComputeHash(html.Html)}";
                     if (oldChildren.TryGetValue(htmlKey, out var existingHtml) && existingHtml is Storage.Internal.HtmlSegment)
                     {
                         newChildren[htmlKey] = existingHtml;
@@ -253,7 +255,8 @@ public sealed partial class MarkdownContentParser
                     break;
 
                 case ExpressionParsedSegment expr:
-                    var exprKey = $"{ExpressionKeyPrefix}{ComputeHash(expr.Path)}";
+                    // Include index in key to handle duplicate expressions
+                    var exprKey = $"{ExpressionKeyPrefix}{segmentIndex}_{ComputeHash(expr.Path)}";
                     if (oldChildren.TryGetValue(exprKey, out var existingExpr) && existingExpr is RenderExpression)
                     {
                         newChildren[exprKey] = existingExpr;
@@ -288,6 +291,8 @@ public sealed partial class MarkdownContentParser
                     }
                     break;
             }
+
+            segmentIndex++;
         }
 
         return newChildren;

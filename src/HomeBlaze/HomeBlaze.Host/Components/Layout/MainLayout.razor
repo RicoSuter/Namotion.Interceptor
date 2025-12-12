@@ -1,6 +1,12 @@
-﻿@inherits LayoutComponentBase
+﻿@using HomeBlaze.Abstractions.Pages
+@using HomeBlaze.Host.Services.Navigation
+
+@inherits LayoutComponentBase
 
 @inject DeveloperModeService DeveloperMode
+@inject RootManager RootManager
+@inject NavigationItemResolver NavigationResolver
+@inject NavigationManager NavigationManager
 
 @implements IDisposable
 
@@ -12,8 +18,21 @@
 <MudLayout>
     <MudAppBar Elevation="1">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@(_ => DrawerToggle())"/>
-        <MudText Typo="Typo.h5" Class="ml-3">HomeBlaze</MudText>
+        @foreach (var item in GetAppBarItems(AppBarAlignment.Left))
+        {
+            <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                           Href="@item.PageUrl"
+                           Color="@(IsActive(item) ? Color.Warning : Color.Inherit)"
+                           title="@item.Title" />
+        }
         <MudSpacer/>
+        @foreach (var item in GetAppBarItems(AppBarAlignment.Right))
+        {
+            <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                           Href="@item.PageUrl"
+                           Color="@(IsActive(item) ? Color.Warning : Color.Inherit)"
+                           title="@item.Title" />
+        }
         <MudIconButton Icon="@(DeveloperModeIcon)"
                        Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
                        OnClick="@DeveloperMode.Toggle"
@@ -44,6 +63,7 @@
     {
         base.OnInitialized();
         DeveloperMode.OnChange += OnStateHasChanged;
+        NavigationManager.LocationChanged += OnLocationChanged;
 
         _theme = new()
         {
@@ -79,10 +99,31 @@
     public void Dispose()
     {
         DeveloperMode.OnChange -= OnStateHasChanged;
+        NavigationManager.LocationChanged -= OnLocationChanged;
     }
 
     private void OnStateHasChanged()
     {
         InvokeAsync(StateHasChanged);
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private IEnumerable<NavigationItem> GetAppBarItems(AppBarAlignment alignment)
+    {
+        if (RootManager.Root == null)
+            return Enumerable.Empty<NavigationItem>();
+
+        return NavigationResolver.GetChildItems(RootManager.Root)
+            .Where(item => item.Location == NavigationLocation.AppBar && item.IsPage && item.Alignment == alignment);
+    }
+
+    private bool IsActive(NavigationItem item)
+    {
+        var currentPath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        return currentPath.Equals(item.PageUrl, StringComparison.OrdinalIgnoreCase);
     }
 }
