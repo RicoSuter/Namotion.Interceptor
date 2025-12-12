@@ -12,8 +12,7 @@ Add the `Namotion.Interceptor.Blazor` package to your Blazor project and ensure 
 var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking()
-    .WithParents()                // Required for TrackingScope hierarchical detection
-    .WithReadPropertyRecorder();  // Required for TrackingScope property recording
+    .WithReadPropertyRecorder();  // Required for TrackingScope
 ```
 
 ### Basic Usage
@@ -149,23 +148,20 @@ The tracking system consists of three core components:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Render Cycle                                │
+│                     Render Cycle                                 │
 │                                                                 │
-│  RecordingContent (RenderFragment)     OnAfterRender()          │
-│       │                                      │                  │
-│       ▼                                      ▼                  │
-│  using var scope =                     Swap dictionaries:       │
-│    ReadPropertyRecorder.Start()        collecting ↔ active      │
-│       │                                Extract tracked subjects │
-│       ▼                                Clear ancestor cache     │
-│  ChildContent.Invoke()                       │                  │
-│       │                                      │                  │
-│       ▼                                      │                  │
-│  Property reads ───────────────────► _collectingProperties      │
+│  ShouldRender()              OnAfterRender()                    │
+│       │                            │                            │
+│       ▼                            ▼                            │
+│  StartRecording()            StopRecording()                    │
+│       │                            │                            │
+│       ▼                            ▼                            │
+│  AsyncLocal<Scopes>          Swap collecting ↔ active           │
+│  push scope                  Extract tracked subjects           │
+│       │                      Clear ancestor cache               │
+│       ▼                            │                            │
+│  Property reads ─────────────────► _collectingProperties        │
 │  via interceptor                                                │
-│       │                                                         │
-│       ▼                                                         │
-│  scope.Dispose() ── removes from AsyncLocal                     │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -198,37 +194,6 @@ The tracking system consists of three core components:
 ```csharp
 private static readonly AsyncLocal<List<ReadPropertyRecorderScope>?> _activeScopes = new();
 ```
-
-### RenderFragment Context Isolation (Critical)
-
-**Problem**: Blazor invokes RenderFragment delegates in a **different async context** than component lifecycle methods (`OnParametersSet`, `ShouldRender`). This means `AsyncLocal<T>` values set in lifecycle methods are NOT available when `ChildContent` is invoked.
-
-**Failed Approach**: Starting a recording scope in `OnParametersSet()` or `ShouldRender()` doesn't work:
-
-```csharp
-// THIS DOES NOT WORK - wrong async context!
-protected override bool ShouldRender()
-{
-    _scope = ReadPropertyRecorder.Start(_collectingProperties);
-    return true;
-}
-// ChildContent runs in different context - scope not visible
-```
-
-**Solution**: Create the recording scope **inside** the RenderFragment delegate itself, ensuring it runs in the same async context as the property reads:
-
-```csharp
-private RenderFragment RecordingContent => builder =>
-{
-    // IMPORTANT: Start scope in THIS async context
-    using var localScope = ReadPropertyRecorder.Start(_collectingProperties);
-
-    // Now property reads will be recorded
-    ChildContent.Invoke(builder);
-};
-```
-
-This ensures the `AsyncLocal<T>` scope is visible to the interceptor when properties are read during child content rendering.
 
 ### Subject Descendant Tracking
 
