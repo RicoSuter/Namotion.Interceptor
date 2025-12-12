@@ -63,7 +63,9 @@ public class NavigationItemResolver
                         Path = path,
                         IsPage = isPage,
                         IsFolder = isFolder,
-                        Order = child.GetNavigationOrder(key)
+                        Order = child.GetNavigationOrder(key),
+                        Location = child.GetNavigationLocation(),
+                        Alignment = child.GetAppBarAlignment()
                     });
                 }
             }

@@ -10,15 +10,15 @@ This demo showcases a simple industrial facility monitoring system with 5 motors
 
 ## Demo Overview
 
-The demo simulates a small factory with the following equipment:
+The demo simulates a small factory with the following equipment (live data):
 
-| Equipment | Type | Target Speed (RPM) | Update Interval | Purpose |
-|-----------|------|-------------------|-----------------|---------|
-| **Conveyor Belt** | Transport | 600 | 2s | Material handling |
-| **Exhaust Fan** | Ventilation | 1,500 | 1s | Air circulation |
-| **Cooling Fan** | HVAC | 1,800 | 1s | Temperature control |
-| **Water Pump** | Utilities | 2,400 | 1s | Water circulation |
-| **Compressor** | Utilities | 3,000 | 1.5s | Compressed air supply |
+| Equipment | Current Speed | Target Speed | Temperature | Status |
+|-----------|---------------|--------------|-------------|--------|
+| **Conveyor Belt** | {{ Root.Children[demo].Children[conveyor.json].CurrentSpeed }} | {{ Root.Children[demo].Children[conveyor.json].TargetSpeed }} | {{ Root.Children[demo].Children[conveyor.json].Temperature }} | {{ Root.Children[demo].Children[conveyor.json].Status }} |
+| **Exhaust Fan** | {{ Root.Children[demo].Children[exhaust-fan.json].CurrentSpeed }} | {{ Root.Children[demo].Children[exhaust-fan.json].TargetSpeed }} | {{ Root.Children[demo].Children[exhaust-fan.json].Temperature }} | {{ Root.Children[demo].Children[exhaust-fan.json].Status }} |
+| **Cooling Fan** | {{ Root.Children[demo].Children[cooling-fan.json].CurrentSpeed }} | {{ Root.Children[demo].Children[cooling-fan.json].TargetSpeed }} | {{ Root.Children[demo].Children[cooling-fan.json].Temperature }} | {{ Root.Children[demo].Children[cooling-fan.json].Status }} |
+| **Water Pump** | {{ Root.Children[demo].Children[water-pump.json].CurrentSpeed }} | {{ Root.Children[demo].Children[water-pump.json].TargetSpeed }} | {{ Root.Children[demo].Children[water-pump.json].Temperature }} | {{ Root.Children[demo].Children[water-pump.json].Status }} |
+| **Compressor** | {{ Root.Children[demo].Children[compressor.json].CurrentSpeed }} | {{ Root.Children[demo].Children[compressor.json].TargetSpeed }} | {{ Root.Children[demo].Children[compressor.json].Temperature }} | {{ Root.Children[demo].Children[compressor.json].Status }} |
 
 ## Motor Properties
 

@@ -21,46 +21,53 @@ public static partial class SubjectPathResolverExtensions
 
     /// <summary>
     /// Resolves a property value from a bracket-notation path.
-    /// Path format: "Children[key].Property" or "Root.Property[index].SubProperty"
+    /// Path format: "Children[key].Property" or "Children[key].Children[key2].Property"
     /// </summary>
     public static object? ResolveValue(this SubjectPathResolver resolver, IInterceptorSubject root, string path)
     {
-        // TODO: Implement alloc free (span?) and make simpler (hacky)
-        var segments = path.Split(['.', '/', '[', ']'], StringSplitOptions.RemoveEmptyEntries)
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .ToArray();
+        if (string.IsNullOrEmpty(path))
+            return null;
 
-        var variable = segments.FirstOrDefault();
-        if (variable != null)
-        {
-            var propertyName = segments.Last();
-            var subjectPath = string.Join('/', segments.Skip(1).Take(segments.Length - 2).ToArray());
+        // Convert bracket notation to slash notation: Children[demo].Children[conveyor].Temperature
+        // becomes: Children/demo/Children/conveyor/Temperature
+        var slashPath = ConvertBracketPath(path);
+        var segments = slashPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
-            var x = resolver.ResolveSubject(root, subjectPath);
-            if (x == null) return null;
-           
-            root = x;
+        if (segments.Length == 0)
+            return null;
 
-            var subject = resolver.ResolveSubject(root, ConvertBracketPath(subjectPath));
-            if (subject == null) return null;
+        // Last segment is the property name to read
+        var propertyName = segments[^1];
 
-            var property = subject.TryGetRegisteredProperty(propertyName);
-            if (property != null)
-                return property.GetValue();
-        }
+        // Everything before the last segment is the subject path
+        var subjectPath = segments.Length > 1
+            ? string.Join('/', segments[..^1])
+            : string.Empty;
 
-        return null;
+        var subject = string.IsNullOrEmpty(subjectPath)
+            ? root
+            : resolver.ResolveSubject(root, subjectPath);
+
+        if (subject == null)
+            return null;
+
+        var property = subject.TryGetRegisteredProperty(propertyName);
+        return property?.GetValue();
     }
 
     /// <summary>
     /// Converts bracket notation to slash notation for ResolveSubject.
-    /// "Children[key].Prop" becomes "Children/key/Prop"
+    /// "Children[key.json].Prop" becomes "Children/key.json/Prop"
+    /// Preserves dots inside bracket keys (e.g., file extensions).
     /// </summary>
     private static string ConvertBracketPath(string path)
     {
-        return BracketRegex().Replace(path, "/$1").Replace(".", "/");
+        // Replace "]." with "/" (end of key followed by property accessor)
+        // Replace "[" with "/" (start of key)
+        // Remove remaining "]" at end of path
+        return path
+            .Replace("].", "/")
+            .Replace("[", "/")
+            .Replace("]", "");
     }
-
-    [GeneratedRegex(@"\[([^\]]+)\]")]
-    private static partial Regex BracketRegex();
 }

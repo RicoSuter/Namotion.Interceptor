@@ -23,9 +23,15 @@ public class MarkdownFrontmatter
         set => NavTitle ??= value;
     }
 
-    [YamlMember(Alias = "order")]
-    public int? Order { get; set; }
+    [YamlMember(Alias = "position")]
+    public int? Position { get; set; }
 
     [YamlMember(Alias = "icon")]
     public string? Icon { get; set; }
+
+    [YamlMember(Alias = "location")]
+    public string? Location { get; set; }
+
+    [YamlMember(Alias = "alignment")]
+    public string? Alignment { get; set; }
 }

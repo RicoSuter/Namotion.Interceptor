@@ -60,8 +60,8 @@ Expressions resolve relative to the current page's embedded subjects first, then
 
 | Path | Resolution |
 |------|------------|
-| `mymotor.Speed` | Looks for subject named `mymotor` in current page, then `Root.mymotor.Speed` |
-| `Root.demo.conveyor.CurrentSpeed` | Absolute path from root storage container |
+| `mymotor.Speed` | Looks for subject named `mymotor` embedded in current page |
+| `Root.Children[demo].Children[conveyor.json].CurrentSpeed` | Absolute path from root storage container |
 
 ### Expression Features
 
