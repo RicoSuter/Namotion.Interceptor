@@ -154,21 +154,12 @@
 
             currentPathParts.Add(propertyName);
 
-            if (property.IsSubjectReference)
+            // Check for collections/dictionaries BEFORE subject references
+            // because IDictionary<string, IInterceptorSubject> is an interface (IsSubjectReference would be true)
+            // but it's actually a dictionary of subjects, not a single subject reference
+            if (property.IsSubjectDictionary || property.IsSubjectCollection)
             {
-                // Direct subject property
-                if (property.GetValue() is not IInterceptorSubject child)
-                    break;
-
-                currentObjectPath = $"{currentObjectPath}.{propertyName}";
-                var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
-                _breadcrumbs.Add(new BreadcrumbItem(propertyName, breadcrumbPath));
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = propertyName, ObjectPath = currentObjectPath, PropertyName = propertyName, Index = null });
-                currentSubject = child;
-            }
-            else
-            {
-                // Collection - next segment is the index
+                // Collection/Dictionary - next segment is the index/key
                 if (i >= pathSegments.Length)
                     break;
 
@@ -184,6 +175,23 @@
                 _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
                 _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, ObjectPath = currentObjectPath, PropertyName = propertyName, Index = indexStr });
                 currentSubject = child;
+            }
+            else if (property.IsSubjectReference)
+            {
+                // Direct subject property
+                if (property.GetValue() is not IInterceptorSubject child)
+                    break;
+
+                currentObjectPath = $"{currentObjectPath}.{propertyName}";
+                var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
+                _breadcrumbs.Add(new BreadcrumbItem(propertyName, breadcrumbPath));
+                _panes.Add(new SubjectPane { Subject = child, DisplayName = propertyName, ObjectPath = currentObjectPath, PropertyName = propertyName, Index = null });
+                currentSubject = child;
+            }
+            else
+            {
+                // Unknown property type with children - shouldn't happen
+                break;
             }
         }
     }

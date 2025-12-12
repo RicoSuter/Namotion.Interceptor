@@ -1,0 +1,143 @@
+@using HomeBlaze.Abstractions.Storage
+
+@implements IDisposable
+
+@inject SubjectComponentRegistry ComponentRegistry
+@inject RootManager RootManager
+@inject ISnackbar Snackbar
+@inject DeveloperModeService DeveloperMode
+
+<TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
+    @if (Subject != null)
+    {
+        @if (_editComponentType != null)
+        {
+            <DynamicComponent Type="_editComponentType"
+                              @ref="_dynamicComponentRef"
+                              Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })"/>
+        }
+        else
+        {
+            <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" />
+        }
+    }
+</TrackingScope>
+
+<div class="d-flex justify-end gap-2 mt-4">
+    @if (ShowCancelButton)
+    {
+        <MudButton OnClick="@(() => OnCancel.InvokeAsync())">Cancel</MudButton>
+    }
+    <MudButton Color="Color.Primary"
+               OnClick="SaveAsync"
+               Disabled="@(!IsValid)">Save</MudButton>
+</div>
+
+@code {
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter] public bool ShowCancelButton { get; set; }
+
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private Type? _editComponentType;
+    private DynamicComponent? _dynamicComponentRef;
+    private ISubjectEditComponent? _editComponent;
+    private ConfigurationPropertiesEditor? _propertiesEditor;
+
+    private bool IsValid => _editComponent?.IsValid ?? _propertiesEditor?.IsValid ?? true;
+
+    protected override void OnParametersSet()
+    {
+        base.OnParametersSet();
+        _editComponent = null;
+
+        if (Subject != null)
+        {
+            var registration = ComponentRegistry.GetComponent(
+                Subject.GetType(),
+                SubjectComponentType.Edit);
+
+            _editComponentType = registration?.ComponentType;
+        }
+        else
+        {
+            _editComponentType = null;
+        }
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        base.OnAfterRender(firstRender);
+
+        if (_dynamicComponentRef?.Instance is ISubjectEditComponent editComponent && _editComponent == null)
+        {
+            _editComponent = editComponent;
+            _editComponent.IsValidChanged += OnIsValidChanged;
+            _editComponent.IsDirtyChanged += OnIsDirtyChanged;
+            StateHasChanged();
+        }
+    }
+
+    private void OnIsValidChanged(bool isValid) => InvokeAsync(StateHasChanged);
+
+    private void OnIsDirtyChanged(bool isDirty) => InvokeAsync(StateHasChanged);
+
+    public async Task SaveAsync()
+    {
+        var subject = Subject;
+        if (subject == null) return;
+
+        try
+        {
+            if (_editComponent != null)
+            {
+                if (!_editComponent.IsValid)
+                {
+                    return;
+                }
+
+                await _editComponent.SaveAsync(CancellationToken.None);
+            }
+            else
+            {
+                if (_propertiesEditor?.HasErrors == true)
+                {
+                    return;
+                }
+
+                _propertiesEditor?.ApplyChanges();
+            }
+
+            if (subject is IConfigurationWriter configurationWriter)
+            {
+                var success = await configurationWriter.WriteConfigurationAsync(subject, CancellationToken.None);
+                if (success)
+                     await RootManager.WriteConfigurationAsync(subject, CancellationToken.None);
+            }
+
+            if (subject is IStorageFile storageFile)
+            {
+                await storageFile.OnFileChangedAsync(CancellationToken.None);
+            }
+
+            Snackbar.Add("File saved.", Severity.Info);
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_editComponent != null)
+        {
+            _editComponent.IsValidChanged -= OnIsValidChanged;
+            _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
+        }
+    }
+}
