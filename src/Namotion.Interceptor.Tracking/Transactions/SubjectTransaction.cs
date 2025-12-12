@@ -45,6 +45,17 @@ public sealed class SubjectTransaction : IDisposable
     internal SubjectTransactionInterceptor? Interceptor { get; }
 
     /// <summary>
+    /// Last write wins if the same property is written multiple times.
+    /// Thread-safe for concurrent property writes within the same transaction.
+    /// </summary>
+    internal ConcurrentDictionary<PropertyReference, SubjectPropertyChange> PendingChanges { get; } = new();
+
+    /// <summary>
+    /// Gets the pending changes as a read-only list.
+    /// </summary>
+    public IReadOnlyList<SubjectPropertyChange> GetPendingChanges() => PendingChanges.Values.ToList();
+
+    /// <summary>
     /// Gets the context this transaction is bound to.
     /// </summary>
     public IInterceptorSubjectContext? Context { get; }
@@ -99,6 +110,7 @@ public sealed class SubjectTransaction : IDisposable
             TransactionConflictBehavior.FailOnConflict,
             DateTimeOffset.UtcNow,
             lockReleaser: null);
+
         CurrentTransaction.Value = transaction;
         return transaction;
     }
@@ -121,48 +133,26 @@ public sealed class SubjectTransaction : IDisposable
         TransactionConflictBehavior conflictBehavior,
         CancellationToken cancellationToken)
     {
-        // Get the transaction interceptor from the context - it holds the per-context lock
-        var interceptor = context.TryGetService<SubjectTransactionInterceptor>()
-            ?? throw new InvalidOperationException(
-                "SubjectTransactionInterceptor is not registered. " +
-                "Use WithFullPropertyTracking() or register SubjectTransactionInterceptor manually.");
-
-        // Acquire the lock - this serializes concurrent transactions on the same context
-        var lockReleaser = await interceptor.AcquireLockAsync(cancellationToken).ConfigureAwait(false);
-
-        // Check for nested transactions AFTER acquiring lock
-        // This allows concurrent transactions from different async contexts (they queue on lock)
-        // but prevents nesting within the same async flow
+        var interceptor = context.GetService<SubjectTransactionInterceptor>();
+        var transactionLock = await interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
+        
         if (CurrentTransaction.Value != null)
         {
-            lockReleaser.Dispose(); // Release lock before throwing
+            transactionLock.Dispose(); // Release lock before throwing
             throw new InvalidOperationException("Nested transactions are not supported.");
         }
 
-        var transaction = new SubjectTransaction(
+        // Don't set CurrentTransaction.Value here because it won't flow to caller's context
+        // The caller (extension method) will call SetCurrent after awaiting this
+        return new SubjectTransaction(
             context,
             interceptor,
             mode,
             requirement,
             conflictBehavior,
             DateTimeOffset.UtcNow,
-            lockReleaser);
-        // Note: Don't set CurrentTransaction.Value here - it won't flow to caller's context
-        // The caller (extension method) will call SetCurrent after awaiting this
-        return transaction;
+            transactionLock);
     }
-
-    /// <summary>
-    /// Internal storage for pending changes. Keyed by PropertyReference.
-    /// Last write wins if same property is written multiple times.
-    /// Thread-safe for concurrent property writes within the same transaction.
-    /// </summary>
-    internal ConcurrentDictionary<PropertyReference, SubjectPropertyChange> PendingChanges { get; } = new();
-
-    /// <summary>
-    /// Gets the pending changes as a read-only list.
-    /// </summary>
-    public IReadOnlyList<SubjectPropertyChange> GetPendingChanges() => PendingChanges.Values.ToList();
 
     /// <summary>
     /// Commits all pending changes. If external write handlers are configured on subjects' contexts,
@@ -181,22 +171,20 @@ public sealed class SubjectTransaction : IDisposable
 
         if (PendingChanges.Count == 0)
         {
-            // Mark as committed (Dispose will handle AsyncLocal cleanup in caller's context)
             _isCommitted = true;
             return;
         }
 
-        var changes = PendingChanges.Values.ToList();
-
-        // Mark as committing early so reads pass through to get underlying values
         _isCommitting = true;
 
+        var changes = PendingChanges.Values.ToList();
         try
         {
-            // 1. Check for conflicts at commit time if FailOnConflict behavior is enabled
-            //    Value-based conflict detection: compare captured OldValue with current actual value
             if (_conflictBehavior == TransactionConflictBehavior.FailOnConflict)
             {
+                // Check for conflicts at commit time if FailOnConflict behavior is enabled
+                // Value-based conflict detection: Compare captured OldValue with the current actual value
+                
                 var conflictingProperties = new List<PropertyReference>();
                 foreach (var change in changes)
                 {
@@ -211,7 +199,7 @@ public sealed class SubjectTransaction : IDisposable
 
                 if (conflictingProperties.Count > 0)
                 {
-                    _isCommitting = false; // Reset so Dispose works correctly
+                    _isCommitting = false;
                     throw new TransactionConflictException(conflictingProperties);
                 }
             }
@@ -241,7 +229,7 @@ public sealed class SubjectTransaction : IDisposable
             }
             else
             {
-                // No handler configured - all changes are successful
+                // No handler configured: All changes are successful
                 allSuccessfulChanges.AddRange(contextChanges);
             }
         }
@@ -286,6 +274,7 @@ public sealed class SubjectTransaction : IDisposable
                 TransactionMode.Rollback => "One or more external sources failed. Rollback was attempted. No changes have been applied to the in-process model.",
                 _ => "One or more external sources failed."
             };
+
             throw new TransactionException(message, allSuccessfulChanges, allFailedChanges);
         }
     }
