@@ -218,4 +218,91 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         // Each failed property change is reported separately
         Assert.Equal(2, ex.FailedChanges.Count);
     }
+
+    [Fact]
+    public async Task SingleWriteRequirement_ValidationFailure_ReturnsChangesWithoutSourceAsSuccessful()
+    {
+        // Tests that when SingleWrite validation fails (multiple sources),
+        // changes without source are still returned as successful in the result.
+        // This tests SourceTransactionWriter line 29-31.
+        var context = CreateContext();
+        var person = new Person(context);
+        var father = new Person(context);
+
+        var source1 = CreateSucceedingSource();
+        var source2 = CreateSucceedingSource();
+
+        // Two properties with different sources (violates SingleWrite)
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
+        // Father has no source
+
+        using var tx = SubjectTransaction.BeginTransaction(
+            TransactionMode.BestEffort, // Use BestEffort to see successful changes applied
+            TransactionRequirement.SingleWrite);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+        person.Father = father; // No source - should be in successful changes
+
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+
+        // Validation error should be reported
+        Assert.Single(ex.FailedChanges);
+        Assert.Contains("2 sources", ex.FailedChanges[0].Error.Message);
+
+        // Father (change without source) should be in successful changes
+        Assert.Single(ex.AppliedChanges);
+        Assert.Equal(nameof(Person.Father), ex.AppliedChanges[0].Property.Metadata.Name);
+
+        // In BestEffort mode, successful changes are applied
+        Assert.Same(father, person.Father);
+
+        // Source properties should NOT be applied (validation failed before any writes)
+        Assert.Null(person.FirstName);
+        Assert.Null(person.LastName);
+
+        // Verify no source writes were attempted
+        source1.Verify(s => s.WriteChangesAsync(
+            It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        source2.Verify(s => s.WriteChangesAsync(
+            It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SingleWriteRequirement_BatchSizeViolation_ReturnsChangesWithoutSourceAsSuccessful()
+    {
+        // Tests that when SingleWrite validation fails due to batch size,
+        // changes without source are still returned as successful.
+        var context = CreateContext();
+        var person = new Person(context);
+        var father = new Person(context);
+
+        var source = CreateSourceWithBatchSize(1); // Only 1 change per batch
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
+        // Father has no source
+
+        using var tx = SubjectTransaction.BeginTransaction(
+            TransactionMode.BestEffort,
+            TransactionRequirement.SingleWrite);
+        person.FirstName = "John";
+        person.LastName = "Doe"; // 2 changes > batch size of 1
+        person.Father = father; // No source
+
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+
+        // Validation error for batch size
+        Assert.Single(ex.FailedChanges);
+        Assert.Contains("WriteBatchSize is 1", ex.FailedChanges[0].Error.Message);
+
+        // Father should be in successful changes
+        Assert.Single(ex.AppliedChanges);
+        Assert.Equal(nameof(Person.Father), ex.AppliedChanges[0].Property.Metadata.Name);
+
+        // In BestEffort, successful changes are applied
+        Assert.Same(father, person.Father);
+    }
 }

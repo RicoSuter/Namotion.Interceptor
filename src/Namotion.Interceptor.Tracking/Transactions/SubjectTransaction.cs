@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Represents a transaction that captures property changes and commits them atomically.
 /// Changes are buffered until <see cref="CommitAsync"/> is called.
 /// </summary>
-public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
+public sealed class SubjectTransaction : IDisposable, IAsyncDisposable // TODO: Do we need to implement IAsyncDisposable?
 {
     private static readonly AsyncLocal<SubjectTransaction?> CurrentTransaction = new();
 
@@ -40,9 +40,14 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
     internal bool IsCommitting => _isCommitting;
 
     /// <summary>
+    /// Gets the interceptor this transaction is bound to (for cross-context validation).
+    /// </summary>
+    internal SubjectTransactionInterceptor? Interceptor { get; }
+
+    /// <summary>
     /// Gets the context this transaction is bound to.
     /// </summary>
-    public IInterceptorSubjectContext Context { get; }
+    public IInterceptorSubjectContext? Context { get; }
 
     /// <summary>
     /// Gets the timestamp when the transaction started.
@@ -55,7 +60,8 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
     public TransactionConflictBehavior ConflictBehavior => _conflictBehavior;
 
     private SubjectTransaction(
-        IInterceptorSubjectContext context,
+        IInterceptorSubjectContext? context,
+        SubjectTransactionInterceptor? interceptor,
         TransactionMode mode,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
@@ -63,6 +69,7 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
         IDisposable? lockReleaser)
     {
         Context = context;
+        Interceptor = interceptor;
         _mode = mode;
         _requirement = requirement;
         _conflictBehavior = conflictBehavior;
@@ -85,19 +92,21 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
             throw new InvalidOperationException("Nested transactions are not supported.");
 
         var transaction = new SubjectTransaction(
-            null!,
+            context: null,
+            interceptor: null,
             mode,
             requirement,
             TransactionConflictBehavior.FailOnConflict,
             DateTimeOffset.UtcNow,
-            null);
+            lockReleaser: null);
         CurrentTransaction.Value = transaction;
         return transaction;
     }
 
     /// <summary>
-    /// Begins a new transaction bound to the specified context.
-    /// Waits if another transaction is active on this context.
+    /// Begins a new serialized transaction bound to the specified context.
+    /// Waits if another transaction is active on this context, ensuring only one
+    /// transaction executes at a time per context.
     /// </summary>
     /// <param name="context">The context to bind the transaction to.</param>
     /// <param name="mode">The transaction mode controlling failure handling behavior.</param>
@@ -105,26 +114,23 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
     /// <param name="conflictBehavior">The conflict detection behavior.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A new SubjectTransaction instance.</returns>
-    internal static async ValueTask<SubjectTransaction> BeginAsync(
+    internal static async ValueTask<SubjectTransaction> BeginSerializedTransactionAsync(
         IInterceptorSubjectContext context,
         TransactionMode mode,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
         CancellationToken cancellationToken)
     {
-        // Get or create TransactionLock for this context
-        var lockService = context.TryGetService<TransactionLock>();
-        if (lockService == null)
-        {
-            // Add the lock service lazily
-            context.TryAddService(
-                () => new TransactionLock(),
-                existing => existing != null);
-            lockService = context.TryGetService<TransactionLock>();
-        }
+        // TODO: Move whole method into the extension method and remove here? possible
+        
+        // Get the transaction interceptor from the context - it holds the per-context lock
+        var interceptor = context.TryGetService<SubjectTransactionInterceptor>()
+            ?? throw new InvalidOperationException(
+                "SubjectTransactionInterceptor is not registered. " +
+                "Use WithFullPropertyTracking() or register SubjectTransactionInterceptor manually.");
 
         // Acquire the lock - this serializes concurrent transactions on the same context
-        var lockReleaser = await lockService!.AcquireAsync(cancellationToken).ConfigureAwait(false);
+        var lockReleaser = await interceptor.AcquireLockAsync(cancellationToken).ConfigureAwait(false);
 
         // Check for nested transactions AFTER acquiring lock
         // This allows concurrent transactions from different async contexts (they queue on lock)
@@ -137,6 +143,7 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
 
         var transaction = new SubjectTransaction(
             context,
+            interceptor,
             mode,
             requirement,
             conflictBehavior,
@@ -224,9 +231,9 @@ public sealed class SubjectTransaction : IDisposable, IAsyncDisposable
         var changesByContext = changes.GroupBy(c => c.Property.Subject.Context);
         foreach (var contextGroup in changesByContext)
         {
-            var context = contextGroup.Key;
+            var groupContext = contextGroup.Key;
             var contextChanges = contextGroup.ToList();
-            var writeHandler = context.TryGetService<ITransactionWriteHandler>();
+            var writeHandler = groupContext.TryGetService<ITransactionWriter>();
 
             if (writeHandler != null)
             {

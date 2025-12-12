@@ -8,8 +8,9 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 public static class SubjectTransactionExtensions
 {
     /// <summary>
-    /// Begins a new transaction bound to this context.
-    /// Waits if another transaction is active on this context.
+    /// Begins a new serialized transaction bound to this context.
+    /// Waits if another transaction is active on this context, ensuring only one
+    /// transaction executes at a time per context.
     /// </summary>
     /// <param name="context">The context to bind the transaction to.</param>
     /// <param name="mode">The transaction mode controlling failure handling behavior. Defaults to <see cref="TransactionMode.Rollback"/>.</param>
@@ -17,14 +18,14 @@ public static class SubjectTransactionExtensions
     /// <param name="conflictBehavior">The conflict detection behavior. Defaults to <see cref="TransactionConflictBehavior.FailOnConflict"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A new SubjectTransaction instance.</returns>
-    public static TransactionAwaitable BeginTransactionAsync(
+    public static TransactionAwaitable BeginSerializedTransactionAsync(
         this IInterceptorSubjectContext context,
         TransactionMode mode = TransactionMode.Rollback,
         TransactionRequirement requirement = TransactionRequirement.None,
         TransactionConflictBehavior conflictBehavior = TransactionConflictBehavior.FailOnConflict,
         CancellationToken cancellationToken = default)
     {
-        var task = SubjectTransaction.BeginAsync(context, mode, requirement, conflictBehavior, cancellationToken);
+        var task = SubjectTransaction.BeginSerializedTransactionAsync(context, mode, requirement, conflictBehavior, cancellationToken);
         return new TransactionAwaitable(task);
     }
 }

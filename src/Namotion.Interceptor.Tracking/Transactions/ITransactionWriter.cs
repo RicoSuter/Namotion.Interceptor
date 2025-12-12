@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Implement this interface and register it with <see cref="IInterceptorSubjectContext"/>
 /// to enable external source writes during transaction commit.
 /// </summary>
-public interface ITransactionWriteHandler
+public interface ITransactionWriter
 {
     /// <summary>
     /// Writes the specified changes to external sources.

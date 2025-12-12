@@ -119,4 +119,60 @@ public class SubjectTransactionModeTests : TransactionTestBase
 
         Assert.Equal(2, ex.FailedChanges.Count);
     }
+
+    [Fact]
+    public async Task RollbackMode_ChangesWithoutSource_RemainSuccessful_WhenSourceFails()
+    {
+        // Tests that changes without source (NullSource) are always successful,
+        // even in Rollback mode when source writes fail.
+        // In SourceTransactionWriter, changes with NullSource are excluded from rollback.
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var failSource = CreateFailingSource();
+
+        // Only FirstName has a source, LastName has no source
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(failSource.Object);
+
+        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Rollback);
+        person.FirstName = "John";
+        person.LastName = "Doe"; // No source - should be in successful changes
+
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+
+        // LastName should NOT be applied in Rollback mode (shouldApplyChanges is false)
+        // because the rollback mode check is at SubjectTransaction level, not SourceTransactionWriter
+        // However, the successful changes returned from SourceTransactionWriter should include LastName
+        Assert.Single(ex.FailedChanges);
+        Assert.Single(ex.AppliedChanges); // LastName is in successful changes (written to "NullSource")
+        Assert.Equal(nameof(Person.LastName), ex.AppliedChanges[0].Property.Metadata.Name);
+
+        // Nothing applied in rollback mode
+        Assert.Null(person.FirstName);
+        Assert.Null(person.LastName);
+    }
+
+    [Fact]
+    public async Task BestEffortMode_ChangesWithoutSource_AlwaysApplied_WhenSourceFails()
+    {
+        // Tests that changes without source are applied in BestEffort mode
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var failSource = CreateFailingSource();
+
+        // Only FirstName has a source
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(failSource.Object);
+
+        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.BestEffort);
+        person.FirstName = "John";
+        person.LastName = "Doe"; // No source
+
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+
+        // In BestEffort, successful changes are applied
+        Assert.Equal("Doe", person.LastName);
+        Assert.Null(person.FirstName);
+        Assert.Single(ex.FailedChanges);
+    }
 }
