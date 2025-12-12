@@ -5,12 +5,12 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// <summary>
 /// Extension methods for transaction support on IInterceptorSubjectContext.
 /// </summary>
-public static class SubjectSerializedTransactionExtensions
+public static class SubjectExclusiveTransactionExtensions
 {
     /// <summary>
-    /// Begins a new serialized transaction bound to this context.
+    /// Begins a new exclusive transaction bound to this context.
     /// Waits if another transaction is active on this context, ensuring only one
-    /// transaction executes at a time per context.
+    /// transaction executes at a time per context (exclusive lock).
     /// </summary>
     /// <param name="context">The context to bind the transaction to.</param>
     /// <param name="mode">The transaction mode controlling failure handling behavior. Defaults to <see cref="TransactionMode.Rollback"/>.</param>
@@ -18,14 +18,14 @@ public static class SubjectSerializedTransactionExtensions
     /// <param name="conflictBehavior">The conflict detection behavior. Defaults to <see cref="TransactionConflictBehavior.FailOnConflict"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A new SubjectTransaction instance.</returns>
-    public static TransactionAwaitable BeginSerializedTransactionAsync(
+    public static TransactionAwaitable BeginExclusiveTransactionAsync(
         this IInterceptorSubjectContext context,
         TransactionMode mode = TransactionMode.Rollback,
         TransactionRequirement requirement = TransactionRequirement.None,
         TransactionConflictBehavior conflictBehavior = TransactionConflictBehavior.FailOnConflict,
         CancellationToken cancellationToken = default)
     {
-        var task = SubjectTransaction.BeginSerializedTransactionAsync(context, mode, requirement, conflictBehavior, cancellationToken);
+        var task = SubjectTransaction.BeginExclusiveTransactionAsync(context, mode, requirement, conflictBehavior, cancellationToken);
         return new TransactionAwaitable(task);
     }
 }

@@ -104,9 +104,9 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Begins a new serialized transaction bound to the specified context.
+    /// Begins a new exclusive transaction bound to the specified context.
     /// Waits if another transaction is active on this context, ensuring only one
-    /// transaction executes at a time per context.
+    /// transaction executes at a time per context (exclusive lock).
     /// </summary>
     /// <param name="context">The context to bind the transaction to.</param>
     /// <param name="mode">The transaction mode controlling failure handling behavior.</param>
@@ -114,7 +114,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="conflictBehavior">The conflict detection behavior.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A new SubjectTransaction instance.</returns>
-    internal static async ValueTask<SubjectTransaction> BeginSerializedTransactionAsync(
+    internal static async ValueTask<SubjectTransaction> BeginExclusiveTransactionAsync(
         IInterceptorSubjectContext context,
         TransactionMode mode,
         TransactionRequirement requirement,

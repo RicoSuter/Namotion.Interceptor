@@ -8,9 +8,9 @@ namespace Namotion.Interceptor.Sources.Tests.Transactions;
 public class SubjectTransactionAsyncTests
 {
     [Fact]
-    public async Task BeginSerializedTransactionAsync_SerializesConcurrentTransactions()
+    public async Task BeginExclusiveTransactionAsync_SerializesConcurrentTransactions()
     {
-        // Test that BeginSerializedTransactionAsync serializes concurrent transactions
+        // Test that BeginExclusiveTransactionAsync serializes concurrent transactions
         // The lock lives on SubjectTransactionInterceptor (one per context)
         var context = InterceptorSubjectContext
             .Create()
@@ -20,7 +20,7 @@ public class SubjectTransactionAsyncTests
         Task<SubjectTransaction> tx2Task;
         var tx2AcquiredTcs = new TaskCompletionSource<bool>();
 
-        using (await context.BeginSerializedTransactionAsync())
+        using (await context.BeginExclusiveTransactionAsync())
         {
             // Try to acquire another transaction in the background
             // Use ExecutionContext.SuppressFlow to prevent AsyncLocal inheritance
@@ -28,7 +28,7 @@ public class SubjectTransactionAsyncTests
             {
                 tx2Task = Task.Run(async () =>
                 {
-                    var tx = await context.BeginSerializedTransactionAsync();
+                    var tx = await context.BeginExclusiveTransactionAsync();
                     tx2AcquiredTcs.SetResult(true);
                     return tx;
                 });
@@ -47,28 +47,28 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task BeginSerializedTransactionAsync_ReturnsTransaction()
+    public async Task BeginExclusiveTransactionAsync_ReturnsTransaction()
     {
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
             .WithFullPropertyTracking();
 
-        using var tx = await context.BeginSerializedTransactionAsync();
+        using var tx = await context.BeginExclusiveTransactionAsync();
 
         Assert.NotNull(tx);
         Assert.Same(context, tx.Context);
     }
 
     [Fact]
-    public async Task BeginSerializedTransactionAsync_SerializesTransactionsPerContext()
+    public async Task BeginExclusiveTransactionAsync_SerializesTransactionsPerContext()
     {
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
             .WithFullPropertyTracking();
 
-        using var tx1 = await context.BeginSerializedTransactionAsync();
+        using var tx1 = await context.BeginExclusiveTransactionAsync();
 
         // Verify tx1's context matches
         Assert.Same(context, tx1.Context);
@@ -84,7 +84,7 @@ public class SubjectTransactionAsyncTests
             tx2Task = Task.Run(async () =>
             {
                 tx2Started = true;
-                var tx = await context.BeginSerializedTransactionAsync();
+                var tx = await context.BeginExclusiveTransactionAsync();
                 tx2Acquired = true;
                 return tx;
             });
@@ -123,7 +123,7 @@ public class SubjectTransactionAsyncTests
         var person1 = new Person(context1);
         var person2 = new Person(context2);
 
-        using var tx = await context1.BeginSerializedTransactionAsync();
+        using var tx = await context1.BeginExclusiveTransactionAsync();
 
         // Should work - same context
         person1.FirstName = "John";
@@ -147,7 +147,7 @@ public class SubjectTransactionAsyncTests
         // Note: subject.Context returns InterceptorExecutor, not the original context
         // But they share the same SubjectTransactionInterceptor via fallback context mechanism
 
-        using var tx = await context.BeginSerializedTransactionAsync();
+        using var tx = await context.BeginExclusiveTransactionAsync();
 
         // Verify transaction context is the original context
         Assert.Same(context, tx.Context);
@@ -161,7 +161,7 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task BeginSerializedTransactionAsync_StoresStartTimestamp()
+    public async Task BeginExclusiveTransactionAsync_StoresStartTimestamp()
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -169,7 +169,7 @@ public class SubjectTransactionAsyncTests
             .WithFullPropertyTracking();
 
         var beforeStart = DateTimeOffset.UtcNow;
-        using var tx = await context.BeginSerializedTransactionAsync();
+        using var tx = await context.BeginExclusiveTransactionAsync();
         var afterStart = DateTimeOffset.UtcNow;
 
         Assert.True(tx.StartTimestamp >= beforeStart);
@@ -177,14 +177,14 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task BeginSerializedTransactionAsync_WithConflictBehavior_StoresBehavior()
+    public async Task BeginExclusiveTransactionAsync_WithConflictBehavior_StoresBehavior()
     {
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
             .WithFullPropertyTracking();
 
-        using var tx = await context.BeginSerializedTransactionAsync(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             conflictBehavior: TransactionConflictBehavior.Ignore);
 
         Assert.Equal(TransactionConflictBehavior.Ignore, tx.ConflictBehavior);
@@ -198,11 +198,11 @@ public class SubjectTransactionAsyncTests
             .WithRegistry()
             .WithFullPropertyTracking();
 
-        var tx1 = await context.BeginSerializedTransactionAsync();
+        var tx1 = await context.BeginExclusiveTransactionAsync();
         tx1.Dispose();
 
         // Should be able to start new transaction immediately
-        using var tx2 = await context.BeginSerializedTransactionAsync();
+        using var tx2 = await context.BeginExclusiveTransactionAsync();
         Assert.NotNull(tx2);
     }
 
@@ -218,7 +218,7 @@ public class SubjectTransactionAsyncTests
         person.FirstName = "Original";
 
         // Start transaction with FailOnConflict
-        using var tx = await context.BeginSerializedTransactionAsync(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
 
         // Make a change within the transaction - captures OldValue = "Original"
@@ -261,7 +261,7 @@ public class SubjectTransactionAsyncTests
         person.FirstName = "Original";
 
         // Start transaction with Ignore behavior
-        using var tx = await context.BeginSerializedTransactionAsync(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             conflictBehavior: TransactionConflictBehavior.Ignore);
 
         // Make a change within the transaction
@@ -299,7 +299,7 @@ public class SubjectTransactionAsyncTests
         person.FirstName = "Original";
 
         // Start transaction with FailOnConflict
-        using var tx = await context.BeginSerializedTransactionAsync(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
 
         // Make a change within the transaction
@@ -324,7 +324,7 @@ public class SubjectTransactionAsyncTests
         // FirstName starts as null
 
         // Start transaction with FailOnConflict
-        using var tx = await context.BeginSerializedTransactionAsync(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
 
         // Make a change within the transaction - captures OldValue = null
@@ -348,7 +348,7 @@ public class SubjectTransactionAsyncTests
         var person = new Person(context);
         person.FirstName = "Original";
 
-        using var tx = await context.BeginSerializedTransactionAsync(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
 
         // First write captures OldValue = "Original"
