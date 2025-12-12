@@ -4,6 +4,7 @@ using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources.Tests.Models;
+using Namotion.Interceptor.Sources.Transactions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources.Tests;
@@ -79,9 +80,8 @@ public class SubjectSourceBackgroundServiceTests
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
 
-        subjectSourceMock
-            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
-            .Returns(true);
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
@@ -135,9 +135,8 @@ public class SubjectSourceBackgroundServiceTests
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
 
-        subjectSourceMock
-            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
-            .Returns(true);
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
@@ -185,9 +184,8 @@ public class SubjectSourceBackgroundServiceTests
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
 
-        subjectSourceMock
-            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
-            .Returns(true);
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
@@ -235,9 +233,8 @@ public class SubjectSourceBackgroundServiceTests
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
 
-        subjectSourceMock
-            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
-            .Returns(true);
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
@@ -304,9 +301,8 @@ public class SubjectSourceBackgroundServiceTests
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
 
-        subjectSourceMock
-            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
-            .Returns(true);
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
@@ -354,9 +350,8 @@ public class SubjectSourceBackgroundServiceTests
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
 
-        subjectSourceMock
-            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
-            .Returns(true);
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))

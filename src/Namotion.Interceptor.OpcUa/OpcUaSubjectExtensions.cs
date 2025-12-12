@@ -12,7 +12,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class OpcUaSubjectExtensions
 {
-    public static IServiceCollection AddOpcUaSubjectClient<TSubject>(
+    public static IServiceCollection AddOpcUaSubjectClientSource<TSubject>(
         this IServiceCollection serviceCollection,
         string serverUrl,
         string sourceName,
@@ -20,7 +20,7 @@ public static class OpcUaSubjectExtensions
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
-        return serviceCollection.AddOpcUaSubjectClient(
+        return serviceCollection.AddOpcUaSubjectClientSource(
             serverUrl,
             sourceName,
             sp => sp.GetRequiredService<TSubject>(),
@@ -28,7 +28,7 @@ public static class OpcUaSubjectExtensions
             rootName);
     }
 
-    public static IServiceCollection AddOpcUaSubjectClient(
+    public static IServiceCollection AddOpcUaSubjectClientSource(
         this IServiceCollection serviceCollection,
         string serverUrl,
         string sourceName,
@@ -36,7 +36,7 @@ public static class OpcUaSubjectExtensions
         string? pathPrefix = null,
         string? rootName = null)
     {
-        return serviceCollection.AddOpcUaSubjectClient(subjectSelector, sp => new OpcUaClientConfiguration
+        return serviceCollection.AddOpcUaSubjectClientSource(subjectSelector, sp => new OpcUaClientConfiguration
         {
             ServerUrl = serverUrl,
             RootName = rootName,
@@ -47,7 +47,7 @@ public static class OpcUaSubjectExtensions
         });
     }
 
-    public static IServiceCollection AddOpcUaSubjectClient(
+    public static IServiceCollection AddOpcUaSubjectClientSource(
         this IServiceCollection serviceCollection,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
         Func<IServiceProvider, OpcUaClientConfiguration> configurationProvider)

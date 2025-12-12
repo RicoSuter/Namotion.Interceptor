@@ -14,6 +14,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Sources.Transactions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -61,10 +62,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
         configuration.Validate();
     }
-
-    /// <inheritdoc />
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
-        _configuration.PathProvider.IsPropertyIncluded(property);
 
     /// <inheritdoc />
     public int WriteBatchSize => 0; // No server-imposed limit for MQTT
@@ -288,7 +285,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
         var properties = registeredSubject
             .GetAllProperties()
-            .Where(p => !p.HasChildSubjects && IsPropertyIncluded(p))
+            .Where(p => !p.HasChildSubjects && _configuration.PathProvider.IsPropertyIncluded(p))
             .ToList();
 
         if (properties.Count == 0)
@@ -303,6 +300,8 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         {
             var topic = TryGetTopicForProperty(property.Reference, property);
             if (topic is null) continue;
+
+            property.Reference.SetSource(this, _logger);
 
             _topicToProperty[topic] = property.Reference;
             subscribeOptionsBuilder.WithTopicFilter(f => f
@@ -332,6 +331,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
             {
                 _propertyToTopic.TryRemove(propertyReference, out _);
+                propertyReference.RemoveSource();
             }
         }
 
@@ -458,6 +458,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             if (kvp.Key.Subject == change.Subject)
             {
                 _propertyToTopic.TryRemove(kvp.Key, out _);
+                kvp.Key.RemoveSource();
             }
         }
 
@@ -466,6 +467,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             if (kvp.Value?.Subject == change.Subject)
             {
                 _topicToProperty.TryRemove(kvp.Key, out _);
+                kvp.Value?.RemoveSource();
             }
         }
     }
@@ -532,7 +534,12 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             _client = null;
         }
 
-        // Clear caches to allow GC of subject references
+        // Remove source associations and clear caches to allow GC of subject references
+        foreach (var kvp in _propertyToTopic)
+        {
+            kvp.Key.RemoveSource();
+        }
+
         _topicToProperty.Clear();
         _propertyToTopic.Clear();
 
