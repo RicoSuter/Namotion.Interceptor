@@ -18,18 +18,19 @@
         }
     </style>
     <div @key="_glowCounter" style="@GetDebugBorderStyle()" title="@GetTooltipText()">
-        @RecordingContent
+        @ChildContent
     </div>
 }
 else
 {
-    @RecordingContent
+    @ChildContent
 }
 
 @code {
     private readonly Lock _lock = new();
     private IDisposable? _subscription;
     private IInterceptorSubjectContext? _subscribedContext;
+    private ReadPropertyRecorderScope? _currentScope;
     private int _glowCounter;
     private volatile int _disposed;
     private volatile int _rerenderPending;
@@ -69,23 +70,6 @@ else
     /// </summary>
     public IEnumerable<string> TrackedPropertyNames =>
         _properties.Keys.Select(p => $"{p.Subject.GetType().Name}.{p.Name}");
-
-    /// <summary>
-    /// Wraps ChildContent to ensure recording is active when properties are read.
-    /// This is necessary because Blazor invokes RenderFragments in different async contexts
-    /// where AsyncLocal values from OnParametersSet/ShouldRender are not available.
-    /// </summary>
-    private RenderFragment RecordingContent => builder =>
-    {
-        if (_disposed != 0 || ChildContent == null) return;
-
-        // IMPORTANT: Start a fresh recording scope in THIS async context.
-        // Blazor's render tree builder runs in a different async context than lifecycle methods.
-        using var localScope = ReadPropertyRecorder.Start(_collectingProperties);
-
-        // Invoke the child content - property reads will be recorded to _collectingProperties
-        ChildContent.Invoke(builder);
-    };
 
     protected override void OnParametersSet()
     {
@@ -127,12 +111,34 @@ else
                 });
         }
 
+        StartRecording();
         base.OnParametersSet();
+    }
+
+    protected override bool ShouldRender()
+    {
+        if (_disposed != 0) return false;
+
+        StartRecording();
+        return base.ShouldRender();
+    }
+
+    private void StartRecording()
+    {
+        if (_disposed != 0) return;
+
+        if (_currentScope == null)
+        {
+            _collectingProperties.Clear();
+            _currentScope = ReadPropertyRecorder.Start(_collectingProperties);
+        }
     }
 
     protected override void OnAfterRender(bool firstRender)
     {
         if (_disposed != 0) return;
+
+        StopRecording();
 
         // Only swap if we collected properties during this render.
         // This prevents losing tracking when a spurious render happens without executing RenderFragments.
@@ -156,6 +162,15 @@ else
         Interlocked.Exchange(ref _rerenderPending, 0);
 
         base.OnAfterRender(firstRender);
+    }
+
+    private void StopRecording()
+    {
+        if (_currentScope != null)
+        {
+            _currentScope.Dispose();
+            _currentScope = null;
+        }
     }
 
     /// <summary>
@@ -276,6 +291,7 @@ else
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 
+        StopRecording();
         _subscription?.Dispose();
         _subscription = null;
         _subscribedContext = null;
