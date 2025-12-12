@@ -19,6 +19,7 @@ namespace Namotion.Interceptor.SampleBlazor
             var context = InterceptorSubjectContext
                 .Create()
                 .WithFullPropertyTracking()
+                .WithParents()
                 .WithReadPropertyRecorder();
 
             builder.Services
