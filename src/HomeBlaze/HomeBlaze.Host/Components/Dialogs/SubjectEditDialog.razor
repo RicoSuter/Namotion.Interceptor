@@ -1,3 +1,4 @@
+@using HomeBlaze.Abstractions.Storage
 @implements IDisposable
 
 @inject SubjectComponentRegistry ComponentRegistry
@@ -91,28 +92,44 @@
 
     private async Task Save()
     {
-        if (Subject == null) return;
-
-        if (_editComponent != null)
-        {
-            await _editComponent.SaveAsync();
-        }
-        else
-        {
-            _propertiesEditor?.ApplyChanges();
-            if (_propertiesEditor?.HasErrors == true)
-            {
-                return;
-            }
-        }
-
+        var subject = Subject;
+        if (subject == null) return;
+        
         try
         {
-            var saved = await Subject.SaveConfigurationAsync(RootManager, CancellationToken.None);
-            if (!saved)
+            if (_editComponent != null)
             {
-                Snackbar.Add("Configuration could not be saved: no handler found.", Severity.Warning);
+                if (!_editComponent.IsValid)
+                {
+                    return;
+                }
+                
+                await _editComponent.SaveAsync(CancellationToken.None);
             }
+            else
+            {
+                if (_propertiesEditor?.HasErrors == true)
+                {
+                    return;
+                }
+                
+                _propertiesEditor?.ApplyChanges();
+            }
+
+            // TODO: Extract to reusable method (services)
+            if (subject is IConfigurationWriter configurationWriter)
+            {
+                var success = await configurationWriter.WriteConfigurationAsync(subject, CancellationToken.None);
+                if (success)
+                     await RootManager.WriteConfigurationAsync(subject, CancellationToken.None);
+            }
+            
+            if (subject is IStorageFile storageFile)
+            {
+                await storageFile.OnFileChangedAsync(CancellationToken.None);
+            }
+            
+            Snackbar.Add("File saved.", Severity.Info);
         }
         catch (Exception ex)
         {

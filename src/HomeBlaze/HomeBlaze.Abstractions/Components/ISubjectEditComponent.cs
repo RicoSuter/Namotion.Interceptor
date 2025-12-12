@@ -29,7 +29,7 @@ public interface ISubjectEditComponent : ISubjectComponent
     /// <summary>
     /// Saves the changes to the subject.
     /// </summary>
-    Task SaveAsync();
+    Task SaveAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Gets the preferred dialog size for this edit component.

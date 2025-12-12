@@ -408,6 +408,12 @@ public partial class FluentStorageContainer :
 
         await _client.WriteAsync(path, content, append: false, cancellationToken: cancellationToken);
         _logger?.LogDebug("Wrote blob to storage: {Path}", path);
+
+        // Notify the file subject to reload its in-memory state
+        if (_pathRegistry.TryGetSubject(path, out var subject) && subject is IStorageFile file)
+        {
+            await file.OnFileChangedAsync(cancellationToken);
+        }
     }
 
     /// <summary>

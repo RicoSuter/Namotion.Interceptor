@@ -78,7 +78,7 @@
         IsDirtyChanged?.Invoke(IsDirty);
     }
 
-    public Task SaveAsync()
+    public Task SaveAsync(CancellationToken cancellationToken)
     {
         if (MotorSubject != null && IsValid)
         {
@@ -90,7 +90,7 @@
             _originalTargetSpeed = _targetSpeed;
             _originalSimulationIntervalMs = _simulationIntervalMs;
 
-            IsDirtyChanged?.Invoke(false);
+            IsDirtyChanged?.Invoke(false); // TODO: Move to base class (StorageFileBase with events, etc.)
         }
         return Task.CompletedTask;
     }
