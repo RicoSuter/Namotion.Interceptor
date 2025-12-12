@@ -78,7 +78,7 @@
         });
     }
 
-    public async Task SaveAsync()
+    public async Task SaveAsync(CancellationToken cancellationToken)
     {
         if (File == null || _editor == null) return;
 

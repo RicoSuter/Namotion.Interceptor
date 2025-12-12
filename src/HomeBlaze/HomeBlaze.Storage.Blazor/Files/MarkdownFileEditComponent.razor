@@ -91,15 +91,18 @@ else
         });
     }
 
-    public async Task SaveAsync()
+    public async Task SaveAsync(CancellationToken cancellationToken)
     {
         if (File == null || _editor == null) return;
 
         var content = await _editor.GetValue();
+        
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
-        await File.WriteAsync(stream, CancellationToken.None);
+        await File.WriteAsync(stream, cancellationToken);
+
         _originalContent = content;
         _currentContent = content;
+        
         IsDirtyChanged?.Invoke(false);
     }
 }
