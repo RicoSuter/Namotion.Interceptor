@@ -195,7 +195,7 @@ public partial class FluentStorageContainer :
         }
 
         Children = children;
-        _logger?.LogInformation("Scan complete. Found {Count} subjects", _pathRegistry.Count);
+        _logger?.LogInformation("Scan complete: Found {Count} subjects.", _pathRegistry.Count);
     }
 
     private void StartFileWatching()

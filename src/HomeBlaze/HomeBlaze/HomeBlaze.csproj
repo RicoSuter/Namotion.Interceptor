@@ -7,6 +7,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="CodeBeam.MudBlazor.Extensions" Version="8.3.0" />
         <ProjectReference Include="..\HomeBlaze.Host\HomeBlaze.Host.csproj" />
         <ProjectReference Include="..\HomeBlaze.Samples\HomeBlaze.Samples.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
