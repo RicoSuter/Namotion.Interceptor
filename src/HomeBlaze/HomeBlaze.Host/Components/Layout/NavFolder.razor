@@ -3,7 +3,7 @@
     {
         @foreach (var child in _children)
         {
-            @if (child.IsPage && !child.IsFolder)
+            @if (child is { IsPage: true, IsFolder: false })
             {
                 <MudNavLink Href="@($"pages/{child.Path}")"
                             Match="NavLinkMatch.All"

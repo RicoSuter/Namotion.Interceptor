@@ -75,6 +75,7 @@
             var registration = ComponentRegistry.GetComponent(
                 _subject.GetType(),
                 SubjectComponentType.Page);
+
             _componentType = registration?.ComponentType;
 
             // Get title from ITitleProvider if implemented
@@ -116,7 +117,6 @@
             SubjectComponentType.Edit);
 
         var maxWidth = editRegistration != null ? MaxWidth.Large : MaxWidth.Small;
-
         var options = new DialogOptions
         {
             MaxWidth = maxWidth,
@@ -128,7 +128,7 @@
         var result = await dialogRef.Result;
 
         // Force page component to reload by changing key
-        if (result != null && !result.Canceled)
+        if (result is { Canceled: false })
         {
             _componentKey++;
             StateHasChanged();
