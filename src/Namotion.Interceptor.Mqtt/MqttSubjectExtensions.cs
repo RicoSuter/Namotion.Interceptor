@@ -15,7 +15,7 @@ public static class MqttSubjectExtensions
     /// <summary>
     /// Adds an MQTT client source that subscribes to an MQTT broker and synchronizes properties.
     /// </summary>
-    public static IServiceCollection AddMqttSubjectClient<TSubject>(
+    public static IServiceCollection AddMqttSubjectClientSource<TSubject>(
         this IServiceCollection serviceCollection,
         string brokerHost,
         string sourceName,
@@ -23,7 +23,7 @@ public static class MqttSubjectExtensions
         string? topicPrefix = null)
         where TSubject : IInterceptorSubject
     {
-        return serviceCollection.AddMqttSubjectClient(
+        return serviceCollection.AddMqttSubjectClientSource(
             sp => sp.GetRequiredService<TSubject>(),
             _ => new MqttClientConfiguration
             {
@@ -37,7 +37,7 @@ public static class MqttSubjectExtensions
     /// <summary>
     /// Adds an MQTT client source with custom configuration.
     /// </summary>
-    public static IServiceCollection AddMqttSubjectClient(
+    public static IServiceCollection AddMqttSubjectClientSource(
         this IServiceCollection serviceCollection,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
         Func<IServiceProvider, MqttClientConfiguration> configurationProvider)

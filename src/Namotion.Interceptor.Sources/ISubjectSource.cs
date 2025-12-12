@@ -1,20 +1,13 @@
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Sources;
 
 /// <summary>
 /// Represents a source that can provide and synchronize data for an <see cref="IInterceptorSubject"/>.
+/// Sources must claim ownership of properties by calling <c>SetSource(this)</c> during initialization.
 /// </summary>
 public interface ISubjectSource
 {
-    /// <summary>
-    /// Checks whether the specified property is included in the source.
-    /// </summary>
-    /// <param name="property">The property.</param>
-    /// <returns>The result.</returns>
-    bool IsPropertyIncluded(RegisteredSubjectProperty property);
-
     /// <summary>
     /// Initializes the source and starts listening for external changes.
     /// </summary>

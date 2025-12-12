@@ -103,29 +103,137 @@ builder.Services.AddOpcUaSubjectClient<Sensor>("opc.tcp://localhost:4840", "opc"
 
 Properties with `[SourcePath("opc", "NodeName")]` map to OPC UA nodes in the external server's address space.
 
+## Source Ownership Model
+
+Each property can have **at most one source** at any time. This is the single source of truth model:
+
+- Sources claim ownership of properties by calling `SetSource(this)` during initialization
+- The `SubjectSourceBackgroundService` dispatches changes only to the owning source
+- Property ownership is stored in the subject's data dictionary and automatically cleaned up when the subject is garbage collected
+
+**Why single ownership?**
+- Prevents conflicts when multiple sources could handle the same property
+- Makes data flow deterministic and predictable
+- Simplifies debugging and error handling
+
+**Warning on multiple claims**: If two sources attempt to claim the same property, the last one wins and a warning is logged. This typically indicates a configuration error.
+
+## Implementing Source Lifecycle
+
+When implementing a custom source, you must properly manage property ownership:
+
+### Claiming Properties
+
+Call `SetSource(this)` for each property your source handles during `StartListeningAsync` or `LoadInitialStateAsync`:
+
+```csharp
+public async Task<IDisposable?> StartListeningAsync(
+    SubjectPropertyWriter propertyWriter,
+    CancellationToken cancellationToken)
+{
+    var registeredSubject = _root.TryGetRegisteredSubject();
+    if (registeredSubject is null) return null;
+
+    // Claim ownership of properties that match this source
+    foreach (var property in registeredSubject.GetAllProperties()
+        .Where(p => _pathProvider.IsPropertyIncluded(p)))
+    {
+        property.Reference.SetSource(this, _logger);
+        _trackedProperties.Add(property.Reference);
+    }
+
+    // Set up change notifications...
+    return subscription;
+}
+```
+
+### Releasing Properties
+
+Release ownership when subjects are detached or when the source is disposed:
+
+```csharp
+// Handle subject detachment
+private void OnSubjectDetached(SubjectLifecycleChange change)
+{
+    var toRemove = _trackedProperties
+        .Where(p => p.Subject == change.Subject)
+        .ToList();
+
+    foreach (var property in toRemove)
+    {
+        property.RemoveSource();
+        _trackedProperties.Remove(property);
+    }
+}
+
+// Clean up on dispose
+public async ValueTask DisposeAsync()
+{
+    // Unsubscribe from lifecycle events
+    if (_lifecycleInterceptor is not null)
+    {
+        _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
+    }
+
+    // Release all property ownership
+    foreach (var property in _trackedProperties)
+    {
+        property.RemoveSource();
+    }
+    _trackedProperties.Clear();
+
+    // Other cleanup...
+}
+```
+
 ## Custom source implementations
 
 Implement `ISubjectSource` to create custom data source integrations:
 
 ```csharp
-public class SampleSource : ISubjectSource
+public class SampleSource : ISubjectSource, IAsyncDisposable
 {
-    public SampleSource(IInterceptorSubject root)
+    private readonly IInterceptorSubject _root;
+    private readonly ISourcePathProvider _pathProvider;
+    private readonly ILogger _logger;
+    private readonly HashSet<PropertyReference> _trackedProperties = [];
+    private LifecycleInterceptor? _lifecycleInterceptor;
+
+    public SampleSource(
+        IInterceptorSubject root,
+        ISourcePathProvider pathProvider,
+        ILogger<SampleSource> logger)
     {
         _root = root;
+        _pathProvider = pathProvider;
+        _logger = logger;
     }
 
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
-    {
-        return property.ReflectionAttributes
-            .OfType<SourcePathAttribute>()
-            .Any(a => a.SourceName == "sample");
-    }
+    public int WriteBatchSize => 0; // No limit
 
     public async Task<IDisposable?> StartListeningAsync(
         SubjectPropertyWriter propertyWriter,
         CancellationToken cancellationToken)
     {
+        // Subscribe to lifecycle events for cleanup
+        _lifecycleInterceptor = _root.Context.TryGetLifecycleInterceptor();
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
+        }
+
+        // Claim ownership of matching properties
+        var registeredSubject = _root.TryGetRegisteredSubject();
+        if (registeredSubject is not null)
+        {
+            foreach (var property in registeredSubject.GetAllProperties()
+                .Where(p => _pathProvider.IsPropertyIncluded(p)))
+            {
+                property.Reference.SetSource(this, _logger);
+                _trackedProperties.Add(property.Reference);
+            }
+        }
+
         // Set up external change notifications
         // Use propertyWriter.Write() to apply inbound updates
         return subscription;
@@ -139,13 +247,40 @@ public class SampleSource : ISubjectSource
         return () => { /* Apply externalState to _root */ };
     }
 
-    public ValueTask WriteChangesAsync(
+    public ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
         // Write changes to external system
-        // Throw exception for failures - the entire batch will be retried
-        return ValueTask.CompletedTask;
+        // Return WriteResult.Failure for errors - the batch will be retried
+        return ValueTask.FromResult(WriteResult.Success());
+    }
+
+    private void OnSubjectDetached(SubjectLifecycleChange change)
+    {
+        var toRemove = _trackedProperties
+            .Where(p => p.Subject == change.Subject)
+            .ToList();
+
+        foreach (var property in toRemove)
+        {
+            property.RemoveSource();
+            _trackedProperties.Remove(property);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_lifecycleInterceptor is not null)
+        {
+            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
+        }
+
+        foreach (var property in _trackedProperties)
+        {
+            property.RemoveSource();
+        }
+        _trackedProperties.Clear();
     }
 }
 ```

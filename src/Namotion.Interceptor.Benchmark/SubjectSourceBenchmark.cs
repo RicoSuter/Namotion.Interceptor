@@ -6,8 +6,8 @@ using BenchmarkDotNet.Attributes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Sources.Transactions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -52,10 +52,11 @@ public class SubjectSourceBenchmark
 
         _car = new Car(_context);
 
+        var registeredSubject = _car.TryGetRegisteredSubject()!;
         foreach (var name in _propertyNames)
         {
-            _car.TryGetRegisteredSubject()!
-                .AddProperty(name, typeof(string), static _ => "foo", static (_, _) => { });
+            var property = registeredSubject.AddProperty(name, typeof(string), static _ => "foo", static (_, _) => { });
+            property.Reference.SetSource(_source);
         }
 
         _cts = new CancellationTokenSource();
@@ -136,8 +137,6 @@ public class SubjectSourceBenchmark
         {
             _signal.WaitOne();
         }
-
-        public bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
 
         public Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
         {

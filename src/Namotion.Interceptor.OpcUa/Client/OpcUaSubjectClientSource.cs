@@ -55,9 +55,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
     }
 
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
-        _configuration.PathProvider.IsPropertyIncluded(property);
-
     public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
         Reset();
