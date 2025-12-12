@@ -114,7 +114,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
                 () => transaction.CommitAsync(CancellationToken.None));
 
             Assert.Single(exception.FailedChanges);
-            Assert.IsType<SourceWriteException>(exception.FailedChanges[0].Error);
+            Assert.IsType<SourceTransactionWriteException>(exception.FailedChanges[0].Error);
         }
 
         Assert.Null(person.FirstName);
@@ -210,9 +210,9 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
 
         using var cts = new CancellationTokenSource();
-        cts.Cancel();
+        await cts.CancelAsync();
 
-        using (var transaction = SubjectTransaction.BeginTransaction())
+        await using (var transaction = SubjectTransaction.BeginTransaction())
         {
             person.FirstName = "John";
 
@@ -220,7 +220,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
                 () => transaction.CommitAsync(cts.Token));
 
             Assert.Single(exception.FailedChanges);
-            var sourceWriteException = Assert.IsType<SourceWriteException>(exception.FailedChanges[0].Error);
+            var sourceWriteException = Assert.IsType<SourceTransactionWriteException>(exception.FailedChanges[0].Error);
             Assert.IsType<OperationCanceledException>(sourceWriteException.InnerException);
         }
     }
@@ -311,5 +311,107 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         Assert.Single(source2Writes);
         Assert.Equal("John", person1.FirstName);
         Assert.Equal("Jane", person2.FirstName);
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithPartialWriteFailure_ReportsOnlyFailedChanges()
+    {
+        // Tests the path where WriteResult.FailedChanges contains specific failed changes
+        // (not all changes in the batch failed)
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
+        sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                // Simulate partial failure: only FirstName fails
+                var span = changes.Span;
+                var failedChanges = new List<SubjectPropertyChange>();
+                for (var i = 0; i < span.Length; i++)
+                {
+                    if (span[i].Property.Metadata.Name == nameof(Person.FirstName))
+                    {
+                        failedChanges.Add(span[i]);
+                    }
+                }
+
+                if (failedChanges.Count > 0)
+                {
+                    return new ValueTask<WriteResult>(
+                        WriteResult.PartialFailure(
+                            failedChanges.ToArray(),
+                            new InvalidOperationException("FirstName write failed")));
+                }
+                return new ValueTask<WriteResult>(WriteResult.Success());
+            });
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceMock.Object);
+
+        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.BestEffort);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+
+        // Only FirstName should be in FailedChanges (partial failure)
+        Assert.Single(ex.FailedChanges);
+        Assert.Equal(nameof(Person.FirstName), ex.FailedChanges[0].Change.Property.Metadata.Name);
+
+        // LastName should have been applied (it was in successful changes)
+        Assert.Equal("Doe", person.LastName);
+        // FirstName should not be applied (it failed)
+        Assert.Null(person.FirstName);
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithPartialWriteFailure_InRollbackMode_RevertsSuccessfulChanges()
+    {
+        // Tests that partial failure triggers rollback for successful changes
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var writeCallCount = 0;
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
+        sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                writeCallCount++;
+                if (writeCallCount == 1)
+                {
+                    // First call: partial failure (only FirstName fails)
+                    var span = changes.Span;
+                    for (var i = 0; i < span.Length; i++)
+                    {
+                        if (span[i].Property.Metadata.Name == nameof(Person.FirstName))
+                        {
+                            return new ValueTask<WriteResult>(
+                                WriteResult.PartialFailure(
+                                    new[] { span[i] },
+                                    new InvalidOperationException("FirstName write failed")));
+                        }
+                    }
+                }
+                // Subsequent calls (rollback): succeed
+                return new ValueTask<WriteResult>(WriteResult.Success());
+            });
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceMock.Object);
+
+        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Rollback);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+
+        // In Rollback mode, nothing should be applied when there's any failure
+        Assert.Null(person.FirstName);
+        Assert.Null(person.LastName);
+        Assert.Contains("Rollback was attempted", ex.Message);
+        Assert.Equal(2, writeCallCount); // Initial write + revert
     }
 }

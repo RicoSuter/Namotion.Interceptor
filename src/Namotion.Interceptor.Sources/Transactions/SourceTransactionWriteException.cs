@@ -17,15 +17,15 @@ namespace Namotion.Interceptor.Sources.Transactions;
 /// with the external system. Successfully written changes are applied even if other sources fail.
 /// </para>
 /// </remarks>
-public class SourceWriteException : Exception
+public class SourceTransactionWriteException : Exception
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="SourceWriteException"/> class.
+    /// Initializes a new instance of the <see cref="SourceTransactionWriteException"/> class.
     /// </summary>
     /// <param name="source">The external data source that failed to write changes.</param>
     /// <param name="changes">The collection of property changes that failed to write.</param>
     /// <param name="inner">The exception that caused the write failure.</param>
-    public SourceWriteException(ISubjectSource source, IReadOnlyList<SubjectPropertyChange> changes, Exception inner)
+    public SourceTransactionWriteException(ISubjectSource source, IReadOnlyList<SubjectPropertyChange> changes, Exception inner)
         : base($"Failed to write {changes.Count} change(s) to source {source.GetType().Name}. See inner exception for details.", inner)
     {
         SubjectSource = source;

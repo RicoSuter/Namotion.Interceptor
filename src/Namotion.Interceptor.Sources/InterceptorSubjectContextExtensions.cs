@@ -10,7 +10,7 @@ public static class InterceptorSubjectContextExtensions
 {
     /// <summary>
     /// Enables external source write support for transactions.
-    /// Registers an <see cref="ITransactionWriteHandler"/> that writes changes to external sources.
+    /// Registers an <see cref="ITransactionWriter"/> that writes changes to external sources.
     /// </summary>
     /// <param name="context">The interceptor subject context to configure.</param>
     /// <returns>The same context instance for method chaining.</returns>
@@ -44,8 +44,8 @@ public static class InterceptorSubjectContextExtensions
         }
 
         // Register the source transaction write handler
-        context.TryAddService<ITransactionWriteHandler>(
-            () => new SourceTransactionWriteHandler(),
+        context.TryAddService<ITransactionWriter>(
+            () => new SourceTransactionWriter(),
             _ => true);
 
         return context;

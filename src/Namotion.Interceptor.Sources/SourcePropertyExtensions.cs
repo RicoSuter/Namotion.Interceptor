@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 
-namespace Namotion.Interceptor.Sources.Transactions;
+namespace Namotion.Interceptor.Sources;
 
 /// <summary>
 /// Extension methods for associating properties with their external data sources.
