@@ -18,12 +18,12 @@
         }
     </style>
     <div @key="_glowCounter" style="@GetDebugBorderStyle()" title="@GetTooltipText()">
-        @ChildContent
+        @WrappedChildContent
     </div>
 }
 else
 {
-    @ChildContent
+    @WrappedChildContent
 }
 
 @code {
@@ -43,7 +43,7 @@ else
 
     // Cache for "is ancestor" results - only cache true results
     // False results are never cached to guarantee at-least-once rerender
-    private ConcurrentDictionary<IInterceptorSubject, bool> _ancestorCache = [];
+    private readonly ConcurrentDictionary<IInterceptorSubject, bool> _ancestorCache = [];
 
     /// <summary>
     /// The interceptor subject context to track for property changes.
@@ -65,10 +65,22 @@ else
     [Parameter]
     public RenderFragment? ChildContent { get; set; }
 
+    private RenderFragment WrappedChildContent
+    {
+        get
+        {
+            return builder =>
+            {
+                using var recorder = ReadPropertyRecorder.Start(_collectingProperties);
+                ChildContent?.Invoke(builder);
+            };
+        }
+    }
+
     /// <summary>
     /// Gets the names of currently tracked properties (for debugging).
     /// </summary>
-    public IEnumerable<string> TrackedPropertyNames =>
+    private IEnumerable<string> TrackedPropertyNames =>
         _properties.Keys.Select(p => $"{p.Subject.GetType().Name}.{p.Name}");
 
     protected override void OnParametersSet()
@@ -110,11 +122,11 @@ else
                     }
                 });
         }
-
+        
         StartRecording();
         base.OnParametersSet();
     }
-
+    
     protected override bool ShouldRender()
     {
         if (_disposed != 0) return false;
@@ -162,6 +174,13 @@ else
         Interlocked.Exchange(ref _rerenderPending, 0);
 
         base.OnAfterRender(firstRender);
+        
+        if (firstRender)
+        {
+            // Trigger rerender because properties are not collected on first render (???)
+            // TODO: Find out why
+            Task.Run(async () => await Task.Yield()).ContinueWith(_ => InvokeAsync(StateHasChanged));
+        }
     }
 
     private void StopRecording()
@@ -304,4 +323,5 @@ else
             _ancestorCache.Clear();
         }
     }
+
 }
