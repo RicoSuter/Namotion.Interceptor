@@ -52,6 +52,7 @@
         }
         catch (Exception ex)
         {
+            // TODO: Show warning box in UI
             Console.WriteLine($"Error getting navigation items: {ex}");
             return Enumerable.Empty<NavigationItem>();
         }

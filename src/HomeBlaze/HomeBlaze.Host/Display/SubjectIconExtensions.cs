@@ -11,7 +11,8 @@ namespace HomeBlaze.Host.Display;
 /// </summary>
 public static class SubjectIconExtensions
 {
-    private static readonly ConcurrentDictionary<string, string> _iconCache = new();
+    private static readonly ConcurrentDictionary<string, string> IconCache = new();
+
     private const string DefaultIconName = "Article";
 
     /// <summary>
@@ -35,7 +36,7 @@ public static class SubjectIconExtensions
         if (string.IsNullOrEmpty(iconName))
             return Icons.Material.Filled.Article;
 
-        return _iconCache.GetOrAdd(iconName, name =>
+        return IconCache.GetOrAdd(iconName, name =>
         {
             var field = typeof(Icons.Material.Filled).GetField(name,
                 BindingFlags.Public | BindingFlags.Static);
