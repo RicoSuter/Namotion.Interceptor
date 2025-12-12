@@ -1,0 +1,6 @@
+{
+  "type": "HomeBlaze.Samples.Motor",
+  "name": "Cooling Fan",
+  "targetSpeed": 1800,
+  "simulationInterval": "00:00:01"
+}

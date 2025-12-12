@@ -8,6 +8,8 @@ Namotion.Interceptor is a .NET library designed to simplify the creation of trac
 
 In addition to property tracking, Namotion.Interceptor offers advanced features such as automatic change detection (including derived properties), reactive source mapping (e.g., for GraphQL subscriptions or MQTT publishing), and other powerful capabilities that integrate seamlessly into your workflow.
 
+**[Subject Design Guidelines](docs/subject-guidelines.md)** - Complete reference for property patterns and best practices
+
 ![Feature Map](./features.png)
 
 ## Change tracking sample

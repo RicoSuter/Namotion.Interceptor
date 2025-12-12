@@ -1,0 +1,11 @@
+@page "/browser"
+@page "/browser/{*Path}"
+
+<PageTitle>Browser - HomeBlaze</PageTitle>
+
+<SubjectBrowser Path="@Path" />
+
+@code {
+    [Parameter]
+    public string? Path { get; set; }
+}
