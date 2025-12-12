@@ -191,7 +191,7 @@ public async ValueTask DisposeAsync()
 Implement `ISubjectSource` to create custom data source integrations:
 
 ```csharp
-public class SampleSource : ISubjectSource, IAsyncDisposable
+public class SampleSource : ISubjectSource, IDisposable
 {
     private readonly IInterceptorSubject _root;
     private readonly ISourcePathProvider _pathProvider;
@@ -269,7 +269,7 @@ public class SampleSource : ISubjectSource, IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public void Dispose()
     {
         if (_lifecycleInterceptor is not null)
         {
@@ -280,15 +280,10 @@ public class SampleSource : ISubjectSource, IAsyncDisposable
         {
             property.RemoveSource();
         }
+
         _trackedProperties.Clear();
     }
 }
-```
-
-Register your custom source:
-
-```csharp
-builder.Services.AddSingleton<ISubjectSource, DatabaseSource>();
 ```
 
 ## Source path providers
@@ -303,6 +298,7 @@ Built-in providers include:
 ## Thread Safety
 
 Properties can receive concurrent writes from multiple origins:
+
 - **Source**: Inbound updates from the external system
 - **Servers**: Background services exposing the property (OPC UA server, MQTT broker)
 - **Local code**: Application services, UI handlers, etc.
