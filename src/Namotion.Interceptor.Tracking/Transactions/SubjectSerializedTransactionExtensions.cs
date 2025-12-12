@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// <summary>
 /// Extension methods for transaction support on IInterceptorSubjectContext.
 /// </summary>
-public static class SubjectTransactionExtensions
+public static class SubjectSerializedTransactionExtensions
 {
     /// <summary>
     /// Begins a new serialized transaction bound to this context.
