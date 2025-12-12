@@ -1,5 +1,6 @@
 @using System.Collections.Concurrent
 @using Namotion.Interceptor.Tracking
+@using Namotion.Interceptor.Tracking.Parent
 @using Namotion.Interceptor.Tracking.Recorder
 
 @implements IDisposable
@@ -26,13 +27,23 @@ else
 }
 
 @code {
+    private readonly Lock _lock = new();
     private IDisposable? _subscription;
     private IInterceptorSubjectContext? _subscribedContext;
     private ReadPropertyRecorderScope? _currentScope;
     private int _glowCounter;
+    private volatile int _disposed;
+    private volatile int _rerenderPending;
 
     private ConcurrentDictionary<PropertyReference, bool> _collectingProperties = [];
     private ConcurrentDictionary<PropertyReference, bool> _properties = [];
+
+    // Track subjects whose properties were read (for descendant checking)
+    private HashSet<IInterceptorSubject> _trackedSubjects = [];
+
+    // Cache for "is ancestor" results - only cache true results
+    // False results are never cached to guarantee at-least-once rerender
+    private ConcurrentDictionary<IInterceptorSubject, bool> _ancestorCache = [];
 
     /// <summary>
     /// The interceptor subject context to track for property changes.
@@ -62,6 +73,8 @@ else
 
     protected override void OnParametersSet()
     {
+        if (_disposed != 0) return;
+
         // Handle Context changes - resubscribe if context changed
         if (_subscribedContext != Context)
         {
@@ -73,10 +86,27 @@ else
                 .GetPropertyChangeObservable()
                 .Subscribe(change =>
                 {
-                    if (_properties.TryGetValue(change.Property, out _))
+                    if (_disposed != 0) return;
+
+                    try
                     {
-                        _glowCounter++;
-                        InvokeAsync(StateHasChanged);
+                        // Check if this property is directly tracked
+                        if (_properties.TryGetValue(change.Property, out _))
+                        {
+                            TriggerRerender();
+                            return;
+                        }
+
+                        // Check if the changed subject is a descendant of any tracked subject
+                        var changedSubject = change.Property.Subject;
+                        if (IsDescendantOfTrackedSubject(changedSubject))
+                        {
+                            TriggerRerender();
+                        }
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Component was disposed during callback, ignore
                     }
                 });
         }
@@ -87,30 +117,49 @@ else
 
     protected override bool ShouldRender()
     {
+        if (_disposed != 0) return false;
+
         StartRecording();
         return base.ShouldRender();
     }
 
     private void StartRecording()
     {
-        if (_currentScope == null && Context != null)
+        if (_disposed != 0) return;
+
+        if (_currentScope == null)
         {
             _collectingProperties.Clear();
-            _currentScope = ReadPropertyRecorder.Start(Context, _collectingProperties);
+            _currentScope = ReadPropertyRecorder.Start(_collectingProperties);
         }
     }
 
     protected override void OnAfterRender(bool firstRender)
     {
+        if (_disposed != 0) return;
+
         StopRecording();
 
         // Only swap if we collected properties during this render.
         // This prevents losing tracking when a spurious render happens without executing RenderFragments.
         if (_collectingProperties.Count > 0)
         {
-            (_properties, _collectingProperties) = (_collectingProperties, _properties);
-            _collectingProperties.Clear();
+            lock (_lock)
+            {
+                (_properties, _collectingProperties) = (_collectingProperties, _properties);
+                _collectingProperties.Clear();
+
+                // Update tracked subjects from the new properties
+                _trackedSubjects = new HashSet<IInterceptorSubject>(
+                    _properties.Keys.Select(p => p.Subject));
+
+                // Clear ancestor cache when tracked subjects change
+                _ancestorCache.Clear();
+            }
         }
+
+        // Reset rerender flag after render completes
+        Interlocked.Exchange(ref _rerenderPending, 0);
 
         base.OnAfterRender(firstRender);
     }
@@ -122,6 +171,95 @@ else
             _currentScope.Dispose();
             _currentScope = null;
         }
+    }
+
+    /// <summary>
+    /// Triggers a rerender with coalescing to prevent rapid successive rerenders.
+    /// </summary>
+    private void TriggerRerender()
+    {
+        if (_disposed != 0) return;
+
+        // Use Interlocked to coalesce rapid property changes
+        if (Interlocked.Exchange(ref _rerenderPending, 1) == 0)
+        {
+            _glowCounter++;
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// Checks if the given subject is a descendant of any tracked subject
+    /// by walking up the parent hierarchy using BFS.
+    /// </summary>
+    private bool IsDescendantOfTrackedSubject(IInterceptorSubject subject)
+    {
+        // Check cache first (only true results are cached)
+        if (_ancestorCache.TryGetValue(subject, out var cached) && cached)
+        {
+            return true;
+        }
+
+        // Get current tracked subjects snapshot under lock
+        HashSet<IInterceptorSubject> trackedSnapshot;
+        lock (_lock)
+        {
+            if (_trackedSubjects.Count == 0)
+                return false;
+
+            // Quick check: is the subject itself tracked?
+            if (_trackedSubjects.Contains(subject))
+            {
+                _ancestorCache.TryAdd(subject, true);
+                return true;
+            }
+
+            trackedSnapshot = new HashSet<IInterceptorSubject>(_trackedSubjects);
+        }
+
+        // BFS to walk up ALL parent branches (fixes multi-parent traversal bug)
+        var visited = new HashSet<IInterceptorSubject>();
+        var queue = new Queue<IInterceptorSubject>();
+        queue.Enqueue(subject);
+        visited.Add(subject);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+
+            HashSet<SubjectParent> parents;
+            try
+            {
+                parents = current.GetParents();
+            }
+            catch
+            {
+                // Subject may have been disposed, skip
+                continue;
+            }
+
+            foreach (var parent in parents)
+            {
+                var parentSubject = parent.Property.Subject;
+
+                // Found a tracked ancestor!
+                if (trackedSnapshot.Contains(parentSubject))
+                {
+                    // Cache only positive results
+                    _ancestorCache.TryAdd(subject, true);
+                    return true;
+                }
+
+                // Continue BFS if not visited (handles cycles)
+                if (visited.Add(parentSubject))
+                {
+                    queue.Enqueue(parentSubject);
+                }
+            }
+        }
+
+        // Don't cache false results - they may become stale when graph changes
+        return false;
     }
 
     private string GetDebugBorderStyle()
@@ -150,11 +288,20 @@ else
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         StopRecording();
         _subscription?.Dispose();
         _subscription = null;
         _subscribedContext = null;
-        _properties.Clear();
-        _collectingProperties.Clear();
+
+        lock (_lock)
+        {
+            _properties.Clear();
+            _collectingProperties.Clear();
+            _trackedSubjects.Clear();
+            _ancestorCache.Clear();
+        }
     }
 }

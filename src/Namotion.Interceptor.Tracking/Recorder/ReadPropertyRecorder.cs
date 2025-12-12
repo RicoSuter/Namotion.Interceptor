@@ -5,25 +5,33 @@ namespace Namotion.Interceptor.Tracking.Recorder;
 
 /// <summary>
 /// A utility class for property read recording and an interceptor that automatically
-/// records property reads to all active scopes registered on the context.
+/// records property reads to all active scopes on the current async context.
+/// Uses AsyncLocal to ensure proper isolation across concurrent async operations
+/// (e.g., Blazor components in different browser tabs/sessions).
 /// </summary>
 public class ReadPropertyRecorder : IReadInterceptor
 {
-    private const string ActiveScopesKey = "ReadPropertyRecorder.ActiveScopes";
+    private static readonly AsyncLocal<List<ReadPropertyRecorderScope>?> _activeScopes = new();
 
     /// <summary>
     /// Starts recording property reads to a new scope.
     /// Property reads are automatically recorded via the interceptor.
+    /// Uses AsyncLocal for proper isolation across async contexts.
     /// </summary>
-    /// <param name="context">The context to record for.</param>
     /// <param name="properties">Optional preallocated properties dictionary.</param>
     /// <returns>The recording scope. Dispose to stop recording.</returns>
-    public static ReadPropertyRecorderScope Start(IInterceptorSubjectContext context, ConcurrentDictionary<PropertyReference, bool>? properties = null)
+    public static ReadPropertyRecorderScope Start(ConcurrentDictionary<PropertyReference, bool>? properties = null)
     {
-        var scope = new ReadPropertyRecorderScope(context, properties);
+        var scope = new ReadPropertyRecorderScope(properties);
 
-        // Register the scope with the context for automatic recording
-        var scopes = context.GetOrAddData(ActiveScopesKey, () => new List<ReadPropertyRecorderScope>());
+        // Get or create the scopes list for this async context
+        var scopes = _activeScopes.Value;
+        if (scopes == null)
+        {
+            scopes = new List<ReadPropertyRecorderScope>();
+            _activeScopes.Value = scopes;
+        }
+
         lock (scopes)
         {
             scopes.Add(scope);
@@ -32,9 +40,10 @@ public class ReadPropertyRecorder : IReadInterceptor
         return scope;
     }
 
-    internal static void RemoveScope(IInterceptorSubjectContext context, ReadPropertyRecorderScope scope)
+    internal static void RemoveScope(ReadPropertyRecorderScope scope)
     {
-        if (context.TryGetData<List<ReadPropertyRecorderScope>>(ActiveScopesKey, out var scopes) && scopes is not null)
+        var scopes = _activeScopes.Value;
+        if (scopes is not null)
         {
             lock (scopes)
             {
@@ -47,9 +56,9 @@ public class ReadPropertyRecorder : IReadInterceptor
     {
         var result = next(ref context);
 
-        // Automatically record to all active scopes for this context
-        var subjectContext = context.Property.Subject.Context;
-        if (subjectContext.TryGetData<List<ReadPropertyRecorderScope>>(ActiveScopesKey, out var scopes) && scopes is not null)
+        // Record to all active scopes in this async context
+        var scopes = _activeScopes.Value;
+        if (scopes is not null)
         {
             lock (scopes)
             {

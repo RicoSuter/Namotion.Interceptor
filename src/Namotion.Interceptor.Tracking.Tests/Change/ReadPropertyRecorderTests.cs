@@ -31,17 +31,13 @@ public class ReadPropertyRecorderTests
     }
 
     [Fact]
-    public void WhenUsingReadPropertyRecorderStart_ThenScopeIsCreatedWithCorrectContext()
+    public void WhenUsingReadPropertyRecorderStart_ThenScopeIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithPropertyChangeObservable();
-
         var properties = new ConcurrentDictionary<PropertyReference, bool>();
 
-        // Act
-        using var scope = ReadPropertyRecorder.Start(context, properties);
+        // Act - AsyncLocal-based scope (no context dependency)
+        using var scope = ReadPropertyRecorder.Start(properties);
 
         // Assert - scope is created and linked to properties dictionary
         Assert.NotNull(scope);
