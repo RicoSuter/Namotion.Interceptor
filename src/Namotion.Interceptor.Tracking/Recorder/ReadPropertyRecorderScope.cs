@@ -1,16 +1,23 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 
 namespace Namotion.Interceptor.Tracking.Recorder;
 
+/// <summary>
+/// A scope for recording property reads.
+/// Each scope instance has its own properties dictionary, ensuring isolation
+/// across different component instances/sessions.
+/// </summary>
 public class ReadPropertyRecorderScope : IDisposable
 {
+    private readonly IInterceptorSubjectContext? _context;
     private readonly ConcurrentDictionary<PropertyReference, bool> _properties;
     private volatile int _disposed;
-    
-    internal ReadPropertyRecorderScope(ConcurrentDictionary<PropertyReference, bool>? properties)
+
+    internal ReadPropertyRecorderScope(IInterceptorSubjectContext? context, ConcurrentDictionary<PropertyReference, bool>? properties)
     {
+        _context = context;
         _properties = properties ?? [];
-        _properties.Clear();
+        // Note: Do NOT clear here - the caller (TrackingScope) manages clearing
     }
 
     internal void AddProperty(PropertyReference property)
@@ -32,9 +39,9 @@ public class ReadPropertyRecorderScope : IDisposable
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        if (Interlocked.Exchange(ref _disposed, 1) == 0 && _context != null)
         {
-            ReadPropertyRecorder.Scopes.Value?.TryRemove(this, out _);
+            ReadPropertyRecorder.RemoveScope(_context, this);
         }
     }
 }

@@ -1,0 +1,138 @@
+@page "/pages/{*Path}"
+
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Host.Components.Dialogs
+@using HomeBlaze.Host.Services.Components
+@using Namotion.Interceptor.Blazor
+
+@inherits HomeBlazorComponentBase
+
+@inject SubjectComponentRegistry ComponentRegistry
+@inject RoutePathResolver RouteResolver
+@inject IDialogService DialogService
+@inject DeveloperModeService DeveloperMode
+
+<PageTitle>@_title - HomeBlaze</PageTitle>
+
+<TrackingScope Context="_subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
+    @if (CanEdit())
+    {
+        <MudFab Style="position: fixed; top: 80px; right: 24px; z-index: 1000;"
+                OnClick="@OpenEditDialog"
+                StartIcon="@Icons.Material.Filled.Edit"
+                Color="Color.Primary"
+                Size="Size.Small"/>
+    }
+
+    @if (_subject == null)
+    {
+        <MudAlert Severity="Severity.Warning">Subject not found at path: @Path</MudAlert>
+    }
+    else if (_componentType != null)
+    {
+        <DynamicComponent @key="_componentKey" Type="_componentType"
+                          Parameters="@(new Dictionary<string, object?> { ["Subject"] = _subject })"/>
+    }
+    else
+    {
+        <MudText>No page component registered for @_subject.GetType().Name</MudText>
+    }
+</TrackingScope>
+
+@code {
+    [Parameter] public string? Path { get; set; }
+
+    private IInterceptorSubject? _subject;
+    private Type? _componentType;
+    private string _title = "";
+    private int _componentKey;
+
+    protected override void OnParametersSet()
+    {
+        LoadSubject();
+    }
+
+    private void LoadSubject()
+    {
+        _subject = null;
+        _componentType = null;
+        _title = "";
+
+        if (Root == null)
+            return;
+
+        // Ensure root is registered by accessing a property
+        if (Root is FluentStorageContainer storage)
+        {
+            _ = storage.Children; // Trigger registration
+        }
+
+        _subject = RouteResolver.ResolveFromRoute(Root, Path ?? "");
+
+        if (_subject != null)
+        {
+            var registration = ComponentRegistry.GetComponent(
+                _subject.GetType(),
+                SubjectComponentType.Page);
+            _componentType = registration?.ComponentType;
+
+            // Get title from ITitleProvider if implemented
+            if (_subject is ITitleProvider titleProvider)
+            {
+                _title = titleProvider.Title ?? _subject.GetType().Name;
+            }
+            else
+            {
+                _title = _subject.GetType().Name;
+            }
+        }
+    }
+
+    private bool CanEdit()
+    {
+        if (_subject == null) return false;
+
+        // Can edit if there's a custom edit component or configuration properties
+        var hasEditComponent = ComponentRegistry.HasComponent(
+            _subject.GetType(),
+            SubjectComponentType.Edit);
+
+        return hasEditComponent || _subject.HasConfigurationProperties();
+    }
+
+    private async Task OpenEditDialog()
+    {
+        if (_subject == null) return;
+
+        var parameters = new DialogParameters<SubjectEditDialog>
+        {
+            { x => x.Subject, _subject }
+        };
+
+        // Check if custom edit component exists to determine dialog size
+        var editRegistration = ComponentRegistry.GetComponent(
+            _subject.GetType(),
+            SubjectComponentType.Edit);
+
+        var maxWidth = editRegistration != null ? MaxWidth.Large : MaxWidth.Small;
+
+        var options = new DialogOptions
+        {
+            MaxWidth = maxWidth,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        var dialogRef = await DialogService.ShowAsync<SubjectEditDialog>($"Edit {_title}", parameters, options);
+        var result = await dialogRef.Result;
+
+        // Force page component to reload by changing key
+        if (result != null && !result.Canceled)
+        {
+            _componentKey++;
+            StateHasChanged();
+        }
+    }
+
+}

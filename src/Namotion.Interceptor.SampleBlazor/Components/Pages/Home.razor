@@ -1,30 +1,32 @@
-﻿@page "/"
+@page "/"
 @rendermode InteractiveServer
 @using Game = Namotion.Interceptor.SampleBlazor.Models.Game
 @using Player = Namotion.Interceptor.SampleBlazor.Models.Player
+@using Namotion.Interceptor
+@using Namotion.Interceptor.Blazor
 
 @inject Game Game
 @inject Player Player
 
-@inherits Namotion.Interceptor.Blazor.TrackingComponentBase<Namotion.Interceptor.SampleBlazor.Models.Game>
-
 <PageTitle>The Game</PageTitle>
 
-<h1>Hi @Player.Name</h1>
+<TrackingScope Context="((IInterceptorSubject)Game).Context" ShowDebugInfo="true">
+    <h1>Hi @Player.Name</h1>
 
-<p>
-    My name <input @bind-value="@Player.Name" />
-</p>
+    <p>
+        My name <input @bind-value="@Player.Name" />
+    </p>
 
-<p>
-    Players in the game:
+    <p>
+        Players in the game:
 
-    <ul>
-        @foreach (var player in Game.Players)
-        {
-            <li>@player.Name</li>
-        }
-    </ul>
+        <ul>
+            @foreach (var player in Game.Players)
+            {
+                <li>@player.Name</li>
+            }
+        </ul>
 
-    Last update: @DateTimeOffset.UtcNow
-</p>
+        Last update: @DateTimeOffset.UtcNow
+    </p>
+</TrackingScope>
