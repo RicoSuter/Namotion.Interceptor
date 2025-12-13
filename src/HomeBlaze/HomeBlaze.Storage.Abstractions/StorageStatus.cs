@@ -1,4 +1,4 @@
-namespace HomeBlaze.Abstractions.Storage;
+namespace HomeBlaze.Storage.Abstractions;
 
 /// <summary>
 /// Status of a storage connection.

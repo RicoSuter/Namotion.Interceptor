@@ -1,4 +1,4 @@
-namespace HomeBlaze.Abstractions.Components;
+namespace HomeBlaze.Components.Abstractions;
 
 /// <summary>
 /// Interface for edit components that provide validation state and save functionality.

@@ -6,13 +6,10 @@
         <ImplicitUsings>enable</ImplicitUsings>
     </PropertyGroup>
 
-    <ItemGroup>
-        <InternalsVisibleTo Include="HomeBlaze.Widgets.Tests" />
-    </ItemGroup>
-
-    <ItemGroup>
+<ItemGroup>
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
         <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
         <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />

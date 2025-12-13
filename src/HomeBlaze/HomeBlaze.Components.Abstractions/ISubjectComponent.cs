@@ -1,6 +1,6 @@
 using Namotion.Interceptor;
 
-namespace HomeBlaze.Abstractions.Components;
+namespace HomeBlaze.Components.Abstractions;
 
 /// <summary>
 /// Interface for components that display or edit subjects.

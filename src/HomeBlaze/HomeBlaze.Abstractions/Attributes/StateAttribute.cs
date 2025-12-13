@@ -4,7 +4,7 @@ namespace HomeBlaze.Abstractions.Attributes;
 /// Marks a property as part of the subject's visible state in the UI.
 /// Only properties marked with this attribute are displayed in the property panel.
 /// </summary>
-[AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
+[AttributeUsage(AttributeTargets.Property)]
 public class StateAttribute : Attribute
 {
     /// <summary>
@@ -45,31 +45,4 @@ public class StateAttribute : Attribute
     {
         Name = name;
     }
-}
-
-/// <summary>
-/// Units for state property values.
-/// </summary>
-public enum StateUnit
-{
-    Default,
-    Percent,
-    DegreeCelsius,
-    Watt,
-    KiloWatt,
-    WattHour,
-    Volt,
-    Ampere,
-    Hertz,
-    Lumen,
-    Lux,
-    Meter,
-    Millimeter,
-    MillimeterPerHour,
-    Kilobyte,
-    KilobytePerSecond,
-    MegabitsPerSecond,
-    LiterPerHour,
-    Currency,
-    HexColor
 }

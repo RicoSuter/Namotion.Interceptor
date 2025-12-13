@@ -1,4 +1,4 @@
-namespace HomeBlaze.Abstractions.Pages;
+namespace HomeBlaze.Components.Abstractions.Pages;
 
 /// <summary>
 /// Specifies where a page should appear in the navigation.

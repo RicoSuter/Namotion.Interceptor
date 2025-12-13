@@ -1,4 +1,4 @@
-namespace HomeBlaze.Abstractions.Attributes;
+namespace HomeBlaze.Storage.Abstractions.Attributes;
 
 /// <summary>
 /// Maps a file extension to an InterceptorSubject type.

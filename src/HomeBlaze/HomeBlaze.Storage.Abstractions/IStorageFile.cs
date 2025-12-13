@@ -1,4 +1,4 @@
-namespace HomeBlaze.Abstractions.Storage;
+namespace HomeBlaze.Storage.Abstractions;
 
 /// <summary>
 /// Interface for file subjects in storage.

@@ -1,7 +1,6 @@
-using HomeBlaze.Abstractions;
-using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Components.Abstractions.Attributes;
 
-namespace HomeBlaze.Host.Services.Components;
+namespace HomeBlaze.Services.Components;
 
 /// <summary>
 /// Represents a registered component for a subject type.

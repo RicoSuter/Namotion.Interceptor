@@ -1,11 +1,11 @@
 using HomeBlaze.Services.Navigation;
-using HomeBlaze.Tests.Models;
+using HomeBlaze.Services.Tests.Models;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 
-namespace HomeBlaze.Tests;
+namespace HomeBlaze.Services.Tests;
 
 public class SubjectPathResolverTests
 {

@@ -1,4 +1,4 @@
-namespace HomeBlaze.Abstractions.Pages;
+namespace HomeBlaze.Components.Abstractions.Pages;
 
 /// <summary>
 /// Interface for subjects that provide page navigation information.
