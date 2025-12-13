@@ -32,17 +32,10 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Build
-        run: dotnet build src/Namotion.Interceptor.sln --configuration Release
-
-      - name: Install Playwright browsers
-        run: pwsh src/HomeBlaze/HomeBlaze.E2E.Tests/bin/Release/net9.0/playwright.ps1 install --with-deps
-
       - name: Run tests and collect coverage (Cobertura)
         run: |
           dotnet test src/Namotion.Interceptor.sln `
             --configuration Release `
-            --no-build `
             --results-directory ./TestResults `
             --collect:"XPlat Code Coverage" `
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
