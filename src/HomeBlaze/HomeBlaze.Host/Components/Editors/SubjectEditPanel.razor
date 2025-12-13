@@ -1,42 +1,49 @@
 @using HomeBlaze.Abstractions.Storage
+@using Toolbelt.Blazor.HotKeys2
 
-@implements IDisposable
+@implements IAsyncDisposable
 
 @inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
 @inject ISnackbar Snackbar
 @inject DeveloperModeService DeveloperMode
+@inject HotKeys HotKeys
 
-<TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
-    @if (Subject != null)
-    {
-        @if (_editComponentType != null)
+<div style="@(Height != null ? $"height: {Height}; overflow-y: auto;" : "")">
+    <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
+        @if (Subject != null)
         {
-            <DynamicComponent Type="_editComponentType"
-                              @ref="_dynamicComponentRef"
-                              Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })"/>
+            @if (_editComponentType != null)
+            {
+                <DynamicComponent Type="_editComponentType"
+                                  @ref="_dynamicComponentRef"
+                                  Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })"/>
+            }
+            else
+            {
+                <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" />
+            }
         }
-        else
-        {
-            <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" />
-        }
-    }
-</TrackingScope>
+    </TrackingScope>
+</div>
 
 <div class="d-flex justify-end gap-2 mt-4">
     @if (ShowCancelButton)
     {
         <MudButton OnClick="@(() => OnCancel.InvokeAsync())">Cancel</MudButton>
     }
+
     <MudButton Color="Color.Primary"
                OnClick="SaveAsync"
-               Disabled="@(!IsValid)">Save</MudButton>
+               Disabled="@(!IsValid)">Save (Ctrl+S)</MudButton>
 </div>
 
 @code {
     [Parameter] public IInterceptorSubject? Subject { get; set; }
 
     [Parameter] public bool ShowCancelButton { get; set; }
+
+    [Parameter] public string? Height { get; set; }
 
     [Parameter] public EventCallback OnCancel { get; set; }
 
@@ -46,8 +53,15 @@
     private DynamicComponent? _dynamicComponentRef;
     private ISubjectEditComponent? _editComponent;
     private ConfigurationPropertiesEditor? _propertiesEditor;
+    private HotKeysContext? _hotKeysContext;
 
     private bool IsValid => _editComponent?.IsValid ?? _propertiesEditor?.IsValid ?? true;
+
+    protected override void OnInitialized()
+    {
+        _hotKeysContext = HotKeys.CreateContext()
+            .Add(ModCode.Ctrl, Code.S, OnCtrlS, exclude: Exclude.None);
+    }
 
     protected override void OnParametersSet()
     {
@@ -84,6 +98,14 @@
     private void OnIsValidChanged(bool isValid) => InvokeAsync(StateHasChanged);
 
     private void OnIsDirtyChanged(bool isDirty) => InvokeAsync(StateHasChanged);
+
+    private async Task OnCtrlS()
+    {
+        if (IsValid)
+        {
+            await SaveAsync();
+        }
+    }
 
     public async Task SaveAsync()
     {
@@ -132,12 +154,17 @@
         }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         if (_editComponent != null)
         {
             _editComponent.IsValidChanged -= OnIsValidChanged;
             _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
+        }
+
+        if (_hotKeysContext != null)
+        {
+            await _hotKeysContext.DisposeAsync();
         }
     }
 }

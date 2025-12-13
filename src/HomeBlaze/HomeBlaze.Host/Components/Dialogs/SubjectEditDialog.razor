@@ -1,36 +1,13 @@
-@using HomeBlaze.Abstractions.Storage
-
-@implements IDisposable
-
-@inject SubjectComponentRegistry ComponentRegistry
-@inject RootManager RootManager
-@inject ISnackbar Snackbar
-@inject DeveloperModeService DeveloperMode
+@using HomeBlaze.Host.Components.Editors
 
 <MudDialog>
     <DialogContent>
-        <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
-            @if (Subject != null)
-            {
-                @if (_editComponentType != null)
-                {
-                    <DynamicComponent Type="_editComponentType"
-                                      @ref="_dynamicComponentRef"
-                                      Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })"/>
-                }
-                else
-                {
-                    <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" />
-                }
-            }
-        </TrackingScope>
+        <SubjectEditPanel Subject="@Subject"
+                          ShowCancelButton="false"
+                          OnSaved="OnSaved" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
-        <MudButton Color="Color.Primary"
-                   OnClick="Save"
-                   Disabled="@(!IsValid)">Save
-        </MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -39,114 +16,15 @@
 
     [Parameter] public IInterceptorSubject? Subject { get; set; }
 
-    private Type? _editComponentType;
-    private DynamicComponent? _dynamicComponentRef;
-    private ISubjectEditComponent? _editComponent;
-    private ConfigurationPropertiesEditor? _propertiesEditor;
-
-    private bool IsValid => _editComponent?.IsValid ?? _propertiesEditor?.IsValid ?? true;
-
     public MaxWidth GetPreferredDialogSize()
     {
-        return _editComponent?.PreferredDialogSize is { } size
-            ? (MaxWidth)Enum.Parse(typeof(MaxWidth), size)
-            : MaxWidth.Small;
+        return MaxWidth.Small;
     }
-
-    protected override void OnParametersSet()
-    {
-        base.OnParametersSet();
-        _editComponent = null;
-
-        if (Subject != null)
-        {
-            var registration = ComponentRegistry.GetComponent(
-                Subject.GetType(),
-                SubjectComponentType.Edit);
-
-            _editComponentType = registration?.ComponentType;
-        }
-        else
-        {
-            _editComponentType = null;
-        }
-    }
-
-    protected override void OnAfterRender(bool firstRender)
-    {
-        base.OnAfterRender(firstRender);
-
-        if (_dynamicComponentRef?.Instance is ISubjectEditComponent editComponent && _editComponent == null)
-        {
-            _editComponent = editComponent;
-            _editComponent.IsValidChanged += OnIsValidChanged;
-            _editComponent.IsDirtyChanged += OnIsDirtyChanged;
-            StateHasChanged();
-        }
-    }
-
-    private void OnIsValidChanged(bool isValid) => InvokeAsync(StateHasChanged);
-
-    private void OnIsDirtyChanged(bool isDirty) => InvokeAsync(StateHasChanged);
 
     private void Cancel() => MudDialog?.Cancel();
 
-    private async Task Save()
+    private void OnSaved()
     {
-        var subject = Subject;
-        if (subject == null) return;
-        
-        try
-        {
-            if (_editComponent != null)
-            {
-                if (!_editComponent.IsValid)
-                {
-                    return;
-                }
-                
-                await _editComponent.SaveAsync(CancellationToken.None);
-            }
-            else
-            {
-                if (_propertiesEditor?.HasErrors == true)
-                {
-                    return;
-                }
-                
-                _propertiesEditor?.ApplyChanges();
-            }
-
-            // TODO: Extract to reusable method (services)
-            if (subject is IConfigurationWriter configurationWriter)
-            {
-                var success = await configurationWriter.WriteConfigurationAsync(subject, CancellationToken.None);
-                if (success)
-                     await RootManager.WriteConfigurationAsync(subject, CancellationToken.None);
-            }
-            
-            if (subject is IStorageFile storageFile)
-            {
-                await storageFile.OnFileChangedAsync(CancellationToken.None);
-            }
-            
-            Snackbar.Add("File saved.", Severity.Info);
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
-            return;
-        }
-
         MudDialog?.Close(DialogResult.Ok(true));
-    }
-
-    public void Dispose()
-    {
-        if (_editComponent != null)
-        {
-            _editComponent.IsValidChanged -= OnIsValidChanged;
-            _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
-        }
     }
 }

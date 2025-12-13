@@ -4,13 +4,14 @@ using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor.Files;
-using HomeBlaze.Widgets;
+using Toolbelt.Blazor.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add all HomeBlaze services (cascades: Host -> Host.Services -> Services)
 // This registers the singleton IInterceptorSubjectContext with HostedServiceHandler
 builder.Services.AddHomeBlazeHost();
+builder.Services.AddHotKeys2();
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
