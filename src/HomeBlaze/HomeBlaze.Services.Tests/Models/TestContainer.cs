@@ -1,7 +1,7 @@
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Tests.Models;
+namespace HomeBlaze.Services.Tests.Models;
 
 [InterceptorSubject]
 public partial class TestContainer

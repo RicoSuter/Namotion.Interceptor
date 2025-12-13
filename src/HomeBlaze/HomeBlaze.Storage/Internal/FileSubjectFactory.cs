@@ -1,5 +1,5 @@
 using FluentStorage.Blobs;
-using HomeBlaze.Abstractions.Storage;
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Navigation;
 using HomeBlaze.Storage.Files;

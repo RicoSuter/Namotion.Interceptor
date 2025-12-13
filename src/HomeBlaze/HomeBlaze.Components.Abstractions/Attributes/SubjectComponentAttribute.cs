@@ -1,4 +1,4 @@
-namespace HomeBlaze.Abstractions.Attributes;
+namespace HomeBlaze.Components.Abstractions.Attributes;
 
 /// <summary>
 /// Registers a Blazor component as a view for a subject type.

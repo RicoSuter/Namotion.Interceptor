@@ -1,9 +1,8 @@
-using HomeBlaze.Abstractions;
-using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Host.Services.Components;
+using HomeBlaze.Components.Abstractions.Attributes;
+using HomeBlaze.Services.Components;
 using HomeBlaze.Services;
 
-namespace HomeBlaze.Host.Services.Tests;
+namespace HomeBlaze.Services.Tests;
 
 public class SubjectComponentRegistryTests
 {
@@ -60,6 +59,41 @@ public class SubjectComponentRegistryTests
     }
 
     [Fact]
+    public void GetComponent_WithName_ReturnsNamedRegistration()
+    {
+        // Arrange
+        var registry = CreateRegistryWithScanning();
+
+        // Act
+        var result1 = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Widget, "status");
+        var result2 = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Widget, "temperature");
+
+        // Assert
+        Assert.NotNull(result1);
+        Assert.Equal(typeof(TestWidgetComponent), result1.ComponentType);
+        Assert.Equal("status", result1.Name);
+
+        Assert.NotNull(result2);
+        Assert.Equal(typeof(TestWidget2Component), result2.ComponentType);
+        Assert.Equal("temperature", result2.Name);
+    }
+
+    [Fact]
+    public void GetComponents_ReturnsAllOfType()
+    {
+        // Arrange
+        var registry = CreateRegistryWithScanning();
+
+        // Act
+        var widgets = registry.GetComponents(typeof(TestSubject), SubjectComponentType.Widget).ToList();
+
+        // Assert
+        Assert.Equal(2, widgets.Count);
+        Assert.Contains(widgets, w => w.Name == "status");
+        Assert.Contains(widgets, w => w.Name == "temperature");
+    }
+
+    [Fact]
     public void HasComponent_ExistingComponent_ReturnsTrue()
     {
         // Arrange
@@ -70,9 +104,32 @@ public class SubjectComponentRegistryTests
         Assert.False(registry.HasComponent(typeof(TestSubject), SubjectComponentType.Page));
     }
 
+    [Fact]
+    public void ScanAssemblies_FindsMultipleAttributes()
+    {
+        // Arrange
+        var registry = CreateRegistryWithScanning();
+
+        // Act
+        var edit = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Edit);
+        var widget1 = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Widget, "status");
+        var widget2 = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Widget, "temperature");
+
+        // Assert
+        Assert.NotNull(edit);
+        Assert.NotNull(widget1);
+        Assert.NotNull(widget2);
+    }
+
     // Test fixtures
     public class TestSubject { }
 
     [SubjectComponent(SubjectComponentType.Edit, typeof(TestSubject))]
     public class TestEditComponent { }
+
+    [SubjectComponent(SubjectComponentType.Widget, typeof(TestSubject), Name = "status")]
+    public class TestWidgetComponent { }
+
+    [SubjectComponent(SubjectComponentType.Widget, typeof(TestSubject), Name = "temperature")]
+    public class TestWidget2Component { }
 }

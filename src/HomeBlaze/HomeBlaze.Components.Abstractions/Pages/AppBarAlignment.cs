@@ -1,4 +1,4 @@
-namespace HomeBlaze.Abstractions.Pages;
+namespace HomeBlaze.Components.Abstractions.Pages;
 
 /// <summary>
 /// Specifies where an AppBar item should appear.

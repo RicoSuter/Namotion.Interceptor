@@ -1,4 +1,4 @@
-namespace HomeBlaze.Abstractions.Storage;
+namespace HomeBlaze.Storage.Abstractions;
 
 /// <summary>
 /// Metadata about a blob in storage.

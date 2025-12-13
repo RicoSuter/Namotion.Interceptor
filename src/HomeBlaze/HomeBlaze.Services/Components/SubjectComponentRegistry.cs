@@ -1,8 +1,6 @@
-using HomeBlaze.Abstractions;
-using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Services;
+using HomeBlaze.Components.Abstractions.Attributes;
 
-namespace HomeBlaze.Host.Services.Components;
+namespace HomeBlaze.Services.Components;
 
 /// <summary>
 /// Registry for resolving Blazor component types for subjects.

@@ -1,6 +1,6 @@
 using Namotion.Interceptor;
 
-namespace HomeBlaze.Abstractions.Storage;
+namespace HomeBlaze.Storage.Abstractions;
 
 /// <summary>
 /// Interface for components that persist subject configurations to storage.

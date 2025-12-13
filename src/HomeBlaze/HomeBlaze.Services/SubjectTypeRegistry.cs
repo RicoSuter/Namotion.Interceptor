@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Storage.Abstractions.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 

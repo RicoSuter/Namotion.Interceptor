@@ -1,5 +1,5 @@
 using HomeBlaze.Abstractions;
-using HomeBlaze.Abstractions.Pages;
+using HomeBlaze.Components.Abstractions.Pages;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Host.Services.Display;

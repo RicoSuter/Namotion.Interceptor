@@ -1,4 +1,4 @@
-namespace HomeBlaze.Abstractions.Attributes;
+namespace HomeBlaze.Components.Abstractions.Attributes;
 
 /// <summary>
 /// Defines the type of UI component for a subject.
