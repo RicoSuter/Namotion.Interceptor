@@ -3,7 +3,9 @@
     "allow": [
       "Bash(dotnet build:*)",
       "Bash(dotnet test:*)",
-      "Bash(dotnet run:*)"
+      "Bash(dotnet run:*)",
+      "Bash(dotnet remove:*)",
+      "Bash(dotnet sln:*)"
     ],
     "deny": [],
     "ask": [],
