@@ -25,7 +25,8 @@
     {
         @if (CanEdit())
         {
-            <MudFab Style="position: fixed; top: 80px; right: 24px; z-index: 1000;"
+            <MudFab data-testid="edit-fab"
+                    Style="position: fixed; top: 80px; right: 24px; z-index: 1000;"
                     OnClick="@ToggleEditMode"
                     StartIcon="@Icons.Material.Filled.Edit"
                     Color="Color.Primary"
@@ -34,10 +35,11 @@
 
         if (_isEditMode && CanEdit())
         {
-            <MudSplitter @bind-Dimension="_splitDimension"
-                         Height="calc(100vh - 80px)"
-                         EnableSlide="true"
-                         OnDoubleClicked="ResetSplitDimension">
+            <div data-testid="edit-splitter">
+                <MudSplitter @bind-Dimension="_splitDimension"
+                             Height="calc(100vh - 80px)"
+                             EnableSlide="true"
+                             OnDoubleClicked="ResetSplitDimension">
                 <StartContent>
                     @if (_componentType != null)
                     {
@@ -62,7 +64,8 @@
                                           OnSaved="OnEditSaved"/>
                     </div>
                 </EndContent>
-            </MudSplitter>
+                </MudSplitter>
+            </div>
         }
         else
         {

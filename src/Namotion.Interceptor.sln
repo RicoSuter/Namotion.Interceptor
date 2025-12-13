@@ -120,6 +120,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HomeBlaze.Storage.Blazor", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HomeBlaze.Widgets", "HomeBlaze\HomeBlaze.Widgets\HomeBlaze.Widgets.csproj", "{DD32A611-7A80-40A4-BBEC-C6A804E9F365}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HomeBlaze.E2E.Tests", "HomeBlaze\HomeBlaze.E2E.Tests\HomeBlaze.E2E.Tests.csproj", "{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -694,6 +696,18 @@ Global
 		{DD32A611-7A80-40A4-BBEC-C6A804E9F365}.Release|x64.Build.0 = Release|Any CPU
 		{DD32A611-7A80-40A4-BBEC-C6A804E9F365}.Release|x86.ActiveCfg = Release|Any CPU
 		{DD32A611-7A80-40A4-BBEC-C6A804E9F365}.Release|x86.Build.0 = Release|Any CPU
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}.Debug|x64.Build.0 = Debug|Any CPU
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}.Debug|x86.Build.0 = Debug|Any CPU
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}.Release|x64.ActiveCfg = Release|Any CPU
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}.Release|x64.Build.0 = Release|Any CPU
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}.Release|x86.ActiveCfg = Release|Any CPU
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -737,6 +751,7 @@ Global
 		{04BD8764-1D46-4BDD-9F11-C14F1E834112} = {D0F6FF5A-BF58-4723-8AD2-ADED4ED2FBE9}
 		{8102B905-8DC5-432E-9F52-83EEA124E811} = {D0F6FF5A-BF58-4723-8AD2-ADED4ED2FBE9}
 		{DD32A611-7A80-40A4-BBEC-C6A804E9F365} = {D0F6FF5A-BF58-4723-8AD2-ADED4ED2FBE9}
+		{1FEC03EF-79E8-43B7-AC89-EF6861A05DD7} = {D0F6FF5A-BF58-4723-8AD2-ADED4ED2FBE9}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {D7E90F8C-B0AE-4ACF-9226-306D8EA3D35B}

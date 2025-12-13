@@ -33,9 +33,11 @@
         <MudButton OnClick="@(() => OnCancel.InvokeAsync())">Cancel</MudButton>
     }
 
-    <MudButton Color="Color.Primary"
-               OnClick="SaveAsync"
-               Disabled="@(!IsValid)">Save (Ctrl+S)</MudButton>
+    <span data-testid="save-button">
+        <MudButton Color="Color.Primary"
+                   OnClick="SaveAsync"
+                   Disabled="@(!IsValid)">Save (Ctrl+S)</MudButton>
+    </span>
 </div>
 
 @code {
