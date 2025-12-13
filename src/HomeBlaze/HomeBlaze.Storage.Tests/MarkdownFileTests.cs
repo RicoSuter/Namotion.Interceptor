@@ -76,12 +76,12 @@ public class MarkdownFileTests
     }
 
     [Fact]
-    public void FrontmatterParser_WithOrder_ReturnsOrder()
+    public void FrontmatterParser_WithPosition_ReturnsPosition()
     {
         var content = """
             ---
             title: Test
-            order: 5
+            position: 5
             ---
             # Content
             """;
@@ -89,7 +89,7 @@ public class MarkdownFileTests
         var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
         Assert.NotNull(result);
-        Assert.Equal(5, result.Order);
+        Assert.Equal(5, result.Position);
     }
 
     [Fact]
@@ -216,13 +216,13 @@ public class MarkdownFileTests
     }
 
     [Fact]
-    public async Task MarkdownFile_NavigationOrder_WithFrontmatter_ReturnsOrder()
+    public async Task MarkdownFile_PagePosition_WithFrontmatter_ReturnsPosition()
     {
         var storage = await CreateInMemoryStorageAsync();
         var content = """
             ---
             title: Test
-            order: 3
+            position: 3
             ---
             # Content
             """;
