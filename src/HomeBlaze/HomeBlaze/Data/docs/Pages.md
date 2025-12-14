@@ -1,7 +1,7 @@
 ---
 title: Markdown Pages
 navTitle: Pages
-order: 4
+position: 4
 ---
 
 # Markdown Pages
@@ -30,7 +30,7 @@ Use YAML frontmatter at the top of your markdown file to control how it appears 
 title: My Dashboard
 navTitle: Dashboard
 icon: Dashboard
-order: 1
+position: 1
 ---
 ```
 
@@ -41,7 +41,9 @@ order: 1
 | `title` | string | Full page title displayed in the header |
 | `navTitle` | string | Short title for navigation menu (optional, defaults to `title`) |
 | `icon` | string | MudBlazor icon name (e.g., `Dashboard`, `Settings`, `Article`) |
-| `order` | number | Sort order in navigation (lower = higher in list) |
+| `position` | number | Sort order in navigation (lower = higher in list) |
+| `location` | string | Where to show in navigation: `NavBar` (sidebar, default) or `AppBar` (top bar) |
+| `alignment` | string | AppBar alignment: `Left` (default) or `Right`. Only used when `location` is `AppBar` |
 
 ---
 
@@ -151,7 +153,7 @@ Here's a complete example of a dashboard page:
 title: Factory Dashboard
 navTitle: Dashboard
 icon: Dashboard
-order: 0
+position: 0
 ---
 
 # Factory Status

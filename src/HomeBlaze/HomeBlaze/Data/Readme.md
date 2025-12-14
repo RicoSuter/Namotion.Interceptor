@@ -1,7 +1,7 @@
 ---
 title: Welcome to HomeBlaze
 navTitle: Home
-order: 0
+position: 0
 ---
 
 # HomeBlaze v2

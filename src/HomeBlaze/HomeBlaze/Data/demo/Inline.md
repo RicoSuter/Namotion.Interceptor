@@ -1,7 +1,7 @@
 ---
 title: Live Widgets Demo
 navTitle: Widgets Demo
-order: 5
+position: 5
 ---
 
 # Live Widgets Demo

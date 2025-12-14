@@ -1,7 +1,7 @@
 ﻿---
 title: Demo Setup Guide
 navTitle: Demo Setup
-order: 1
+position: 1
 ---
 
 # Demo Setup Guide
@@ -51,7 +51,7 @@ Data/
     cooling-fan.json      # 1800 RPM HVAC system
     water-pump.json       # 2400 RPM water circulation
     compressor.json       # 3000 RPM compressed air
-    setup.md             # This file
+    Setup.md             # This file
 ```
 
 ## Exploring the Demo
