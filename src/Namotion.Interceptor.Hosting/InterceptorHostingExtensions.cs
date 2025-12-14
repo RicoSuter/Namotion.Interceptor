@@ -20,8 +20,12 @@ public static class InterceptorHostingExtensions
     /// <returns>An immutable array of attached hosted services, or an empty array if none are attached.</returns>
     public static ImmutableArray<IHostedService> GetAttachedHostedServices(this IInterceptorSubject subject)
     {
-        return subject.Data.GetOrAdd((null, AttachedHostedServicesKey), _ => null)
-            as ImmutableArray<IHostedService>? ?? [];
+        var value = subject.Data.GetOrAdd((null, AttachedHostedServicesKey), _ => null);
+        if (value is ImmutableArray<IHostedService> array)
+        {
+            return array;
+        }
+        return [];
     }
 
     /// <summary>
@@ -41,7 +45,7 @@ public static class InterceptorHostingExtensions
             },
             (_, value) =>
             {
-                var array = value as ImmutableArray<IHostedService>? ?? [];
+                var array = value is ImmutableArray<IHostedService> arr ? arr : [];
                 if (!array.Contains(hostedService))
                 {
                     wasAdded = true;
@@ -72,14 +76,13 @@ public static class InterceptorHostingExtensions
             _ => null,
             (_, value) =>
             {
-                var array = value as ImmutableArray<IHostedService>?;
-                if (array?.Contains(hostedService) == true)
+                if (value is ImmutableArray<IHostedService> array && array.Contains(hostedService))
                 {
                     wasRemoved = true;
-                    var newArray = array.Value.Remove(hostedService);
+                    var newArray = array.Remove(hostedService);
                     return newArray.Length > 0 ? newArray : null;
                 }
-                return array;
+                return value;
             });
 
         if (wasRemoved)
@@ -108,7 +111,7 @@ public static class InterceptorHostingExtensions
             },
             (_, value) =>
             {
-                var array = value as ImmutableArray<IHostedService>? ?? [];
+                var array = value is ImmutableArray<IHostedService> arr ? arr : [];
                 if (!array.Contains(hostedService))
                 {
                     wasAdded = true;
@@ -142,14 +145,13 @@ public static class InterceptorHostingExtensions
             _ => null,
             (_, value) =>
             {
-                var array = value as ImmutableArray<IHostedService>?;
-                if (array?.Contains(hostedService) == true)
+                if (value is ImmutableArray<IHostedService> array && array.Contains(hostedService))
                 {
                     wasRemoved = true;
-                    var newArray = array.Value.Remove(hostedService);
+                    var newArray = array.Remove(hostedService);
                     return newArray.Length > 0 ? newArray : null;
                 }
-                return array;
+                return value;
             });
 
         if (wasRemoved)
