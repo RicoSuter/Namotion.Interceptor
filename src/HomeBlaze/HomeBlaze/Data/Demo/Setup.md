@@ -14,11 +14,11 @@ The demo simulates a small factory with the following equipment (live data):
 
 | Equipment | Current Speed | Target Speed | Temperature | Status |
 |-----------|---------------|--------------|-------------|--------|
-| **Conveyor Belt** | {{ Root.Children[demo].Children[conveyor.json].CurrentSpeed }} | {{ Root.Children[demo].Children[conveyor.json].TargetSpeed }} | {{ Root.Children[demo].Children[conveyor.json].Temperature }} | {{ Root.Children[demo].Children[conveyor.json].Status }} |
-| **Exhaust Fan** | {{ Root.Children[demo].Children[exhaust-fan.json].CurrentSpeed }} | {{ Root.Children[demo].Children[exhaust-fan.json].TargetSpeed }} | {{ Root.Children[demo].Children[exhaust-fan.json].Temperature }} | {{ Root.Children[demo].Children[exhaust-fan.json].Status }} |
-| **Cooling Fan** | {{ Root.Children[demo].Children[cooling-fan.json].CurrentSpeed }} | {{ Root.Children[demo].Children[cooling-fan.json].TargetSpeed }} | {{ Root.Children[demo].Children[cooling-fan.json].Temperature }} | {{ Root.Children[demo].Children[cooling-fan.json].Status }} |
-| **Water Pump** | {{ Root.Children[demo].Children[water-pump.json].CurrentSpeed }} | {{ Root.Children[demo].Children[water-pump.json].TargetSpeed }} | {{ Root.Children[demo].Children[water-pump.json].Temperature }} | {{ Root.Children[demo].Children[water-pump.json].Status }} |
-| **Compressor** | {{ Root.Children[demo].Children[compressor.json].CurrentSpeed }} | {{ Root.Children[demo].Children[compressor.json].TargetSpeed }} | {{ Root.Children[demo].Children[compressor.json].Temperature }} | {{ Root.Children[demo].Children[compressor.json].Status }} |
+| **Conveyor Belt** | {{ Root.Children[Demo].Children[Conveyor.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[Conveyor.json].TargetSpeed }} | {{ Root.Children[Demo].Children[Conveyor.json].Temperature }} | {{ Root.Children[Demo].Children[Conveyor.json].Status }} |
+| **Exhaust Fan** | {{ Root.Children[Demo].Children[ExhaustFan.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan.json].TargetSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan.json].Temperature }} | {{ Root.Children[Demo].Children[ExhaustFan.json].Status }} |
+| **Cooling Fan** | {{ Root.Children[Demo].Children[CoolingFan.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[CoolingFan.json].TargetSpeed }} | {{ Root.Children[Demo].Children[CoolingFan.json].Temperature }} | {{ Root.Children[Demo].Children[CoolingFan.json].Status }} |
+| **Water Pump** | {{ Root.Children[Demo].Children[WaterPump.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[WaterPump.json].TargetSpeed }} | {{ Root.Children[Demo].Children[WaterPump.json].Temperature }} | {{ Root.Children[Demo].Children[WaterPump.json].Status }} |
+| **Compressor** | {{ Root.Children[Demo].Children[Compressor.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[Compressor.json].TargetSpeed }} | {{ Root.Children[Demo].Children[Compressor.json].Temperature }} | {{ Root.Children[Demo].Children[Compressor.json].Status }} |
 
 ## Motor Properties
 
@@ -46,11 +46,11 @@ These properties auto-calculate when dependencies change:
 ```
 Data/
   demo/
-    conveyor.json         # 600 RPM conveyor
-    exhaust-fan.json      # 1500 RPM exhaust system
-    cooling-fan.json      # 1800 RPM HVAC system
-    water-pump.json       # 2400 RPM water circulation
-    compressor.json       # 3000 RPM compressed air
+    Conveyor.json         # 600 RPM conveyor
+    ExhaustFan.json      # 1500 RPM exhaust system
+    CoolingFan.json      # 1800 RPM HVAC system
+    WaterPump.json       # 2400 RPM water circulation
+    Compressor.json       # 3000 RPM compressed air
     Setup.md             # This file
 ```
 
@@ -84,7 +84,7 @@ Observe how:
 ### 5. External File Editing
 Try editing a JSON file externally:
 ```bash
-# Edit demo/conveyor.json and change targetSpeed to 1000
+# Edit demo/Conveyor.json and change targetSpeed to 1000
 # Watch the UI update automatically via FileSystemWatcher!
 ```
 

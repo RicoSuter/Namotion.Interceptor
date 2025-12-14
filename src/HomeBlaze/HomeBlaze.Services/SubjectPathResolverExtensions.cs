@@ -4,7 +4,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 
-namespace HomeBlaze.Services.Navigation;
+namespace HomeBlaze.Services;
 
 public static class SubjectPathResolverExtensions
 {
@@ -48,10 +48,11 @@ public static class SubjectPathResolverExtensions
         if (string.IsNullOrEmpty(path))
             return currentSubject;
 
-        // Handle "Root." prefix - absolute path from root
-        if (path.StartsWith("Root."))
+        // Handle "Root" or "Root." prefix - absolute path from root
+        // Let the resolver handle the prefix stripping internally
+        if (path == "Root" || path.StartsWith("Root."))
         {
-            return resolver.ResolveSubject(path["Root.".Length..]);
+            return resolver.ResolveSubject(path);
         }
 
         // Handle "this." prefix - relative to currentSubject
@@ -106,10 +107,10 @@ public static class SubjectPathResolverExtensions
         if (string.IsNullOrEmpty(path))
             return null;
 
-        // Handle "Root." prefix
-        if (path.StartsWith("Root."))
+        // Handle "Root" or "Root." prefix - let resolver handle it
+        if (path == "Root" || path.StartsWith("Root."))
         {
-            return resolver.ResolveValue(path["Root.".Length..]);
+            return resolver.ResolveValue(path);
         }
 
         // Handle inline subject lookup (e.g., "conveyor.Temperature")

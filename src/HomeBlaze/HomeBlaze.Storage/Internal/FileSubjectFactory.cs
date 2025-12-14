@@ -1,7 +1,6 @@
 using FluentStorage.Blobs;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Services;
-using HomeBlaze.Services.Navigation;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;

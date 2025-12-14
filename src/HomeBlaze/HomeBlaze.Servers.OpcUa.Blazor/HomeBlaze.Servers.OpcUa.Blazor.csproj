@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\HomeBlaze.Servers.OpcUa\HomeBlaze.Servers.OpcUa.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
+        <PackageReference Include="MudBlazor" Version="8.*" />
+    </ItemGroup>
+
+</Project>

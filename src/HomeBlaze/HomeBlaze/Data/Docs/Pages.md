@@ -63,7 +63,7 @@ Expressions resolve relative to the current page's embedded subjects first, then
 | Path | Resolution |
 |------|------------|
 | `mymotor.Speed` | Inline subject named `mymotor` embedded in current page |
-| `Root.Children[demo].Children[conveyor.json].CurrentSpeed` | Absolute path from root |
+| `Root.Children[demo].Children[Conveyor.json].CurrentSpeed` | Absolute path from root |
 
 See [Configuration Guide - Path Syntax](Configuration.md#path-syntax) for full path documentation including `this.`, `../`, and more.
 

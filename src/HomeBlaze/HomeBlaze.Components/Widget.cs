@@ -1,6 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Services.Navigation;
+using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 

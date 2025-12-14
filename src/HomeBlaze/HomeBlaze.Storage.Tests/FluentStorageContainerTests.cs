@@ -1,6 +1,5 @@
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Services;
-using HomeBlaze.Services.Navigation;
 using Moq;
 using Namotion.Interceptor;
 

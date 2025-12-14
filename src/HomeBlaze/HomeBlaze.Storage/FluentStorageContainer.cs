@@ -3,9 +3,7 @@ using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Storage.Abstractions;
-using HomeBlaze.Storage.Abstractions.Attributes;
 using HomeBlaze.Services;
-using HomeBlaze.Services.Navigation;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -21,7 +19,7 @@ namespace HomeBlaze.Storage;
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,
-    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurableSubject, IDisposable
+    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurableSubject
 {
     private IBlobStorage? _client;
 

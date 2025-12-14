@@ -167,7 +167,67 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
             }
         }
     }
-    
+
+    internal async Task AttachHostedServiceAsync(IHostedService hostedService, CancellationToken cancellationToken)
+    {
+        var tcs = new TaskCompletionSource();
+        lock (_hostedServices)
+        {
+            if (_hostedServices.Add(hostedService))
+            {
+                _actions.Post(async token =>
+                {
+                    try
+                    {
+                        _logger?.LogInformation("Starting attached hosted service {Service}.", hostedService.ToString());
+                        await hostedService.StartAsync(token);
+                        tcs.TrySetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        tcs.TrySetException(ex);
+                    }
+                });
+            }
+            else
+            {
+                tcs.TrySetResult(); // Already attached
+            }
+        }
+
+        await tcs.Task.WaitAsync(cancellationToken);
+    }
+
+    internal async Task DetachHostedServiceAsync(IHostedService hostedService, CancellationToken cancellationToken)
+    {
+        var tcs = new TaskCompletionSource();
+        lock (_hostedServices)
+        {
+            if (_hostedServices.Remove(hostedService))
+            {
+                _actions.Post(async token =>
+                {
+                    try
+                    {
+                        _logger?.LogInformation("Stopping detached hosted service {Service}.", hostedService.ToString());
+                        await hostedService.StopAsync(token);
+                        tcs.TrySetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        tcs.TrySetException(ex);
+                    }
+                });
+            }
+            else
+            {
+                tcs.TrySetResult(); // Already removed
+            }
+        }
+
+        await tcs.Task.WaitAsync(cancellationToken);
+    }
+
     public void Dispose()
     {
         _stoppingCts?.Cancel();

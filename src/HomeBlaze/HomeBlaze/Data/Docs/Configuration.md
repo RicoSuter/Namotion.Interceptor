@@ -24,7 +24,7 @@ HomeBlaze organizes everything as **subjects** in a tree structure:
 Root (FluentStorageContainer)
 ├── Children
 │   ├── demo/
-│   │   ├── conveyor.json (Motor)
+│   │   ├── Conveyor.json (Motor)
 │   │   └── dashboard.md (MarkdownFile)
 │   └── docs/
 │       └── Configuration.md (MarkdownFile)
@@ -149,8 +149,8 @@ Children[folder-name].Children[file.json].PropertyName
 
 | Path | Description |
 |------|-------------|
-| `Root.Children[demo].Children[conveyor.json]` | Absolute path to a motor |
-| `Root.Children[demo].Children[conveyor.json].CurrentSpeed` | Property on that motor |
+| `Root.Children[demo].Children[Conveyor.json]` | Absolute path to a motor |
+| `Root.Children[demo].Children[Conveyor.json].CurrentSpeed` | Property on that motor |
 | `this.Child.Name` | Property on current subject's child |
 | `../Temperature` | Go up one level, access Temperature |
 | `../../Children[data].Value` | Go up two levels, then navigate down |
@@ -182,7 +182,7 @@ Use the `Widget` subject to embed another subject's widget by path:
 ```json
 {
     "type": "HomeBlaze.Components.Widget",
-    "path": "Root.Children[demo].Children[conveyor.json]"
+    "path": "Root.Children[demo].Children[Conveyor.json]"
 }
 ```
 

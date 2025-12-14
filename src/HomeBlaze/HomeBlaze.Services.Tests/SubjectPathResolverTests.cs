@@ -1,4 +1,3 @@
-using HomeBlaze.Services.Navigation;
 using HomeBlaze.Services.Tests.Models;
 using Moq;
 using Namotion.Interceptor;
@@ -336,6 +335,113 @@ public class SubjectPathResolverTests
         Assert.Same(file, result);
     }
 
+    [Fact]
+    public void ResolveSubject_WithRootAlone_ReturnsRootSubject()
+    {
+        // Arrange
+        var child = new TestContainer(_context) { Name = "Child" };
+        var root = new TestContainer(_context)
+        {
+            Name = "Root",
+            Child = child
+        };
+
+        var rootManager = _context.GetService<RootManager>();
+        rootManager.Root = root;
+
+        // Act - "Root" should return the root subject
+        var result = _resolver.ResolveSubject("Root");
+
+        // Assert
+        Assert.Same(root, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_WithRootDotPrefix_ResolvesFromRoot()
+    {
+        // Arrange
+        var child = new TestContainer(_context) { Name = "Child" };
+        var root = new TestContainer(_context)
+        {
+            Name = "Root",
+            Child = child
+        };
+
+        var rootManager = _context.GetService<RootManager>();
+        rootManager.Root = root;
+
+        // Act - "Root.Child" should resolve to the child
+        var result = _resolver.ResolveSubject("Root.Child");
+
+        // Assert
+        Assert.Same(child, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_WithRootDotPrefix_CaseSensitive_LowercaseDoesNotMatch()
+    {
+        // Arrange
+        var child = new TestContainer(_context) { Name = "Child" };
+        var root = new TestContainer(_context)
+        {
+            Name = "Root",
+            Child = child
+        };
+
+        var rootManager = _context.GetService<RootManager>();
+        rootManager.Root = root;
+
+        // Act - "root" (lowercase) should not match, returns null
+        var result = _resolver.ResolveSubject("root");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ResolveSubject_WithRootDotPrefix_CaseSensitive_LowercasePrefixDoesNotMatch()
+    {
+        // Arrange
+        var child = new TestContainer(_context) { Name = "Child" };
+        var root = new TestContainer(_context)
+        {
+            Name = "Root",
+            Child = child
+        };
+
+        var rootManager = _context.GetService<RootManager>();
+        rootManager.Root = root;
+
+        // Act - "root.Child" (lowercase) should not match
+        var result = _resolver.ResolveSubject("root.Child");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ResolveSubject_WithThisRootPropertyPath_ResolvesCorrectly()
+    {
+        // Arrange - if a subject has a property/child named "Root",
+        // the user can access it via "this.Root" to disambiguate
+        // (though TestContainer doesn't have a "Root" property, this tests the pattern)
+        var child = new TestContainer(_context) { Name = "Child" };
+        var root = new TestContainer(_context)
+        {
+            Name = "Root",
+            Child = child
+        };
+
+        var rootManager = _context.GetService<RootManager>();
+        rootManager.Root = root;
+
+        // Act - resolve child relative to root, accessing Child property
+        var result = _resolver.ResolveSubject("Child", root: root);
+
+        // Assert
+        Assert.Same(child, result);
+    }
+
     #endregion
 
     #region Cache Invalidation Tests
@@ -382,6 +488,28 @@ public class SubjectPathResolverTests
     #region ResolveFromRelativePath Tests
 
     [Fact]
+    public void ResolveFromRelativePath_WithRootAlone_ReturnsRoot()
+    {
+        // Arrange
+        var child = new TestContainer(_context) { Name = "Child" };
+        var root = new TestContainer(_context)
+        {
+            Name = "Root",
+            Child = child
+        };
+
+        // Register root with RootManager
+        var rootManager = _context.GetService<RootManager>();
+        rootManager.Root = root;
+
+        // Act - just "Root" should return the root subject
+        var result = _resolver.ResolveFromRelativePath("Root");
+
+        // Assert
+        Assert.Same(root, result);
+    }
+
+    [Fact]
     public void ResolveFromRelativePath_WithRootPrefix_ResolvesFromRoot()
     {
         // Arrange
@@ -418,7 +546,7 @@ public class SubjectPathResolverTests
         rootManager.Root = root;
 
         // Act - no current subject provided
-        var result = _resolver.ResolveFromRelativePath("Root.Child", null);
+        var result = _resolver.ResolveFromRelativePath("Root.Child");
 
         // Assert
         Assert.Same(child, result);
@@ -434,11 +562,6 @@ public class SubjectPathResolverTests
             Name = "Child",
             Child = grandchild
         };
-        var root = new TestContainer(_context)
-        {
-            Name = "Root",
-            Child = child
-        };
 
         // Act - "this.Child" from child should resolve grandchild
         var result = _resolver.ResolveFromRelativePath("this.Child", child);
@@ -450,11 +573,8 @@ public class SubjectPathResolverTests
     [Fact]
     public void ResolveFromRelativePath_WithThisPrefix_NoCurrentSubject_ReturnsNull()
     {
-        // Arrange
-        var root = new TestContainer(_context) { Name = "Root" };
-
         // Act
-        var result = _resolver.ResolveFromRelativePath("this.Child", null);
+        var result = _resolver.ResolveFromRelativePath("this.Child");
 
         // Assert
         Assert.Null(result);
@@ -562,7 +682,7 @@ public class SubjectPathResolverTests
     public void ResolveFromRelativePath_NoPrefix_NoCurrentSubject_ReturnsNull()
     {
         // Act
-        var result = _resolver.ResolveFromRelativePath("Child", null);
+        var result = _resolver.ResolveFromRelativePath("Child");
 
         // Assert
         Assert.Null(result);
