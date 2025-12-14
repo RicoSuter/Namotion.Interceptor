@@ -1,7 +1,7 @@
 ---
 title: Configuration Guide
 navTitle: Configuration
-order: 2
+position: 2
 ---
 
 # Configuration Guide
@@ -215,7 +215,7 @@ The demo includes pre-configured motors in the `demo/` folder:
 | Water Pump | 2,400 RPM | 1s |
 | Compressor | 3,000 RPM | 1s |
 
-See the [Demo Setup Guide](../demo/setup.md) for details.
+See the [Demo Setup Guide](../demo/Setup.md) for details.
 
 ---
 

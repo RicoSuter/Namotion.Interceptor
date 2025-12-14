@@ -1,7 +1,7 @@
 ---
 title: Installation Guide
 navTitle: Installation
-order: 1
+position: 1
 ---
 
 # Installation

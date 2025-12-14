@@ -254,8 +254,8 @@ services.AddHomeBlazeHost();
 
 | Method | Services |
 |--------|----------|
-| `AddHomeBlazeServices()` | `TypeProvider`, `SubjectTypeRegistry`, `SubjectComponentRegistry`, `ConfigurableSubjectSerializer`, `SubjectPathResolver`, `RootManager` |
-| `AddHomeBlazeHostServices()` | `RoutePathResolver`, `NavigationItemResolver`, `DeveloperModeService` |
+| `AddHomeBlazeServices()` | `TypeProvider`, `SubjectTypeRegistry`, `ConfigurableSubjectSerializer`, `SubjectPathResolver`, `RootManager` |
+| `AddHomeBlazeHostServices()` | `SubjectComponentRegistry`, `NavigationItemResolver`, `DeveloperModeService` |
 | `AddHomeBlazeHost()` | MudBlazor services + all above |
 
 ---
