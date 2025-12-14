@@ -13,8 +13,9 @@ public class VirtualFolderTests
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
         var mockServiceProvider = new Mock<IServiceProvider>();
         var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
-        var pathResolver = new SubjectPathResolver();
-        var rootManager = new RootManager(typeRegistry, serializer, null!);
+        var context = InterceptorSubjectContext.Create();
+        var rootManager = new RootManager(typeRegistry, serializer, context);
+        var pathResolver = new SubjectPathResolver(rootManager, context);
         return (typeProvider, typeRegistry, serializer, pathResolver, rootManager);
     }
 
@@ -23,8 +24,8 @@ public class VirtualFolderTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var (_, typeRegistry, serializer, pathResolver, rootManager) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
+        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
 
         // Act
         var folder = new VirtualFolder(context, storage, "test/folder/");
@@ -41,8 +42,8 @@ public class VirtualFolderTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var (_, typeRegistry, serializer, pathResolver, rootManager) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
+        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
 
         // Act
         var folder = new VirtualFolder(context, storage, "parent/child/");
@@ -56,8 +57,8 @@ public class VirtualFolderTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var (_, typeRegistry, serializer, pathResolver, rootManager) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
+        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
 
         // Act
         var folder = new VirtualFolder(context, storage, "test/");

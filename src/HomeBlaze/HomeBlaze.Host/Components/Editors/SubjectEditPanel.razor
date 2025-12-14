@@ -1,10 +1,11 @@
+@using HomeBlaze.Components
 @using HomeBlaze.Storage.Abstractions
 @using Toolbelt.Blazor.HotKeys2
 
 @implements IAsyncDisposable
 
-@inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
+@inject SubjectComponentRegistry ComponentRegistry
 @inject ISnackbar Snackbar
 @inject DeveloperModeService DeveloperMode
 @inject HotKeys HotKeys
@@ -13,11 +14,11 @@
     <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
         @if (Subject != null)
         {
-            @if (_editComponentType != null)
+            @if (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit))
             {
-                <DynamicComponent Type="_editComponentType"
-                                  @ref="_dynamicComponentRef"
-                                  Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })"/>
+                <SubjectComponent Subject="@Subject"
+                                  Type="SubjectComponentType.Edit"
+                                  @bind-ComponentInstance="_subjectComponent" />
             }
             else
             {
@@ -51,8 +52,7 @@
 
     [Parameter] public EventCallback OnSaved { get; set; }
 
-    private Type? _editComponentType;
-    private DynamicComponent? _dynamicComponentRef;
+    private ISubjectComponent? _subjectComponent;
     private ISubjectEditComponent? _editComponent;
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private HotKeysContext? _hotKeysContext;
@@ -68,19 +68,13 @@
     protected override void OnParametersSet()
     {
         base.OnParametersSet();
-        _editComponent = null;
 
-        if (Subject != null)
+        // Unsubscribe from previous edit component
+        if (_editComponent != null)
         {
-            var registration = ComponentRegistry.GetComponent(
-                Subject.GetType(),
-                SubjectComponentType.Edit);
-
-            _editComponentType = registration?.ComponentType;
-        }
-        else
-        {
-            _editComponentType = null;
+            _editComponent.IsValidChanged -= OnIsValidChanged;
+            _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
+            _editComponent = null;
         }
     }
 
@@ -88,8 +82,15 @@
     {
         base.OnAfterRender(firstRender);
 
-        if (_dynamicComponentRef?.Instance is ISubjectEditComponent editComponent && _editComponent == null)
+        // Subscribe to new edit component if available
+        if (_subjectComponent is ISubjectEditComponent editComponent && _editComponent != editComponent)
         {
+            if (_editComponent != null)
+            {
+                _editComponent.IsValidChanged -= OnIsValidChanged;
+                _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
+            }
+
             _editComponent = editComponent;
             _editComponent.IsValidChanged += OnIsValidChanged;
             _editComponent.IsDirtyChanged += OnIsDirtyChanged;

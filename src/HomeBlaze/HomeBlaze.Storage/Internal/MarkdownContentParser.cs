@@ -28,9 +28,6 @@ public sealed partial class MarkdownContentParser
 
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
-    private readonly RootManager _rootManager;
-    
-    // TODO: Review class
 
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
@@ -133,12 +130,10 @@ public sealed partial class MarkdownContentParser
 
     public MarkdownContentParser(
         ConfigurableSubjectSerializer serializer,
-        SubjectPathResolver pathResolver,
-        RootManager rootManager)
+        SubjectPathResolver pathResolver)
     {
         _serializer = serializer;
         _pathResolver = pathResolver;
-        _rootManager = rootManager;
     }
 
     // Source-generated regexes for performance
@@ -245,7 +240,7 @@ public sealed partial class MarkdownContentParser
                 case HtmlParsedSegment html:
                     // Include index in key to handle duplicate HTML segments (e.g., "</td><td>" between cells)
                     var htmlKey = $"{HtmlKeyPrefix}{segmentIndex}_{ComputeHash(html.Html)}";
-                    if (oldChildren.TryGetValue(htmlKey, out var existingHtml) && existingHtml is Storage.Internal.HtmlSegment)
+                    if (oldChildren.TryGetValue(htmlKey, out var existingHtml) && existingHtml is HtmlSegment)
                     {
                         newChildren[htmlKey] = existingHtml;
                     }
@@ -264,7 +259,7 @@ public sealed partial class MarkdownContentParser
                     }
                     else
                     {
-                        newChildren[exprKey] = new RenderExpression(expr.Path, parent, _pathResolver, _rootManager);
+                        newChildren[exprKey] = new RenderExpression(expr.Path, parent, _pathResolver);
                     }
                     break;
 

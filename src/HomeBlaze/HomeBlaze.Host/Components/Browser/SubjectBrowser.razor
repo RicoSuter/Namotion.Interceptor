@@ -164,7 +164,7 @@
                     break;
 
                 var indexStr = pathSegments[i++];
-                var child = RoutePathResolver.FindChildByIndex(property, indexStr);
+                var child = SubjectPathResolverExtensions.FindChildByIndex(property, indexStr);
                 if (child == null)
                     break;
 

@@ -1,0 +1,48 @@
+@inject SubjectComponentRegistry ComponentRegistry
+
+@if (Subject != null)
+{
+    var registration = ComponentRegistry.GetComponent(Subject.GetType(), Type);
+    if (registration?.ComponentType != null)
+    {
+        <DynamicComponent Type="registration.ComponentType"
+                          @ref="_dynamicComponent"
+                          Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })" />
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true">
+            No @Type component for @Subject.GetType().Name
+        </MudAlert>
+    }
+}
+
+@code {
+    private DynamicComponent? _dynamicComponent;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public SubjectComponentType Type { get; set; }
+
+    /// <summary>
+    /// Two-way binding for accessing the rendered component instance.
+    /// Useful for edit panels that need to access ISubjectEditComponent methods.
+    /// </summary>
+    [Parameter]
+    public ISubjectComponent? ComponentInstance { get; set; }
+
+    [Parameter]
+    public EventCallback<ISubjectComponent?> ComponentInstanceChanged { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var instance = _dynamicComponent?.Instance as ISubjectComponent;
+        if (instance != ComponentInstance)
+        {
+            ComponentInstance = instance;
+            await ComponentInstanceChanged.InvokeAsync(instance);
+        }
+    }
+}

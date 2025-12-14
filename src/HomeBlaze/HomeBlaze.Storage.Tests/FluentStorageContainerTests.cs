@@ -2,6 +2,7 @@ using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Navigation;
 using Moq;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests;
 
@@ -13,8 +14,9 @@ public class FluentStorageContainerTests
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
         var mockServiceProvider = new Mock<IServiceProvider>();
         var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
-        var pathResolver = new SubjectPathResolver();
-        var rootManager = new RootManager(typeRegistry, serializer, null!);
+        var context = InterceptorSubjectContext.Create();
+        var rootManager = new RootManager(typeRegistry, serializer, context);
+        var pathResolver = new SubjectPathResolver(rootManager, context);
         return (typeProvider, typeRegistry, serializer, pathResolver, rootManager);
     }
 
@@ -22,10 +24,10 @@ public class FluentStorageContainerTests
     public void Constructor_InitializesProperties()
     {
         // Arrange
-        var (_, typeRegistry, serializer, pathResolver, rootManager) = CreateDependencies();
+        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
 
         // Act
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
 
         // Assert
         Assert.Equal("disk", storage.StorageType);
@@ -39,8 +41,8 @@ public class FluentStorageContainerTests
     public void Title_ReturnsConnectionStringFileName_WhenNotEmpty()
     {
         // Arrange
-        var (_, typeRegistry, serializer, pathResolver, rootManager) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
+        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
 
         // Act
         storage.ConnectionString = @"Foo/Bar/Storage";
@@ -53,8 +55,8 @@ public class FluentStorageContainerTests
     public void Title_ReturnsStorage_WhenConnectionStringEmpty()
     {
         // Arrange
-        var (_, typeRegistry, serializer, pathResolver, rootManager) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
+        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
 
         // Act & Assert
         Assert.Equal("Storage", storage.Title);
@@ -64,8 +66,8 @@ public class FluentStorageContainerTests
     public async Task ConnectAsync_ThrowsWhenConnectionStringEmpty()
     {
         // Arrange
-        var (_, typeRegistry, serializer, pathResolver, rootManager) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
+        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() => storage.ConnectAsync(CancellationToken.None));
@@ -75,8 +77,8 @@ public class FluentStorageContainerTests
     public async Task ConnectAsync_ThrowsForUnsupportedStorageType()
     {
         // Arrange
-        var (_, typeRegistry, serializer, pathResolver, rootManager) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
+        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
 
         storage.ConnectionString = "test-connection";
         storage.StorageType = "unsupported-type";
@@ -90,8 +92,8 @@ public class FluentStorageContainerTests
     public void Status_DefaultsToDisconnected()
     {
         // Arrange
-        var (_, typeRegistry, serializer, pathResolver, rootManager) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
+        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
 
         // Assert - Initial state
         Assert.Equal(StorageStatus.Disconnected, storage.Status);
@@ -101,8 +103,8 @@ public class FluentStorageContainerTests
     public void Icon_ReturnsStorageIcon()
     {
         // Arrange
-        var (_, typeRegistry, serializer, pathResolver, rootManager) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
+        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
 
         // Act
         var icon = storage.Icon;
@@ -115,8 +117,8 @@ public class FluentStorageContainerTests
     public void Dispose_SetsStatusToDisconnected()
     {
         // Arrange
-        var (_, typeRegistry, serializer, pathResolver, rootManager) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
+        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
 
         // Act
         storage.Dispose();

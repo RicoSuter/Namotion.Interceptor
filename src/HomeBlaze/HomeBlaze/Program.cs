@@ -25,7 +25,7 @@ var typeProvider = app.Services.GetRequiredService<TypeProvider>();
 typeProvider.AddAssemblies(
     typeof(FluentStorageContainer).Assembly,      // HomeBlaze.Storage
     typeof(MarkdownFilePageComponent).Assembly,   // HomeBlaze.Storage.Blazor
-    // typeof(RenderExpressionComponent).Assembly,   // HomeBlaze.Widgets
+    typeof(Widget).Assembly,                      // HomeBlaze.Components
     typeof(Motor).Assembly,                       // HomeBlaze.Samples
     typeof(App).Assembly);                        // HomeBlaze UI components
 

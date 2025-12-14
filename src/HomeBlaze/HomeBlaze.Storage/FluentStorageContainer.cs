@@ -80,10 +80,9 @@ public partial class FluentStorageContainer :
         SubjectTypeRegistry typeRegistry,
         ConfigurableSubjectSerializer serializer,
         SubjectPathResolver pathResolver,
-        RootManager rootManager,
         ILogger<FluentStorageContainer>? logger = null)
     {
-        _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, pathResolver, rootManager, logger);
+        _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, pathResolver, logger);
         _hierarchyManager = new StorageHierarchyManager(logger);
         _serializer = serializer;
         _logger = logger;

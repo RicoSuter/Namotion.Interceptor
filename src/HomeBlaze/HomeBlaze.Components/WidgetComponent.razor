@@ -1,0 +1,22 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Widget))]
+@implements ISubjectComponent
+
+@if (ResolvedSubject != null)
+{
+    <SubjectComponent Subject="@ResolvedSubject" Type="SubjectComponentType.Widget" />
+}
+else
+{
+    <MudAlert Severity="Severity.Error" Dense="true">
+        Cannot resolve path: @WidgetSubject?.Path
+    </MudAlert>
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private Widget? WidgetSubject => Subject as Widget;
+
+    private IInterceptorSubject? ResolvedSubject => WidgetSubject?.ResolvedSubject;
+}
