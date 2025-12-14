@@ -55,9 +55,9 @@ public class OpcUaServerConfiguration
 
     /// <summary>
     /// Gets or sets the base address for the OPC UA server.
-    /// Default is "opc.tcp://localhost:4840".
+    /// Default is "opc.tcp://localhost:4840/".
     /// </summary>
-    public string BaseAddress { get; init; } = "opc.tcp://localhost:4840";
+    public string BaseAddress { get; init; } = "opc.tcp://localhost:4840/";
 
     public virtual ApplicationInstance CreateApplicationInstance()
     {
