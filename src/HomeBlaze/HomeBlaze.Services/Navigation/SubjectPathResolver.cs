@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -6,76 +7,148 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace HomeBlaze.Services.Navigation;
 
 /// <summary>
-/// Thread-safe service that resolves subjects from URL-style paths and builds paths from subjects.
+/// Thread-safe service that resolves subjects from paths and builds paths from subjects.
+/// Supports both bracket notation (Children[key]) and slash notation (Children/key).
 /// Implements lifecycle handling to invalidate caches when subjects are attached/detached.
 /// </summary>
 public class SubjectPathResolver : ILifecycleHandler
 {
-    private const string CacheKey = "SubjectPathResolver.Paths";
-    private readonly ReaderWriterLockSlim _lock = new();
+    private readonly RootManager _rootManager;
+
+    // Subject → Paths cache (bracket format, derive slash on demand)
+    private readonly ConcurrentDictionary<IInterceptorSubject, IReadOnlyList<string>> _pathsCache = new();
+
+    // Path → Subject cache (slash format - normalized for both bracket and slash input)
+    // Nullable to support caching "not found" results (cache is cleared on attach/detach anyway)
+    private readonly ConcurrentDictionary<string, IInterceptorSubject?> _resolveCache = new();
+
+    public SubjectPathResolver(RootManager rootManager, IInterceptorSubjectContext context)
+    {
+        _rootManager = rootManager;
+
+        // Register self with context for subjects to access
+        context.AddService(this);
+    }
 
     /// <summary>
-    /// Gets all paths to the given subject from any root.
-    /// Returns empty list if subject is detached.
+    /// Converts bracket notation to slash notation.
+    /// Children[demo].Children[file.json] → Children/demo/Children/file.json
     /// </summary>
-    public IReadOnlyList<string> GetPaths(IInterceptorSubject subject)
+    public static string BracketToSlash(string bracketPath)
     {
-        _lock.EnterReadLock();
-        try
-        {
-            // Try to get cached paths
-            if (subject.TryGetData(CacheKey, out var cached) && cached is IReadOnlyList<string> paths)
-            {
-                return paths;
-            }
-        }
-        finally
-        {
-            _lock.ExitReadLock();
-        }
+        return bracketPath
+            .Replace("].", "/")
+            .Replace("[", "/")
+            .Replace("]", "");
+    }
 
-        // Compute paths with write lock
-        _lock.EnterWriteLock();
-        try
-        {
-            // Double-check after acquiring write lock
-            if (subject.TryGetData(CacheKey, out var cached) && cached is IReadOnlyList<string> paths)
-            {
-                return paths;
-            }
+    /// <summary>
+    /// Resolves a subject from a path.
+    /// </summary>
+    /// <param name="path">The path to resolve.</param>
+    /// <param name="format">Path format (default: Bracket).</param>
+    /// <param name="root">Root subject (default: uses RootManager.Root).</param>
+    /// <returns>The resolved subject, or null if not found.</returns>
+    public IInterceptorSubject? ResolveSubject(
+        string path,
+        PathFormat format = PathFormat.Bracket,
+        IInterceptorSubject? root = null)
+    {
+        root ??= _rootManager.Root;
+        if (root == null)
+            return null;
 
-            var computedPaths = ComputePaths(subject);
-            subject.SetData(CacheKey, computedPaths);
-            return computedPaths;
-        }
-        finally
+        if (string.IsNullOrEmpty(path))
+            return root;
+
+        // Normalize to slash format for internal processing and cache key
+        var slashPath = format == PathFormat.Bracket ? BracketToSlash(path) : path;
+
+        // Use GetOrAdd - caches both found and not-found results
+        // Cache is cleared on attach/detach anyway
+        return _resolveCache.GetOrAdd(slashPath, _ => ResolveInternal(root, slashPath));
+    }
+
+    /// <summary>
+    /// Gets all paths to the subject (subject can have multiple parents).
+    /// </summary>
+    /// <param name="subject">The subject to get paths for</param>
+    /// <param name="format">Path format (default: Bracket)</param>
+    /// <param name="root">Root subject to stop at (default: uses RootManager.Root)</param>
+    public IReadOnlyList<string> GetPaths(
+        IInterceptorSubject subject,
+        PathFormat format = PathFormat.Bracket,
+        IInterceptorSubject? root = null)
+    {
+        root ??= _rootManager.Root;
+
+        // Get or compute bracket paths
+        var bracketPaths = _pathsCache.GetOrAdd(subject, s => ComputeBracketPaths(s, root));
+
+        // Return in requested format
+        if (format == PathFormat.Bracket)
         {
-            _lock.ExitWriteLock();
+            return bracketPaths;
+        }
+        else
+        {
+            // Convert to slash format
+            if (bracketPaths.Count == 0)
+                return Array.Empty<string>();
+
+            var slashPaths = new string[bracketPaths.Count];
+            for (int i = 0; i < bracketPaths.Count; i++)
+            {
+                slashPaths[i] = BracketToSlash(bracketPaths[i]);
+            }
+            return slashPaths;
         }
     }
 
     /// <summary>
-    /// Gets the first path to the given subject, or null if detached.
+    /// Gets the first path to the subject (convenience method).
     /// </summary>
-    public string? GetPath(IInterceptorSubject subject)
+    /// <param name="subject">The subject to get path for</param>
+    /// <param name="format">Path format (default: Bracket)</param>
+    /// <param name="root">Root subject to stop at (default: uses RootManager.Root)</param>
+    public string? GetPath(
+        IInterceptorSubject subject,
+        PathFormat format = PathFormat.Bracket,
+        IInterceptorSubject? root = null)
     {
-        var paths = GetPaths(subject);
+        var paths = GetPaths(subject, format, root);
         return paths.Count > 0 ? paths[0] : null;
     }
 
     /// <summary>
-    /// Resolves a subject from a URL-style path (e.g., "Children/Notes/Child").
+    /// Invalidates caches when subject is attached.
     /// </summary>
-    public IInterceptorSubject? ResolveSubject(IInterceptorSubject root, string path)
+    public void AttachSubject(SubjectLifecycleChange change)
     {
-        if (string.IsNullOrEmpty(path))
-            return root;
+        ClearCaches();
+    }
 
+    /// <summary>
+    /// Invalidates caches when subject is detached.
+    /// </summary>
+    public void DetachSubject(SubjectLifecycleChange change)
+    {
+        ClearCaches();
+    }
+
+    private void ClearCaches()
+    {
+        _pathsCache.Clear();
+        _resolveCache.Clear();
+    }
+
+    private IInterceptorSubject? ResolveInternal(IInterceptorSubject root, string slashPath)
+    {
         var registry = root.Context.TryGetService<ISubjectRegistry>();
         if (registry == null)
             return null;
 
-        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var segments = slashPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var current = root;
 
         for (int i = 0; i < segments.Length; i++)
@@ -84,41 +157,15 @@ public class SubjectPathResolver : ILifecycleHandler
             var registered = registry.TryGetRegisteredSubject(current);
             var property = registered?.TryGetProperty(segment);
 
-            object? value;
-            bool isSubjectReference;
+            if (property is not { HasChildSubjects: true })
+                return null;
 
-            // Try registry first, fall back to reflection
-            if (property != null)
-            {
-                if (!property.HasChildSubjects)
-                    return null;
-
-                value = property.GetValue();
-                isSubjectReference = property.IsSubjectReference;
-            }
-            else
-            {
-                // Fall back to reflection for unregistered subjects
-                var propInfo = current.GetType().GetProperty(segment);
-                if (propInfo == null)
-                    return null;
-
-                value = propInfo.GetValue(current);
-                if (value == null)
-                    return null;
-
-                isSubjectReference = value is IInterceptorSubject;
-                var isCollection = !isSubjectReference && (value is IDictionary || (value is IEnumerable && value is not string));
-
-                if (!isSubjectReference && !isCollection)
-                    return null;
-            }
-
+            var value = property.GetValue();
             if (value == null)
                 return null;
 
             // Direct subject reference
-            if (isSubjectReference)
+            if (property.IsSubjectReference)
             {
                 if (value is not IInterceptorSubject subject)
                     return null;
@@ -172,36 +219,7 @@ public class SubjectPathResolver : ILifecycleHandler
         return current;
     }
 
-    /// <summary>
-    /// Invalidates cache when subject is attached.
-    /// </summary>
-    public void AttachSubject(SubjectLifecycleChange change)
-    {
-        InvalidateCache(change.Subject);
-    }
-
-    /// <summary>
-    /// Invalidates cache when subject is detached.
-    /// </summary>
-    public void DetachSubject(SubjectLifecycleChange change)
-    {
-        InvalidateCache(change.Subject);
-    }
-
-    private void InvalidateCache(IInterceptorSubject subject)
-    {
-        _lock.EnterWriteLock();
-        try
-        {
-            subject.Data.Remove((null, CacheKey), out _);
-        }
-        finally
-        {
-            _lock.ExitWriteLock();
-        }
-    }
-
-    private IReadOnlyList<string> ComputePaths(IInterceptorSubject subject)
+    private IReadOnlyList<string> ComputeBracketPaths(IInterceptorSubject subject, IInterceptorSubject? root)
     {
         var registry = subject.Context.TryGetService<ISubjectRegistry>();
         if (registry == null)
@@ -214,11 +232,7 @@ public class SubjectPathResolver : ILifecycleHandler
         var parents = registered.Parents;
         if (parents.Length == 0)
         {
-            // No parents - this is a detached/orphan subject
-            // If you call GetPath on a subject that is not attached to anything,
-            // it returns empty (no paths available), NOT [""] (which would imply it's a root).
-            // The "" (empty string) path is only returned when explicitly asking for path
-            // of the root subject itself during ResolveSubject or when you know it's the intended root.
+            // No parents - this is a detached/orphan subject or root
             return Array.Empty<string>();
         }
 
@@ -228,10 +242,10 @@ public class SubjectPathResolver : ILifecycleHandler
         foreach (var parent in parents)
         {
             var pathSegments = new List<string>();
-            if (BuildPathRecursive(subject, parent, pathSegments, visited, registry))
+            if (BuildPathRecursive(subject, parent, pathSegments, visited, registry, root))
             {
                 pathSegments.Reverse();
-                paths.Add(string.Join("/", pathSegments));
+                paths.Add(string.Join(".", pathSegments));
             }
         }
 
@@ -243,7 +257,8 @@ public class SubjectPathResolver : ILifecycleHandler
         SubjectPropertyParent parent,
         List<string> pathSegments,
         HashSet<IInterceptorSubject> visited,
-        ISubjectRegistry registry)
+        ISubjectRegistry registry,
+        IInterceptorSubject? root)
     {
         // Detect cycles
         if (!visited.Add(currentSubject))
@@ -255,30 +270,34 @@ public class SubjectPathResolver : ILifecycleHandler
         {
             var parentSubject = parent.Property.Subject;
 
-            // Add property name
-            pathSegments.Add(parent.Property.Name);
-
-            // Add index/key if it's a collection/dictionary child
+            // Build bracket segment: PropertyName or PropertyName[key]
+            var segment = parent.Property.Name;
             if (parent.Index != null)
             {
-                var indexStr = Uri.EscapeDataString(parent.Index.ToString()!);
-                pathSegments.Add(indexStr);
+                segment += $"[{parent.Index}]";
+            }
+            pathSegments.Add(segment);
+
+            // Check if parent is the specified root
+            if (root != null && parentSubject == root)
+            {
+                return true;
             }
 
-            // Check if parent is root (has no parents)
+            // Check if parent is a natural root (has no parents)
             var parentRegistered = registry.TryGetRegisteredSubject(parentSubject);
             if (parentRegistered == null)
                 return false;
 
             if (parentRegistered.Parents.Length == 0)
             {
-                // Reached root
+                // Reached natural root
                 return true;
             }
 
             // Continue up the tree (take first parent path)
             var grandparent = parentRegistered.Parents[0];
-            return BuildPathRecursive(parentSubject, grandparent, pathSegments, visited, registry);
+            return BuildPathRecursive(parentSubject, grandparent, pathSegments, visited, registry, root);
         }
         finally
         {

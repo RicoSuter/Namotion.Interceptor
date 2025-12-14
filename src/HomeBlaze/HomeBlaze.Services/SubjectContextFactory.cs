@@ -1,4 +1,3 @@
-using HomeBlaze.Services.Navigation;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
@@ -27,7 +26,6 @@ public static class SubjectContextFactory
             .WithRegistry()
             .WithParents()
             .WithLifecycle()
-            .WithPathResolver()
             .WithDataAnnotationValidation()
             .WithHostedServices(services);
     }

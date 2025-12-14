@@ -27,4 +27,15 @@ Temperature: {{ mymotor.Temperature }}
 
 Speed: {{ mymotor.CurrentSpeed }}
 
+## Widget Reference
+
+Reference an existing subject's widget by path instead of embedding it inline:
+
+```subject(conveyorRef)
+{
+  "type": "HomeBlaze.Components.Widget",
+  "path": "Root.Children[demo].Children[conveyor.json]"
+}
+```
+
 For more information on creating pages with embedded subjects, see [Pages Documentation](../docs/Pages.md).

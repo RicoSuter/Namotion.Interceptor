@@ -82,7 +82,7 @@ var logs = new List<string>();
 
 var context = InterceptorSubjectContext
     .Create()
-    .WithService(() => new TestInterceptor("logger", logs), _ => false);
+    .WithService(_ => new TestInterceptor("logger", logs), _ => false);
 
 var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor));
 var motor = (IMotor)subject;

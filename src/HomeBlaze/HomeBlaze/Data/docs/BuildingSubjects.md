@@ -470,3 +470,73 @@ Only `[Configuration]` properties are persisted. The `type` field enables polymo
 | `ITitleProvider` | Display name in navigation |
 | `IIconProvider` | Icon in navigation/browser |
 | `IConfigurableSubject` | React to configuration changes |
+
+---
+
+## Advanced Patterns
+
+### Constructor Injection
+
+Subjects can inject services via constructor. The system uses `ActivatorUtilities.CreateInstance` to resolve dependencies from the DI container:
+
+```csharp
+[InterceptorSubject]
+public partial class Widget : IConfigurableSubject
+{
+    private readonly SubjectPathResolver _pathResolver;
+    private readonly RootManager _rootManager;
+
+    [Configuration]
+    public partial string Path { get; set; }
+
+    public Widget(SubjectPathResolver pathResolver, RootManager rootManager)
+    {
+        _pathResolver = pathResolver;
+        _rootManager = rootManager;
+        Path = string.Empty;
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
+}
+```
+
+### Available Injectable Services
+
+| Service | Purpose |
+|---------|---------|
+| `SubjectPathResolver` | Resolve subjects from paths |
+| `RootManager` | Access root subject |
+| `SubjectTypeRegistry` | Resolve types by name |
+| `ConfigurableSubjectSerializer` | Serialize/deserialize subjects |
+| `ILogger<T>` | Logging |
+
+### Referencing Other Subjects
+
+Use paths to reference subjects in the object graph. See [Configuration Guide - Path Syntax](Configuration.md#path-syntax) for full documentation.
+
+**Quick Reference:**
+
+| Prefix | Example |
+|--------|---------|
+| `Root.` | `Root.Children[demo].Children[motor.json]` |
+| `this.` | `this.Child.Property` |
+| `../` | `../Sibling.Property` |
+
+Use `SubjectPathResolver.ResolveFromRelativePath()` to resolve paths in code:
+
+```csharp
+[Derived]
+public IInterceptorSubject? ResolvedSubject => ResolveSubject();
+
+private IInterceptorSubject? ResolveSubject()
+{
+    if (string.IsNullOrEmpty(Path))
+        return null;
+
+    // ResolveFromRelativePath handles Root., this., ../, and relative paths
+    return _pathResolver.ResolveFromRelativePath(Path);
+}
+```

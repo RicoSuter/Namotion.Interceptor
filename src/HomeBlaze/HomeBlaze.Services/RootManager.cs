@@ -20,7 +20,7 @@ public class RootManager : BackgroundService, IConfigurationWriter
     /// <summary>
     /// The root subject loaded from configuration.
     /// </summary>
-    public IInterceptorSubject? Root { get; private set; }
+    public IInterceptorSubject? Root { get; internal set; }
 
     /// <summary>
     /// Whether the root has been loaded.
@@ -37,6 +37,9 @@ public class RootManager : BackgroundService, IConfigurationWriter
         _serializer = serializer;
         _context = context;
         _logger = logger;
+
+        // Register self with context for subjects to access
+        context.AddService(this);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

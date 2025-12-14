@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Services.Components;
+using HomeBlaze.Services.Navigation;
 using HomeBlaze.Host.Services.Display;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -13,14 +14,14 @@ namespace HomeBlaze.Host.Services.Navigation;
 public class NavigationItemResolver
 {
     private readonly SubjectComponentRegistry _componentRegistry;
-    private readonly RoutePathResolver _routePathResolver;
+    private readonly SubjectPathResolver _pathResolver;
 
     public NavigationItemResolver(
         SubjectComponentRegistry componentRegistry,
-        RoutePathResolver routePathResolver)
+        SubjectPathResolver pathResolver)
     {
         _componentRegistry = componentRegistry;
-        _routePathResolver = routePathResolver;
+        _pathResolver = pathResolver;
     }
 
     /// <summary>
@@ -45,7 +46,7 @@ public class NavigationItemResolver
                     continue;
 
                 var key = childInfo.Index?.ToString() ?? prop.Name;
-                var path = _routePathResolver.GetRoutePath(child);
+                var path = _pathResolver.GetPath(child, PathFormat.Slash);
                 if (path == null)
                     continue;
 

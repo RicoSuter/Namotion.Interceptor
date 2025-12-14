@@ -305,3 +305,54 @@ Reference: HomeBlaze (host project)
 1. Reference appropriate layer
 2. Add subjects and components
 3. Reference from host project
+
+---
+
+## Subject Component System
+
+Subjects can have associated UI components for different purposes. The system automatically discovers and renders the appropriate component based on subject type.
+
+### Component Types
+
+| Type | Purpose | Interface |
+|------|---------|-----------|
+| `Widget` | Inline visualization (e.g., in markdown) | `ISubjectComponent` |
+| `Edit` | Configuration editor dialog | `ISubjectEditComponent` |
+| `Page` | Full-page view | `ISubjectComponent` |
+
+### Registering Components
+
+Use `[SubjectComponent]` attribute on Razor components:
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Motor))]
+@implements ISubjectComponent
+
+<MudPaper>@MotorSubject?.CurrentSpeed RPM</MudPaper>
+
+@code {
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
+    private Motor? MotorSubject => Subject as Motor;
+}
+```
+
+### Rendering Components with `<SubjectComponent>`
+
+Use the `<SubjectComponent>` component to dynamically render any subject's registered component:
+
+```razor
+@* Render a subject's widget *@
+<SubjectComponent Subject="@motor" Type="SubjectComponentType.Widget" />
+
+@* Render a subject's page component *@
+<SubjectComponent Subject="@page" Type="SubjectComponentType.Page" />
+
+@* With component instance binding (for edit dialogs needing validation access) *@
+<SubjectComponent Subject="@subject" Type="SubjectComponentType.Edit"
+    @bind-ComponentInstance="_editComponent" />
+```
+
+The component automatically:
+- Looks up the registered component from `SubjectComponentRegistry`
+- Renders via `DynamicComponent`
+- Shows a warning alert if no component is registered
