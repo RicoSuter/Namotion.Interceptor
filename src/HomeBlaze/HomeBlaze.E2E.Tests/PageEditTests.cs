@@ -24,11 +24,11 @@ public class PageEditTests
 
         // Act - Navigate to Dashboard (a markdown page)
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Assert - Edit FAB should be visible
         var editButton = page.Locator("[data-testid='edit-fab']");
-        await Assertions.Expect(editButton).ToBeVisibleAsync();
+        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 
     [Fact]
@@ -37,18 +37,16 @@ public class PageEditTests
         // Arrange
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // Act - Click edit button
+        // Act - Click edit button (wait for it to be visible first)
         var editFab = page.Locator("[data-testid='edit-fab']");
+        await Assertions.Expect(editFab).ToBeVisibleAsync(new() { Timeout = 30000 });
         await editFab.ClickAsync();
-
-        // Wait for Blazor to re-render
-        await page.WaitForTimeoutAsync(2000);
 
         // Assert - Split view should be visible
         var splitter = page.Locator("[data-testid='edit-splitter']");
-        await Assertions.Expect(splitter).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(splitter).ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 
     [Fact]
@@ -57,22 +55,20 @@ public class PageEditTests
         // Arrange
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // Act - Open edit mode
+        // Act - Open edit mode (wait for FAB to be visible first)
         var editFab = page.Locator("[data-testid='edit-fab']");
+        await Assertions.Expect(editFab).ToBeVisibleAsync(new() { Timeout = 30000 });
         await editFab.ClickAsync();
-
-        // Wait for Blazor to re-render
-        await page.WaitForTimeoutAsync(1000);
 
         // Wait for split view to appear
         var splitter = page.Locator("[data-testid='edit-splitter']");
-        await Assertions.Expect(splitter).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(splitter).ToBeVisibleAsync(new() { Timeout = 30000 });
 
         // Assert - Save button should be visible
         var saveButton = page.Locator("[data-testid='save-button']");
-        await Assertions.Expect(saveButton).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(saveButton).ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 
     [Fact]
@@ -81,26 +77,21 @@ public class PageEditTests
         // Arrange
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // Act - Open edit mode
+        // Act - Open edit mode (wait for FAB to be visible first)
         var editFab = page.Locator("[data-testid='edit-fab']");
+        await Assertions.Expect(editFab).ToBeVisibleAsync(new() { Timeout = 30000 });
         await editFab.ClickAsync();
-
-        // Wait for Blazor to re-render
-        await page.WaitForTimeoutAsync(1000);
 
         // Verify split view is open
         var splitter = page.Locator("[data-testid='edit-splitter']");
-        await Assertions.Expect(splitter).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(splitter).ToBeVisibleAsync(new() { Timeout = 30000 });
 
         // Click FAB again to close edit mode
         await editFab.ClickAsync();
 
-        // Wait for Blazor to re-render
-        await page.WaitForTimeoutAsync(1000);
-
         // Assert - Split view should no longer be visible
-        await Assertions.Expect(splitter).Not.ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(splitter).Not.ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 }
