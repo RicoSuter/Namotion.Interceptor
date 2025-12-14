@@ -53,6 +53,12 @@ public class OpcUaServerConfiguration
     /// </summary>
     public TimeSpan? RetryTime { get; init; }
 
+    /// <summary>
+    /// Gets or sets the base address for the OPC UA server.
+    /// Default is "opc.tcp://localhost:4840".
+    /// </summary>
+    public string BaseAddress { get; init; } = "opc.tcp://localhost:4840";
+
     public virtual ApplicationInstance CreateApplicationInstance()
     {
         var application = new ApplicationInstance
@@ -113,7 +119,7 @@ public class OpcUaServerConfiguration
             ServerConfiguration = new ServerConfiguration
             {
                 // Base addresses kept minimal (tcp only). Add https if required later.
-                BaseAddresses = { "opc.tcp://localhost:4840/" },
+                BaseAddresses = { BaseAddress },
                 SecurityPolicies =
                 [
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.Sign, SecurityPolicyUri = SecurityPolicies.Basic256Sha256 },

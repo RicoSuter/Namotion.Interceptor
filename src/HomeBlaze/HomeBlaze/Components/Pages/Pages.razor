@@ -4,14 +4,16 @@
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Host.Components.Editors
 @using HomeBlaze.Services.Components
-@using HomeBlaze.Services.Navigation
 @using Namotion.Interceptor.Blazor
+@using Toolbelt.Blazor.HotKeys2
 
 @inherits HomeBlazorComponentBase
+@implements IAsyncDisposable
 
 @inject SubjectComponentRegistry ComponentRegistry
 @inject SubjectPathResolver PathResolver
 @inject DeveloperModeService DeveloperMode
+@inject HotKeys HotKeys
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
 
@@ -47,14 +49,19 @@
                     </div>
                 </StartContent>
                 <EndContent>
-                    <div style="width: 100%">
+                    <div style="width: 100%; height: calc(100vh - 200px); overflow-y: auto;">
                         <br />
                         <br />
                         <br />
-                        <SubjectEditPanel Subject="@_subject"
-                                          Height="calc(100vh - 200px)"
-                                          ShowCancelButton="false"
-                                          OnSaved="OnEditSaved"/>
+                        <SubjectEditPanel @ref="_editPanel" Subject="@_subject" />
+
+                        <div class="d-flex justify-end gap-2 mt-4">
+                            <span data-testid="save-button">
+                                <MudButton Color="Color.Primary"
+                                           OnClick="OnSaveClicked"
+                                           Disabled="@(!(_editPanel?.IsValid ?? true))">Save (Ctrl+S)</MudButton>
+                            </span>
+                        </div>
                     </div>
                 </EndContent>
                 </MudSplitter>
@@ -77,6 +84,17 @@
     private int _componentKey;
     private bool _isEditMode;
     private double _splitDimension = 50;
+    private SubjectEditPanel? _editPanel;
+    private HotKeysContext? _hotKeysContext;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _hotKeysContext = HotKeys.CreateContext()
+                .Add(ModCode.Ctrl, Code.S, OnCtrlS, exclude: Exclude.None);
+        }
+    }
 
     protected override void OnParametersSet()
     {
@@ -88,7 +106,7 @@
     {
         _subject = null;
         _title = "";
-        
+
         var path = Path;
         if (string.IsNullOrEmpty(path) || Root is null)
             return;
@@ -125,15 +143,35 @@
         _isEditMode = !_isEditMode;
     }
 
-    private void OnEditSaved()
+    private async Task OnCtrlS()
     {
-        // Increment key to refresh page component with saved changes
-        _componentKey++;
-        StateHasChanged();
+        if (_isEditMode && _editPanel?.IsValid == true)
+        {
+            await OnSaveClicked();
+        }
+    }
+
+    private async Task OnSaveClicked()
+    {
+        if (_editPanel != null)
+        {
+            await _editPanel.SaveAsync();
+            // Increment key to refresh page component with saved changes
+            _componentKey++;
+            StateHasChanged();
+        }
     }
 
     private void ResetSplitDimension()
     {
         _splitDimension = 50;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hotKeysContext != null)
+        {
+            await _hotKeysContext.DisposeAsync();
+        }
     }
 }

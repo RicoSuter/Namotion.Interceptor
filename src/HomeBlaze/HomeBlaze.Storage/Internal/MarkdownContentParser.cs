@@ -5,8 +5,6 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
-using HomeBlaze.Storage.Abstractions;
-using HomeBlaze.Services.Navigation;
 using HomeBlaze.Storage.Files;
 using Markdig;
 using Markdig.Renderers;

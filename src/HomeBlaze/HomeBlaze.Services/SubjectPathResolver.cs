@@ -4,7 +4,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
-namespace HomeBlaze.Services.Navigation;
+namespace HomeBlaze.Services;
 
 /// <summary>
 /// Thread-safe service that resolves subjects from paths and builds paths from subjects.
@@ -44,8 +44,9 @@ public class SubjectPathResolver : ILifecycleHandler
 
     /// <summary>
     /// Resolves a subject from a path.
+    /// Handles "Root" alone and "Root." prefix automatically.
     /// </summary>
-    /// <param name="path">The path to resolve.</param>
+    /// <param name="path">The path to resolve (e.g., "Root", "Root.Children[demo]", or "Children[demo]").</param>
     /// <param name="format">Path format (default: Bracket).</param>
     /// <param name="root">Root subject (default: uses RootManager.Root).</param>
     /// <returns>The resolved subject, or null if not found.</returns>
@@ -60,6 +61,14 @@ public class SubjectPathResolver : ILifecycleHandler
 
         if (string.IsNullOrEmpty(path))
             return root;
+
+        // Handle "Root" alone - return root directly
+        if (path == "Root")
+            return root;
+
+        // Strip "Root." prefix if present
+        if (path.StartsWith("Root."))
+            path = path[5..]; // "Root.".Length
 
         // Normalize to slash format for internal processing and cache key
         var slashPath = format == PathFormat.Bracket ? BracketToSlash(path) : path;

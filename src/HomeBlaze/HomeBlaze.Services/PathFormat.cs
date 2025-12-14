@@ -1,4 +1,4 @@
-﻿namespace HomeBlaze.Services.Navigation;
+﻿namespace HomeBlaze.Services;
 
 /// <summary>
 /// Path format for subject paths.

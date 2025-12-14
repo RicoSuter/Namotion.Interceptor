@@ -93,15 +93,7 @@ internal class CustomNodeManager : CustomNodeManager2
             var propertyName = property.ResolvePropertyName(_configuration.PathProvider);
             if (propertyName is not null)
             {
-                if (property.IsSubjectReference)
-                {
-                    var referencedSubject = property.Children.SingleOrDefault();
-                    if (referencedSubject.Subject is not null)
-                    {
-                        CreateReferenceObjectNode(propertyName, property, referencedSubject, parentNodeId, prefix);
-                    }
-                }
-                else if (property.IsSubjectCollection)
+                if (property.IsSubjectCollection)
                 {
                     CreateArrayObjectNode(propertyName, property, property.Children, parentNodeId, prefix);
                 }
@@ -109,7 +101,15 @@ internal class CustomNodeManager : CustomNodeManager2
                 {
                     CreateDictionaryObjectNode(propertyName, property, property.Children, parentNodeId, prefix);
                 }
-                else
+                else if (property.IsSubjectReference)
+                {
+                    var referencedSubject = property.Children.SingleOrDefault();
+                    if (referencedSubject.Subject is not null)
+                    {
+                        CreateReferenceObjectNode(propertyName, property, referencedSubject, parentNodeId, prefix);
+                    }
+                }
+                else 
                 {
                     CreateVariableNode(propertyName, property, parentNodeId, prefix);
                 }

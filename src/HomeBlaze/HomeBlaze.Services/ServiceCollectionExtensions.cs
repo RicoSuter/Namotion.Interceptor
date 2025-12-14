@@ -1,4 +1,3 @@
-using HomeBlaze.Services.Navigation;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HomeBlaze.Services;

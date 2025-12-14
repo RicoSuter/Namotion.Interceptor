@@ -1,7 +1,6 @@
-using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Services.Components;
-using HomeBlaze.Services.Navigation;
+using HomeBlaze.Services;
 using HomeBlaze.Host.Services.Display;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;

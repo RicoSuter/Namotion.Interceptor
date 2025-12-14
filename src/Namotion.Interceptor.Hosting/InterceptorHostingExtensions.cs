@@ -1,59 +1,166 @@
-﻿using Microsoft.Extensions.Hosting;
+using System.Collections.Immutable;
+using Microsoft.Extensions.Hosting;
 
 namespace Namotion.Interceptor.Hosting;
 
+/// <summary>
+/// Extension methods for attaching and detaching hosted services to/from interceptor subjects.
+/// </summary>
 public static class InterceptorHostingExtensions
 {
+    // TODO: Refactor to reuse code, lots of duplication here
+    
     private const string AttachedHostedServicesKey = "Namotion.Hosting.AttachedHostedServices";
 
-    public static void AttachHostedService(this IInterceptorSubject subject, IHostedService hostedService)
+    /// <summary>
+    /// Gets all hosted services currently attached to the subject.
+    /// Returns an immutable snapshot that is thread-safe and allocation-free to enumerate.
+    /// </summary>
+    /// <param name="subject">The subject to get attached hosted services from.</param>
+    /// <returns>An immutable array of attached hosted services, or an empty array if none are attached.</returns>
+    public static ImmutableArray<IHostedService> GetAttachedHostedServices(this IInterceptorSubject subject)
     {
-        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey), 
+        return subject.Data.GetOrAdd((null, AttachedHostedServicesKey), _ => null)
+            as ImmutableArray<IHostedService>? ?? [];
+    }
+
+    /// <summary>
+    /// Attaches a hosted service to the subject. The service will be started when the subject's
+    /// lifecycle handler processes the attachment. This method does not wait for the service to start.
+    /// </summary>
+    /// <param name="subject">The subject to attach the hosted service to.</param>
+    /// <param name="hostedService">The hosted service to attach.</param>
+    public static bool AttachHostedService(this IInterceptorSubject subject, IHostedService hostedService)
+    {
+        bool wasAdded = false;
+        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
             _ =>
             {
-                HandleAttachHostedService(subject, hostedService);
-                return new HashSet<IHostedService> { hostedService };
+                wasAdded = true;
+                return ImmutableArray.Create(hostedService);
             },
             (_, value) =>
             {
-                var hashSet = value as HashSet<IHostedService> ?? [];
-                if (hashSet.Add(hostedService))
+                var array = value as ImmutableArray<IHostedService>? ?? [];
+                if (!array.Contains(hostedService))
                 {
-                    HandleAttachHostedService(subject, hostedService);
+                    wasAdded = true;
+                    return array.Add(hostedService);
                 }
-                return hashSet;
+                return array;
             });
+
+        if (wasAdded)
+        {
+            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
+            hostedServiceHandler?.AttachHostedService(hostedService);
+        }
+
+        return wasAdded;
     }
 
-    public static void DetachHostedService(this IInterceptorSubject subject, IHostedService hostedService)
+    /// <summary>
+    /// Detaches a hosted service from the subject. The service will be stopped when the subject's
+    /// lifecycle handler processes the detachment. This method does not wait for the service to stop.
+    /// </summary>
+    /// <param name="subject">The subject to detach the hosted service from.</param>
+    /// <param name="hostedService">The hosted service to detach.</param>
+    public static bool DetachHostedService(this IInterceptorSubject subject, IHostedService hostedService)
     {
-        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey), 
-            _ => new HashSet<IHostedService>(),
+        bool wasRemoved = false;
+        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
+            _ => null,
             (_, value) =>
             {
-                var hashSet = value as HashSet<IHostedService>;
-                if (hashSet?.Remove(hostedService) == true)
+                var array = value as ImmutableArray<IHostedService>?;
+                if (array?.Contains(hostedService) == true)
                 {
-                    HandleDetachHostedService(subject, hostedService);
+                    wasRemoved = true;
+                    var newArray = array.Value.Remove(hostedService);
+                    return newArray.Length > 0 ? newArray : null;
                 }
-                return hashSet?.Count > 0 ? hashSet : null;
+                return array;
             });
+
+        if (wasRemoved)
+        {
+            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
+            hostedServiceHandler?.DetachHostedService(hostedService);
+        }
+
+        return wasRemoved;
     }
 
-    private static void HandleAttachHostedService(IInterceptorSubject subject, IHostedService hostedService)
+    /// <summary>
+    /// Attaches a hosted service to the subject and waits for it to start.
+    /// </summary>
+    public static async Task<bool> AttachHostedServiceAsync(
+        this IInterceptorSubject subject,
+        IHostedService hostedService,
+        CancellationToken cancellationToken)
     {
-        var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-        hostedServiceHandler?.AttachHostedService(hostedService);
+        bool wasAdded = false;
+        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
+            _ =>
+            {
+                wasAdded = true;
+                return ImmutableArray.Create(hostedService);
+            },
+            (_, value) =>
+            {
+                var array = value as ImmutableArray<IHostedService>? ?? [];
+                if (!array.Contains(hostedService))
+                {
+                    wasAdded = true;
+                    return array.Add(hostedService);
+                }
+                return array;
+            });
+
+        if (wasAdded)
+        {
+            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
+            if (hostedServiceHandler != null)
+            {
+                await hostedServiceHandler.AttachHostedServiceAsync(hostedService, cancellationToken);
+            }
+        }
+
+        return wasAdded;
     }
 
-    private static void HandleDetachHostedService(IInterceptorSubject subject, IHostedService hostedService)
+    /// <summary>
+    /// Detaches a hosted service from the subject and waits for it to stop.
+    /// </summary>
+    public static async Task<bool> DetachHostedServiceAsync(
+        this IInterceptorSubject subject,
+        IHostedService hostedService,
+        CancellationToken cancellationToken)
     {
-        var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-        hostedServiceHandler?.DetachHostedService(hostedService);
-    }
+        var wasRemoved = false;
+        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
+            _ => null,
+            (_, value) =>
+            {
+                var array = value as ImmutableArray<IHostedService>?;
+                if (array?.Contains(hostedService) == true)
+                {
+                    wasRemoved = true;
+                    var newArray = array.Value.Remove(hostedService);
+                    return newArray.Length > 0 ? newArray : null;
+                }
+                return array;
+            });
 
-    public static HashSet<IHostedService> GetAttachedHostedServices(this IInterceptorSubject subject)
-    {
-        return subject.Data.GetOrAdd((null, AttachedHostedServicesKey), _ => null) as HashSet<IHostedService> ?? [];
+        if (wasRemoved)
+        {
+            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
+            if (hostedServiceHandler != null)
+            {
+                await hostedServiceHandler.DetachHostedServiceAsync(hostedService, cancellationToken);
+            }
+        }
+
+        return wasRemoved;
     }
 }

@@ -12,6 +12,38 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class OpcUaSubjectExtensions
 {
+    /// <summary>
+    /// Creates an OPC UA server hosted service for the given subject.
+    /// The server exposes the subject's properties as OPC UA nodes.
+    /// </summary>
+    /// <param name="subject">The subject to expose via OPC UA.</param>
+    /// <param name="configuration">The OPC UA server configuration.</param>
+    /// <param name="logger">The logger instance.</param>
+    /// <returns>An IHostedService that runs the OPC UA server.</returns>
+    public static IHostedService CreateOpcUaServer(
+        this IInterceptorSubject subject,
+        OpcUaServerConfiguration configuration,
+        ILogger logger)
+    {
+        return new OpcUaSubjectServerBackgroundService(subject, configuration, logger);
+    }
+
+    /// <summary>
+    /// Creates an OPC UA client source hosted service for the given subject.
+    /// The client synchronizes the subject's properties with an OPC UA server.
+    /// </summary>
+    /// <param name="subject">The subject to synchronize with OPC UA.</param>
+    /// <param name="configuration">The OPC UA client configuration.</param>
+    /// <param name="logger">The logger instance.</param>
+    /// <returns>An IHostedService that runs the OPC UA client.</returns>
+    public static IHostedService CreateOpcUaClientSource(
+        this IInterceptorSubject subject,
+        OpcUaClientConfiguration configuration,
+        ILogger logger)
+    {
+        return new OpcUaSubjectClientSource(subject, configuration, logger);
+    }
+
     public static IServiceCollection AddOpcUaSubjectClient<TSubject>(
         this IServiceCollection serviceCollection,
         string serverUrl,

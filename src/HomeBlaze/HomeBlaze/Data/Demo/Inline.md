@@ -34,7 +34,7 @@ Reference an existing subject's widget by path instead of embedding it inline:
 ```subject(conveyorRef)
 {
   "type": "HomeBlaze.Components.Widget",
-  "path": "Root.Children[demo].Children[conveyor.json]"
+  "path": "Root.Children[Demo].Children[Conveyor.json]"
 }
 ```
 

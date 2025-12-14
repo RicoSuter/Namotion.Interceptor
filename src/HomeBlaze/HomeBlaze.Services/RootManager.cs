@@ -96,18 +96,4 @@ public class RootManager : BackgroundService, IConfigurationWriter
         _logger?.LogInformation("Root configuration saved successfully");
         return true;
     }
-
-    /// <summary>
-    /// Saves the root subject configuration to the configuration file.
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task SaveAsync(CancellationToken cancellationToken)
-    {
-        if (Root == null)
-        {
-            throw new InvalidOperationException("Cannot save: root is not loaded");
-        }
-
-        await WriteConfigurationAsync(Root, cancellationToken);
-    }
 }
