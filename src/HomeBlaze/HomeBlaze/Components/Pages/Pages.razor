@@ -87,13 +87,15 @@
     private SubjectEditPanel? _editPanel;
     private HotKeysContext? _hotKeysContext;
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
             _hotKeysContext = HotKeys.CreateContext()
                 .Add(ModCode.Ctrl, Code.S, OnCtrlS, exclude: Exclude.None);
         }
+
+        return Task.CompletedTask;
     }
 
     protected override void OnParametersSet()
