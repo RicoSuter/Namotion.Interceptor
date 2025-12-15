@@ -38,4 +38,4 @@ Reference an existing subject's widget by path instead of embedding it inline:
 }
 ```
 
-For more information on creating pages with embedded subjects, see [Pages Documentation](../docs/Pages.md).
+For more information on creating pages with embedded subjects, see [Pages Documentation](../Docs/Pages.md).

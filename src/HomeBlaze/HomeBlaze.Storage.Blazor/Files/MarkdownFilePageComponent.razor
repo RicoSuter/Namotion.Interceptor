@@ -12,13 +12,16 @@
 
 @implements ISubjectComponent
 
-<div class="markdown-content">
+<div class="markdown-content" style="position: relative;">
     @if (IsLoading)
     {
         <MudProgressCircular Indeterminate="true" />
     }
     else
     {
+        <div style="position: absolute; top: 0.5rem; right: 1rem; font-size: 0.8rem; color: rgba(128,128,128,0.7);">
+            @File?.LastModified.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+        </div>
         @foreach (var segment in GetRenderSegments())
         {
             @if (segment.Html != null)
