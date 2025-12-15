@@ -1,3 +1,4 @@
+@using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Services
 @using HomeBlaze.Host.Components.Dialogs
 @using HomeBlaze.Storage.Abstractions
@@ -74,12 +75,16 @@
                                 {
                                     var isQuery = method.Kind == SubjectMethodKind.Query;
                                     var defaultIcon = isQuery ? "Search" : "PlayArrow";
+                                    var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
+                                    var methodProperty = _registeredSubject?.TryGetProperty(methodName);
+                                    var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
+                                    var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
                                     <MudButton Variant="Variant.Filled"
                                                Color="@(isQuery ? Color.Info : Color.Primary)"
                                                Size="Size.Small"
                                                FullWidth="true"
                                                StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
-                                               Disabled="@(!method.IsSupported || _executingOperation == method)"
+                                               Disabled="@(!method.IsSupported || _executingOperation == method || !isEnabled)"
                                                OnClick="@(() => ExecuteMethodAsync(method))">
                                         @if (_executingOperation == method)
                                         {

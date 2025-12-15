@@ -8,6 +8,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Server;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Sources.Paths;
 
 namespace HomeBlaze.Servers.OpcUa;
@@ -92,6 +93,28 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     /// </summary>
     [State]
     public partial string? ErrorMessage { get; set; }
+
+    // Operations
+
+    /// <summary>
+    /// Starts the OPC UA server.
+    /// </summary>
+    [Operation(Title = "Start", Position = 1, Icon = "Start", RequiresConfirmation = true)]
+    public Task StartAsync() => StartServerAsync(CancellationToken.None);
+
+    [Derived]
+    [PropertyAttribute("Start", KnownAttributes.IsEnabled)]
+    public bool Start_IsEnabled => Status == ServerStatus.Stopped || Status == ServerStatus.Error;
+
+    /// <summary>
+    /// Stops the OPC UA server.
+    /// </summary>
+    [Operation(Title = "Stop", Position = 2, Icon = "Stop", RequiresConfirmation = true)]
+    public Task StopAsync() => StopServerAsync(CancellationToken.None);
+
+    [Derived]
+    [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
+    public bool Stop_IsEnabled => Status == ServerStatus.Running || Status == ServerStatus.Starting;
 
     // Interface implementations
 

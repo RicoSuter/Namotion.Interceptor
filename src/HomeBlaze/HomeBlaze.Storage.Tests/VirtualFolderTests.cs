@@ -33,12 +33,11 @@ public class VirtualFolderTests
     public void Constructor_InitializesProperties()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create();
         var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
 
         // Act
-        var folder = new VirtualFolder(context, storage, "test/folder/");
+        var folder = new VirtualFolder(storage, "test/folder/");
 
         // Assert
         Assert.Same(storage, folder.Storage);
@@ -51,12 +50,11 @@ public class VirtualFolderTests
     public void Title_ReturnsFolderName()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create();
         var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
 
         // Act
-        var folder = new VirtualFolder(context, storage, "parent/child/");
+        var folder = new VirtualFolder(storage, "parent/child/");
 
         // Assert
         Assert.Equal("child", folder.Title);
@@ -66,12 +64,11 @@ public class VirtualFolderTests
     public void Icon_ReturnsFolderIcon()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create();
         var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
 
         // Act
-        var folder = new VirtualFolder(context, storage, "test/");
+        var folder = new VirtualFolder(storage, "test/");
 
         // Assert
         Assert.Equal("Folder", folder.Icon);
