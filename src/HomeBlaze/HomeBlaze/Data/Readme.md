@@ -1,7 +1,7 @@
 ---
 title: Welcome to HomeBlaze
 navTitle: Home
-order: 0
+position: 0
 ---
 
 # HomeBlaze v2
@@ -139,7 +139,7 @@ Paths use familiar C# syntax:
 |------|-------------|
 | `Root` | The root storage container |
 | `Root.Children[motor.json]` | A subject named "motor.json" |
-| `Root.Children[demo].Children[conveyor.json]` | Conveyor motor in demo folder |
+| `Root.Children[Demo].Children[Conveyor.json]` | Conveyor motor in Demo folder |
 
 ---
 
@@ -178,11 +178,11 @@ The `demo/` folder contains a working example with 5 motors simulating a small f
 
 | Equipment | Current Speed | Target Speed | Temperature |
 |-----------|---------------|--------------|-------------|
-| Conveyor Belt | {{ Root.Children[demo].Children[conveyor.json].CurrentSpeed }} | {{ Root.Children[demo].Children[conveyor.json].TargetSpeed }} | {{ Root.Children[demo].Children[conveyor.json].Temperature }} |
-| Exhaust Fan | {{ Root.Children[demo].Children[exhaust-fan.json].CurrentSpeed }} | {{ Root.Children[demo].Children[exhaust-fan.json].TargetSpeed }} | {{ Root.Children[demo].Children[exhaust-fan.json].Temperature }} |
-| Cooling Fan | {{ Root.Children[demo].Children[cooling-fan.json].CurrentSpeed }} | {{ Root.Children[demo].Children[cooling-fan.json].TargetSpeed }} | {{ Root.Children[demo].Children[cooling-fan.json].Temperature }} |
-| Water Pump | {{ Root.Children[demo].Children[water-pump.json].CurrentSpeed }} | {{ Root.Children[demo].Children[water-pump.json].TargetSpeed }} | {{ Root.Children[demo].Children[water-pump.json].Temperature }} |
-| Compressor | {{ Root.Children[demo].Children[compressor.json].CurrentSpeed }} | {{ Root.Children[demo].Children[compressor.json].TargetSpeed }} | {{ Root.Children[demo].Children[compressor.json].Temperature }} |
+| Conveyor Belt | {{ Root.Children[Demo].Children[Conveyor.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[Conveyor.json].TargetSpeed }} | {{ Root.Children[Demo].Children[Conveyor.json].Temperature }} |
+| Exhaust Fan | {{ Root.Children[Demo].Children[ExhaustFan.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan.json].TargetSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan.json].Temperature }} |
+| Cooling Fan | {{ Root.Children[Demo].Children[CoolingFan.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[CoolingFan.json].TargetSpeed }} | {{ Root.Children[Demo].Children[CoolingFan.json].Temperature }} |
+| Water Pump | {{ Root.Children[Demo].Children[WaterPump.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[WaterPump.json].TargetSpeed }} | {{ Root.Children[Demo].Children[WaterPump.json].Temperature }} |
+| Compressor | {{ Root.Children[Demo].Children[Compressor.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[Compressor.json].TargetSpeed }} | {{ Root.Children[Demo].Children[Compressor.json].Temperature }} |
 
 👉 **[View Demo Setup Guide](demo/Setup.md)** for detailed exploration steps.
 
@@ -191,7 +191,7 @@ The `demo/` folder contains a working example with 5 motors simulating a small f
 1. 📂 **Explore the Demo** - Check out the [demo folder](demo/) with live motor simulations
 2. 📖 **Read Documentation** - Browse the [docs folder](docs/) for in-depth guides
 3. 🔧 **Edit a Motor** - Click any motor in the Browser and change its target speed
-4. 📝 **External Edits** - Try editing `demo/cooling-fan.json` externally and watch it update!
+4. 📝 **External Edits** - Try editing `demo/CoolingFan.json` externally and watch it update!
 
 ---
 

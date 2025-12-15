@@ -1,9 +1,9 @@
 using System.Text;
 using HomeBlaze.Services;
-using HomeBlaze.Services.Navigation;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Moq;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests;
 
@@ -299,9 +299,10 @@ public class MarkdownFileTests
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
         var mockServiceProvider = new Mock<IServiceProvider>();
         var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
-        var pathResolver = new SubjectPathResolver();
-        var rootManager = new RootManager(typeRegistry, serializer, null!);
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver, rootManager);
+        var context = InterceptorSubjectContext.Create();
+        var rootManager = new RootManager(typeRegistry, serializer, context);
+        var pathResolver = new SubjectPathResolver(rootManager, context);
+        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
         storage.StorageType = "inmemory";
         await storage.ConnectAsync(CancellationToken.None);
         return storage;
@@ -313,9 +314,10 @@ public class MarkdownFileTests
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
         var mockServiceProvider = new Mock<IServiceProvider>();
         var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
-        var pathResolver = new SubjectPathResolver();
-        var rootManager = new RootManager(typeRegistry, serializer, null!);
-        var parser = new MarkdownContentParser(serializer, pathResolver, rootManager);
+        var context = InterceptorSubjectContext.Create();
+        var rootManager = new RootManager(typeRegistry, serializer, context);
+        var pathResolver = new SubjectPathResolver(rootManager, context);
+        var parser = new MarkdownContentParser(serializer, pathResolver);
         return new MarkdownFile(storage, path, parser);
     }
 

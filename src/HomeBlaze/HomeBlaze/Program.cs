@@ -1,6 +1,8 @@
 using HomeBlaze.Components;
 using HomeBlaze.Host;
 using HomeBlaze.Samples;
+using HomeBlaze.Servers.OpcUa;
+using HomeBlaze.Servers.OpcUa.Blazor;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor.Files;
@@ -25,8 +27,10 @@ var typeProvider = app.Services.GetRequiredService<TypeProvider>();
 typeProvider.AddAssemblies(
     typeof(FluentStorageContainer).Assembly,      // HomeBlaze.Storage
     typeof(MarkdownFilePageComponent).Assembly,   // HomeBlaze.Storage.Blazor
-    // typeof(RenderExpressionComponent).Assembly,   // HomeBlaze.Widgets
+    typeof(Widget).Assembly,                      // HomeBlaze.Components
     typeof(Motor).Assembly,                       // HomeBlaze.Samples
+    typeof(OpcUaServer).Assembly,                 // HomeBlaze.Servers.OpcUa
+    typeof(OpcUaServerEditComponent).Assembly,    // HomeBlaze.Servers.OpcUa.Blazor
     typeof(App).Assembly);                        // HomeBlaze UI components
 
 // Configure the HTTP request pipeline.

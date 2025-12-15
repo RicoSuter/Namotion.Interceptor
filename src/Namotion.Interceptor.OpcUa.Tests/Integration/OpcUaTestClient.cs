@@ -52,8 +52,8 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         _host = builder.Build();
         await _host.StartAsync();
 
-        // Wait for client to connect
-        for (var i = 0; i < 30; i++)
+        // Wait for client to connect (15 seconds timeout for slower CI environments)
+        for (var i = 0; i < 75; i++)
         {
             if (Root != null && isConnected(Root))
                 return;

@@ -1,8 +1,8 @@
 @using System.Text
 @using System.Web
-@using HomeBlaze.Abstractions.Attributes
-@using HomeBlaze.Abstractions.Components
-@using HomeBlaze.Host.Services.Components
+@using HomeBlaze.Components
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Storage.Files
 @using HomeBlaze.Storage.Internal
 @using MudBlazor
@@ -11,8 +11,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
 
 @implements ISubjectComponent
-
-@inject SubjectComponentRegistry ComponentRegistry
 
 <div class="markdown-content">
     @if (IsLoading)
@@ -29,20 +27,7 @@
             }
             else if (segment.Widget != null)
             {
-                var widgetType = ComponentRegistry
-                    .GetComponent(segment.Widget.GetType(), SubjectComponentType.Widget)?.ComponentType;
-
-                if (widgetType != null)
-                {
-                    <DynamicComponent Type="widgetType"
-                        Parameters="@(new Dictionary<string, object?> { ["Subject"] = segment.Widget })" />
-                }
-                else
-                {
-                    <MudAlert Severity="Severity.Warning" Dense="true" Class="my-2">
-                        No widget registered for type: @segment.Widget.GetType().Name
-                    </MudAlert>
-                }
+                <SubjectComponent Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
             }
         }
     }

@@ -1,7 +1,6 @@
 using FluentStorage.Blobs;
-using HomeBlaze.Abstractions.Storage;
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Services;
-using HomeBlaze.Services.Navigation;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -23,12 +22,11 @@ internal sealed class FileSubjectFactory
         SubjectTypeRegistry typeRegistry,
         ConfigurableSubjectSerializer serializer,
         SubjectPathResolver pathResolver,
-        RootManager rootManager,
         ILogger? logger = null)
     {
         _typeRegistry = typeRegistry;
         _serializer = serializer;
-        _markdownParser = new MarkdownContentParser(serializer, pathResolver, rootManager);
+        _markdownParser = new MarkdownContentParser(serializer, pathResolver);
         _logger = logger;
     }
 

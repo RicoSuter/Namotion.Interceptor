@@ -1,0 +1,187 @@
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(OpcUaServer))]
+@implements ISubjectEditComponent
+
+<MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
+    <MudTabPanel Text="General">
+        <MudForm>
+            <MudTextField @bind-Value="_name"
+                          Label="Name"
+                          Required="true"
+                          RequiredError="Name is required"
+                          Immediate="true"
+                          OnKeyUp="OnFieldChanged" />
+
+            <MudTextField @bind-Value="_path"
+                          Label="Subject Path"
+                          Required="true"
+                          RequiredError="Path is required"
+                          HelperText="e.g., Root or Root.Children[demo]"
+                          Immediate="true"
+                          OnKeyUp="OnFieldChanged"
+                          Class="mt-4" />
+
+            <MudDivider Class="my-4" />
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Server Status</MudText>
+            <MudText>Status: <strong>@ServerSubject?.Status</strong></MudText>
+            @if (!string.IsNullOrEmpty(ServerSubject?.ErrorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-2">@ServerSubject.ErrorMessage</MudAlert>
+            }
+        </MudForm>
+    </MudTabPanel>
+
+    <MudTabPanel Text="Advanced">
+        <MudForm>
+            <MudTextField @bind-Value="_baseAddress"
+                          Label="Base Address"
+                          HelperText="e.g., opc.tcp://localhost:4840"
+                          Immediate="true"
+                          OnKeyUp="OnFieldChanged" />
+
+            <MudTextField @bind-Value="_applicationName"
+                          Label="Application Name"
+                          Immediate="true"
+                          OnKeyUp="OnFieldChanged"
+                          Class="mt-4" />
+
+            <MudTextField @bind-Value="_namespaceUri"
+                          Label="Namespace URI"
+                          Immediate="true"
+                          OnKeyUp="OnFieldChanged"
+                          Class="mt-4" />
+
+            <MudTextField @bind-Value="_rootName"
+                          Label="Root Folder Name"
+                          HelperText="OPC UA root folder name under Objects"
+                          Immediate="true"
+                          OnKeyUp="OnFieldChanged"
+                          Class="mt-4" />
+
+            <MudCheckBox @bind-Value="_cleanCertificateStore"
+                         Label="Clean Certificate Store on Start"
+                         Class="mt-4" />
+
+            <MudNumericField @bind-Value="_bufferTimeMs"
+                             Label="Buffer Time (ms)"
+                             HelperText="Change buffer time, leave empty for default"
+                             Min="0"
+                             Class="mt-4" />
+
+            <MudNumericField @bind-Value="_retryTimeSeconds"
+                             Label="Retry Time (seconds)"
+                             HelperText="Retry delay, leave empty for default"
+                             Min="0"
+                             Class="mt-4" />
+        </MudForm>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private OpcUaServer? ServerSubject => Subject as OpcUaServer;
+
+    private string _name = string.Empty;
+    private string _path = string.Empty;
+    private string? _baseAddress;
+    private string? _applicationName;
+    private string? _namespaceUri;
+    private string? _rootName;
+    private bool? _cleanCertificateStore;
+    private int? _bufferTimeMs;
+    private int? _retryTimeSeconds;
+
+    private string _originalName = string.Empty;
+    private string _originalPath = string.Empty;
+    private string? _originalBaseAddress;
+    private string? _originalApplicationName;
+    private string? _originalNamespaceUri;
+    private string? _originalRootName;
+    private bool? _originalCleanCertificateStore;
+    private int? _originalBufferTimeMs;
+    private int? _originalRetryTimeSeconds;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_path);
+
+    public bool IsDirty => _name != _originalName ||
+                           _path != _originalPath ||
+                           _baseAddress != _originalBaseAddress ||
+                           _applicationName != _originalApplicationName ||
+                           _namespaceUri != _originalNamespaceUri ||
+                           _rootName != _originalRootName ||
+                           _cleanCertificateStore != _originalCleanCertificateStore ||
+                           _bufferTimeMs != _originalBufferTimeMs ||
+                           _retryTimeSeconds != _originalRetryTimeSeconds;
+
+    public string PreferredDialogSize => "Medium";
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (ServerSubject != null)
+        {
+            _name = ServerSubject.Name ?? string.Empty;
+            _path = ServerSubject.Path ?? string.Empty;
+            _baseAddress = ServerSubject.BaseAddress;
+            _applicationName = ServerSubject.ApplicationName;
+            _namespaceUri = ServerSubject.NamespaceUri;
+            _rootName = ServerSubject.RootName;
+            _cleanCertificateStore = ServerSubject.CleanCertificateStore;
+            _bufferTimeMs = ServerSubject.BufferTimeMs;
+            _retryTimeSeconds = ServerSubject.RetryTimeSeconds;
+
+            _originalName = _name;
+            _originalPath = _path;
+            _originalBaseAddress = _baseAddress;
+            _originalApplicationName = _applicationName;
+            _originalNamespaceUri = _namespaceUri;
+            _originalRootName = _rootName;
+            _originalCleanCertificateStore = _cleanCertificateStore;
+            _originalBufferTimeMs = _bufferTimeMs;
+            _originalRetryTimeSeconds = _retryTimeSeconds;
+        }
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (ServerSubject != null && IsValid)
+        {
+            ServerSubject.Name = _name;
+            ServerSubject.Path = _path;
+            ServerSubject.BaseAddress = _baseAddress;
+            ServerSubject.ApplicationName = _applicationName;
+            ServerSubject.NamespaceUri = _namespaceUri;
+            ServerSubject.RootName = _rootName;
+            ServerSubject.CleanCertificateStore = _cleanCertificateStore;
+            ServerSubject.BufferTimeMs = _bufferTimeMs;
+            ServerSubject.RetryTimeSeconds = _retryTimeSeconds;
+
+            _originalName = _name;
+            _originalPath = _path;
+            _originalBaseAddress = _baseAddress;
+            _originalApplicationName = _applicationName;
+            _originalNamespaceUri = _namespaceUri;
+            _originalRootName = _rootName;
+            _originalCleanCertificateStore = _cleanCertificateStore;
+            _originalBufferTimeMs = _bufferTimeMs;
+            _originalRetryTimeSeconds = _retryTimeSeconds;
+
+            IsDirtyChanged?.Invoke(false);
+        }
+        return Task.CompletedTask;
+    }
+}
