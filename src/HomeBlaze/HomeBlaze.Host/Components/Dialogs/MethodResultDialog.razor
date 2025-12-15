@@ -49,4 +49,22 @@
     }
 
     private void Close() => MudDialog?.Close(DialogResult.Ok(true));
+
+    public static Task ShowAsync(IDialogService dialogService, string operationTitle, object? result)
+    {
+        var parameters = new DialogParameters<MethodResultDialog>
+        {
+            { x => x.OperationTitle, operationTitle },
+            { x => x.Result, result }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        return dialogService.ShowAsync<MethodResultDialog>("Result", parameters, options);
+    }
 }

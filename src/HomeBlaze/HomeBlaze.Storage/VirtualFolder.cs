@@ -1,17 +1,16 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Storage.Abstractions;
-using HomeBlaze.Storage.Abstractions.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage;
 
 /// <summary>
-/// Hierarchical grouping for virtual folders. Does NOT implement IStorageContainer.
+/// Hierarchical grouping for virtual folders. Implements IStorageContainer by delegation to parent.
 /// </summary>
 [InterceptorSubject]
-public partial class VirtualFolder : ITitleProvider, IIconProvider
+public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageContainer
 {
     /// <summary>
     /// Reference to the root storage.
@@ -33,10 +32,49 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider
 
     public string Icon => "Folder";
 
-    public VirtualFolder(IInterceptorSubjectContext context, IStorageContainer storage, string relativePath)
+    public StorageStatus Status => Storage.Status;
+
+    public VirtualFolder(IStorageContainer storage, string relativePath)
     {
         Storage = storage;
         RelativePath = relativePath;
         Children = new Dictionary<string, IInterceptorSubject>();
+    }
+
+    /// <summary>
+    /// Gets metadata about a blob. Path is relative to the storage root.
+    /// </summary>
+    public Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken cancellationToken)
+        => Storage.GetBlobMetadataAsync(path, cancellationToken);
+
+    /// <summary>
+    /// Reads a blob from storage. Path is relative to the storage root.
+    /// </summary>
+    public Task<Stream> ReadBlobAsync(string path, CancellationToken cancellationToken)
+        => Storage.ReadBlobAsync(path, cancellationToken);
+
+    /// <summary>
+    /// Writes a blob to storage. Path is relative to the storage root.
+    /// </summary>
+    public Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken)
+        => Storage.WriteBlobAsync(path, content, cancellationToken);
+
+    /// <summary>
+    /// Deletes a blob from storage and removes it from Children.
+    /// Path is relative to the storage root.
+    /// </summary>
+    public async Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
+    {
+        // Delete from storage
+        await Storage.DeleteBlobAsync(path, cancellationToken);
+
+        // Remove from Children directly (don't rely on FileWatcher)
+        var fileName = Path.GetFileName(path);
+        if (Children.ContainsKey(fileName))
+        {
+            var children = new Dictionary<string, IInterceptorSubject>(Children);
+            children.Remove(fileName);
+            Children = children;
+        }
     }
 }

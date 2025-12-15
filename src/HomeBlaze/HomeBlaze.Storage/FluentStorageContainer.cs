@@ -77,10 +77,10 @@ public partial class FluentStorageContainer :
     public FluentStorageContainer(
         SubjectTypeRegistry typeRegistry,
         ConfigurableSubjectSerializer serializer,
-        SubjectPathResolver pathResolver,
+        IServiceProvider serviceProvider,
         ILogger<FluentStorageContainer>? logger = null)
     {
-        _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, pathResolver, logger);
+        _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, serviceProvider, logger);
         _hierarchyManager = new StorageHierarchyManager(logger);
         _serializer = serializer;
         _logger = logger;
@@ -415,7 +415,7 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// IStorageContainer - Deletes a blob from storage.
+    /// IStorageContainer - Deletes a blob from storage and removes from Children.
     /// </summary>
     public async Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
     {
@@ -426,6 +426,13 @@ public partial class FluentStorageContainer :
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         await _client.DeleteAsync(path, cancellationToken: cancellationToken);
+
+        // Remove from hierarchy directly (don't rely on FileWatcher)
+        _pathRegistry.Unregister(path);
+        var children = new Dictionary<string, IInterceptorSubject>(Children);
+        _hierarchyManager.RemoveFromHierarchy(path, children);
+        Children = children;
+
         _logger?.LogDebug("Deleted blob from storage: {Path}", path);
     }
 

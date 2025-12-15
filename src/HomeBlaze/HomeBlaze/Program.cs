@@ -13,6 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Add all HomeBlaze services (cascades: Host -> Host.Services -> Services)
 // This registers the singleton IInterceptorSubjectContext with HostedServiceHandler
 builder.Services.AddHomeBlazeHost();
+builder.Services.AddHomeBlazeStorage();
 builder.Services.AddHotKeys2();
 
 // Add services to the container.

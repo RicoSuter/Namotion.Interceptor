@@ -45,4 +45,22 @@
     private bool _showDetails;
 
     private void Close() => MudDialog?.Close(DialogResult.Ok(true));
+
+    public static Task ShowAsync(IDialogService dialogService, string operationTitle, Exception exception)
+    {
+        var parameters = new DialogParameters<MethodErrorDialog>
+        {
+            { x => x.OperationTitle, operationTitle },
+            { x => x.Exception, exception }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        return dialogService.ShowAsync<MethodErrorDialog>("Error", parameters, options);
+    }
 }

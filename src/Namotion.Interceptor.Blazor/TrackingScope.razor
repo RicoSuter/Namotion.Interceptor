@@ -177,8 +177,12 @@ else
         
         if (firstRender)
         {
-            // Trigger rerender because properties are not collected on first render (???)
-            // TODO: Find out why
+            // WORKAROUND: Properties accessed during first render are not collected.
+            // This may be due to Blazor's render tree initialization timing - the recording
+            // scope may not be fully active when BuildRenderTree first executes.
+            // Triggering a second render ensures properties are properly tracked.
+            // TODO: Investigate root cause - check if recording scope starts too late
+            // or if Blazor's first render has special behavior that bypasses interception.
             Task.Run(async () => await Task.Yield()).ContinueWith(_ => InvokeAsync(StateHasChanged));
         }
     }

@@ -1,3 +1,4 @@
+using HomeBlaze.Components.Abstractions.Pages;
 using YamlDotNet.Serialization;
 
 namespace HomeBlaze.Storage.Internal;
@@ -30,8 +31,8 @@ public class MarkdownFrontmatter
     public string? Icon { get; set; }
 
     [YamlMember(Alias = "location")]
-    public string? Location { get; set; }
+    public NavigationLocation? Location { get; set; }
 
     [YamlMember(Alias = "alignment")]
-    public string? Alignment { get; set; }
+    public AppBarAlignment? Alignment { get; set; }
 }

@@ -37,16 +37,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public int? PagePosition => Frontmatter?.Position;
 
     [Derived]
-    public NavigationLocation PageLocation =>
-        Enum.TryParse<NavigationLocation>(Frontmatter?.Location, true, out var location)
-            ? location
-            : NavigationLocation.NavBar; // TODO: Cant we serialize to NavigationLocation directly to avoid reparse here?
+    public NavigationLocation PageLocation => Frontmatter?.Location ?? NavigationLocation.NavBar;
 
     [Derived]
-    public AppBarAlignment AppBarAlignment =>
-        Enum.TryParse<AppBarAlignment>(Frontmatter?.Alignment, true, out var alignment)
-            ? alignment
-            : AppBarAlignment.Left;
+    public AppBarAlignment AppBarAlignment => Frontmatter?.Alignment ?? AppBarAlignment.Left;
 
     public partial MarkdownFrontmatter? Frontmatter { get; private set; }
 

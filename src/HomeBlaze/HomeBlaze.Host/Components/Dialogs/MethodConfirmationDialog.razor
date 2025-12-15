@@ -25,4 +25,20 @@
     private void Cancel() => MudDialog?.Cancel();
 
     private void Execute() => MudDialog?.Close(DialogResult.Ok(true));
+
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, SubjectMethodInfo operation)
+    {
+        var parameters = new DialogParameters<MethodConfirmationDialog>
+        {
+            { x => x.Operation, operation }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.ExtraSmall,
+            FullWidth = true
+        };
+
+        return dialogService.ShowAsync<MethodConfirmationDialog>($"Confirm: {operation.Title}", parameters, options);
+    }
 }
