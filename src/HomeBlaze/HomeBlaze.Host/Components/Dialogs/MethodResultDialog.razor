@@ -1,0 +1,52 @@
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body1" Class="mb-2">
+            <strong>@OperationTitle</strong> completed successfully.
+        </MudText>
+
+        @if (Result != null)
+        {
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Result:</MudText>
+            <MudPaper Class="pa-3" Elevation="0" Style="background-color: var(--mud-palette-background-grey);">
+                <MudText Typo="Typo.body2" Style="font-family: monospace; white-space: pre-wrap; word-break: break-all;">
+                    @FormatResult(Result)
+                </MudText>
+            </MudPaper>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Close">OK</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter] public string? OperationTitle { get; set; }
+
+    [Parameter] public object? Result { get; set; }
+
+    private string FormatResult(object? result)
+    {
+        if (result == null)
+            return "null";
+
+        if (result is string stringResult)
+            return stringResult;
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Serialize(result, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+        }
+        catch
+        {
+            return result.ToString() ?? "null";
+        }
+    }
+
+    private void Close() => MudDialog?.Close(DialogResult.Ok(true));
+}

@@ -18,9 +18,9 @@ public class StateAttribute : Attribute
     public StateUnit Unit { get; set; } = StateUnit.Default;
 
     /// <summary>
-    /// Gets or sets the display order of the property.
+    /// Gets or sets the display position of the property.
     /// </summary>
-    public int Order { get; set; }
+    public int Position { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether the value is cumulative (accumulated over time).
