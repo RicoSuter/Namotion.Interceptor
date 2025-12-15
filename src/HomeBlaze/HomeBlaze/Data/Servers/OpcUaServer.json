@@ -1,0 +1,12 @@
+{
+  "type": "HomeBlaze.Servers.OpcUa.OpcUaServer",
+  "name": "My OPC UA Server",
+  "path": "Root",
+  "applicationName": null,
+  "namespaceUri": null,
+  "rootName": "Root",
+  "baseAddress": null,
+  "cleanCertificateStore": null,
+  "bufferTimeMs": null,
+  "retryTimeSeconds": null
+}

@@ -30,7 +30,7 @@ public class PlaywrightFixture : IAsyncLifetime
         _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
         {
             #if DEBUG
-            Headless = false,
+            Headless = true,
             #else
             Headless = true,
             #endif

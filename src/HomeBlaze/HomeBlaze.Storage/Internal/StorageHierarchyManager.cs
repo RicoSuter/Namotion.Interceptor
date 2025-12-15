@@ -1,4 +1,4 @@
-using HomeBlaze.Abstractions.Storage;
+using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 

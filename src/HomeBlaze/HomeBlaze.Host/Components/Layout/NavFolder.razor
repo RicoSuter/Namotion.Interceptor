@@ -1,4 +1,4 @@
-@using HomeBlaze.Abstractions.Pages
+@using HomeBlaze.Components.Abstractions.Pages
 
 <MudNavGroup Title="@Item.Title" Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(Item.Icon)" Expanded="_expanded" ExpandedChanged="OnExpandedChanged">
     @if (_expanded && _children != null)

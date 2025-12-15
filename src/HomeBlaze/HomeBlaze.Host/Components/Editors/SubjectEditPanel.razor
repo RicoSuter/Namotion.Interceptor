@@ -1,86 +1,50 @@
-@using HomeBlaze.Abstractions.Storage
-@using Toolbelt.Blazor.HotKeys2
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Components
+@using HomeBlaze.Storage.Abstractions
+@using Namotion.Interceptor.Tracking.Parent
 
 @implements IAsyncDisposable
 
-@inject SubjectComponentRegistry ComponentRegistry
 @inject RootManager RootManager
+@inject SubjectComponentRegistry ComponentRegistry
 @inject ISnackbar Snackbar
 @inject DeveloperModeService DeveloperMode
-@inject HotKeys HotKeys
 
-<div style="@(Height != null ? $"height: {Height}; overflow-y: auto;" : "")">
-    <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
-        @if (Subject != null)
-        {
-            @if (_editComponentType != null)
-            {
-                <DynamicComponent Type="_editComponentType"
-                                  @ref="_dynamicComponentRef"
-                                  Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })"/>
-            }
-            else
-            {
-                <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" />
-            }
-        }
-    </TrackingScope>
-</div>
-
-<div class="d-flex justify-end gap-2 mt-4">
-    @if (ShowCancelButton)
+<TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
+    @if (Subject != null)
     {
-        <MudButton OnClick="@(() => OnCancel.InvokeAsync())">Cancel</MudButton>
+        @if (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit))
+        {
+            <SubjectComponent Subject="@Subject"
+                              Type="SubjectComponentType.Edit"
+                              @bind-ComponentInstance="_subjectComponent" />
+        }
+        else
+        {
+            <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" />
+        }
     }
-
-    <span data-testid="save-button">
-        <MudButton Color="Color.Primary"
-                   OnClick="SaveAsync"
-                   Disabled="@(!IsValid)">Save (Ctrl+S)</MudButton>
-    </span>
-</div>
+</TrackingScope>
 
 @code {
     [Parameter] public IInterceptorSubject? Subject { get; set; }
 
-    [Parameter] public bool ShowCancelButton { get; set; }
-
-    [Parameter] public string? Height { get; set; }
-
-    [Parameter] public EventCallback OnCancel { get; set; }
-
-    [Parameter] public EventCallback OnSaved { get; set; }
-
-    private Type? _editComponentType;
-    private DynamicComponent? _dynamicComponentRef;
+    private ISubjectComponent? _subjectComponent;
     private ISubjectEditComponent? _editComponent;
     private ConfigurationPropertiesEditor? _propertiesEditor;
-    private HotKeysContext? _hotKeysContext;
 
-    private bool IsValid => _editComponent?.IsValid ?? _propertiesEditor?.IsValid ?? true;
-
-    protected override void OnInitialized()
-    {
-        _hotKeysContext = HotKeys.CreateContext()
-            .Add(ModCode.Ctrl, Code.S, OnCtrlS, exclude: Exclude.None);
-    }
+    public bool IsValid => _editComponent?.IsValid ?? _propertiesEditor?.IsValid ?? true;
 
     protected override void OnParametersSet()
     {
         base.OnParametersSet();
-        _editComponent = null;
 
-        if (Subject != null)
+        // Unsubscribe from previous edit component
+        if (_editComponent != null)
         {
-            var registration = ComponentRegistry.GetComponent(
-                Subject.GetType(),
-                SubjectComponentType.Edit);
-
-            _editComponentType = registration?.ComponentType;
-        }
-        else
-        {
-            _editComponentType = null;
+            _editComponent.IsValidChanged -= OnIsValidChanged;
+            _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
+            _editComponent = null;
         }
     }
 
@@ -88,8 +52,15 @@
     {
         base.OnAfterRender(firstRender);
 
-        if (_dynamicComponentRef?.Instance is ISubjectEditComponent editComponent && _editComponent == null)
+        // Subscribe to new edit component if available
+        if (_subjectComponent is ISubjectEditComponent editComponent && _editComponent != editComponent)
         {
+            if (_editComponent != null)
+            {
+                _editComponent.IsValidChanged -= OnIsValidChanged;
+                _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
+            }
+
             _editComponent = editComponent;
             _editComponent.IsValidChanged += OnIsValidChanged;
             _editComponent.IsDirtyChanged += OnIsDirtyChanged;
@@ -100,14 +71,6 @@
     private void OnIsValidChanged(bool isValid) => InvokeAsync(StateHasChanged);
 
     private void OnIsDirtyChanged(bool isDirty) => InvokeAsync(StateHasChanged);
-
-    private async Task OnCtrlS()
-    {
-        if (IsValid)
-        {
-            await SaveAsync();
-        }
-    }
 
     public async Task SaveAsync()
     {
@@ -135,11 +98,10 @@
                 _propertiesEditor?.ApplyChanges();
             }
 
-            if (subject is IConfigurationWriter configurationWriter)
+            if (subject is IConfigurableSubject)
             {
-                var success = await configurationWriter.WriteConfigurationAsync(subject, CancellationToken.None);
-                if (success)
-                     await RootManager.WriteConfigurationAsync(subject, CancellationToken.None);
+                var configurationWriter = FindNearestConfigurationWriter(subject);
+                await configurationWriter.WriteConfigurationAsync(subject, CancellationToken.None);
             }
 
             if (subject is IStorageFile storageFile)
@@ -147,8 +109,12 @@
                 await storageFile.OnFileChangedAsync(CancellationToken.None);
             }
 
-            Snackbar.Add("File saved.", Severity.Info);
-            await OnSaved.InvokeAsync();
+            if (subject is IConfigurableSubject configurableSubject)
+            {
+                await configurableSubject.ApplyConfigurationAsync(CancellationToken.None);
+            }
+
+            Snackbar.Add("Configuration saved.", Severity.Info);
         }
         catch (Exception ex)
         {
@@ -164,9 +130,44 @@
             _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
         }
 
-        if (_hotKeysContext != null)
+        await Task.CompletedTask;
+    }
+
+    private IConfigurationWriter FindNearestConfigurationWriter(IInterceptorSubject subject)
+    {
+        // Check if the subject itself is a writer
+        if (subject is IConfigurationWriter writer)
         {
-            await _hotKeysContext.DisposeAsync();
+            return writer;
         }
+
+        // Traverse parents to find the nearest IConfigurationWriter
+        var visited = new HashSet<IInterceptorSubject>();
+        var current = subject;
+
+        while (current != null)
+        {
+            if (!visited.Add(current))
+            {
+                break; // Avoid infinite loops
+            }
+
+            var parents = current.GetParents();
+            if (parents.Count == 0)
+            {
+                break;
+            }
+
+            // Get the first parent's subject
+            var parentSubject = parents.First().Property.Subject;
+            if (parentSubject is IConfigurationWriter parentWriter)
+            {
+                return parentWriter;
+            }
+
+            current = parentSubject;
+        }
+
+        return RootManager;
     }
 }

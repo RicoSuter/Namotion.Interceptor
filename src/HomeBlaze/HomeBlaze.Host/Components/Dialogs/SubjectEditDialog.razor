@@ -2,12 +2,13 @@
 
 <MudDialog>
     <DialogContent>
-        <SubjectEditPanel Subject="@Subject"
-                          ShowCancelButton="false"
-                          OnSaved="OnSaved" />
+        <SubjectEditPanel @ref="_editPanel" Subject="@Subject" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   OnClick="OnSaveClicked"
+                   Disabled="@(!(_editPanel?.IsValid ?? true))">Save</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -16,6 +17,8 @@
 
     [Parameter] public IInterceptorSubject? Subject { get; set; }
 
+    private SubjectEditPanel? _editPanel;
+
     public MaxWidth GetPreferredDialogSize()
     {
         return MaxWidth.Small;
@@ -23,8 +26,12 @@
 
     private void Cancel() => MudDialog?.Cancel();
 
-    private void OnSaved()
+    private async Task OnSaveClicked()
     {
-        MudDialog?.Close(DialogResult.Ok(true));
+        if (_editPanel != null)
+        {
+            await _editPanel.SaveAsync();
+            MudDialog?.Close(DialogResult.Ok(true));
+        }
     }
 }

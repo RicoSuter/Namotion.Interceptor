@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Abstractions.Storage;
+using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Abstractions.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 

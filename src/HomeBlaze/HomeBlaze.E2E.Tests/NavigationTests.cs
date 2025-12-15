@@ -24,9 +24,10 @@ public class NavigationTests
 
         // Act
         await page.GotoAsync(_fixture.ServerAddress);
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // Wait for Blazor to initialize and redirect
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        // Wait for redirect to happen
+        await page.WaitForURLAsync(url => url.Contains("/pages/"), new() { Timeout = 30000 });
 
         // Assert - should redirect to a page (Dashboard is the default)
         Assert.Contains("/pages/", page.Url);
@@ -40,11 +41,11 @@ public class NavigationTests
 
         // Act
         await page.GotoAsync(_fixture.ServerAddress);
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Assert - AppBar should have navigation links
         var toolbar = page.GetByRole(AriaRole.Toolbar);
-        await Assertions.Expect(toolbar).ToBeVisibleAsync();
+        await Assertions.Expect(toolbar).ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 
     [Fact]
@@ -55,11 +56,11 @@ public class NavigationTests
 
         // Act
         await page.GotoAsync(_fixture.ServerAddress);
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Assert - Nav menu should have Browser link
         var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
-        await Assertions.Expect(browserLink).ToBeVisibleAsync();
+        await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 
     [Fact]
@@ -68,12 +69,15 @@ public class NavigationTests
         // Arrange
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync(_fixture.ServerAddress);
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // Act
+        // Act - wait for browser link to be visible before clicking
         var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
+        await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = 30000 });
         await browserLink.ClickAsync();
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        // Wait for navigation to complete
+        await page.WaitForURLAsync(url => url.Contains("/browser"), new() { Timeout = 30000 });
 
         // Assert
         Assert.Contains("/browser", page.Url);
