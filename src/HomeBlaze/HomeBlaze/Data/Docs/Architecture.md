@@ -81,6 +81,9 @@ Storage.Abs.   Components.Abs.   Abstractions
 **Contents**:
 - `IIconProvider` - Subject icon metadata
 - `ITitleProvider` - Subject title metadata
+- `KnownAttributes` - Well-known attribute names (e.g., `IsEnabled`)
+- `[Operation]` - Mark methods as executable operations
+- `[Query]` - Mark methods as read-only queries
 
 **Dependencies**: `Namotion.Interceptor`
 
@@ -142,6 +145,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Property Utilities**: Filter by `[Configuration]`/`[State]`
 - **Method Discovery**: Find `[Operation]` and `[Query]` methods on subjects
 - **Method Invocation**: Execute operations with parameter conversion
+- **Method Properties**: `MethodPropertyInitializer` creates virtual properties for methods, enabling `[PropertyAttribute]` on operations (e.g., `IsEnabled`)
 
 **Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Storage.Abstractions`, `HomeBlaze.Components.Abstractions`
 

@@ -267,6 +267,43 @@ public partial class Motor
 - Use `[Configuration]` for values that should persist and can be edited at any time
 - Use `[Operation]` for one-time actions that execute immediately
 
+### Conditional Operations (IsEnabled)
+
+Use `[PropertyAttribute]` with `KnownAttributes.IsEnabled` to conditionally enable/disable operation buttons based on runtime state:
+
+```csharp
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
+
+[InterceptorSubject]
+public partial class Server
+{
+    [State]
+    public partial ServerStatus Status { get; set; }
+
+    [Operation(Title = "Start", Position = 1)]
+    public Task StartAsync() { /* ... */ }
+
+    [Derived]
+    [PropertyAttribute("Start", KnownAttributes.IsEnabled)]
+    public bool Start_IsEnabled => Status == ServerStatus.Stopped || Status == ServerStatus.Error;
+
+    [Operation(Title = "Stop", Position = 2)]
+    public Task StopAsync() { /* ... */ }
+
+    [Derived]
+    [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
+    public bool Stop_IsEnabled => Status == ServerStatus.Running;
+}
+```
+
+**Key points:**
+- The property attribute name (e.g., `"Start"`) must match the method name without the `Async` suffix
+- The `IsEnabled` property should be `[Derived]` so it automatically updates when dependencies change
+- When `IsEnabled` is `false`, the button is disabled in the UI
+- This uses the `TrackingScope` for automatic re-rendering when the derived property changes
+
 ## Background Services
 
 Extend `BackgroundService` for subjects that need to run continuously:
