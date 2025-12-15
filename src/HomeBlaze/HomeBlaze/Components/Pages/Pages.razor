@@ -41,29 +41,29 @@
                              Height="calc(100vh - 80px)"
                              EnableSlide="true"
                              OnDoubleClicked="ResetSplitDimension">
-                <StartContent>
-                    <div style="width: 100%">
-                        <SubjectComponent @key="_componentKey"
-                                          Subject="@_subject"
-                                          Type="SubjectComponentType.Page" />
-                    </div>
-                </StartContent>
-                <EndContent>
-                    <div style="width: 100%; height: calc(100vh - 200px); overflow-y: auto;">
-                        <br />
-                        <br />
-                        <br />
-                        <SubjectEditPanel @ref="_editPanel" Subject="@_subject" />
+                    <StartContent>
+                        <div style="width: 100%">
+                            <SubjectComponent @key="_componentKey"
+                                              Subject="@_subject"
+                                              Type="SubjectComponentType.Page"/>
+                        </div>
+                    </StartContent>
+                    <EndContent>
+                        <div style="width: 100%; height: calc(100vh - 200px); overflow-y: auto;">
+                            <br/>
+                            <br/>
+                            <br/>
+                            <SubjectEditPanel @ref="_editPanel" Subject="@_subject"/>
 
-                        <div class="d-flex justify-end gap-2 mt-4">
+                            <div class="d-flex justify-end gap-2 mt-4">
                             <span data-testid="save-button">
                                 <MudButton Color="Color.Primary"
                                            OnClick="OnSaveClicked"
                                            Disabled="@(!(_editPanel?.IsValid ?? true))">Save (Ctrl+S)</MudButton>
                             </span>
+                            </div>
                         </div>
-                    </div>
-                </EndContent>
+                    </EndContent>
                 </MudSplitter>
             </div>
         }
@@ -71,7 +71,7 @@
         {
             <SubjectComponent @key="_componentKey"
                               Subject="@_subject"
-                              Type="SubjectComponentType.Page" />
+                              Type="SubjectComponentType.Page"/>
         }
     }
 </TrackingScope>
@@ -176,4 +176,5 @@
             await _hotKeysContext.DisposeAsync();
         }
     }
+
 }
