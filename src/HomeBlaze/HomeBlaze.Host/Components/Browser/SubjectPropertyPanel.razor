@@ -1,5 +1,6 @@
 @using HomeBlaze.Abstractions.Services
 @using HomeBlaze.Host.Components.Dialogs
+@using HomeBlaze.Storage.Abstractions
 
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
@@ -36,12 +37,15 @@
                            Size="Size.Small"
                            Class="mr-2" />
         }
-        <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
-                       Icon="@Icons.Material.Filled.Delete"
-                       Variant="Variant.Filled"
-                       Color="Color.Error"
-                       Size="Size.Small"
-                       Class="mr-2" />
+        @if (Subject is IStorageFile)
+        {
+            <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
+                           Icon="@Icons.Material.Filled.Delete"
+                           Variant="Variant.Filled"
+                           Color="Color.Error"
+                           Size="Size.Small"
+                           Class="mr-2" />
+        }
     </MudListSubheader>
 
     <div style="max-height: calc(100vh - 300px); overflow-y: auto; overflow-x: hidden;">
@@ -234,7 +238,7 @@
         if (subject == null)
             return Icons.Material.Filled.QuestionMark;
 
-        return subject.GetIcon();
+        return SubjectIconExtensions.ResolveMudBlazorIcon(subject.GetIcon());
     }
 
     private string GetObjectPath()
@@ -375,13 +379,8 @@
         await DialogService.ShowAsync<SubjectEditDialog>($"Edit {title}", parameters, options);
     }
 
-    private IReadOnlyList<SubjectMethodInfo> GetMethods()
-    {
-        if (_registeredSubject == null)
-            return [];
-
-        return _registeredSubject.GetAllMethods();
-    }
+    private IReadOnlyList<SubjectMethodInfo> GetMethods() =>
+        _registeredSubject?.GetAllMethods() ?? [];
 
     private async Task ExecuteMethodAsync(SubjectMethodInfo operation)
     {
@@ -395,23 +394,7 @@
             // If operation has parameters, show parameter dialog
             if (operation.Parameters.Length > 0)
             {
-                var parameterDialogParameters = new DialogParameters<MethodParameterDialog>
-                {
-                    { x => x.Operation, operation }
-                };
-
-                var parameterDialogOptions = new DialogOptions
-                {
-                    MaxWidth = MaxWidth.Small,
-                    FullWidth = true,
-                    CloseButton = true
-                };
-
-                var parameterDialog = await DialogService.ShowAsync<MethodParameterDialog>(
-                    operation.Title,
-                    parameterDialogParameters,
-                    parameterDialogOptions);
-
+                var parameterDialog = await MethodParameterDialog.ShowAsync(DialogService, operation);
                 var parameterResult = await parameterDialog.Result;
                 if (parameterResult == null || parameterResult.Canceled)
                     return;
@@ -421,22 +404,7 @@
             // If operation requires confirmation, show confirmation dialog
             else if (operation.RequiresConfirmation)
             {
-                var confirmDialogParameters = new DialogParameters<MethodConfirmationDialog>
-                {
-                    { x => x.Operation, operation }
-                };
-
-                var confirmDialogOptions = new DialogOptions
-                {
-                    MaxWidth = MaxWidth.ExtraSmall,
-                    FullWidth = true
-                };
-
-                var confirmDialog = await DialogService.ShowAsync<MethodConfirmationDialog>(
-                    $"Confirm: {operation.Title}",
-                    confirmDialogParameters,
-                    confirmDialogOptions);
-
+                var confirmDialog = await MethodConfirmationDialog.ShowAsync(DialogService, operation);
                 var confirmResult = await confirmDialog.Result;
                 if (confirmResult == null || confirmResult.Canceled)
                     return;
@@ -459,67 +427,18 @@
             {
                 if (result.Result != null)
                 {
-                    var resultDialogParameters = new DialogParameters<MethodResultDialog>
-                    {
-                        { x => x.OperationTitle, operation.Title },
-                        { x => x.Result, result.Result }
-                    };
-
-                    var resultDialogOptions = new DialogOptions
-                    {
-                        MaxWidth = MaxWidth.Small,
-                        FullWidth = true,
-                        CloseButton = true
-                    };
-
-                    await DialogService.ShowAsync<MethodResultDialog>(
-                        "Result",
-                        resultDialogParameters,
-                        resultDialogOptions);
+                    await MethodResultDialog.ShowAsync(DialogService, operation.Title, result.Result);
                 }
             }
             else
             {
-                var errorDialogParameters = new DialogParameters<MethodErrorDialog>
-                {
-                    { x => x.OperationTitle, operation.Title },
-                    { x => x.Exception, result.Exception }
-                };
-
-                var errorDialogOptions = new DialogOptions
-                {
-                    MaxWidth = MaxWidth.Small,
-                    FullWidth = true,
-                    CloseButton = true
-                };
-
-                await DialogService.ShowAsync<MethodErrorDialog>(
-                    "Error",
-                    errorDialogParameters,
-                    errorDialogOptions);
+                await MethodErrorDialog.ShowAsync(DialogService, operation.Title, result.Exception!);
             }
         }
         catch (Exception ex)
         {
             _executingOperation = null;
-
-            var errorDialogParameters = new DialogParameters<MethodErrorDialog>
-            {
-                { x => x.OperationTitle, operation.Title },
-                { x => x.Exception, ex }
-            };
-
-            var errorDialogOptions = new DialogOptions
-            {
-                MaxWidth = MaxWidth.Small,
-                FullWidth = true,
-                CloseButton = true
-            };
-
-            await DialogService.ShowAsync<MethodErrorDialog>(
-                "Error",
-                errorDialogParameters,
-                errorDialogOptions);
+            await MethodErrorDialog.ShowAsync(DialogService, operation.Title, ex);
         }
     }
 }

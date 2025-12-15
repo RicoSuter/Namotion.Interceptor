@@ -1,21 +1,32 @@
 using HomeBlaze.Services;
-using Moq;
+using HomeBlaze.Storage.Internal;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests;
 
 public class VirtualFolderTests
 {
-    private static (TypeProvider typeProvider, SubjectTypeRegistry typeRegistry, ConfigurableSubjectSerializer serializer, SubjectPathResolver pathResolver, RootManager rootManager) CreateDependencies()
+    private static (TypeProvider typeProvider, SubjectTypeRegistry typeRegistry, ConfigurableSubjectSerializer serializer, IServiceProvider serviceProvider, RootManager rootManager) CreateDependencies()
     {
         var typeProvider = new TypeProvider();
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
-        var mockServiceProvider = new Mock<IServiceProvider>();
-        var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
         var context = InterceptorSubjectContext.Create();
-        var rootManager = new RootManager(typeRegistry, serializer, context);
-        var pathResolver = new SubjectPathResolver(rootManager, context);
-        return (typeProvider, typeRegistry, serializer, pathResolver, rootManager);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(typeProvider);
+        services.AddSingleton(typeRegistry);
+        services.AddSingleton<IInterceptorSubjectContext>(context);
+        services.AddSingleton<ConfigurableSubjectSerializer>();
+        services.AddSingleton<RootManager>();
+        services.AddSingleton<SubjectPathResolver>();
+        services.AddSingleton<MarkdownContentParser>();
+
+        var serviceProvider = services.BuildServiceProvider();
+        var serializer = serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>();
+        var rootManager = serviceProvider.GetRequiredService<RootManager>();
+
+        return (typeProvider, typeRegistry, serializer, serviceProvider, rootManager);
     }
 
     [Fact]
@@ -23,8 +34,8 @@ public class VirtualFolderTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
+        var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
 
         // Act
         var folder = new VirtualFolder(context, storage, "test/folder/");
@@ -41,8 +52,8 @@ public class VirtualFolderTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
+        var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
 
         // Act
         var folder = new VirtualFolder(context, storage, "parent/child/");
@@ -56,8 +67,8 @@ public class VirtualFolderTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var (_, typeRegistry, serializer, pathResolver, _) = CreateDependencies();
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
+        var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
 
         // Act
         var folder = new VirtualFolder(context, storage, "test/");

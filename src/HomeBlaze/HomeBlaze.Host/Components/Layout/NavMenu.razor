@@ -1,8 +1,10 @@
 @using HomeBlaze.Components.Abstractions.Pages
+@using Microsoft.Extensions.Logging
 
 @inject RootManager RootManager
 @inject NavigationItemResolver NavigationResolver
 @inject NavigationManager NavigationManager
+@inject ILogger<NavMenu> Logger
 
 @implements IDisposable
 
@@ -70,8 +72,7 @@
         }
         catch (Exception ex)
         {
-            // TODO: Show warning box in UI
-            Console.WriteLine($"Error getting navigation items: {ex}");
+            Logger.LogWarning(ex, "Error getting navigation items");
             return Enumerable.Empty<NavigationItem>();
         }
     }

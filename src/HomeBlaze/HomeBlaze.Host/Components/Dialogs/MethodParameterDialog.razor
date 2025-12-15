@@ -191,4 +191,21 @@
 
         MudDialog?.Close(DialogResult.Ok(parameters));
     }
+
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, SubjectMethodInfo operation)
+    {
+        var parameters = new DialogParameters<MethodParameterDialog>
+        {
+            { x => x.Operation, operation }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        return dialogService.ShowAsync<MethodParameterDialog>(operation.Title, parameters, options);
+    }
 }

@@ -43,7 +43,7 @@ internal sealed class StorageHierarchyManager
             if (!current.TryGetValue(folderName, out var existing))
             {
                 var relativePath = string.Join("/", segments.Take(i + 1)) + "/";
-                var folder = new VirtualFolder(context, storage, relativePath);
+                var folder = new VirtualFolder(storage, relativePath);
                 current[folderName] = folder;
                 foldersTraversed.Add(folder);
                 current = folder.Children;

@@ -2,7 +2,7 @@ using System.Text;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
-using Moq;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests;
@@ -169,7 +169,7 @@ public class MarkdownFileTests
     [Fact]
     public async Task MarkdownFile_Title_WithFrontmatter_ReturnsFrontmatterTitle()
     {
-        var storage = await CreateInMemoryStorageAsync();
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         var content = """
             ---
             title: Frontmatter Title
@@ -178,7 +178,7 @@ public class MarkdownFileTests
             """;
         await WriteFileAsync(storage, "test.md", content);
 
-        var markdown = CreateMarkdownFile(storage, "test.md");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Frontmatter Title", markdown.Title);
@@ -187,10 +187,10 @@ public class MarkdownFileTests
     [Fact]
     public async Task MarkdownFile_Title_WithoutFrontmatter_ReturnsFormattedFilename()
     {
-        var storage = await CreateInMemoryStorageAsync();
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         await WriteFileAsync(storage, "my-test-document.md", "# Content");
 
-        var markdown = CreateMarkdownFile(storage, "my-test-document.md");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "my-test-document.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("My Test Document", markdown.Title);
@@ -199,7 +199,7 @@ public class MarkdownFileTests
     [Fact]
     public async Task MarkdownFile_NavigationTitle_WithFrontmatter_ReturnsNavTitle()
     {
-        var storage = await CreateInMemoryStorageAsync();
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         var content = """
             ---
             title: Regular Title
@@ -209,7 +209,7 @@ public class MarkdownFileTests
             """;
         await WriteFileAsync(storage, "test.md", content);
 
-        var markdown = CreateMarkdownFile(storage, "test.md");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Nav Title", markdown.NavigationTitle);
@@ -218,7 +218,7 @@ public class MarkdownFileTests
     [Fact]
     public async Task MarkdownFile_PagePosition_WithFrontmatter_ReturnsPosition()
     {
-        var storage = await CreateInMemoryStorageAsync();
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         var content = """
             ---
             title: Test
@@ -228,7 +228,7 @@ public class MarkdownFileTests
             """;
         await WriteFileAsync(storage, "test.md", content);
 
-        var markdown = CreateMarkdownFile(storage, "test.md");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal(3, markdown.PagePosition);
@@ -237,7 +237,7 @@ public class MarkdownFileTests
     [Fact]
     public async Task MarkdownFile_Icon_WithFrontmatter_ReturnsCustomIcon()
     {
-        var storage = await CreateInMemoryStorageAsync();
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         var content = """
             ---
             title: Test
@@ -247,7 +247,7 @@ public class MarkdownFileTests
             """;
         await WriteFileAsync(storage, "test.md", content);
 
-        var markdown = CreateMarkdownFile(storage, "test.md");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("mdi-custom", markdown.Icon);
@@ -256,10 +256,10 @@ public class MarkdownFileTests
     [Fact]
     public async Task MarkdownFile_Icon_WithoutFrontmatter_ReturnsDefaultIcon()
     {
-        var storage = await CreateInMemoryStorageAsync();
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         await WriteFileAsync(storage, "test.md", "# Content");
 
-        var markdown = CreateMarkdownFile(storage, "test.md");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Article", markdown.Icon);
@@ -268,7 +268,7 @@ public class MarkdownFileTests
     [Fact]
     public async Task MarkdownFile_Refresh_UpdatesFrontmatter()
     {
-        var storage = await CreateInMemoryStorageAsync();
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         var content1 = """
             ---
             title: First Title
@@ -277,7 +277,7 @@ public class MarkdownFileTests
             """;
         await WriteFileAsync(storage, "test.md", content1);
 
-        var markdown = CreateMarkdownFile(storage, "test.md");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
         Assert.Equal("First Title", markdown.Title);
 
@@ -293,31 +293,33 @@ public class MarkdownFileTests
         Assert.Equal("Second Title", markdown.Title);
     }
 
-    private static async Task<FluentStorageContainer> CreateInMemoryStorageAsync()
+    private static async Task<(FluentStorageContainer storage, IServiceProvider serviceProvider)> CreateInMemoryStorageAsync()
     {
         var typeProvider = new TypeProvider();
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
-        var mockServiceProvider = new Mock<IServiceProvider>();
-        var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
         var context = InterceptorSubjectContext.Create();
-        var rootManager = new RootManager(typeRegistry, serializer, context);
-        var pathResolver = new SubjectPathResolver(rootManager, context);
-        var storage = new FluentStorageContainer(typeRegistry, serializer, pathResolver);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(typeProvider);
+        services.AddSingleton(typeRegistry);
+        services.AddSingleton<IInterceptorSubjectContext>(context);
+        services.AddSingleton<ConfigurableSubjectSerializer>();
+        services.AddSingleton<RootManager>();
+        services.AddSingleton<SubjectPathResolver>();
+        services.AddSingleton<MarkdownContentParser>();
+
+        var serviceProvider = services.BuildServiceProvider();
+        var serializer = serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>();
+
+        var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
         storage.StorageType = "inmemory";
         await storage.ConnectAsync(CancellationToken.None);
-        return storage;
+        return (storage, serviceProvider);
     }
 
-    private static MarkdownFile CreateMarkdownFile(FluentStorageContainer storage, string path)
+    private static MarkdownFile CreateMarkdownFile(IServiceProvider serviceProvider, FluentStorageContainer storage, string path)
     {
-        var typeProvider = new TypeProvider();
-        var typeRegistry = new SubjectTypeRegistry(typeProvider);
-        var mockServiceProvider = new Mock<IServiceProvider>();
-        var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
-        var context = InterceptorSubjectContext.Create();
-        var rootManager = new RootManager(typeRegistry, serializer, context);
-        var pathResolver = new SubjectPathResolver(rootManager, context);
-        var parser = new MarkdownContentParser(serializer, pathResolver);
+        var parser = serviceProvider.GetRequiredService<MarkdownContentParser>();
         return new MarkdownFile(storage, path, parser);
     }
 

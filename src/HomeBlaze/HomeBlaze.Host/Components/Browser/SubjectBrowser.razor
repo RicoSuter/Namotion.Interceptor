@@ -1,7 +1,10 @@
 @inherits HomeBlazorComponentBase
 
+@using HomeBlaze.Storage.Abstractions
+
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
+@inject IDialogService DialogService
 
 @implements IDisposable
 @implements IAsyncDisposable
@@ -247,9 +250,44 @@
 
     private async Task OnPaneDelete(SubjectPane pane)
     {
-        // TODO: Implement delete functionality
-        // This would remove the subject from its parent collection
-        await Task.CompletedTask;
+        if (pane.Subject is not IStorageFile storageFile)
+            return;
+
+        // Show confirmation dialog
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete File",
+            $"Are you sure you want to delete '{storageFile.Name}'?",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed != true)
+            return;
+
+        try
+        {
+            // Delete the file from storage
+            await storageFile.Storage.DeleteBlobAsync(storageFile.FullPath, CancellationToken.None);
+
+            // Close this pane and any after it
+            var paneIndex = _panes.IndexOf(pane);
+            if (paneIndex > 0)
+            {
+                while (_panes.Count > paneIndex)
+                {
+                    _panes.RemoveAt(_panes.Count - 1);
+                }
+
+                UpdateUrl();
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            await DialogService.ShowMessageBox(
+                "Delete Failed",
+                $"Failed to delete file: {ex.Message}",
+                yesText: "OK");
+        }
     }
 
     private void UpdateUrl()
