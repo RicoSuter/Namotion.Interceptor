@@ -5,9 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <!-- Skip E2E tests in CI by default: dotnet test -p:SkipE2ETests=false to run -->
-    <SkipE2ETests Condition="'$(SkipE2ETests)' == ''">true</SkipE2ETests>
-    <IsTestProject Condition="'$(SkipE2ETests)' == 'true'">false</IsTestProject>
   </PropertyGroup>
 
   <ItemGroup>
