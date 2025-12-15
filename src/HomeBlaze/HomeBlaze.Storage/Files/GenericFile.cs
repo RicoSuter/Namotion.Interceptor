@@ -25,19 +25,19 @@ public partial class GenericFile : IStorageFile, ITitleProvider, IIconProvider
     /// <summary>
     /// File extension including the dot.
     /// </summary>
-    [State(Order = 1)]
+    [State(Position = 1)]
     public partial string Extension { get; set; }
 
     /// <summary>
     /// File size in bytes.
     /// </summary>
-    [State("Size", Order = 2)]
+    [State("Size", Position = 2)]
     public partial long FileSize { get; set; }
 
     /// <summary>
     /// Last modification time (UTC).
     /// </summary>
-    [State("Modified", Order = 3)]
+    [State("Modified", Position = 3)]
     public partial DateTime LastModified { get; set; }
 
     public GenericFile(IStorageContainer storage, string fullPath)

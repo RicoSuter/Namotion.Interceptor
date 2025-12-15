@@ -1,0 +1,48 @@
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body1" Class="mb-2">
+            <strong>@OperationTitle</strong> failed with an error.
+        </MudText>
+
+        @if (Exception != null)
+        {
+            <MudDivider Class="my-3" />
+
+            <MudText Typo="Typo.subtitle2" Class="mb-1">Error:</MudText>
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">
+                @Exception.Message
+            </MudAlert>
+
+            @if (_showDetails)
+            {
+                <MudText Typo="Typo.subtitle2" Class="mb-1">Details:</MudText>
+                <MudPaper Class="pa-3" Elevation="0" Style="background-color: var(--mud-palette-background-grey); max-height: 300px; overflow: auto;">
+                    <MudText Typo="Typo.body2" Style="font-family: monospace; white-space: pre-wrap; word-break: break-all; font-size: 0.75rem;">
+                        @Exception.ToString()
+                    </MudText>
+                </MudPaper>
+            }
+            else
+            {
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _showDetails = true)">
+                    Show Details
+                </MudButton>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Close">OK</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter] public string? OperationTitle { get; set; }
+
+    [Parameter] public Exception? Exception { get; set; }
+
+    private bool _showDetails;
+
+    private void Close() => MudDialog?.Close(DialogResult.Ok(true));
+}

@@ -108,11 +108,11 @@ public static partial class SubjectRegistryExtensions
     }
 
     /// <summary>
-    /// Gets the display order for a property (from StateAttribute).
+    /// Gets the display position for a property (from StateAttribute).
     /// </summary>
-    public static int GetDisplayOrder(this RegisteredSubjectProperty property)
+    public static int GetDisplayPosition(this RegisteredSubjectProperty property)
     {
-        return property.GetStateAttribute()?.Order ?? int.MaxValue;
+        return property.GetStateAttribute()?.Position ?? int.MaxValue;
     }
 
     /// <summary>

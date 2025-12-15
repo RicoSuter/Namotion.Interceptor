@@ -140,6 +140,8 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Path Resolution**: Subject references to object graph paths
 - **Component Registry**: Discover and resolve UI components
 - **Property Utilities**: Filter by `[Configuration]`/`[State]`
+- **Method Discovery**: Find `[Operation]` and `[Query]` methods on subjects
+- **Method Invocation**: Execute operations with parameter conversion
 
 **Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Storage.Abstractions`, `HomeBlaze.Components.Abstractions`
 
@@ -214,7 +216,8 @@ Storage.Abs.   Components.Abs.   Abstractions
 
 **Features**:
 - **Subject Browser**: Tree view navigation
-- **Property Panel**: Edit subject properties
+- **Property Panel**: Edit subject properties and execute operations
+- **Operations UI**: Execute `[Operation]` methods with parameter dialogs
 - **Navigation Menu**: Sidebar from subject tree
 - **Layout**: Standard application layout
 
@@ -294,7 +297,8 @@ Reference: HomeBlaze (host project)
 1. Create class with `[InterceptorSubject]`
 2. Add `[Configuration]` for persistence
 3. Add `[State]` for display
-4. Implement `ITitleProvider`/`IIconProvider`
+4. Add `[Operation]` for executable actions
+5. Implement `ITitleProvider`/`IIconProvider`
 
 ### Adding Custom Components
 1. Create Razor component implementing `ISubjectComponent`

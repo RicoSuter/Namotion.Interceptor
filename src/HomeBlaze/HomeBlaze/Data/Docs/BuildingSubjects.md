@@ -64,13 +64,13 @@ Properties marked with `[State]` are displayed in the UI property panel:
 [InterceptorSubject]
 public partial class Motor
 {
-    [State("Speed", Order = 1)]
+    [State("Speed", Position = 1)]
     public partial int CurrentSpeed { get; set; }
 
-    [State(Order = 2, Unit = StateUnit.DegreeCelsius)]
+    [State(Position = 2, Unit = StateUnit.DegreeCelsius)]
     public partial double Temperature { get; set; }
 
-    [State(Order = 3)]
+    [State(Position = 3)]
     public partial MotorStatus Status { get; set; }
 }
 ```
@@ -80,7 +80,7 @@ public partial class Motor
 | Option | Description | Example |
 |--------|-------------|---------|
 | `Name` | Display name (overrides property name) | `"Speed"` |
-| `Order` | Sort order in property panel | `1`, `2`, `3` |
+| `Position` | Sort position in property panel | `1`, `2`, `3` |
 | `Unit` | Formatting unit | `StateUnit.DegreeCelsius` |
 | `IsCumulative` | Value accumulates over time | `true` for energy meters |
 | `IsSignal` | Precise value (not a sensor reading) | `true` for commands |
@@ -193,6 +193,80 @@ public partial class Motor : IConfigurableSubject
 }
 ```
 
+## Operations
+
+Methods marked with `[Operation]` become executable from the UI. Operations are actions with side effects like starting a process, resetting state, or sending commands.
+
+```csharp
+using HomeBlaze.Abstractions.Attributes;
+
+[InterceptorSubject]
+public partial class Motor
+{
+    [State]
+    public partial int TargetSpeed { get; set; }
+
+    [State]
+    public partial MotorStatus Status { get; set; }
+
+    [Operation(Title = "Set Speed", Description = "Sets the motor target speed", Position = 1)]
+    public void SetTargetSpeed(int speed)
+    {
+        TargetSpeed = Math.Clamp(speed, 0, 3000);
+    }
+
+    [Operation(Title = "Emergency Stop", RequiresConfirmation = true, Position = 2)]
+    public void EmergencyStop()
+    {
+        TargetSpeed = 0;
+        Status = MotorStatus.Stopped;
+    }
+
+    [Query(Title = "Get Diagnostics", Position = 3)]
+    public MotorDiagnostics GetDiagnostics()
+    {
+        return new MotorDiagnostics { Status = Status, Speed = TargetSpeed };
+    }
+
+    [Operation(Title = "Run Test", Position = 4)]
+    public async Task RunTestAsync(int speed, int durationSeconds)
+    {
+        var previousSpeed = TargetSpeed;
+        TargetSpeed = speed;
+        await Task.Delay(TimeSpan.FromSeconds(durationSeconds));
+        TargetSpeed = previousSpeed;
+    }
+}
+```
+
+**Operation attribute options:**
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `Title` | Display name (defaults to method name without "Async") | `"Set Speed"` |
+| `Description` | Help text shown in dialogs | `"Sets the motor target speed"` |
+| `Icon` | MudBlazor icon name | `"Speed"`, `"Stop"` |
+| `Position` | Sort position in operations list | `1`, `2`, `3` |
+| `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
+
+**Key points:**
+- Operations appear in the subject's property panel under "Operations"
+- Parameters with supported types (primitives, enums, nullable variants) show input dialogs
+- Async methods are supported and show a progress indicator
+- Methods returning values display the result in a dialog
+- Errors are caught and shown in an error dialog
+- Operations with `RequiresConfirmation = true` show a confirmation dialog first
+
+**Supported parameter types:**
+- `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`
+- `DateTime`, `DateTimeOffset`, `Guid`, `TimeSpan`
+- Nullable versions of the above (`int?`, `bool?`, etc.)
+- Enums and nullable enums
+
+**Operations vs Configuration:**
+- Use `[Configuration]` for values that should persist and can be edited at any time
+- Use `[Operation]` for one-time actions that execute immediately
+
 ## Background Services
 
 Extend `BackgroundService` for subjects that need to run continuously:
@@ -273,7 +347,7 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
     public partial string Name { get; set; }
 
     [Configuration]
-    [State("Target", Order = 2)]
+    [State("Target", Position = 2)]
     public partial int TargetSpeed { get; set; }
 
     [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
@@ -287,23 +361,23 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
 
     // Live state (not persisted)
 
-    [State("Speed", Order = 3)]
+    [State("Speed", Position = 3)]
     public partial int CurrentSpeed { get; set; }
 
-    [State(Order = 4, Unit = StateUnit.DegreeCelsius)]
+    [State(Position = 4, Unit = StateUnit.DegreeCelsius)]
     public partial double Temperature { get; set; }
 
-    [State(Order = 1)]
+    [State(Position = 1)]
     public partial MotorStatus Status { get; set; }
 
     // Derived properties
 
     [Derived]
-    [State("Delta", Order = 5)]
+    [State("Delta", Position = 5)]
     public int SpeedDelta => TargetSpeed - CurrentSpeed;
 
     [Derived]
-    [State("At Target", Order = 6)]
+    [State("At Target", Position = 6)]
     public bool IsAtTargetSpeed => Math.Abs(SpeedDelta) < 50;
 
     // Display interfaces
@@ -464,6 +538,7 @@ Only `[Configuration]` properties are persisted. The `type` field enables polymo
 | `[State]` | Live values for display | No | Yes |
 | `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
+| `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
 
 | Interface | Purpose |
 |-----------|---------|

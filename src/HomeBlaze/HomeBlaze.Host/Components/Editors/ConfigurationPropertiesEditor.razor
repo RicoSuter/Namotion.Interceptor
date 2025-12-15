@@ -61,7 +61,7 @@ else
         {
             _configurationProperties = Subject.GetConfigurationProperties()
                 .Where(p => p.HasSetter)
-                .OrderBy(p => p.GetDisplayOrder())
+                .OrderBy(p => p.GetDisplayPosition())
                 .ToList();
 
             _editValues = _configurationProperties.ToDictionary(

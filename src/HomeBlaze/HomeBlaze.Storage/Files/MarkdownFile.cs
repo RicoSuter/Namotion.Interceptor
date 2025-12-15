@@ -64,13 +64,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <summary>
     /// File size in bytes.
     /// </summary>
-    [State("Size", Order = 1)]
+    [State("Size", Position = 1)]
     public partial long FileSize { get; set; }
 
     /// <summary>
     /// Last modification time (UTC).
     /// </summary>
-    [State("Modified", Order = 2)]
+    [State("Modified", Position = 2)]
     public partial DateTime LastModified { get; set; }
 
     public MarkdownFile(IStorageContainer storage, string fullPath, MarkdownContentParser parser)
