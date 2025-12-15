@@ -1,7 +1,7 @@
 {
   "type": "HomeBlaze.Storage.FluentStorageContainer",
   "storageType": "disk",
-  "connectionString": "./Data",
+  "connectionString": "./TestData",
   "containerName": null,
   "enableFileWatching": false
 }

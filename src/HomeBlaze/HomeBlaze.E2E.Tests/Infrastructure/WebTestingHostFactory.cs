@@ -32,6 +32,9 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
     {
         builder.UseUrls("http://127.0.0.1:0");
         builder.UseEnvironment("Development");
+
+        // Use test-specific root configuration to avoid loading HomeBlaze's Data folder
+        builder.UseSetting("HomeBlaze:RootConfigFile", "testRoot.json");
     }
 
     private void EnsureServer()
@@ -75,7 +78,15 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
     {
         if (disposing)
         {
-            _kestrelHost?.StopAsync().GetAwaiter().GetResult();
+            // Give the host time to stop gracefully, including OPC UA server shutdown
+            try
+            {
+                _kestrelHost?.StopAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // Ignore timeout exceptions during shutdown
+            }
             _kestrelHost?.Dispose();
         }
         base.Dispose(disposing);

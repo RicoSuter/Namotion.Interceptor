@@ -8,4 +8,4 @@ alignment: Left
 
 # Dashboard
 
-This is the test Dashboard page for E2E tests.
+Welcome to HomeBlaze E2E Test Dashboard.

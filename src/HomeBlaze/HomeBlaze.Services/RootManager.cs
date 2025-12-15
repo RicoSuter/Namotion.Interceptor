@@ -1,4 +1,5 @@
 using HomeBlaze.Storage.Abstractions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -14,6 +15,7 @@ public class RootManager : BackgroundService, IConfigurationWriter
     private readonly SubjectTypeRegistry _typeRegistry;
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly IInterceptorSubjectContext _context;
+    private readonly IConfiguration? _configuration;
     private readonly ILogger<RootManager>? _logger;
     private string? _configurationPath;
 
@@ -31,11 +33,13 @@ public class RootManager : BackgroundService, IConfigurationWriter
         SubjectTypeRegistry typeRegistry,
         ConfigurableSubjectSerializer serializer,
         IInterceptorSubjectContext context,
+        IConfiguration? configuration = null,
         ILogger<RootManager>? logger = null)
     {
         _typeRegistry = typeRegistry;
         _serializer = serializer;
         _context = context;
+        _configuration = configuration;
         _logger = logger;
 
         // Register self with context for subjects to access
@@ -54,7 +58,8 @@ public class RootManager : BackgroundService, IConfigurationWriter
             return;
         }
 
-        _configurationPath = Path.GetFullPath("root.json");
+        var configFileName = _configuration?["HomeBlaze:RootConfigFile"] ?? "root.json";
+        _configurationPath = Path.GetFullPath(configFileName);
         _logger?.LogInformation("Loading root configuration from: {Path}", _configurationPath);
 
         if (!File.Exists(_configurationPath))
