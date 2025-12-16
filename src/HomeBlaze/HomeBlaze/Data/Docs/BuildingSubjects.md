@@ -652,3 +652,211 @@ private IInterceptorSubject? ResolveSubject()
     return _pathResolver.ResolveFromRelativePath(Path);
 }
 ```
+
+### SubjectPathField Component
+
+For subject path configuration properties, use the `SubjectPathField` component in edit forms. It provides a text input with a browse button that opens a tree picker dialog:
+
+```razor
+@using HomeBlaze.Components.Inputs
+
+<SubjectPathField @bind-Value="_path"
+                  @bind-Value:after="OnFieldChanged"
+                  Label="Subject Path"
+                  Placeholder="e.g., Root or Root.Children[demo]"
+                  Class="mt-4" />
+```
+
+**Features:**
+- Text input for direct path entry
+- Search icon button opens tree picker dialog
+- Tree shows all subjects with lazy loading
+- State properties and child properties are displayed
+- Disabled properties shown grayed but still selectable
+- Preview shows resolved value
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `Value` | `string?` | `null` | The path value (two-way bindable) |
+| `Label` | `string` | `"Path"` | Input label |
+| `Placeholder` | `string` | `"Enter path or click to browse"` | Placeholder text |
+| `Variant` | `Variant` | `Variant.Outlined` | MudBlazor input variant |
+| `LocalSubjects` | `IDictionary<string, IInterceptorSubject>?` | `null` | Additional local subjects to show in picker |
+| `Class` | `string?` | `null` | CSS class for styling |
+
+---
+
+## Building Subject Components
+
+Subject components are Blazor components that visualize or edit subjects. There are three types:
+
+| Component Type | Interface | Purpose | Example |
+|----------------|-----------|---------|---------|
+| Widget | `ISubjectComponent` | Compact display, dashboard cards | `MotorWidgetComponent` |
+| Edit | `ISubjectEditComponent` | Configuration form | `MotorEditComponent` |
+| Page | `ISubjectComponent` | Full page view | `MarkdownFilePageComponent` |
+
+### Registration
+
+Register components with the `[SubjectComponent]` attribute:
+
+```csharp
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Motor))]
+@implements ISubjectComponent
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private Motor? MotorSubject => Subject as Motor;
+}
+```
+
+### Widget Components
+
+Widgets are compact visual representations shown in dashboards and markdown pages:
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Motor))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4" Elevation="2">
+    <MudText Typo="Typo.h6">@MotorSubject?.Name</MudText>
+    <MudText>Speed: @MotorSubject?.CurrentSpeed RPM</MudText>
+
+    @if (IsEditing)
+    {
+        <!-- Inline editing when page is in edit mode -->
+        <MudSlider T="int"
+                   Value="@MotorSubject.TargetSpeed"
+                   ValueChanged="@OnSpeedChanged"
+                   Min="0" Max="3000" />
+    }
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    private Motor? MotorSubject => Subject as Motor;
+
+    private void OnSpeedChanged(int speed)
+    {
+        if (MotorSubject != null)
+            MotorSubject.TargetSpeed = speed;
+    }
+}
+```
+
+### IsEditing Cascading Parameter
+
+When a page enters edit mode, an `IsEditing` cascading parameter is propagated to all child widgets. This enables inline editing behaviors:
+
+```csharp
+[CascadingParameter(Name = "IsEditing")]
+public bool IsEditing { get; set; }
+```
+
+**Widget editing behaviors:**
+
+| Approach | Description | Example |
+|----------|-------------|---------|
+| Inline editing | Show editable controls directly in widget | Slider for TargetSpeed |
+| Ignore | Read-only widget, no editing support | Status displays |
+| Hybrid | Simple fields inline, complex via dialog | Basic fields inline, advanced via dialog |
+
+### Auto Edit Button
+
+When a widget has a corresponding Edit component, the host automatically renders an edit button overlay when `IsEditing` is true:
+
+- The button appears in the top-right corner of the widget
+- Clicking opens the `SubjectEditDialog` with the Edit component
+- No boilerplate needed in widget components
+
+### Edit Components
+
+Edit components provide configuration forms:
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Motor))]
+@implements ISubjectEditComponent
+
+<MudTextField @bind-Value="MotorSubject.Name" Label="Name" />
+<MudNumericField @bind-Value="MotorSubject.TargetSpeed" Label="Target Speed" />
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private Motor? MotorSubject => Subject as Motor;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(MotorSubject?.Name);
+    public bool IsDirty { get; private set; }
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    public Task SaveAsync(CancellationToken cancellationToken = default)
+    {
+        // Save logic here
+        IsDirty = false;
+        IsDirtyChanged?.Invoke(false);
+        return Task.CompletedTask;
+    }
+}
+```
+
+**ISubjectEditComponent contract:**
+
+| Member | Purpose |
+|--------|---------|
+| `IsValid` | Can the form be saved? |
+| `IsDirty` | Have changes been made? |
+| `IsValidChanged` | Event fired when validity changes |
+| `IsDirtyChanged` | Event fired when dirty state changes |
+| `SaveAsync` | Persist changes |
+
+### Page Components
+
+Page components provide full-page views:
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
+@implements ISubjectComponent
+
+<CascadingValue Value="@_isEditing" Name="IsEditing">
+    <div class="markdown-content">
+        @foreach (var widget in GetWidgets())
+        {
+            <SubjectComponent Subject="@widget" Type="SubjectComponentType.Widget" />
+        }
+    </div>
+</CascadingValue>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private bool _isEditing = false;
+
+    private void ToggleEditMode()
+    {
+        _isEditing = !_isEditing;
+    }
+}
+```
+
+### Summary
+
+| Feature | Widget | Edit | Page |
+|---------|--------|------|------|
+| Shows subject data | Yes | Yes | Yes |
+| Compact/card format | Yes | No | No |
+| Full configuration | No | Yes | No |
+| Uses IsEditing | Yes (optional) | No | Yes (provides) |
+| Auto edit button | Yes (if Edit exists) | N/A | No |

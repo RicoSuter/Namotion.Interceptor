@@ -1,6 +1,6 @@
-@using HomeBlaze.Abstractions
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
+@using HomeBlaze.Components.Inputs
 @using Namotion.Interceptor
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(OpcUaServer))]
@@ -16,16 +16,14 @@
                           Immediate="true"
                           OnKeyUp="OnFieldChanged" />
 
-            <MudTextField @bind-Value="_path"
-                          Label="Subject Path"
-                          Required="true"
-                          RequiredError="Path is required"
-                          HelperText="e.g., Root or Root.Children[demo]"
-                          Immediate="true"
-                          OnKeyUp="OnFieldChanged"
-                          Class="mt-4" />
+            <SubjectPathField @bind-Value="_path"
+                              @bind-Value:after="OnFieldChanged"
+                              Label="Subject Path"
+                              Placeholder="e.g., Root or Root.Children[demo]"
+                              Class="mt-4" />
 
-            <MudDivider Class="my-4" />
+            <br />
+            <br />
             <MudText Typo="Typo.subtitle2" Class="mb-2">Server Status</MudText>
             <MudText>Status: <strong>@ServerSubject?.Status</strong></MudText>
             @if (!string.IsNullOrEmpty(ServerSubject?.ErrorMessage))

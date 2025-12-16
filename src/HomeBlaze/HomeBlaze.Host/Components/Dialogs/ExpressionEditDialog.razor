@@ -1,0 +1,29 @@
+@using HomeBlaze.Components.Inputs
+
+<MudDialog data-testid="expression-edit-dialog">
+    <DialogContent>
+        <SubjectPathPicker @bind-Value="SelectedPath"
+                           LocalSubjects="LocalSubjects" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   OnClick="OnOkClicked"
+                   Disabled="@(string.IsNullOrWhiteSpace(SelectedPath))">OK</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter] public string? SelectedPath { get; set; }
+
+    [Parameter] public IDictionary<string, IInterceptorSubject>? LocalSubjects { get; set; }
+
+    private void Cancel() => MudDialog?.Cancel();
+
+    private void OnOkClicked()
+    {
+        MudDialog?.Close(DialogResult.Ok(SelectedPath));
+    }
+}

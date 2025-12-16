@@ -17,7 +17,7 @@ public class PageEditTests
     }
 
     [Fact]
-    public async Task EditButton_ShouldBeVisibleOnMarkdownPage()
+    public async Task EditModeMenu_ShouldBeVisibleOnMarkdownPage()
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
@@ -26,23 +26,24 @@ public class PageEditTests
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // Assert - Edit FAB should be visible
-        var editButton = page.Locator("[data-testid='edit-fab']");
-        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = 30000 });
+        // Assert - Edit mode menu should be visible
+        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
+        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 
     [Fact]
-    public async Task EditButton_ShouldOpenSplitView()
+    public async Task SplitMode_ShouldOpenSplitView()
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // Act - Click edit button (wait for it to be visible first)
-        var editFab = page.Locator("[data-testid='edit-fab']");
-        await Assertions.Expect(editFab).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editFab.ClickAsync();
+        // Act - Open Split mode via dropdown menu
+        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
+        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await editMenu.ClickAsync();
+        await page.GetByText("Split").ClickAsync();
 
         // Assert - Split view should be visible
         var splitter = page.Locator("[data-testid='edit-splitter']");
@@ -57,10 +58,11 @@ public class PageEditTests
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // Act - Open edit mode (wait for FAB to be visible first)
-        var editFab = page.Locator("[data-testid='edit-fab']");
-        await Assertions.Expect(editFab).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editFab.ClickAsync();
+        // Act - Open Split mode via dropdown menu
+        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
+        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await editMenu.ClickAsync();
+        await page.GetByText("Split").ClickAsync();
 
         // Wait for split view to appear
         var splitter = page.Locator("[data-testid='edit-splitter']");
@@ -72,26 +74,51 @@ public class PageEditTests
     }
 
     [Fact]
-    public async Task EditButton_ShouldToggleEditMode()
+    public async Task ViewMode_ShouldCloseEditMode()
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // Act - Open edit mode (wait for FAB to be visible first)
-        var editFab = page.Locator("[data-testid='edit-fab']");
-        await Assertions.Expect(editFab).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editFab.ClickAsync();
+        // Act - Open Split mode
+        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
+        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await editMenu.ClickAsync();
+        await page.GetByText("Split").ClickAsync();
 
         // Verify split view is open
         var splitter = page.Locator("[data-testid='edit-splitter']");
         await Assertions.Expect(splitter).ToBeVisibleAsync(new() { Timeout = 30000 });
 
-        // Click FAB again to close edit mode
-        await editFab.ClickAsync();
+        // Switch to View mode
+        await editMenu.ClickAsync();
+        await page.GetByText("View").ClickAsync();
 
         // Assert - Split view should no longer be visible
         await Assertions.Expect(splitter).Not.ToBeVisibleAsync(new() { Timeout = 30000 });
+    }
+
+    [Fact]
+    public async Task SourceMode_ShouldShowEditorOnly()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // Act - Open Source mode via dropdown menu
+        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
+        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await editMenu.ClickAsync();
+        await page.GetByText("Source").ClickAsync();
+
+        // Assert - Monaco editor should be visible (not in split view)
+        var monacoEditor = page.Locator(".monaco-editor");
+        await Assertions.Expect(monacoEditor).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // Split view should NOT be visible
+        var splitter = page.Locator("[data-testid='edit-splitter']");
+        await Assertions.Expect(splitter).Not.ToBeVisibleAsync(new() { Timeout = 5000 });
     }
 }

@@ -12,29 +12,33 @@
 
 @implements ISubjectComponent
 
-<div class="markdown-content" style="position: relative;">
-    @if (IsLoading)
-    {
-        <MudProgressCircular Indeterminate="true" />
-    }
-    else
-    {
-        <div style="position: absolute; top: 0.5rem; right: 1rem; font-size: 0.8rem; color: rgba(128,128,128,0.7);">
-            @File?.LastModified.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
-        </div>
-        @foreach (var segment in GetRenderSegments())
+<CascadingValue Value="@IsEditing" Name="IsEditing">
+    <div class="markdown-content" style="position: relative;">
+        @if (IsLoading)
         {
-            @if (segment.Html != null)
+            <MudProgressCircular Indeterminate="true" />
+        }
+        else
+        {
+            <div class="markdown-page-toolbar" style="position: absolute; top: 0.5rem; right: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+                <span style="font-size: 0.8rem; color: rgba(128,128,128,0.7);">
+                    @File?.LastModified.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                </span>
+            </div>
+            @foreach (var segment in GetRenderSegments())
             {
-                @((MarkupString)segment.Html)
-            }
-            else if (segment.Widget != null)
-            {
-                <SubjectComponent Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
+                @if (segment.Html != null)
+                {
+                    @((MarkupString)segment.Html)
+                }
+                else if (segment.Widget != null)
+                {
+                    <SubjectComponent Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
+                }
             }
         }
-    }
-</div>
+    </div>
+</CascadingValue>
 
 <style>
     .markdown-content h1 { font-size: 2rem; font-weight: 500; margin: 1.5rem 0 1rem; }
@@ -57,6 +61,9 @@
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
 
     private MarkdownFile? File => Subject as MarkdownFile;
 
