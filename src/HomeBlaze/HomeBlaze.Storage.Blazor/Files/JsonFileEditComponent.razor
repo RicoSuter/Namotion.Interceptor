@@ -1,6 +1,6 @@
 @using BlazorMonaco.Editor
-@using HomeBlaze.Abstractions.Attributes
-@using HomeBlaze.Abstractions.Components
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Storage
 @using HomeBlaze.Storage.Files
 @using Namotion.Interceptor
@@ -78,7 +78,7 @@
         });
     }
 
-    public async Task SaveAsync()
+    public async Task SaveAsync(CancellationToken cancellationToken)
     {
         if (File == null || _editor == null) return;
 

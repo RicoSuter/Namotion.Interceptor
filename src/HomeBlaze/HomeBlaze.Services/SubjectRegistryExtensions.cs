@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Storage.Abstractions.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -107,11 +108,11 @@ public static partial class SubjectRegistryExtensions
     }
 
     /// <summary>
-    /// Gets the display order for a property (from StateAttribute).
+    /// Gets the display position for a property (from StateAttribute).
     /// </summary>
-    public static int GetDisplayOrder(this RegisteredSubjectProperty property)
+    public static int GetDisplayPosition(this RegisteredSubjectProperty property)
     {
-        return property.GetStateAttribute()?.Order ?? int.MaxValue;
+        return property.GetStateAttribute()?.Position ?? int.MaxValue;
     }
 
     /// <summary>

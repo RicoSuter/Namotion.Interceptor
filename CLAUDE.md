@@ -9,9 +9,9 @@ Namotion.Interceptor is a .NET library for creating trackable object models thro
 ## Development Commands
 
 ### Build and Test
-- `dotnet test src/Namotion.Interceptor.sln` - Run all unit tests
-- `dotnet build src/Namotion.Interceptor.sln` - Build entire solution
-- `dotnet pack src/Namotion.Interceptor.sln` - Create NuGet packages
+- `dotnet test src/Namotion.Interceptor.slnx` - Run all unit tests
+- `dotnet build src/Namotion.Interceptor.slnx` - Build entire solution
+- `dotnet pack src/Namotion.Interceptor.slnx` - Create NuGet packages
 
 ### Running Samples
 - `dotnet run --project src/Namotion.Interceptor.SampleConsole` - Run console sample
@@ -103,3 +103,7 @@ The library has specialized support for:
 - Dedicated benchmarking with BenchmarkDotNet
 - Recent performance optimizations focused on allocation reduction
 - Observable streams for efficient change propagation
+
+## Coding Style
+
+- **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `location` not `loc`, `result` not `res`, `configuration` not `config`).

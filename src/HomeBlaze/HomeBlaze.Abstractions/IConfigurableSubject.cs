@@ -6,7 +6,7 @@ namespace HomeBlaze.Abstractions;
 public interface IConfigurableSubject
 {
     /// <summary>
-    /// Called after configuration properties have been updated from storage.
+    /// Called after configuration properties have been updated.
     /// Implementations should apply any side effects from the new configuration.
     /// </summary>
     Task ApplyConfigurationAsync(CancellationToken cancellationToken);
