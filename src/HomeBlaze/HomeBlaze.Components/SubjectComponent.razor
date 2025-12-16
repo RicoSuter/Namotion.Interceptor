@@ -1,0 +1,105 @@
+@inject SubjectComponentRegistry ComponentRegistry
+@inject IDialogService DialogService
+
+@if (Subject != null)
+{
+    var registration = ComponentRegistry.GetComponent(Subject.GetType(), Type);
+    if (registration?.ComponentType != null)
+    {
+        <div class="subject-component-wrapper" style="position: relative;">
+            @if (IsEditing && Type == SubjectComponentType.Widget && HasEditComponent)
+            {
+                <div class="subject-edit-overlay">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                   Size="Size.Small"
+                                   Color="Color.Primary"
+                                   OnClick="OpenEditDialog"
+                                   data-testid="edit-subject-button" />
+                </div>
+            }
+            <DynamicComponent Type="registration.ComponentType"
+                              @ref="_dynamicComponent"
+                              Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })" />
+        </div>
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true">
+            No @Type component for @Subject.GetType().Name
+        </MudAlert>
+    }
+}
+
+<style>
+    .subject-edit-overlay {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        z-index: 10;
+        opacity: 0.8;
+    }
+    .subject-edit-overlay:hover {
+        opacity: 1;
+    }
+</style>
+
+@code {
+    private DynamicComponent? _dynamicComponent;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public SubjectComponentType Type { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    /// <summary>
+    /// Two-way binding for accessing the rendered component instance.
+    /// Useful for edit panels that need to access ISubjectEditComponent methods.
+    /// </summary>
+    [Parameter]
+    public ISubjectComponent? ComponentInstance { get; set; }
+
+    [Parameter]
+    public EventCallback<ISubjectComponent?> ComponentInstanceChanged { get; set; }
+
+    private bool HasEditComponent =>
+        Subject != null &&
+        ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var instance = _dynamicComponent?.Instance as ISubjectComponent;
+        if (instance != ComponentInstance)
+        {
+            ComponentInstance = instance;
+            await ComponentInstanceChanged.InvokeAsync(instance);
+        }
+    }
+
+    private async Task OpenEditDialog()
+    {
+        if (Subject == null)
+            return;
+
+        // Use dynamic type lookup for SubjectEditDialog since it's in HomeBlaze.Host
+        var dialogType = System.Type.GetType("HomeBlaze.Host.Components.Dialogs.SubjectEditDialog, HomeBlaze.Host");
+        if (dialogType == null)
+            return;
+
+        var parameters = new DialogParameters<object>
+        {
+            { "Subject", Subject }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true
+        };
+
+        await DialogService.ShowAsync(dialogType, "Edit", parameters, options);
+    }
+}

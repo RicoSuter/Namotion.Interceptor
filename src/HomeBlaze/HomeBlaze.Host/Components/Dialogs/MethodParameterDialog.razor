@@ -1,0 +1,211 @@
+@using HomeBlaze.Abstractions.Services
+
+<MudDialog>
+    <DialogContent>
+        @if (!string.IsNullOrEmpty(Operation?.Description))
+        {
+            <MudText Typo="Typo.body2" Class="mb-4">@Operation.Description</MudText>
+        }
+
+        @if (Operation != null)
+        {
+            <MudStack Spacing="3">
+                @foreach (var parameter in Operation.Parameters)
+                {
+                    <div>
+                        @if (parameter.Type == typeof(bool) || Nullable.GetUnderlyingType(parameter.Type) == typeof(bool))
+                        {
+                            <MudCheckBox T="bool"
+                                         Label="@GetParameterLabel(parameter)"
+                                         Value="@GetBoolValue(parameter.Name)"
+                                         ValueChanged="@(v => SetValue(parameter.Name, v))" />
+                        }
+                        else if (parameter.Type.IsEnum || (Nullable.GetUnderlyingType(parameter.Type)?.IsEnum ?? false))
+                        {
+                            var enumType = Nullable.GetUnderlyingType(parameter.Type) ?? parameter.Type;
+                            <MudSelect T="string"
+                                       Label="@GetParameterLabel(parameter)"
+                                       Value="@GetStringValue(parameter.Name)"
+                                       ValueChanged="@(v => SetValue(parameter.Name, v))">
+                                @if (Nullable.GetUnderlyingType(parameter.Type) != null)
+                                {
+                                    <MudSelectItem Value="@((string?)null)">(None)</MudSelectItem>
+                                }
+                                @foreach (var enumValue in Enum.GetNames(enumType))
+                                {
+                                    <MudSelectItem Value="@enumValue">@enumValue</MudSelectItem>
+                                }
+                            </MudSelect>
+                        }
+                        else
+                        {
+                            <MudTextField T="string"
+                                          Label="@GetParameterLabel(parameter)"
+                                          Value="@GetStringValue(parameter.Name)"
+                                          ValueChanged="@(v => SetValue(parameter.Name, v))"
+                                          Error="@HasError(parameter.Name)"
+                                          ErrorText="@GetError(parameter.Name)"
+                                          Required="@IsRequired(parameter)"
+                                          Immediate="true" />
+                        }
+                    </div>
+                }
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   Variant="Variant.Filled"
+                   OnClick="Execute"
+                   Disabled="@(!IsValid)">Execute</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter] public SubjectMethodInfo? Operation { get; set; }
+
+    private Dictionary<string, string?> _inputValues = new();
+    private Dictionary<string, string?> _errors = new();
+
+    protected override void OnParametersSet()
+    {
+        if (Operation != null)
+        {
+            foreach (var parameter in Operation.Parameters)
+            {
+                if (!_inputValues.ContainsKey(parameter.Name))
+                {
+                    _inputValues[parameter.Name] = GetDefaultValue(parameter);
+                }
+            }
+        }
+    }
+
+    private string GetParameterLabel(SubjectMethodParameter parameter)
+    {
+        var label = char.ToUpperInvariant(parameter.Name[0]) + parameter.Name.Substring(1);
+        var isNullable = Nullable.GetUnderlyingType(parameter.Type) != null || parameter.Type == typeof(string);
+        return isNullable ? label : $"{label} *";
+    }
+
+    private string? GetDefaultValue(SubjectMethodParameter parameter)
+    {
+        if (parameter.Type == typeof(bool))
+            return "false";
+        if (parameter.Type == typeof(bool?))
+            return null;
+        return null;
+    }
+
+    private bool GetBoolValue(string name)
+    {
+        if (_inputValues.TryGetValue(name, out var value))
+        {
+            return value?.Equals("true", StringComparison.OrdinalIgnoreCase) ?? false;
+        }
+        return false;
+    }
+
+    private string? GetStringValue(string name)
+    {
+        _inputValues.TryGetValue(name, out var value);
+        return value;
+    }
+
+    private void SetValue(string name, object? value)
+    {
+        _inputValues[name] = value?.ToString();
+        ValidateParameter(name);
+    }
+
+    private void ValidateParameter(string name)
+    {
+        _errors.Remove(name);
+        var parameter = Operation?.Parameters.FirstOrDefault(p => p.Name == name);
+        if (parameter == null)
+            return;
+
+        var input = _inputValues.GetValueOrDefault(name);
+
+        if (string.IsNullOrEmpty(input))
+        {
+            if (IsRequired(parameter))
+            {
+                _errors[name] = "This field is required";
+            }
+            return;
+        }
+
+        if (!ParameterConverter.TryConvert(input, parameter.Type, out _))
+        {
+            _errors[name] = $"Invalid value for {parameter.Type.Name}";
+        }
+    }
+
+    private bool IsRequired(SubjectMethodParameter parameter)
+    {
+        return Nullable.GetUnderlyingType(parameter.Type) == null && parameter.Type != typeof(string);
+    }
+
+    private bool HasError(string name) => _errors.ContainsKey(name);
+
+    private string? GetError(string name) => _errors.GetValueOrDefault(name);
+
+    private bool IsValid
+    {
+        get
+        {
+            if (Operation == null)
+                return false;
+
+            foreach (var parameter in Operation.Parameters)
+            {
+                ValidateParameter(parameter.Name);
+            }
+
+            return !_errors.Any();
+        }
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+
+    private void Execute()
+    {
+        if (Operation == null || !IsValid)
+            return;
+
+        var parameters = new object?[Operation.Parameters.Length];
+        for (var i = 0; i < Operation.Parameters.Length; i++)
+        {
+            var parameter = Operation.Parameters[i];
+            var input = _inputValues.GetValueOrDefault(parameter.Name);
+
+            if (ParameterConverter.TryConvert(input, parameter.Type, out var value))
+            {
+                parameters[i] = value;
+            }
+        }
+
+        MudDialog?.Close(DialogResult.Ok(parameters));
+    }
+
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, SubjectMethodInfo operation)
+    {
+        var parameters = new DialogParameters<MethodParameterDialog>
+        {
+            { x => x.Operation, operation }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        return dialogService.ShowAsync<MethodParameterDialog>(operation.Title, parameters, options);
+    }
+}

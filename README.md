@@ -279,7 +279,7 @@ var context = InterceptorSubjectContext
 
 **Namotion.Interceptor.AspNetCore** - ASP.NET Core integration for exposing subjects as web APIs
 
-**Namotion.Interceptor.Blazor** - Blazor components for data binding with interceptor subjects
+**[Namotion.Interceptor.Blazor](docs/blazor.md)** - Blazor components for data binding with interceptor subjects
 
 **Namotion.Interceptor.GraphQL** - GraphQL integration with subscription support for real-time updates
 

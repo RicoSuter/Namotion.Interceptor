@@ -1,11 +1,13 @@
+@using HomeBlaze.Components.Abstractions.Pages
+
 <MudNavGroup Title="@Item.Title" Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(Item.Icon)" Expanded="_expanded" ExpandedChanged="OnExpandedChanged">
     @if (_expanded && _children != null)
     {
-        @foreach (var child in _children)
+        @foreach (var child in _children.Where(c => c.Location == NavigationLocation.NavBar))
         {
-            @if (child.IsPage && !child.IsFolder)
+            @if (child is { IsPage: true, IsFolder: false })
             {
-                <MudNavLink Href="@($"pages/{child.Path}")"
+                <MudNavLink Href="@child.PageUrl"
                             Match="NavLinkMatch.All"
                             Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(child.Icon)">
                     @child.Title
@@ -13,7 +15,7 @@
             }
             else if (child.IsFolder)
             {
-                <NavFolder Item="child" NavigationResolver="NavigationResolver" />
+                <NavFolder Item="child" NavigationResolver="NavigationResolver" CurrentPath="@CurrentPath" />
             }
         }
     }
@@ -26,8 +28,36 @@
     [Parameter, EditorRequired]
     public required NavigationItemResolver NavigationResolver { get; set; }
 
+    [Parameter]
+    public string CurrentPath { get; set; } = string.Empty;
+
     private bool _expanded;
     private List<NavigationItem>? _children;
+    private string? _lastCurrentPath;
+
+    protected override void OnParametersSet()
+    {
+        // Auto-expand if current page is inside this folder
+        if (CurrentPath != _lastCurrentPath)
+        {
+            _lastCurrentPath = CurrentPath;
+            if (!string.IsNullOrEmpty(CurrentPath) && IsCurrentPageInFolder())
+            {
+                _expanded = true;
+                _children ??= NavigationResolver.GetChildItems(Item.Subject).ToList();
+            }
+        }
+    }
+
+    private bool IsCurrentPageInFolder()
+    {
+        // Check if current path starts with this folder's path
+        // Item.PageUrl is like "pages/Children/demo" for a folder
+        // CurrentPath would be like "pages/Children/demo/Children/Setup.md"
+        var folderPath = Item.PageUrl.TrimEnd('/');
+        return CurrentPath.StartsWith(folderPath + "/", StringComparison.OrdinalIgnoreCase) ||
+               CurrentPath.Equals(folderPath, StringComparison.OrdinalIgnoreCase);
+    }
 
     private void OnExpandedChanged(bool expanded)
     {

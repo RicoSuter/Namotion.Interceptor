@@ -2,7 +2,7 @@ using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Abstractions.Storage;
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Hosting;
@@ -19,14 +19,16 @@ namespace HomeBlaze.Storage;
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,
-    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurableSubject, IDisposable
+    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurableSubject
 {
     private IBlobStorage? _client;
 
     private readonly StoragePathRegistry _pathRegistry = new();
     private readonly FileSubjectFactory _subjectFactory;
     private readonly StorageHierarchyManager _hierarchyManager;
+    private readonly ConfigurableSubjectSerializer _serializer;
     private StorageFileWatcher? _fileWatcher;
+    private JsonSubjectSynchronizer? _jsonSyncHelper;
 
     private readonly ILogger<FluentStorageContainer>? _logger;
 
@@ -75,10 +77,12 @@ public partial class FluentStorageContainer :
     public FluentStorageContainer(
         SubjectTypeRegistry typeRegistry,
         ConfigurableSubjectSerializer serializer,
+        IServiceProvider serviceProvider,
         ILogger<FluentStorageContainer>? logger = null)
     {
-        _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, logger);
+        _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, serviceProvider, logger);
         _hierarchyManager = new StorageHierarchyManager(logger);
+        _serializer = serializer;
         _logger = logger;
 
         StorageType = "disk";
@@ -107,26 +111,30 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task ConnectAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(ConnectionString))
+        var isInMemory = StorageType.ToLowerInvariant() == "inmemory";
+        if (!isInMemory && string.IsNullOrWhiteSpace(ConnectionString))
             throw new InvalidOperationException("ConnectionString is not configured");
 
         Status = StorageStatus.Initializing;
-
         try
         {
             _client = StorageType.ToLowerInvariant() switch
             {
                 "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(
                     Path.GetFullPath(ConnectionString)),
+                "inmemory" => StorageFactory.Blobs.InMemory(),
                 _ => throw new NotSupportedException($"Storage type '{StorageType}' is not supported")
             };
 
+            _jsonSyncHelper = new JsonSubjectSynchronizer(_pathRegistry, _serializer, _client, _logger);
+
             Status = StorageStatus.Connected;
-            _logger?.LogInformation("Connected to storage: {Type} at {Path}", StorageType, ConnectionString);
+            _logger?.LogInformation("Connected to storage: {Type} at {Path}", StorageType,
+                isInMemory ? "(in-memory)" : ConnectionString);
 
             await ScanAsync(cancellationToken);
 
-            if (EnableFileWatching && StorageType.ToLowerInvariant() is "disk" or "filesystem")
+            if (EnableFileWatching && !isInMemory)
             {
                 StartFileWatching();
             }
@@ -185,7 +193,7 @@ public partial class FluentStorageContainer :
         }
 
         Children = children;
-        _logger?.LogInformation("Scan complete. Found {Count} subjects", _pathRegistry.Count);
+        _logger?.LogInformation("Scan complete: Found {Count} subjects.", _pathRegistry.Count);
     }
 
     private void StartFileWatching()
@@ -249,86 +257,22 @@ public partial class FluentStorageContainer :
         if (!_pathRegistry.TryGetSubject(relativePath, out var existingSubject))
             return;
 
-        // Refresh all IStorageFile subjects (updates metadata + content)
         if (existingSubject is IStorageFile storageFile)
         {
             try
             {
-                await storageFile.RefreshAsync(CancellationToken.None);
-                _logger?.LogInformation("Refreshed file: {Path}", relativePath);
+                await storageFile.OnFileChangedAsync(CancellationToken.None);
+                _logger?.LogInformation("Notified file of change: {Path}", relativePath);
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning(ex, "Failed to refresh file: {Path}", relativePath);
-            }
-            return;
-        }
-
-        // Continue with JSON reload for IConfigurableSubject (existing logic)
-        if (existingSubject is not IConfigurableSubject)
-            return;
-
-        long newSize;
-        try
-        {
-            var fileInfo = new FileInfo(fullPath);
-            newSize = fileInfo.Length;
-        }
-        catch
-        {
-            return;
-        }
-
-        var sizeChanged = _pathRegistry.HasSizeChanged(relativePath, newSize);
-
-        string? newHash = null;
-        for (var retry = 0; retry < 3; retry++)
-        {
-            try
-            {
-                await using var stream = await _client!.OpenReadAsync(relativePath);
-                newHash = await StoragePathRegistry.ComputeHashAsync(stream);
-                break;
-            }
-            catch (IOException) when (retry < 2)
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(100 * Math.Pow(2, retry)));
+                _logger?.LogWarning(ex, "Failed to notify file of change: {Path}", relativePath);
             }
         }
-
-        if (newHash == null)
+        else if (existingSubject is IConfigurableSubject)
         {
-            _logger?.LogWarning("Could not compute hash after retries: {Path}", relativePath);
-            return;
+            await _jsonSyncHelper!.TryRefreshAsync(existingSubject, relativePath, fullPath, CancellationToken.None);
         }
-
-        if (!sizeChanged && !_pathRegistry.HasHashChanged(relativePath, newHash))
-        {
-            _logger?.LogDebug("File unchanged (same hash), skipping reload: {Path}", relativePath);
-            return;
-        }
-
-        _pathRegistry.UpdateSize(relativePath, newSize);
-        _pathRegistry.UpdateHash(relativePath, newHash);
-
-        if (Path.GetExtension(relativePath).Equals(".json", StringComparison.OrdinalIgnoreCase))
-        {
-            try
-            {
-                var json = await _client!.ReadTextAsync(relativePath);
-                await _subjectFactory.UpdateFromJsonAsync(existingSubject, json, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to update from JSON: {Path}", relativePath);
-            }
-        }
-        else if (existingSubject is IConfigurableSubject configurable)
-        {
-            await configurable.ApplyConfigurationAsync(CancellationToken.None);
-        }
-
-        _logger?.LogInformation("Reloaded: {Path}", relativePath);
     }
 
     private Task HandleFileDeletedAsync(string relativePath)
@@ -462,10 +406,16 @@ public partial class FluentStorageContainer :
 
         await _client.WriteAsync(path, content, append: false, cancellationToken: cancellationToken);
         _logger?.LogDebug("Wrote blob to storage: {Path}", path);
+
+        // Notify the file subject to reload its in-memory state
+        if (_pathRegistry.TryGetSubject(path, out var subject) && subject is IStorageFile file)
+        {
+            await file.OnFileChangedAsync(cancellationToken);
+        }
     }
 
     /// <summary>
-    /// IStorageContainer - Deletes a blob from storage.
+    /// IStorageContainer - Deletes a blob from storage and removes from Children.
     /// </summary>
     public async Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
     {
@@ -476,6 +426,13 @@ public partial class FluentStorageContainer :
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         await _client.DeleteAsync(path, cancellationToken: cancellationToken);
+
+        // Remove from hierarchy directly (don't rely on FileWatcher)
+        _pathRegistry.Unregister(path);
+        var children = new Dictionary<string, IInterceptorSubject>(Children);
+        _hierarchyManager.RemoveFromHierarchy(path, children);
+        Children = children;
+
         _logger?.LogDebug("Deleted blob from storage: {Path}", path);
     }
 
