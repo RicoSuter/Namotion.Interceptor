@@ -46,7 +46,8 @@ public class MarkdownEditorTests
         await editorContent.ClickAsync();
 
         // Assert: "Edit mymotor" button should be visible (within reasonable time)
-        var editButton = page.Locator("[data-testid='edit-subject-button']");
+        // Use .First because there may be multiple edit buttons (one in editor, one on widget)
+        var editButton = page.Locator("[data-testid='edit-subject-button']").First;
         // The button may not appear if cursor isn't in the right place, so we use a reasonable timeout
         await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = 10000 });
     }
