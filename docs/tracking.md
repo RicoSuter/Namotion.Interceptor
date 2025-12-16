@@ -262,6 +262,40 @@ lifecycleInterceptor.SubjectDetached += async change =>
 
 4. **Thread-safe operations**: Use thread-safe data structures like `ConcurrentDictionary` with atomic operations (`TryRemove`, `TryAdd`) rather than check-then-act patterns.
 
+### Handler and Interceptor Ordering
+
+When multiple handlers or interceptors are registered, their execution order can be controlled using ordering attributes. This is important when handlers have dependencies on each other.
+
+**Available Attributes:**
+
+```csharp
+using Namotion.Interceptor.Attributes;
+
+// Run before specific types
+[RunsBefore(typeof(OtherHandler))]
+public class MyHandler : ILifecycleHandler { }
+
+// Run after specific types
+[RunsAfter(typeof(OtherHandler))]
+public class MyHandler : ILifecycleHandler { }
+
+// Run before all handlers without [RunsFirst]
+[RunsFirst]
+public class EarlyHandler : IWriteInterceptor { }
+
+// Run after all handlers without [RunsLast]
+[RunsLast]
+public class LateHandler : IWriteInterceptor { }
+```
+
+**Ordering Rules:**
+
+- Handlers are partitioned into three groups: `[RunsFirst]` → Middle → `[RunsLast]`
+- Within each group, `[RunsBefore]` and `[RunsAfter]` define the topological order
+- Missing dependency types are silently ignored (supports optional dependencies)
+- Circular dependencies throw `InvalidOperationException` with the involved type names
+- A handler cannot have both `[RunsFirst]` and `[RunsLast]`
+
 ### Reference Counting
 
 Each subject tracks how many parent references point to it via `GetReferenceCount()`:
