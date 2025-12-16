@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Storage.Abstractions.Attributes;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Registry.Abstractions;
 

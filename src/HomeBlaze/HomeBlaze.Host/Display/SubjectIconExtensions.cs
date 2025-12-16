@@ -11,20 +11,20 @@ namespace HomeBlaze.Host.Display;
 /// </summary>
 public static class SubjectIconExtensions
 {
-    private static readonly ConcurrentDictionary<string, string> _iconCache = new();
+    private static readonly ConcurrentDictionary<string, string> IconCache = new();
+
     private const string DefaultIconName = "Article";
 
     /// <summary>
-    /// Gets the MudBlazor icon for a subject by resolving the icon name via reflection.
-    /// Icon names like "Folder", "Storage", "Article" are resolved from Icons.Material.Filled.
+    /// Gets the icon name for a subject (e.g., "Folder", "Article").
+    /// Use ResolveMudBlazorIcon() to convert to MudBlazor icon.
     /// </summary>
     public static string GetIcon(this IInterceptorSubject subject)
     {
-        var iconName = subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.Icon)
-            ? iconProvider.Icon
-            : DefaultIconName;
+        if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.Icon))
+            return iconProvider.Icon;
 
-        return ResolveMudBlazorIcon(iconName);
+        return DefaultIconName;
     }
 
     /// <summary>
@@ -35,7 +35,7 @@ public static class SubjectIconExtensions
         if (string.IsNullOrEmpty(iconName))
             return Icons.Material.Filled.Article;
 
-        return _iconCache.GetOrAdd(iconName, name =>
+        return IconCache.GetOrAdd(iconName, name =>
         {
             var field = typeof(Icons.Material.Filled).GetField(name,
                 BindingFlags.Public | BindingFlags.Static);

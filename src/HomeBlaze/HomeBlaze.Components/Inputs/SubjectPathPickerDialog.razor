@@ -1,0 +1,45 @@
+<MudDialog data-testid="subject-path-picker-dialog">
+    <DialogContent>
+        <SubjectPathPicker @bind-Value="_selectedPath"
+                           LocalSubjects="LocalSubjects"
+                           Label="@Label"
+                           Placeholder="@Placeholder" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   OnClick="OnOkClicked"
+                   Disabled="@(string.IsNullOrWhiteSpace(_selectedPath))">OK</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter]
+    public string? SelectedPath { get; set; }
+
+    [Parameter]
+    public IDictionary<string, IInterceptorSubject>? LocalSubjects { get; set; }
+
+    [Parameter]
+    public string Label { get; set; } = "Path";
+
+    [Parameter]
+    public string Placeholder { get; set; } = "Enter path (e.g., motor.Temperature)";
+
+    private string? _selectedPath;
+
+    protected override void OnInitialized()
+    {
+        _selectedPath = SelectedPath;
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+
+    private void OnOkClicked()
+    {
+        MudDialog?.Close(DialogResult.Ok(_selectedPath));
+    }
+}

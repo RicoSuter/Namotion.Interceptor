@@ -1,19 +1,14 @@
-using HomeBlaze.Abstractions.Storage;
+using System.Text;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
-using Moq;
-using Xunit;
+using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests;
 
 public class MarkdownFileTests
 {
-    private static MarkdownFile CreateMarkdownFile(string fileName)
-    {
-        var mockStorage = new Mock<IStorageContainer>();
-        return new MarkdownFile(mockStorage.Object, fileName);
-    }
-
     [Fact]
     public void FrontmatterParser_WithNavigationTitle_ReturnsNavigationTitle()
     {
@@ -81,12 +76,12 @@ public class MarkdownFileTests
     }
 
     [Fact]
-    public void FrontmatterParser_WithOrder_ReturnsOrder()
+    public void FrontmatterParser_WithPosition_ReturnsPosition()
     {
         var content = """
             ---
             title: Test
-            order: 5
+            position: 5
             ---
             # Content
             """;
@@ -94,7 +89,7 @@ public class MarkdownFileTests
         var result = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
 
         Assert.NotNull(result);
-        Assert.Equal(5, result.Order);
+        Assert.Equal(5, result.Position);
     }
 
     [Fact]
@@ -172,33 +167,39 @@ public class MarkdownFileTests
     }
 
     [Fact]
-    public void MarkdownFile_Title_WithFrontmatter_ReturnsFrontmatterTitle()
+    public async Task MarkdownFile_Title_WithFrontmatter_ReturnsFrontmatterTitle()
     {
-        var markdown = CreateMarkdownFile("test.md");
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         var content = """
             ---
             title: Frontmatter Title
             ---
             # Content
             """;
+        await WriteFileAsync(storage, "test.md", content);
 
-        markdown.Content = content;
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Frontmatter Title", markdown.Title);
     }
 
     [Fact]
-    public void MarkdownFile_Title_WithoutFrontmatter_ReturnsFormattedFilename()
+    public async Task MarkdownFile_Title_WithoutFrontmatter_ReturnsFormattedFilename()
     {
-        var markdown = CreateMarkdownFile("my-test-document.md");
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "my-test-document.md", "# Content");
+
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "my-test-document.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("My Test Document", markdown.Title);
     }
 
     [Fact]
-    public void MarkdownFile_NavigationTitle_WithFrontmatter_ReturnsNavTitle()
+    public async Task MarkdownFile_NavigationTitle_WithFrontmatter_ReturnsNavTitle()
     {
-        var markdown = CreateMarkdownFile("test.md");
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         var content = """
             ---
             title: Regular Title
@@ -206,33 +207,37 @@ public class MarkdownFileTests
             ---
             # Content
             """;
+        await WriteFileAsync(storage, "test.md", content);
 
-        markdown.Content = content;
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Nav Title", markdown.NavigationTitle);
     }
 
     [Fact]
-    public void MarkdownFile_NavigationOrder_WithFrontmatter_ReturnsOrder()
+    public async Task MarkdownFile_PagePosition_WithFrontmatter_ReturnsPosition()
     {
-        var markdown = CreateMarkdownFile("test.md");
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         var content = """
             ---
             title: Test
-            order: 3
+            position: 3
             ---
             # Content
             """;
+        await WriteFileAsync(storage, "test.md", content);
 
-        markdown.Content = content;
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
-        Assert.Equal(3, markdown.NavigationOrder);
+        Assert.Equal(3, markdown.PagePosition);
     }
 
     [Fact]
-    public void MarkdownFile_Icon_WithFrontmatter_ReturnsCustomIcon()
+    public async Task MarkdownFile_Icon_WithFrontmatter_ReturnsCustomIcon()
     {
-        var markdown = CreateMarkdownFile("test.md");
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         var content = """
             ---
             title: Test
@@ -240,32 +245,40 @@ public class MarkdownFileTests
             ---
             # Content
             """;
+        await WriteFileAsync(storage, "test.md", content);
 
-        markdown.Content = content;
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("mdi-custom", markdown.Icon);
     }
 
     [Fact]
-    public void MarkdownFile_Icon_WithoutFrontmatter_ReturnsDefaultIcon()
+    public async Task MarkdownFile_Icon_WithoutFrontmatter_ReturnsDefaultIcon()
     {
-        var markdown = CreateMarkdownFile("test.md");
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "test.md", "# Content");
+
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
 
         Assert.Equal("Article", markdown.Icon);
     }
 
     [Fact]
-    public void MarkdownFile_Content_ClearsCachedFrontmatter()
+    public async Task MarkdownFile_Refresh_UpdatesFrontmatter()
     {
-        var markdown = CreateMarkdownFile("test.md");
-
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
         var content1 = """
             ---
             title: First Title
             ---
             # Content
             """;
-        markdown.Content = content1;
+        await WriteFileAsync(storage, "test.md", content1);
+
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
         Assert.Equal("First Title", markdown.Title);
 
         var content2 = """
@@ -274,7 +287,45 @@ public class MarkdownFileTests
             ---
             # Content
             """;
-        markdown.Content = content2;
+        await WriteFileAsync(storage, "test.md", content2);
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
         Assert.Equal("Second Title", markdown.Title);
+    }
+
+    private static async Task<(FluentStorageContainer storage, IServiceProvider serviceProvider)> CreateInMemoryStorageAsync()
+    {
+        var typeProvider = new TypeProvider();
+        var typeRegistry = new SubjectTypeRegistry(typeProvider);
+        var context = InterceptorSubjectContext.Create();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(typeProvider);
+        services.AddSingleton(typeRegistry);
+        services.AddSingleton<IInterceptorSubjectContext>(context);
+        services.AddSingleton<ConfigurableSubjectSerializer>();
+        services.AddSingleton<RootManager>();
+        services.AddSingleton<SubjectPathResolver>();
+        services.AddSingleton<MarkdownContentParser>();
+
+        var serviceProvider = services.BuildServiceProvider();
+        var serializer = serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>();
+
+        var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
+        storage.StorageType = "inmemory";
+        await storage.ConnectAsync(CancellationToken.None);
+        return (storage, serviceProvider);
+    }
+
+    private static MarkdownFile CreateMarkdownFile(IServiceProvider serviceProvider, FluentStorageContainer storage, string path)
+    {
+        var parser = serviceProvider.GetRequiredService<MarkdownContentParser>();
+        return new MarkdownFile(storage, path, parser);
+    }
+
+    private static async Task WriteFileAsync(FluentStorageContainer storage, string path, string content)
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+        await storage.WriteBlobAsync(path, stream, CancellationToken.None);
     }
 }

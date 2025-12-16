@@ -28,7 +28,7 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
     /// Target speed in RPM.
     /// </summary>
     [Configuration]
-    [State("Target", Order = 2)]
+    [State("Target", Position = 2)]
     public partial int TargetSpeed { get; set; }
 
     [PropertyAttribute(nameof(TargetSpeed), "Minimum")]
@@ -48,19 +48,19 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
     /// <summary>
     /// Current speed in RPM.
     /// </summary>
-    [State("Speed", Order = 3)]
+    [State("Speed", Position = 3)]
     public partial int CurrentSpeed { get; set; }
 
     /// <summary>
     /// Current temperature in Celsius.
     /// </summary>
-    [State(Order = 4, Unit = StateUnit.DegreeCelsius)]
+    [State(Position = 4, Unit = StateUnit.DegreeCelsius)]
     public partial double Temperature { get; set; }
 
     /// <summary>
     /// Current operational status.
     /// </summary>
-    [State(Order = 1)]
+    [State(Position = 1)]
     public partial MotorStatus Status { get; set; }
 
     // Derived properties
@@ -69,14 +69,14 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
     /// Difference between target and current speed.
     /// </summary>
     [Derived]
-    [State("Delta", Order = 5)]
+    [State("Delta", Position = 5)]
     public int SpeedDelta => TargetSpeed - CurrentSpeed;
 
     /// <summary>
     /// Whether the motor is at target speed (within 50 RPM).
     /// </summary>
     [Derived]
-    [State("At Target", Order = 6)]
+    [State("At Target", Position = 6)]
     public bool IsAtTargetSpeed => Math.Abs(SpeedDelta) < 50;
 
     public Motor()
@@ -146,6 +146,72 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
         // (e.g., restart a connection, recalculate derived values, etc.)
         return Task.CompletedTask;
     }
+
+    // Operations
+
+    /// <summary>
+    /// Sets the target speed to the specified value.
+    /// </summary>
+    [Operation(Title = "Set Speed", Description = "Sets the motor target speed", Icon = "Speed", Position = 1)]
+    public void SetTargetSpeed(int speed)
+    {
+        TargetSpeed = Math.Clamp(speed, TargetSpeed_Minimum, TargetSpeed_Maximum);
+    }
+
+    /// <summary>
+    /// Immediately stops the motor by setting target speed to zero.
+    /// </summary>
+    [Operation(Title = "Emergency Stop", Description = "Immediately stops the motor", Icon = "Stop", Position = 2, RequiresConfirmation = true)]
+    public void EmergencyStop()
+    {
+        TargetSpeed = 0;
+        CurrentSpeed = 0;
+        Status = MotorStatus.Stopped;
+    }
+
+    /// <summary>
+    /// Gets the current motor diagnostics.
+    /// </summary>
+    [Query(Title = "Get Diagnostics", Description = "Returns current motor diagnostics", Icon = "Info", Position = 3)]
+    public MotorDiagnostics GetDiagnostics()
+    {
+        return new MotorDiagnostics
+        {
+            Status = Status,
+            CurrentSpeed = CurrentSpeed,
+            TargetSpeed = TargetSpeed,
+            Temperature = Temperature,
+            IsAtTarget = IsAtTargetSpeed,
+            SpeedDelta = SpeedDelta
+        };
+    }
+
+    /// <summary>
+    /// Simulates running for a specified duration.
+    /// </summary>
+    [Operation(Title = "Run Test", Description = "Runs the motor at specified speed for a duration", Icon = "PlayArrow", Position = 4)]
+    public async Task RunTestAsync(int speed, int durationSeconds)
+    {
+        var previousSpeed = TargetSpeed;
+        TargetSpeed = Math.Clamp(speed, TargetSpeed_Minimum, TargetSpeed_Maximum);
+
+        await Task.Delay(TimeSpan.FromSeconds(durationSeconds));
+
+        TargetSpeed = previousSpeed;
+    }
+}
+
+/// <summary>
+/// Motor diagnostics data.
+/// </summary>
+public class MotorDiagnostics
+{
+    public MotorStatus Status { get; set; }
+    public int CurrentSpeed { get; set; }
+    public int TargetSpeed { get; set; }
+    public double Temperature { get; set; }
+    public bool IsAtTarget { get; set; }
+    public int SpeedDelta { get; set; }
 }
 
 public enum MotorStatus
