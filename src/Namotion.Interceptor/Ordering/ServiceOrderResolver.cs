@@ -57,10 +57,10 @@ public static class ServiceOrderResolver
     private static void ValidateSingleService<T>(T service)
     {
         var info = GetOrderInfo(service!.GetType());
-        if (info.RunsFirst && info.RunsLast)
+        if (info is { RunsFirst: true, RunsLast: true })
         {
             throw new InvalidOperationException(
-                $"Service {service!.GetType().Name} cannot have both [RunsFirst] and [RunsLast]");
+                $"Service {service.GetType().Name} cannot have both [RunsFirst] and [RunsLast]");
         }
     }
 
@@ -73,8 +73,7 @@ public static class ServiceOrderResolver
         foreach (var service in services)
         {
             var info = GetOrderInfo(service!.GetType());
-
-            if (info.RunsFirst && info.RunsLast)
+            if (info is { RunsFirst: true, RunsLast: true })
             {
                 throw new InvalidOperationException(
                     $"Service {service.GetType().Name} cannot have both [RunsFirst] and [RunsLast]");
@@ -190,9 +189,9 @@ public static class ServiceOrderResolver
     {
         var count = indexToService.Length;
         var queue = InitializeQueue(inDegree, count);
-        var result = ProcessQueue(queue, indexToService, adjacency, inDegree);
+        var (result, processedCount) = ProcessQueue(queue, indexToService, adjacency, inDegree);
 
-        if (result.Length != count)
+        if (processedCount != count)
         {
             ThrowCycleDetectedError(indexToService, inDegree);
         }
@@ -213,7 +212,7 @@ public static class ServiceOrderResolver
         return queue;
     }
 
-    private static T[] ProcessQueue<T>(Queue<int> queue, T[] indexToService, List<int>?[] adjacency, int[] inDegree)
+    private static (T[] result, int processedCount) ProcessQueue<T>(Queue<int> queue, T[] indexToService, List<int>?[] adjacency, int[] inDegree)
     {
         var result = new T[indexToService.Length];
         var resultIndex = 0;
@@ -235,14 +234,7 @@ public static class ServiceOrderResolver
             }
         }
 
-        if (resultIndex == indexToService.Length)
-        {
-            return result;
-        }
-
-        var trimmed = new T[resultIndex];
-        Array.Copy(result, trimmed, resultIndex);
-        return trimmed;
+        return (result, resultIndex);
     }
 
     private static void ThrowCycleDetectedError<T>(T[] indexToService, int[] inDegree)
@@ -263,12 +255,22 @@ public static class ServiceOrderResolver
     private static void ValidateCrossGroupDependencies<T>(
         List<T> firstGroup, List<T> middleGroup, List<T> lastGroup)
     {
-        var firstTypes = new HashSet<Type>(firstGroup.Select(s => s!.GetType()));
-        var middleTypes = new HashSet<Type>(middleGroup.Select(s => s!.GetType()));
-        var lastTypes = new HashSet<Type>(lastGroup.Select(s => s!.GetType()));
+        var firstTypes = ToTypeSet(firstGroup);
+        var middleTypes = ToTypeSet(middleGroup);
+        var lastTypes = ToTypeSet(lastGroup);
 
         ValidateFirstGroupDependencies(firstGroup, middleTypes, lastTypes);
         ValidateLastGroupDependencies(lastGroup, middleTypes, firstTypes);
+
+        static HashSet<Type> ToTypeSet<TService>(List<TService> services)
+        {
+            var set = new HashSet<Type>();
+            foreach (var service in services)
+            {
+                set.Add(service!.GetType());
+            }
+            return set;
+        }
     }
 
     private static void ValidateFirstGroupDependencies<T>(

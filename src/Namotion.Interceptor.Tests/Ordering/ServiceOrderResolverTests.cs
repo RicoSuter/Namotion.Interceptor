@@ -146,6 +146,42 @@ public class ServiceOrderResolverTests
         Assert.Same(serviceBeforeA, result[0]);
     }
 
+    [Fact]
+    public void MultipleRunsBeforeAttributes_OrdersCorrectly()
+    {
+        // Arrange: ServiceBeforeAAndB has two [RunsBefore] attributes
+        var serviceA = new ServiceA();
+        var serviceB = new ServiceB();
+        var serviceBeforeAAndB = new ServiceBeforeAAndB();
+        var services = new List<object> { serviceA, serviceB, serviceBeforeAAndB };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert: ServiceBeforeAAndB should come first
+        Assert.Equal(3, result.Length);
+        Assert.Same(serviceBeforeAAndB, result[0]);
+    }
+
+    [Fact]
+    public void CombinedRunsBeforeAndRunsAfter_OrdersCorrectly()
+    {
+        // Arrange: ServiceBetweenAAndC runs after A and before C
+        var serviceA = new ServiceA();
+        var serviceC = new ServiceC();
+        var serviceBetween = new ServiceBetweenAAndC();
+        var services = new List<object> { serviceC, serviceBetween, serviceA };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert: A -> Between -> C
+        Assert.Equal(3, result.Length);
+        Assert.Same(serviceA, result[0]);
+        Assert.Same(serviceBetween, result[1]);
+        Assert.Same(serviceC, result[2]);
+    }
+
     #endregion
 
     #region RunsFirst/RunsLast
@@ -305,6 +341,14 @@ public class ServiceOrderResolverTests
 
     [RunsAfter(typeof(ServiceA))]
     private class ServiceAfterA { }
+
+    [RunsBefore(typeof(ServiceA))]
+    [RunsBefore(typeof(ServiceB))]
+    private class ServiceBeforeAAndB { }
+
+    [RunsAfter(typeof(ServiceA))]
+    [RunsBefore(typeof(ServiceC))]
+    private class ServiceBetweenAAndC { }
 
     // Transitive chain: ChainStart -> ChainMiddle -> ChainEnd
     [RunsBefore(typeof(ChainMiddle))]
