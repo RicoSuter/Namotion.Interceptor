@@ -1,0 +1,44 @@
+@using HomeBlaze.Abstractions.Services
+
+<MudDialog>
+    <DialogContent>
+        @if (!string.IsNullOrEmpty(Operation?.Description))
+        {
+            <MudText Typo="Typo.body1">@Operation.Description</MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.body1">Are you sure you want to execute this operation?</MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Execute">Execute</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter] public SubjectMethodInfo? Operation { get; set; }
+
+    private void Cancel() => MudDialog?.Cancel();
+
+    private void Execute() => MudDialog?.Close(DialogResult.Ok(true));
+
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, SubjectMethodInfo operation)
+    {
+        var parameters = new DialogParameters<MethodConfirmationDialog>
+        {
+            { x => x.Operation, operation }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.ExtraSmall,
+            FullWidth = true
+        };
+
+        return dialogService.ShowAsync<MethodConfirmationDialog>($"Confirm: {operation.Title}", parameters, options);
+    }
+}

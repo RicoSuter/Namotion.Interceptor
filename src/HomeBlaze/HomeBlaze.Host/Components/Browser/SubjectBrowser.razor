@@ -1,9 +1,10 @@
-@using System.Collections
-
 @inherits HomeBlazorComponentBase
+
+@using HomeBlaze.Storage.Abstractions
 
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
+@inject IDialogService DialogService
 
 @implements IDisposable
 @implements IAsyncDisposable
@@ -13,26 +14,28 @@
     <MudSpacer />
 </MudStack>
 
-<div id="scrollContainer" style="height: calc(100% - 48px); width: 100%; overflow-x: auto; overflow-y: hidden; display: flex; padding: 0 16px 16px 16px;">
+<div id="scrollContainer" style="height: calc(100vh - 130px); width: 100%; overflow-x: auto; overflow-y: hidden; display: flex;">
     @for (var i = 0; i < _panes.Count; i++)
     {
         var pane = _panes[i];
         var isFirst = i == 0;
         var selectedChild = i < _panes.Count - 1 ? _panes[i + 1].Subject : null;
 
-        <MudPaper @key="pane.Subject" Width="@((PaneWidth - 16) + "px")"
-                  Class="mr-4"
-                  Style="@($"min-width: {PaneWidth - 16}px; flex-shrink: 0; height: 100%; display: flex; flex-direction: column;")">
-            <SubjectPropertyPanel @key="pane.Subject"
-                Subject="@pane.Subject"
-                SubjectRegistry="@_subjectRegistry"
-                ObjectPath="@pane.ObjectPath"
-                SelectedChild="@selectedChild"
-                CanClose="@(!isFirst)"
-                OnPropertyClick="@((args) => OnPropertyClick(pane, args.PropertyName, args.Index, args.Subject))"
-                OnClose="@(() => OnPaneClose(pane))"
-                OnDelete="@(() => OnPaneDelete(pane))" />
-        </MudPaper>
+        <div style="display: flex; flex-direction: column;" class="pb-4">
+            <MudPaper @key="pane.Subject" Width="@((PaneWidth - 16) + "px")"
+                      Class="mr-4"
+                      Style="@($"min-width: {PaneWidth - 16}px; flex-shrink: 0; height: 100%;")">
+                <SubjectPropertyPanel @key="pane.Subject"
+                                      Subject="@pane.Subject"
+                                      SubjectRegistry="@_subjectRegistry"
+                                      ObjectPath="@pane.ObjectPath"
+                                      SelectedChild="@selectedChild"
+                                      CanClose="@(!isFirst)"
+                                      OnPropertyClick="@((args) => OnPropertyClick(pane, args.PropertyName, args.Index, args.Subject))"
+                                      OnClose="@(() => OnPaneClose(pane))"
+                                      OnDelete="@(() => OnPaneDelete(pane))" />
+            </MudPaper>
+        </div>
     }
 </div>
 
@@ -133,6 +136,7 @@
         if (string.IsNullOrEmpty(Path))
             return;
 
+        // Use RoutePathResolver to navigate the path and build panes
         var pathSegments = Path.Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Select(Uri.UnescapeDataString)
             .ToArray();
@@ -140,91 +144,59 @@
         IInterceptorSubject currentSubject = Root;
         var currentPathParts = new List<string>();
         var currentObjectPath = "Root";
-        RegisteredSubjectProperty? pendingProperty = null;
+        var i = 0;
 
-        foreach (var segment in pathSegments)
+        while (i < pathSegments.Length)
         {
-            if (pendingProperty == null)
-            {
-                // Expecting a property name
-                var registered = _subjectRegistry?.TryGetRegisteredSubject(currentSubject);
+            var propertyName = pathSegments[i++];
+            var registered = currentSubject.TryGetRegisteredSubject();
+            var property = registered?.TryGetProperty(propertyName);
 
-                var property = registered?.TryGetProperty(segment);
-                if (property is not { HasChildSubjects: true })
+            if (property == null || !property.HasChildSubjects)
+                break;
+
+            currentPathParts.Add(propertyName);
+
+            // Check for collections/dictionaries BEFORE subject references
+            // because IDictionary<string, IInterceptorSubject> is an interface (IsSubjectReference would be true)
+            // but it's actually a dictionary of subjects, not a single subject reference
+            if (property.IsSubjectDictionary || property.IsSubjectCollection)
+            {
+                // Collection/Dictionary - next segment is the index/key
+                if (i >= pathSegments.Length)
                     break;
 
-                currentPathParts.Add(segment);
-
-                // If it's a single subject reference, navigate directly
-                if (property.IsSubjectReference)
-                {
-                    if (property.GetValue() is not IInterceptorSubject child)
-                        break;
-
-                    currentObjectPath = $"{currentObjectPath}.{segment}";
-                    var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
-                    _breadcrumbs.Add(new BreadcrumbItem(segment, breadcrumbPath));
-                    _panes.Add(new SubjectPane { Subject = child, DisplayName = segment, ObjectPath = currentObjectPath, PropertyName = segment, Index = null });
-                    currentSubject = child;
-                }
-                else
-                {
-                    // Collection or dictionary - next segment will be the index/key
-                    pendingProperty = property;
-                }
-            }
-            else
-            {
-                // Expecting an index/key for the pending property
-                var child = FindChildByIndex(pendingProperty, segment);
+                var indexStr = pathSegments[i++];
+                var child = SubjectPathResolverExtensions.FindChildByIndex(property, indexStr);
                 if (child == null)
                     break;
 
-                currentPathParts.Add(segment);
-                currentObjectPath = $"{currentObjectPath}.{pendingProperty.Name}[{segment}]";
+                currentPathParts.Add(indexStr);
+                currentObjectPath = $"{currentObjectPath}.{propertyName}[{indexStr}]";
                 var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
-                var displayName = $"{pendingProperty.Name}[{segment}]";
+                var displayName = $"{propertyName}[{indexStr}]";
                 _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, ObjectPath = currentObjectPath, PropertyName = pendingProperty.Name, Index = segment });
+                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, ObjectPath = currentObjectPath, PropertyName = propertyName, Index = indexStr });
                 currentSubject = child;
-                pendingProperty = null;
             }
-        }
-    }
-
-    private IInterceptorSubject? FindChildByIndex(RegisteredSubjectProperty property, string indexStr)
-    {
-        // Get the property value directly instead of using cached registry children
-        var value = property.GetValue();
-        if (value == null)
-            return null;
-
-        // Handle Dictionary<string, IInterceptorSubject>
-        if (value is IDictionary dictionary)
-        {
-            foreach (DictionaryEntry entry in dictionary)
+            else if (property.IsSubjectReference)
             {
-                var key = entry.Key?.ToString();
-                if (key == indexStr && entry.Value is IInterceptorSubject subject)
-                    return subject;
-            }
-        }
-        // Handle List/Array with numeric index
-        else if (value is IEnumerable enumerable and not string)
-        {
-            if (int.TryParse(indexStr, out var index))
-            {
-                var i = 0;
-                foreach (var item in enumerable)
-                {
-                    if (i == index && item is IInterceptorSubject subject)
-                        return subject;
-                    i++;
-                }
-            }
-        }
+                // Direct subject property
+                if (property.GetValue() is not IInterceptorSubject child)
+                    break;
 
-        return null;
+                currentObjectPath = $"{currentObjectPath}.{propertyName}";
+                var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
+                _breadcrumbs.Add(new BreadcrumbItem(propertyName, breadcrumbPath));
+                _panes.Add(new SubjectPane { Subject = child, DisplayName = propertyName, ObjectPath = currentObjectPath, PropertyName = propertyName, Index = null });
+                currentSubject = child;
+            }
+            else
+            {
+                // Unknown property type with children - shouldn't happen
+                break;
+            }
+        }
     }
 
     private void OnPropertyClick(SubjectPane clickedPane, string propertyName, object? index, IInterceptorSubject subject)
@@ -278,9 +250,44 @@
 
     private async Task OnPaneDelete(SubjectPane pane)
     {
-        // TODO: Implement delete functionality
-        // This would remove the subject from its parent collection
-        await Task.CompletedTask;
+        if (pane.Subject is not IStorageFile storageFile)
+            return;
+
+        // Show confirmation dialog
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete File",
+            $"Are you sure you want to delete '{storageFile.Name}'?",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed != true)
+            return;
+
+        try
+        {
+            // Delete the file from storage
+            await storageFile.Storage.DeleteBlobAsync(storageFile.FullPath, CancellationToken.None);
+
+            // Close this pane and any after it
+            var paneIndex = _panes.IndexOf(pane);
+            if (paneIndex > 0)
+            {
+                while (_panes.Count > paneIndex)
+                {
+                    _panes.RemoveAt(_panes.Count - 1);
+                }
+
+                UpdateUrl();
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            await DialogService.ShowMessageBox(
+                "Delete Failed",
+                $"Failed to delete file: {ex.Message}",
+                yesText: "OK");
+        }
     }
 
     private void UpdateUrl()

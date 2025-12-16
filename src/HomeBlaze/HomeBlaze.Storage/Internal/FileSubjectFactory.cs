@@ -1,8 +1,8 @@
 using FluentStorage.Blobs;
-using HomeBlaze.Abstractions;
-using HomeBlaze.Abstractions.Storage;
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
@@ -16,15 +16,18 @@ internal sealed class FileSubjectFactory
 {
     private readonly SubjectTypeRegistry _typeRegistry;
     private readonly ConfigurableSubjectSerializer _serializer;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger? _logger;
 
     public FileSubjectFactory(
         SubjectTypeRegistry typeRegistry,
         ConfigurableSubjectSerializer serializer,
+        IServiceProvider serviceProvider,
         ILogger? logger = null)
     {
         _typeRegistry = typeRegistry;
         _serializer = serializer;
+        _serviceProvider = serviceProvider;
         _logger = logger;
     }
 
@@ -48,11 +51,12 @@ internal sealed class FileSubjectFactory
         if (mappedType != null)
         {
             var subject = CreateFileSubject(mappedType, storage, blob.FullPath);
-            SetFileMetadata(subject, blob);
+            UpdateFileMetadata(subject, blob);
 
-            if (subject is MarkdownFile markdownFile)
+            // Eager load content for storage files
+            if (subject is IStorageFile storageFile)
             {
-                await LoadMarkdownTitleAsync(client, markdownFile, blob, cancellationToken);
+                await storageFile.OnFileChangedAsync(cancellationToken);
             }
 
             return subject;
@@ -60,22 +64,9 @@ internal sealed class FileSubjectFactory
 
         // Default to GenericFile
         var genericFile = new GenericFile(storage, blob.FullPath);
-        SetFileMetadata(genericFile, blob);
+        UpdateFileMetadata(genericFile, blob);
+        await genericFile.OnFileChangedAsync(cancellationToken);
         return genericFile;
-    }
-
-    /// <summary>
-    /// Updates an existing subject's configuration properties from JSON and calls ApplyConfigurationAsync.
-    /// </summary>
-    public async Task UpdateFromJsonAsync(
-        IInterceptorSubject subject, string json, CancellationToken cancellationToken)
-    {
-        _serializer.UpdateConfiguration(subject, json);
-
-        if (subject is IConfigurableSubject configurable)
-        {
-            await configurable.ApplyConfigurationAsync(cancellationToken);
-        }
     }
 
     /// <summary>
@@ -108,33 +99,20 @@ internal sealed class FileSubjectFactory
         return new JsonFile(storage, blob.FullPath);
     }
 
-    private async Task LoadMarkdownTitleAsync(
-        IBlobStorage client,
-        MarkdownFile markdownFile,
-        Blob blob,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var content = await client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
-            markdownFile.Content = content;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to load markdown content for: {Path}", blob.FullPath);
-        }
-    }
-
+    /// <summary>
+    /// Creates a file subject using ActivatorUtilities for DI-aware construction.
+    /// Convention: File constructors should be (IStorageContainer storage, string fullPath, /* DI services... */)
+    /// </summary>
     private IInterceptorSubject? CreateFileSubject(Type type, IStorageContainer storage, string blobPath)
     {
         try
         {
-            // Try constructor with (IStorageContainer, string)
-            var ctor = type.GetConstructor([typeof(IStorageContainer), typeof(string)]);
-            if (ctor != null)
-            {
-                return (IInterceptorSubject)ctor.Invoke([storage, blobPath]);
-            }
+            // ActivatorUtilities resolves DI services + passes explicit args
+            return (IInterceptorSubject)ActivatorUtilities.CreateInstance(
+                _serviceProvider,
+                type,
+                storage,   // explicit arg
+                blobPath); // explicit arg
         }
         catch (Exception ex)
         {
@@ -144,7 +122,7 @@ internal sealed class FileSubjectFactory
         return null;
     }
 
-    private static void SetFileMetadata(IInterceptorSubject? subject, Blob blob)
+    private static void UpdateFileMetadata(IInterceptorSubject? subject, Blob blob)
     {
         if (subject is IStorageFile file)
         {

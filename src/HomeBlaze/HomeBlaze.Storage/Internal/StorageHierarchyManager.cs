@@ -1,4 +1,4 @@
-using HomeBlaze.Abstractions.Storage;
+using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
@@ -32,7 +32,10 @@ internal sealed class StorageHierarchyManager
             return;
         }
 
+        // Track folders we traverse so we can reassign Children afterward
+        var foldersTraversed = new List<VirtualFolder>();
         var current = children;
+
         for (int i = 0; i < segments.Length - 1; i++)
         {
             var folderName = segments[i];
@@ -40,12 +43,14 @@ internal sealed class StorageHierarchyManager
             if (!current.TryGetValue(folderName, out var existing))
             {
                 var relativePath = string.Join("/", segments.Take(i + 1)) + "/";
-                var folder = new VirtualFolder(context, storage, relativePath);
+                var folder = new VirtualFolder(storage, relativePath);
                 current[folderName] = folder;
+                foldersTraversed.Add(folder);
                 current = folder.Children;
             }
             else if (existing is VirtualFolder vf)
             {
+                foldersTraversed.Add(vf);
                 current = vf.Children;
             }
             else
@@ -55,7 +60,14 @@ internal sealed class StorageHierarchyManager
             }
         }
 
+        // Add the subject to the leaf folder's children
         current[segments[^1]] = subject;
+
+        // Reassign Children for all traversed folders (triggers change tracking)
+        foreach (var folder in foldersTraversed.AsEnumerable().Reverse())
+        {
+            folder.Children = new Dictionary<string, IInterceptorSubject>(folder.Children);
+        }
     }
 
     public void RemoveFromHierarchy(string path, Dictionary<string, IInterceptorSubject> children)
@@ -69,16 +81,26 @@ internal sealed class StorageHierarchyManager
             return;
         }
 
-        // Navigate to parent folder
+        // Track folders we traverse so we can reassign Children afterward
+        var foldersTraversed = new List<VirtualFolder>();
         var current = children;
+
         for (int i = 0; i < segments.Length - 1; i++)
         {
             if (!current.TryGetValue(segments[i], out var folder) || folder is not VirtualFolder vf)
                 return;
+            foldersTraversed.Add(vf);
             current = vf.Children;
         }
 
+        // Remove the subject from the leaf folder's children
         current.Remove(segments[^1]);
+
+        // Reassign Children for all traversed folders (triggers change tracking)
+        foreach (var folder in foldersTraversed.AsEnumerable().Reverse())
+        {
+            folder.Children = new Dictionary<string, IInterceptorSubject>(folder.Children);
+        }
     }
 
     private static string NormalizePath(string path)

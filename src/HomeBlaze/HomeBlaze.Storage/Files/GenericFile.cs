@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Abstractions.Storage;
+using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Files;
@@ -24,19 +25,19 @@ public partial class GenericFile : IStorageFile, ITitleProvider, IIconProvider
     /// <summary>
     /// File extension including the dot.
     /// </summary>
-    [State(Order = 1)]
+    [State(Position = 1)]
     public partial string Extension { get; set; }
 
     /// <summary>
     /// File size in bytes.
     /// </summary>
-    [State("Size", Order = 2)]
+    [State("Size", Position = 2)]
     public partial long FileSize { get; set; }
 
     /// <summary>
     /// Last modification time (UTC).
     /// </summary>
-    [State("Modified", Order = 3)]
+    [State("Modified", Position = 3)]
     public partial DateTime LastModified { get; set; }
 
     public GenericFile(IStorageContainer storage, string fullPath)
@@ -54,7 +55,7 @@ public partial class GenericFile : IStorageFile, ITitleProvider, IIconProvider
     public Task WriteAsync(Stream content, CancellationToken cancellationToken)
         => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
 
-    public Task RefreshAsync(CancellationToken cancellationToken)
+    public Task OnFileChangedAsync(CancellationToken cancellationToken)
     {
         // Update metadata
         try

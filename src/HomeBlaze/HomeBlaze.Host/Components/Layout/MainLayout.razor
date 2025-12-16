@@ -1,6 +1,11 @@
-﻿@inherits LayoutComponentBase
+﻿@using HomeBlaze.Components.Abstractions.Pages
+
+@inherits LayoutComponentBase
 
 @inject DeveloperModeService DeveloperMode
+@inject RootManager RootManager
+@inject NavigationItemResolver NavigationResolver
+@inject NavigationManager NavigationManager
 
 @implements IDisposable
 
@@ -9,25 +14,41 @@
 <MudDialogProvider/>
 <MudSnackbarProvider/>
 
-<MudLayout>
-    <MudAppBar Elevation="1">
-        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@((e) => DrawerToggle())"/>
-        <MudText Typo="Typo.h5" Class="ml-3">HomeBlaze</MudText>
-        <MudSpacer/>
-        <MudIconButton Icon="@(DeveloperModeIcon)"
-                       Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
-                       OnClick="@DeveloperMode.Toggle"
-                       title="Toggle Developer Mode"/>
-        <MudIconButton Icon="@(DarkLightModeButtonIcon)" Color="Color.Inherit" OnClick="@DarkModeToggle"/>
-        <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" Edge="Edge.End"/>
-    </MudAppBar>
-    <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
-        <NavMenu/>
-    </MudDrawer>
-    <MudMainContent Class="pt-16 pa-4">
-        @Body
-    </MudMainContent>
-</MudLayout>
+<CascadingValue Value="@_isDarkMode" Name="IsDarkMode">
+    <MudLayout>
+        <MudAppBar Elevation="1">
+            <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
+                           OnClick="@(_ => DrawerToggle())"/>
+            @foreach (var item in GetAppBarItems(AppBarAlignment.Left))
+            {
+                <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                               Href="@item.PageUrl"
+                               Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
+                               title="@item.Title"/>
+            }
+            <MudSpacer/>
+            @foreach (var item in GetAppBarItems(AppBarAlignment.Right))
+            {
+                <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                               Href="@item.PageUrl"
+                               Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
+                               title="@item.Title"/>
+            }
+            <MudIconButton Icon="@(DeveloperModeIcon)"
+                           Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
+                           OnClick="@DeveloperMode.Toggle"
+                           title="Toggle Developer Mode"/>
+            <MudIconButton Icon="@(DarkLightModeButtonIcon)" Color="Color.Inherit" OnClick="@DarkModeToggle"/>
+            <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" Edge="Edge.End"/>
+        </MudAppBar>
+        <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
+            <NavMenu/>
+        </MudDrawer>
+        <MudMainContent Class="pt-16 px-4 pt-4">
+            @Body
+        </MudMainContent>
+    </MudLayout>
+</CascadingValue>
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
@@ -38,12 +59,13 @@
 @code {
     private bool _drawerOpen = true;
     private bool _isDarkMode = true;
-    private MudTheme? _theme = null;
+    private MudTheme? _theme;
 
     protected override void OnInitialized()
     {
         base.OnInitialized();
-        DeveloperMode.OnChange += StateHasChanged;
+        DeveloperMode.OnChange += OnStateHasChanged;
+        NavigationManager.LocationChanged += OnLocationChanged;
 
         _theme = new()
         {
@@ -78,6 +100,32 @@
 
     public void Dispose()
     {
-        DeveloperMode.OnChange -= StateHasChanged;
+        DeveloperMode.OnChange -= OnStateHasChanged;
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+
+    private void OnStateHasChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private IEnumerable<NavigationItem> GetAppBarItems(AppBarAlignment alignment)
+    {
+        if (RootManager.Root == null)
+            return Enumerable.Empty<NavigationItem>();
+
+        return NavigationResolver.GetChildItems(RootManager.Root)
+            .Where(item => item.Location == NavigationLocation.AppBar && item.IsPage && item.Alignment == alignment);
+    }
+
+    private bool IsActive(NavigationItem item)
+    {
+        var currentPath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        return currentPath.Equals(item.PageUrl, StringComparison.OrdinalIgnoreCase);
     }
 }

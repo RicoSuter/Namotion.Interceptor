@@ -15,7 +15,7 @@ When the user invokes this command, follow these steps:
 
 ### 1. Build the Solution
 ```bash
-cd "C:\Users\rsute\GitHub\Namotion.Interceptor\src" && dotnet build Namotion.Interceptor.sln -c Release
+cd "C:\Users\rsute\GitHub\Namotion.Interceptor\src" && dotnet build Namotion.Interceptor.slnx -c Release
 ```
 
 ### 2. Start the Appropriate Server (in background)

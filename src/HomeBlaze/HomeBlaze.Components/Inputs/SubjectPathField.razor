@@ -1,0 +1,61 @@
+@inject IDialogService DialogService
+
+<MudTextField @bind-Value="Value"
+              Label="@Label"
+              Placeholder="@Placeholder"
+              Variant="@Variant"
+              Immediate="true"
+              Adornment="Adornment.End"
+              AdornmentIcon="@Icons.Material.Filled.Search"
+              OnAdornmentClick="OpenPickerDialogAsync"
+              Class="@Class"
+              data-testid="subject-path-field" />
+
+@code {
+    [Parameter]
+    public string? Value { get; set; }
+
+    [Parameter]
+    public EventCallback<string?> ValueChanged { get; set; }
+
+    [Parameter]
+    public string Label { get; set; } = "Path";
+
+    [Parameter]
+    public string Placeholder { get; set; } = "Enter path or click to browse";
+
+    [Parameter]
+    public Variant Variant { get; set; } = Variant.Text;
+
+    [Parameter]
+    public IDictionary<string, IInterceptorSubject>? LocalSubjects { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    private async Task OpenPickerDialogAsync()
+    {
+        var parameters = new DialogParameters<SubjectPathPickerDialog>
+        {
+            { x => x.SelectedPath, Value },
+            { x => x.LocalSubjects, LocalSubjects },
+            { x => x.Label, Label },
+            { x => x.Placeholder, Placeholder }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true
+        };
+
+        var dialog = await DialogService.ShowAsync<SubjectPathPickerDialog>("Select Path", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: string selectedPath })
+        {
+            Value = selectedPath;
+            await ValueChanged.InvokeAsync(Value);
+        }
+    }
+}

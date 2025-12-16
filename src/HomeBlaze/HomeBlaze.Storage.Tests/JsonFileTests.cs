@@ -1,4 +1,4 @@
-﻿using HomeBlaze.Abstractions.Storage;
+﻿using HomeBlaze.Storage.Abstractions;
 using Moq;
 
 namespace HomeBlaze.Storage.Tests;
