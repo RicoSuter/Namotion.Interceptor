@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Parent;
 public class ParentAccessDuringLifecycleTests
 {
     [Fact]
-    public void WhenComponentAttachedToSimulation_ThenParentsAreSetBeforeSubjectsOwnAttachSubject()
+    public void WhenComponentAttachedToSimulation_ThenParentsAndRootAreAvailableDuringAttachSubject()
     {
         // Arrange: Create context with parent tracking
         var context = InterceptorSubjectContext
@@ -25,29 +25,10 @@ public class ParentAccessDuringLifecycleTests
         // Act: Attach component to simulation
         simulation.Component = component;
 
-        // Assert: Component should have found parents during its AttachSubject
+        // Assert: Component should have found parents and root during its AttachSubject
         Assert.Null(component.AttachException);
         Assert.NotNull(component.ParentsFoundDuringAttach);
         Assert.NotEmpty(component.ParentsFoundDuringAttach);
-    }
-
-    [Fact]
-    public void WhenComponentAttachedToSimulation_ThenRootCanBeFoundViaParentTraversal()
-    {
-        // Arrange: Create context with parent tracking
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithParents();
-
-        var simulation = new Simulation(context) { Name = "Root" };
-        var component = new Component { Name = "Child" };
-
-        // Act: Attach component to simulation
-        simulation.Component = component;
-
-        // Assert: Component should have found the root simulation during AttachSubject
-        Assert.Null(component.AttachException);
         Assert.NotNull(component.RootFoundDuringAttach);
         Assert.Same(simulation, component.RootFoundDuringAttach);
     }
