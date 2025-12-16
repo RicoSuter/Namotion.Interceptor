@@ -80,6 +80,14 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     [Configuration]
     public partial int? RetryTimeSeconds { get; set; }
 
+    /// <summary>
+    /// Whether the server is enabled and should auto-start on application startup.
+    /// When stopped manually, this is set to false to prevent auto-restart.
+    /// </summary>
+    [Configuration]
+    [State]
+    public partial bool IsEnabled { get; set; }
+
     // State properties (runtime only)
 
     /// <summary>
@@ -97,20 +105,28 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     // Operations
 
     /// <summary>
-    /// Starts the OPC UA server.
+    /// Starts the OPC UA server and enables auto-start on next application startup.
     /// </summary>
     [Operation(Title = "Start", Position = 1, Icon = "Start", RequiresConfirmation = true)]
-    public Task StartAsync() => StartServerAsync(CancellationToken.None);
+    public Task StartAsync()
+    {
+        IsEnabled = true;
+        return StartServerAsync(CancellationToken.None);
+    }
 
     [Derived]
     [PropertyAttribute("Start", KnownAttributes.IsEnabled)]
     public bool Start_IsEnabled => Status == ServerStatus.Stopped || Status == ServerStatus.Error;
 
     /// <summary>
-    /// Stops the OPC UA server.
+    /// Stops the OPC UA server and disables auto-start on next application startup.
     /// </summary>
     [Operation(Title = "Stop", Position = 2, Icon = "Stop", RequiresConfirmation = true)]
-    public Task StopAsync() => StopServerAsync(CancellationToken.None);
+    public Task StopAsync()
+    {
+        IsEnabled = false;
+        return StopServerAsync(CancellationToken.None);
+    }
 
     [Derived]
     [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
@@ -134,11 +150,16 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
         Name = string.Empty;
         Path = string.Empty;
         Status = ServerStatus.Stopped;
+        IsEnabled = true;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await StartServerAsync(stoppingToken);
+        // Only auto-start if enabled (respects last persisted state)
+        if (IsEnabled)
+        {
+            await StartServerAsync(stoppingToken);
+        }
 
         // Keep running until cancelled
         try
