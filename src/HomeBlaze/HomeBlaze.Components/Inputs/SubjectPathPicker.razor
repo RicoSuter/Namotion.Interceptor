@@ -1,0 +1,438 @@
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Services
+@using Microsoft.AspNetCore.Components.Web
+@using Namotion.Interceptor.Registry.Abstractions
+
+@inject RootManager RootManager
+@inject SubjectPathResolver PathResolver
+
+<div class="subject-path-picker" data-testid="subject-path-picker">
+    <MudTextField @bind-Value="Value"
+                  Label="@Label"
+                  Placeholder="@Placeholder"
+                  Variant="Variant.Outlined"
+                  Immediate="true"
+                  OnKeyUp="OnPathKeyUp" />
+
+    @if (_previewValue != null || _isValidPath)
+    {
+        <MudText Typo="Typo.caption" Class="mt-1 mb-2">
+            Preview: @(_previewValue?.ToString() ?? "(subject)")
+        </MudText>
+    }
+
+    <MudDivider Class="my-2" />
+
+    <div class="subject-path-picker-tree">
+        <MudTreeView T="PathTreeItem"
+                     Items="@_treeItems"
+                     SelectionMode="SelectionMode.SingleSelection"
+                     @bind-SelectedValue="_selectedItem"
+                     @bind-SelectedValue:after="OnSelectedValueChangedAsync"
+                     Hover="true"
+                     Dense="true">
+            <ItemTemplate>
+                <MudTreeViewItem T="PathTreeItem"
+                                 Value="@context.Value"
+                                 Items="@context.Children"
+                                 Text="@context.Value?.DisplayName"
+                                 Icon="@context.Value?.Icon"
+                                 Expanded="@context.Expanded"
+                                 ExpandedChanged="@(expanded => OnExpandedChanged(context, expanded))"
+                                 Style="@(context.Value?.IsEnabled == false ? "opacity: 0.5;" : "")" />
+            </ItemTemplate>
+        </MudTreeView>
+    </div>
+</div>
+
+<style>
+    .subject-path-picker-tree {
+        max-height: 300px;
+        overflow-y: auto;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public string? Value { get; set; }
+
+    [Parameter]
+    public EventCallback<string?> ValueChanged { get; set; }
+
+    [Parameter]
+    public string Label { get; set; } = "Path";
+
+    [Parameter]
+    public string Placeholder { get; set; } = "Enter path (e.g., motor.Temperature)";
+
+    [Parameter]
+    public IDictionary<string, IInterceptorSubject>? LocalSubjects { get; set; }
+
+    private readonly List<TreeItemData<PathTreeItem>> _treeItems = new();
+
+    private PathTreeItem? _selectedItem;
+    private object? _previewValue;
+    private bool _isValidPath;
+
+    protected override void OnInitialized()
+    {
+        BuildTreeItems();
+    }
+
+    protected override void OnParametersSet()
+    {
+        UpdatePreview();
+        ExpandToSelectedPath();
+    }
+
+    private void BuildTreeItems()
+    {
+        _treeItems.Clear();
+
+        // Add local subjects
+        if (LocalSubjects is { Count: > 0 })
+        {
+            foreach (var kvp in LocalSubjects)
+            {
+                _treeItems.Add(CreateSubjectTreeItem(kvp.Value, kvp.Key, kvp.Key));
+            }
+        }
+
+        // Add Root
+        if (RootManager.Root != null)
+        {
+            var rootItem = CreateSubjectTreeItem(RootManager.Root, "Root", "Root");
+            rootItem.Value!.Icon = Icons.Material.Filled.Home;
+            _treeItems.Add(rootItem);
+        }
+    }
+
+    private TreeItemData<PathTreeItem> CreateSubjectTreeItem(IInterceptorSubject subject, string displayName, string path)
+    {
+        var isExpandable = HasExpandableProperties(subject);
+
+        var pathItem = new PathTreeItem
+        {
+            DisplayName = displayName,
+            Path = path,
+            Icon = Icons.Material.Filled.AccountTree,
+            Subject = subject,
+            IsExpandable = isExpandable
+        };
+
+        var treeItem = new TreeItemData<PathTreeItem>
+        {
+            Value = pathItem,
+            Expanded = false,
+            Expandable = isExpandable,
+            // Add placeholder child so MudBlazor shows expand arrow
+            Children = isExpandable ? CreatePlaceholderChildren() : null
+        };
+
+        return treeItem;
+    }
+
+    private List<TreeItemData<PathTreeItem>> CreatePlaceholderChildren()
+    {
+        return
+        [
+            new TreeItemData<PathTreeItem>
+            {
+                Value = new PathTreeItem
+                {
+                    DisplayName = "Loading...",
+                    Path = "",
+                    Icon = Icons.Material.Filled.HourglassEmpty,
+                    IsPlaceholder = true
+                }
+            }
+        ];
+    }
+
+    private bool HasPlaceholderChild(TreeItemData<PathTreeItem> treeItem)
+    {
+        return treeItem.Children is [{ Value.IsPlaceholder: true }];
+    }
+
+    private void OnExpandedChanged(TreeItemData<PathTreeItem> treeItem, bool expanded)
+    {
+        treeItem.Expanded = expanded;
+
+        if (expanded && treeItem.Value != null && HasPlaceholderChild(treeItem))
+        {
+            // Load children lazily, replacing placeholder
+            var children = LoadChildren(treeItem.Value);
+            treeItem.Children = children;
+        }
+
+        StateHasChanged();
+    }
+
+    private List<TreeItemData<PathTreeItem>> LoadChildren(PathTreeItem parent)
+    {
+        var children = new List<TreeItemData<PathTreeItem>>();
+
+        if (parent.Property is { Children.Length: > 0 })
+        {
+            // Check collection/dictionary first (before reference)
+            if (parent.Property.IsSubjectDictionary || parent.Property.IsSubjectCollection)
+            {
+                // For collection/dictionary, show child subjects by index
+                foreach (var child in parent.Property.Children)
+                {
+                    var childPath = $"{parent.Path}[{child.Index}]";
+                    var childDisplayName = $"[{child.Index}]";
+
+                    children.Add(CreateSubjectTreeItem(child.Subject, childDisplayName, childPath));
+                }
+            }
+            else if (parent.Property.IsSubjectReference)
+            {
+                // For a reference, directly show the child subject's properties
+                var child = parent.Property.Children[0];
+                return LoadPropertiesFromSubject(child.Subject, parent.Path);
+            }
+        }
+        else if (parent.Subject != null)
+        {
+            return LoadPropertiesFromSubject(parent.Subject, parent.Path);
+        }
+
+        return children;
+    }
+
+    private List<TreeItemData<PathTreeItem>> LoadPropertiesFromSubject(IInterceptorSubject subject, string basePath)
+    {
+        var children = new List<TreeItemData<PathTreeItem>>();
+
+        var registry = subject.Context.TryGetService<ISubjectRegistry>();
+        var registered = registry?.TryGetRegisteredSubject(subject);
+        if (registered != null)
+        {
+            foreach (var property in registered.Properties.OrderBy(p => p.GetDisplayPosition()))
+            {
+                // Skip internal properties
+                if (property.Name.StartsWith("_"))
+                    continue;
+
+                // Determine if property has state attribute
+                var hasState = property.GetStateAttribute() != null;
+
+                // Determine if this property is expandable
+                var isExpandable = false;
+                if (property.IsSubjectDictionary || property.IsSubjectCollection)
+                {
+                    isExpandable = property.Children.Length > 0;
+                }
+                else if (property is { IsSubjectReference: true, Children.Length: > 0 })
+                {
+                    isExpandable = HasExpandableProperties(property.Children[0].Subject);
+                }
+
+                // Include if: has State attribute OR is expandable
+                if (!hasState && !isExpandable)
+                    continue;
+
+                var propertyPath = $"{basePath}.{property.Name}";
+
+                // Check IsEnabled for visual styling
+                var isEnabledAttr = property.TryGetAttribute(KnownAttributes.IsEnabled);
+                var isEnabled = isEnabledAttr?.GetValue() as bool? ?? true;
+
+                var pathItem = new PathTreeItem
+                {
+                    DisplayName = property.Name,
+                    Path = propertyPath,
+                    Icon = GetPropertyIcon(property),
+                    Property = property,
+                    IsExpandable = isExpandable,
+                    IsEnabled = isEnabled
+                };
+
+                children.Add(new TreeItemData<PathTreeItem>
+                {
+                    Value = pathItem,
+                    Expanded = false,
+                    Expandable = isExpandable,
+                    Children = isExpandable ? CreatePlaceholderChildren() : null
+                });
+            }
+        }
+
+        return children;
+    }
+
+    private void ExpandToSelectedPath()
+    {
+        if (string.IsNullOrEmpty(Value))
+            return;
+
+        // Try to expand tree nodes along the selected path
+        ExpandPath(_treeItems, Value);
+        StateHasChanged();
+    }
+
+    private bool ExpandPath(List<TreeItemData<PathTreeItem>>? items, string targetPath)
+    {
+        if (items == null)
+            return false;
+
+        foreach (var item in items)
+        {
+            if (item.Value == null)
+                continue;
+
+            var itemPath = item.Value.Path;
+
+            // Check if target path matches this item's path
+            if (targetPath.Equals(itemPath, StringComparison.OrdinalIgnoreCase))
+            {
+                _selectedItem = item.Value;
+                return true;
+            }
+
+            // Check if target path is under this item
+            if (targetPath.StartsWith(itemPath + ".", StringComparison.OrdinalIgnoreCase) ||
+                targetPath.StartsWith(itemPath + "[", StringComparison.OrdinalIgnoreCase))
+            {
+                // Expand this node
+                item.Expanded = true;
+
+                // Load children if not already loaded (replace placeholder)
+                if (item.Children == null || HasPlaceholderChild(item))
+                {
+                    item.Children = LoadChildren(item.Value);
+                }
+
+                // Recursively expand children
+                if (ExpandPath(item.Children, targetPath))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async Task OnSelectedValueChangedAsync()
+    {
+        if (_selectedItem != null)
+        {
+            Value = _selectedItem.Path;
+            await ValueChanged.InvokeAsync(Value);
+            UpdatePreview();
+        }
+    }
+
+    private bool HasExpandableProperties(IInterceptorSubject subject)
+    {
+        var registry = subject.Context.TryGetService<ISubjectRegistry>();
+        var registered = registry?.TryGetRegisteredSubject(subject);
+
+        if (registered == null)
+            return false;
+
+        return registered.Properties.Any(p =>
+        {
+            if (p.Name.StartsWith("_"))
+                return false;
+
+            // Has state attribute - will be shown
+            if (p.GetStateAttribute() != null)
+                return true;
+
+            // Collection/Dictionary with children - will be shown
+            if ((p.IsSubjectDictionary || p.IsSubjectCollection) && p.Children.Length > 0)
+                return true;
+
+            // Reference with expandable subject - will be shown
+            if (p is { IsSubjectReference: true, Children.Length: > 0 })
+                return HasExpandableProperties(p.Children[0].Subject);
+
+            return false;
+        });
+    }
+
+    private string GetPropertyIcon(RegisteredSubjectProperty property)
+    {
+        if (property.IsSubjectDictionary)
+            return Icons.Material.Filled.Dataset;
+        if (property.IsSubjectCollection)
+            return Icons.Material.Filled.List;
+        if (property.IsSubjectReference)
+            return Icons.Material.Filled.Link;
+        return Icons.Material.Filled.Label;
+    }
+
+    private async Task OnPathKeyUp(KeyboardEventArgs e)
+    {
+        await ValueChanged.InvokeAsync(Value);
+        UpdatePreview();
+        ExpandToSelectedPath();
+    }
+
+    private void UpdatePreview()
+    {
+        _previewValue = null;
+        _isValidPath = false;
+
+        if (string.IsNullOrWhiteSpace(Value))
+            return;
+
+        try
+        {
+            var value = PathResolver.ResolveValueFromRelativePath(Value, null, LocalSubjects);
+
+            if (value != null)
+            {
+                _previewValue = value;
+                _isValidPath = true;
+            }
+            else
+            {
+                IInterceptorSubject? subject = null;
+
+                if (LocalSubjects != null)
+                {
+                    var dotIndex = Value.IndexOf('.');
+                    if (dotIndex > 0)
+                    {
+                        var key = Value[..dotIndex];
+                        if (LocalSubjects.TryGetValue(key, out var local))
+                        {
+                            subject = PathResolver.ResolveSubject(Value[(dotIndex + 1)..], root: local);
+                        }
+                    }
+                    else if (LocalSubjects.TryGetValue(Value, out var directLocal))
+                    {
+                        subject = directLocal;
+                    }
+                }
+
+                subject ??= PathResolver.ResolveSubject(Value);
+
+                if (subject != null)
+                {
+                    _isValidPath = true;
+                }
+            }
+        }
+        catch
+        {
+            // Invalid path - ignore
+        }
+    }
+
+    private class PathTreeItem
+    {
+        public string DisplayName { get; set; } = "";
+        public string Path { get; set; } = "";
+        public string Icon { get; set; } = Icons.Material.Filled.Label;
+        public bool IsExpandable { get; set; }
+        public bool IsEnabled { get; set; } = true;
+        public bool IsPlaceholder { get; set; }
+
+        // For lazy loading
+        public IInterceptorSubject? Subject { get; set; }
+        public RegisteredSubjectProperty? Property { get; set; }
+    }
+}

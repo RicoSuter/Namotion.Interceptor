@@ -9,6 +9,7 @@
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.Servers.OpcUa\HomeBlaze.Servers.OpcUa.csproj" />
         <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Components\HomeBlaze.Components.csproj" />
         <PackageReference Include="MudBlazor" Version="8.*" />
     </ItemGroup>
 

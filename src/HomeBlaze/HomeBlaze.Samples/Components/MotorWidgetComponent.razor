@@ -24,9 +24,23 @@
 
     <div class="d-flex justify-space-between align-center mb-2">
         <MudText Typo="Typo.body2" Class="mud-text-secondary">Speed</MudText>
-        <MudText Typo="Typo.body1">
-            <strong>@MotorSubject?.CurrentSpeed</strong> / @MotorSubject?.TargetSpeed RPM
-        </MudText>
+        @if (IsEditing && MotorSubject != null)
+        {
+            <MudSlider T="int"
+                       Value="@MotorSubject.TargetSpeed"
+                       ValueChanged="@OnTargetSpeedChanged"
+                       Min="0"
+                       Max="3000"
+                       Step="100"
+                       ValueLabel="true"
+                       Style="min-width: 150px;" />
+        }
+        else
+        {
+            <MudText Typo="Typo.body1">
+                <strong>@MotorSubject?.CurrentSpeed</strong> / @MotorSubject?.TargetSpeed RPM
+            </MudText>
+        }
     </div>
 
     <MudProgressLinear Value="@GetSpeedPercentage()"
@@ -63,7 +77,18 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
     private Motor? MotorSubject => Subject as Motor;
+
+    private void OnTargetSpeedChanged(int newSpeed)
+    {
+        if (MotorSubject != null)
+        {
+            MotorSubject.TargetSpeed = newSpeed;
+        }
+    }
 
     private Color GetStatusColor()
     {

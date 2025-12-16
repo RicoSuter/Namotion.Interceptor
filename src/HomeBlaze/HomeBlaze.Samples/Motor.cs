@@ -1,7 +1,5 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Storage.Abstractions;
-using HomeBlaze.Storage.Abstractions.Attributes;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;

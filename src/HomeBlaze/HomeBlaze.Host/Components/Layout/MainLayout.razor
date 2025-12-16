@@ -1,5 +1,4 @@
 ﻿@using HomeBlaze.Components.Abstractions.Pages
-@using HomeBlaze.Host.Services.Navigation
 
 @inherits LayoutComponentBase
 
@@ -15,38 +14,41 @@
 <MudDialogProvider/>
 <MudSnackbarProvider/>
 
-<MudLayout>
-    <MudAppBar Elevation="1">
-        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@(_ => DrawerToggle())"/>
-        @foreach (var item in GetAppBarItems(AppBarAlignment.Left))
-        {
-            <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                           Href="@item.PageUrl"
-                           Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                           title="@item.Title" />
-        }
-        <MudSpacer/>
-        @foreach (var item in GetAppBarItems(AppBarAlignment.Right))
-        {
-            <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
-                           Href="@item.PageUrl"
-                           Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
-                           title="@item.Title" />
-        }
-        <MudIconButton Icon="@(DeveloperModeIcon)"
-                       Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
-                       OnClick="@DeveloperMode.Toggle"
-                       title="Toggle Developer Mode"/>
-        <MudIconButton Icon="@(DarkLightModeButtonIcon)" Color="Color.Inherit" OnClick="@DarkModeToggle"/>
-        <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" Edge="Edge.End"/>
-    </MudAppBar>
-    <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
-        <NavMenu/>
-    </MudDrawer>
-    <MudMainContent Class="pt-16 pl-4 pt-4">
-        @Body
-    </MudMainContent>
-</MudLayout>
+<CascadingValue Value="@_isDarkMode" Name="IsDarkMode">
+    <MudLayout>
+        <MudAppBar Elevation="1">
+            <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
+                           OnClick="@(_ => DrawerToggle())"/>
+            @foreach (var item in GetAppBarItems(AppBarAlignment.Left))
+            {
+                <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                               Href="@item.PageUrl"
+                               Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
+                               title="@item.Title"/>
+            }
+            <MudSpacer/>
+            @foreach (var item in GetAppBarItems(AppBarAlignment.Right))
+            {
+                <MudIconButton Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)"
+                               Href="@item.PageUrl"
+                               Color="@(IsActive(item) ? Color.Primary : Color.Inherit)"
+                               title="@item.Title"/>
+            }
+            <MudIconButton Icon="@(DeveloperModeIcon)"
+                           Color="@(DeveloperMode.IsEnabled ? Color.Success : Color.Inherit)"
+                           OnClick="@DeveloperMode.Toggle"
+                           title="Toggle Developer Mode"/>
+            <MudIconButton Icon="@(DarkLightModeButtonIcon)" Color="Color.Inherit" OnClick="@DarkModeToggle"/>
+            <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" Edge="Edge.End"/>
+        </MudAppBar>
+        <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
+            <NavMenu/>
+        </MudDrawer>
+        <MudMainContent Class="pt-16 px-4 pt-4">
+            @Body
+        </MudMainContent>
+    </MudLayout>
+</CascadingValue>
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.

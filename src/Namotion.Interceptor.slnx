@@ -33,6 +33,7 @@
     <Project Path="HomeBlaze/HomeBlaze.Servers.OpcUa/HomeBlaze.Servers.OpcUa.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Servers.OpcUa.Blazor/HomeBlaze.Servers.OpcUa.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Services/HomeBlaze.Services.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor.Tests/HomeBlaze.Storage.Blazor.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor/HomeBlaze.Storage.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage/HomeBlaze.Storage.csproj" />
     <Project Path="HomeBlaze/HomeBlaze/HomeBlaze.csproj" />

@@ -1,4 +1,3 @@
-@using HomeBlaze.Abstractions
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
 @using Namotion.Interceptor
@@ -62,7 +61,7 @@
     {
         if (MotorSubject != null)
         {
-            _name = MotorSubject.Name ?? string.Empty;
+            _name = MotorSubject.Name;
             _targetSpeed = MotorSubject.TargetSpeed;
             _simulationIntervalMs = (int)MotorSubject.SimulationInterval.TotalMilliseconds;
 
@@ -92,6 +91,7 @@
 
             IsDirtyChanged?.Invoke(false); // TODO: Move to base class (StorageFileBase with events, etc.)
         }
+
         return Task.CompletedTask;
     }
 }
