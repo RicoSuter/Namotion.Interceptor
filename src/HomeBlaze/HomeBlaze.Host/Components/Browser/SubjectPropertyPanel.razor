@@ -107,7 +107,7 @@
             @if (children.Length == 1)
             {
                 @* Single child - no expansion panel *@
-                <MudList T="object" SelectedValue="SelectedChild" Style="padding-top: 0; padding-bottom: 0">
+                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Style="padding-top: 0; padding-bottom: 0">
                     @{
                         var child = children[0];
                         var isSelected = child.Subject == SelectedChild;
@@ -116,11 +116,12 @@
                     <MudListItem Value="@child.Subject"
                                  OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
                                  Icon="@GetSubjectIcon(child.Subject)"
-                                 IconColor="Color.Default">
+                                 IconColor="@(isSelected ? Color.Primary : Color.Default)"
+                                 Class="@(isSelected ? "mud-primary-text" : "")">
                         @if (isSelected)
                         {
                             <div style="float: right; line-height: 0">
-                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                             </div>
                         }
                         <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
@@ -140,7 +141,7 @@
                         <MudChip T="string" Size="Size.Small" Color="Color.Dark">@children.Length</MudChip>
                     </TitleContent>
                     <ChildContent>
-                        <MudList T="object" SelectedValue="SelectedChild">
+                        <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary">
                             @foreach (var child in children)
                             {
                                 var isSelected = child.Subject == SelectedChild;
@@ -149,11 +150,12 @@
                                 <MudListItem Value="@child.Subject"
                                              OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
                                              Icon="@GetSubjectIcon(child.Subject)"
-                                             IconColor="Color.Default">
+                                             IconColor="@(isSelected ? Color.Primary : Color.Default)"
+                                             Class="@(isSelected ? "mud-primary-text" : "")">
                                     @if (isSelected)
                                     {
                                         <div style="float: right; line-height: 0">
-                                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                         </div>
                                     }
                                     <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>

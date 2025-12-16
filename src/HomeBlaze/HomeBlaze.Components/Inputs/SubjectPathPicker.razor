@@ -39,7 +39,7 @@
                                  Icon="@context.Value?.Icon"
                                  Expanded="@context.Expanded"
                                  ExpandedChanged="@(expanded => OnExpandedChanged(context, expanded))"
-                                 Style="@(context.Value?.IsEnabled == false ? "opacity: 0.5;" : "")" />
+                                 Style="@GetItemStyle(context.Value)" />
             </ItemTemplate>
         </MudTreeView>
     </div>
@@ -67,6 +67,12 @@
 
     [Parameter]
     public IDictionary<string, IInterceptorSubject>? LocalSubjects { get; set; }
+
+    [Parameter]
+    public Func<RegisteredSubjectProperty, bool>? IsPropertyVisible { get; set; }
+
+    [Parameter]
+    public Func<RegisteredSubjectProperty, bool>? CanSelectProperty { get; set; }
 
     private readonly List<TreeItemData<PathTreeItem>> _treeItems = new();
 
@@ -215,6 +221,10 @@
                 if (property.Name.StartsWith("_"))
                     continue;
 
+                // Apply visibility filter
+                if (IsPropertyVisible != null && !IsPropertyVisible(property))
+                    continue;
+
                 // Determine if property has state attribute
                 var hasState = property.GetStateAttribute() != null;
 
@@ -236,8 +246,11 @@
                 var propertyPath = $"{basePath}.{property.Name}";
 
                 // Check IsEnabled for visual styling
-                var isEnabledAttr = property.TryGetAttribute(KnownAttributes.IsEnabled);
-                var isEnabled = isEnabledAttr?.GetValue() as bool? ?? true;
+                var isEnabledAttribute = property.TryGetAttribute(KnownAttributes.IsEnabled);
+                var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
+
+                // Check if property can be selected
+                var canSelect = CanSelectProperty == null || CanSelectProperty(property);
 
                 var pathItem = new PathTreeItem
                 {
@@ -246,7 +259,8 @@
                     Icon = GetPropertyIcon(property),
                     Property = property,
                     IsExpandable = isExpandable,
-                    IsEnabled = isEnabled
+                    IsEnabled = isEnabled,
+                    CanSelect = canSelect
                 };
 
                 children.Add(new TreeItemData<PathTreeItem>
@@ -317,6 +331,12 @@
     {
         if (_selectedItem != null)
         {
+            // Prevent selection of non-selectable items
+            if (!_selectedItem.CanSelect)
+            {
+                return;
+            }
+
             Value = _selectedItem.Path;
             await ValueChanged.InvokeAsync(Value);
             UpdatePreview();
@@ -361,6 +381,22 @@
         if (property.IsSubjectReference)
             return Icons.Material.Filled.Link;
         return Icons.Material.Filled.Label;
+    }
+
+    private static string GetItemStyle(PathTreeItem? item)
+    {
+        if (item == null)
+            return "";
+
+        var styles = new List<string>();
+
+        if (!item.IsEnabled)
+            styles.Add("opacity: 0.5");
+
+        if (!item.CanSelect)
+            styles.Add("opacity: 0.6");
+
+        return string.Join("; ", styles);
     }
 
     private async Task OnPathKeyUp(KeyboardEventArgs e)
@@ -430,6 +466,7 @@
         public bool IsExpandable { get; set; }
         public bool IsEnabled { get; set; } = true;
         public bool IsPlaceholder { get; set; }
+        public bool CanSelect { get; set; } = true;
 
         // For lazy loading
         public IInterceptorSubject? Subject { get; set; }
