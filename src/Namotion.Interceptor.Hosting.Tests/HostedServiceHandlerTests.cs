@@ -24,7 +24,7 @@ public class HostedServiceHandlerTests
         });
         
         await Task.Delay(100);
-        Assert.Equal("Disposed", person!.FirstName);
+        Assert.Equal("Disposed", person.FirstName);
     }
     
     [Fact]
@@ -48,14 +48,14 @@ public class HostedServiceHandlerTests
         });
         
         await Task.Delay(100);
-        Assert.Equal("Disposed", person!.FirstName);
+        Assert.Equal("Disposed", person.FirstName);
     }
     
     [Fact]
     public async Task WhenHostedServiceIsDetachedFromSubject_ThenHostedServiceIsStopped()
     {
         // Arrange
-        Person person = null!;
+        Person person;
         await RunWithAppLifecycleAsync(async context =>
         {
             person = new Person(context);
@@ -68,7 +68,7 @@ public class HostedServiceHandlerTests
             
             Assert.Equal("John", person.FirstName);
             Assert.Equal("Doe", person.LastName);
-            Assert.Single(attachedHostedServices!);
+            Assert.Single(attachedHostedServices);
 
             // Act
             person.DetachHostedService(hostedService);
@@ -76,8 +76,8 @@ public class HostedServiceHandlerTests
 
             // Assert
             await Task.Delay(100);
-            Assert.Equal("Disposed", person!.FirstName);
-            Assert.Empty(attachedHostedServices!);
+            Assert.Equal("Disposed", person.FirstName);
+            Assert.Empty(attachedHostedServices);
         });
     }
 
@@ -85,17 +85,17 @@ public class HostedServiceHandlerTests
     public async Task WhenSubjectServiceIsDetached_ThenHostedServiceIsStopped()
     {
         // Arrange
-        Person person = null!;
+        Person person;
         await RunWithAppLifecycleAsync(async context =>
         {
             person = new Person(context);
-         
+
             var hostedService = new PersonBackgroundService(person);
             person.AttachHostedService(hostedService);
             var attachedHostedServices = person.GetAttachedHostedServices();
-            
+
             await Task.Delay(100);
-            Assert.Single(attachedHostedServices!);
+            Assert.Single(attachedHostedServices);
 
             // Act
             ((IInterceptorSubject)person).Context.RemoveFallbackContext(context);
@@ -103,9 +103,74 @@ public class HostedServiceHandlerTests
 
             // Assert
             await Task.Delay(100);
-            Assert.Equal("Disposed", person!.FirstName);
-            Assert.Empty(attachedHostedServices!); // the service has been stopped and
+            Assert.Equal("Disposed", person.FirstName);
+            Assert.Empty(attachedHostedServices); // the service has been stopped and
                                                    // removed from list (not allowed to restart again anyway)
+        });
+    }
+
+    [Fact]
+    public async Task WhenHostedServiceIsAttachedAsync_ThenServiceIsStartedAndAwaited()
+    {
+        // Arrange
+        Person person = null!;
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            person = new Person(context);
+            var hostedService = new PersonBackgroundService(person);
+
+            // Act - AttachHostedServiceAsync should wait for StartAsync to complete
+            await person.AttachHostedServiceAsync(hostedService, CancellationToken.None);
+
+            // Assert - Service should be running immediately after await returns
+            Assert.Equal("John", person.FirstName);
+            Assert.Equal("Doe", person.LastName);
+            Assert.Single(person.GetAttachedHostedServices());
+        });
+
+        await Task.Delay(100);
+        Assert.Equal("Disposed", person!.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenHostedServiceIsDetachedAsync_ThenServiceIsStoppedAndAwaited()
+    {
+        // Arrange
+        Person person = null!;
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            person = new Person(context);
+            var hostedService = new PersonBackgroundService(person);
+
+            // Start the service
+            await person.AttachHostedServiceAsync(hostedService, CancellationToken.None);
+            Assert.Equal("John", person.FirstName);
+
+            // Act - DetachHostedServiceAsync should wait for StopAsync to complete
+            await person.DetachHostedServiceAsync(hostedService, CancellationToken.None);
+
+            // Assert - Service should be stopped immediately after await returns
+            Assert.Equal("Disposed", person.FirstName);
+            Assert.Empty(person.GetAttachedHostedServices());
+        });
+    }
+
+    [Fact]
+    public async Task WhenAttachHostedServiceAsyncCalledTwice_ThenOnlyStartsOnce()
+    {
+        // Arrange
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var person = new Person(context);
+            var hostedService = new PersonBackgroundService(person);
+
+            // Act - Attach same service twice
+            await person.AttachHostedServiceAsync(hostedService, CancellationToken.None);
+            await person.AttachHostedServiceAsync(hostedService, CancellationToken.None);
+
+            // Assert - Should only be in the collection once
+            Assert.Single(person.GetAttachedHostedServices());
+            Assert.Equal("John", person.FirstName);
         });
     }
 

@@ -1,5 +1,5 @@
+using HomeBlaze.Abstractions.Services;
 using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor;
 
 namespace HomeBlaze.Services;
 
@@ -14,15 +14,19 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddHomeBlazeServices(this IServiceCollection services)
     {
-        services.AddSingleton<TypeProvider>();
-        services.AddSingleton<SubjectTypeRegistry>();
+        var typeProvider = new TypeProvider();
+        var typeRegistry = new SubjectTypeRegistry(typeProvider);
+        var context = SubjectContextFactory.Create(services);
+
+        services.AddSingleton(typeProvider);
+        services.AddSingleton(typeRegistry);
+        services.AddSingleton(context);
+
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
+        services.AddSingleton<SubjectPathResolver>();
+        services.AddSingleton<ISubjectMethodInvoker, SubjectMethodInvoker>();
         services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
-
-        // Create and register the context
-        var context = SubjectContextFactory.Create(services);
-        services.AddSingleton(context);
 
         return services;
     }

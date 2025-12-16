@@ -7,8 +7,12 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <Watch Remove="Data/**/*" />
+        <PackageReference Include="CodeBeam.MudBlazor.Extensions" Version="8.3.0" />
         <ProjectReference Include="..\HomeBlaze.Host\HomeBlaze.Host.csproj" />
         <ProjectReference Include="..\HomeBlaze.Samples\HomeBlaze.Samples.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Servers.OpcUa\HomeBlaze.Servers.OpcUa.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Servers.OpcUa.Blazor\HomeBlaze.Servers.OpcUa.Blazor.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <PackageReference Include="BlazorMonaco" Version="3.4.0" />
     </ItemGroup>

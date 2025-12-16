@@ -1,6 +1,5 @@
-@using HomeBlaze.Abstractions
-@using HomeBlaze.Abstractions.Attributes
-@using HomeBlaze.Abstractions.Components
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
 @using Namotion.Interceptor
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Motor))]
@@ -62,7 +61,7 @@
     {
         if (MotorSubject != null)
         {
-            _name = MotorSubject.Name ?? string.Empty;
+            _name = MotorSubject.Name;
             _targetSpeed = MotorSubject.TargetSpeed;
             _simulationIntervalMs = (int)MotorSubject.SimulationInterval.TotalMilliseconds;
 
@@ -78,7 +77,7 @@
         IsDirtyChanged?.Invoke(IsDirty);
     }
 
-    public Task SaveAsync()
+    public Task SaveAsync(CancellationToken cancellationToken)
     {
         if (MotorSubject != null && IsValid)
         {
@@ -90,8 +89,9 @@
             _originalTargetSpeed = _targetSpeed;
             _originalSimulationIntervalMs = _simulationIntervalMs;
 
-            IsDirtyChanged?.Invoke(false);
+            IsDirtyChanged?.Invoke(false); // TODO: Move to base class (StorageFileBase with events, etc.)
         }
+
         return Task.CompletedTask;
     }
 }
