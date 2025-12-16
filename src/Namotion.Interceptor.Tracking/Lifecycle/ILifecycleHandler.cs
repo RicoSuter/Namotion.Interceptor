@@ -14,6 +14,8 @@ public interface ILifecycleHandler
     public void AttachSubject(SubjectLifecycleChange change)
     {
     }
+    
+    // TODO: Change interface and call AttachSubject only for first attach and add a ReferenceCountChanged(change) with empty default implementation
 
     /// <summary>
     /// Called when a subject is detached from the subject tree.
