@@ -1,7 +1,9 @@
-﻿using Namotion.Interceptor.Tracking.Lifecycle;
+﻿using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Parent;
 
+[RunsBefore(typeof(ContextInheritanceHandler))]
 public class ParentTrackingHandler : ILifecycleHandler
 {
     public void AttachSubject(SubjectLifecycleChange change)

@@ -9,7 +9,7 @@ public class ContextInheritanceHandler : ILifecycleHandler
 {
     public void AttachSubject(SubjectLifecycleChange change)
     {
-        if (change.ReferenceCount == 1 && change.Property is not null)
+        if (change is { ReferenceCount: 1, Property: not null })
         {
             var parent = change.Property.Value.Subject;
             change.Subject.Context.AddFallbackContext(parent.Context);
