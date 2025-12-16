@@ -1,4 +1,4 @@
-using HomeBlaze.Host.Services.Components;
+using HomeBlaze.Services.Components;
 using HomeBlaze.Host.Services.Navigation;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,7 +22,6 @@ public static class ServiceCollectionExtensions
 
         // UI-specific services
         services.AddSingleton<SubjectComponentRegistry>();
-        services.AddSingleton<RoutePathResolver>();
         services.AddSingleton<NavigationItemResolver>();
         services.AddSingleton<DeveloperModeService>();
 

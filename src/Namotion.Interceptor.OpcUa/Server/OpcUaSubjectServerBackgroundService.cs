@@ -26,7 +26,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
     public OpcUaSubjectServerBackgroundService(
         IInterceptorSubject subject,
         OpcUaServerConfiguration configuration,
-        ILogger<OpcUaSubjectServerBackgroundService> logger)
+        ILogger logger)
     {
         _subject = subject;
         _context = subject.Context;

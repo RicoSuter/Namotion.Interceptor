@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Abstractions.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 

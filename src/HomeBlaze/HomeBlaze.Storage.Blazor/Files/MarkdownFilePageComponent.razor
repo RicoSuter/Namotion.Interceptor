@@ -1,9 +1,10 @@
-@using HomeBlaze.Abstractions.Attributes
-@using HomeBlaze.Abstractions.Components
-@using HomeBlaze.Storage
+@using System.Text
+@using System.Web
+@using HomeBlaze.Components
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Storage.Files
 @using HomeBlaze.Storage.Internal
-@using Markdig
 @using MudBlazor
 @using Namotion.Interceptor
 
@@ -11,16 +12,33 @@
 
 @implements ISubjectComponent
 
-<div class="markdown-content">
-    @if (IsLoading)
-    {
-        <MudProgressCircular Indeterminate="true" />
-    }
-    else
-    {
-        @((MarkupString)HtmlContent)
-    }
-</div>
+<CascadingValue Value="@IsEditing" Name="IsEditing">
+    <div class="markdown-content" style="position: relative;">
+        @if (IsLoading)
+        {
+            <MudProgressCircular Indeterminate="true" />
+        }
+        else
+        {
+            <div class="markdown-page-toolbar" style="position: absolute; top: 0.5rem; right: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+                <span style="font-size: 0.8rem; color: rgba(128,128,128,0.7);">
+                    @File?.LastModified.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                </span>
+            </div>
+            @foreach (var segment in GetRenderSegments())
+            {
+                @if (segment.Html != null)
+                {
+                    @((MarkupString)segment.Html)
+                }
+                else if (segment.Widget != null)
+                {
+                    <SubjectComponent Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
+                }
+            }
+        }
+    </div>
+</CascadingValue>
 
 <style>
     .markdown-content h1 { font-size: 2rem; font-weight: 500; margin: 1.5rem 0 1rem; }
@@ -44,21 +62,53 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
     private MarkdownFile? File => Subject as MarkdownFile;
 
     private bool IsLoading => File?.Content is null;
 
-    private string HtmlContent
-    {
-        get
-        {
-            var json = File?.Content;
-            var content = json is not null ? FrontmatterParser.GetContentAfterFrontmatter(json) : "Loading...";
-            return Markdown.ToHtml(content, Pipeline);
-        }
-    }
+    private record RenderSegment(string? Html, IInterceptorSubject? Widget);
 
-    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .Build();
+    private List<RenderSegment> GetRenderSegments()
+    {
+        var result = new List<RenderSegment>();
+        if (File?.Children is null)
+            return result;
+
+        StringBuilder? sb = null;
+
+        foreach (var child in File.Children.Values)
+        {
+            if (child is HtmlSegment html)
+            {
+                sb ??= new StringBuilder();
+                sb.Append(html.Html);
+            }
+            else if (child is RenderExpression expr)
+            {
+                sb ??= new StringBuilder();
+                sb.Append(HttpUtility.HtmlEncode(expr.Value?.ToString() ?? string.Empty));
+            }
+            else
+            {
+                // Flush accumulated HTML before widget
+                if (sb is { Length: > 0 })
+                {
+                    result.Add(new RenderSegment(sb.ToString(), null));
+                    sb.Clear();
+                }
+                result.Add(new RenderSegment(null, child));
+            }
+        }
+
+        // Flush remaining HTML
+        if (sb is { Length: > 0 })
+        {
+            result.Add(new RenderSegment(sb.ToString(), null));
+        }
+
+        return result;
+    }
 }
