@@ -117,6 +117,8 @@ Each property can have **at most one source** at any time. This is the single so
 - The `SubjectSourceBackgroundService` dispatches changes only to the owning source
 - Property ownership is stored in the subject's data dictionary and automatically cleaned up when the subject is garbage collected
 
+**Recommended**: Use `SourcePropertyTracker` (see [Implementing Source Lifecycle](#implementing-source-lifecycle)) to manage property ownership automatically. It handles `SetSource()`/`RemoveSource()` calls, lifecycle event subscriptions, and cleanup when subjects are detached.
+
 **Why single ownership?**
 - Prevents conflicts when multiple sources could handle the same property
 - Makes data flow deterministic and predictable
@@ -126,69 +128,82 @@ Each property can have **at most one source** at any time. This is the single so
 
 ## Implementing Source Lifecycle
 
-When implementing a custom source, you must properly manage property ownership:
+When implementing a custom source, use `SourcePropertyTracker` to manage property ownership and lifecycle events automatically:
 
-### Claiming Properties
+### Using SourcePropertyTracker
 
-Call `SetSource(this)` for each property your source handles during `StartListeningAsync` or `LoadInitialStateAsync`:
+The `SourcePropertyTracker` helper class handles:
+- Tracking which properties are owned by the source
+- Subscribing to lifecycle events
+- Automatically calling `SetSource()` when tracking and `RemoveSource()` when untracking
+- Cleaning up properties when subjects are detached
 
 ```csharp
-public async Task<IDisposable?> StartListeningAsync(
-    SubjectPropertyWriter propertyWriter,
-    CancellationToken cancellationToken)
+public class MySource : ISubjectSource, IDisposable
 {
-    var registeredSubject = _root.TryGetRegisteredSubject();
-    if (registeredSubject is null) return null;
+    private readonly SourcePropertyTracker _propertyTracker;
 
-    // Claim ownership of properties that match this source
-    foreach (var property in registeredSubject.GetAllProperties()
-        .Where(p => _pathProvider.IsPropertyIncluded(p)))
+    public MySource(ILogger logger)
     {
-        property.Reference.SetSource(this, _logger);
-        _trackedProperties.Add(property.Reference);
+        _propertyTracker = new SourcePropertyTracker(this, logger);
     }
 
-    // Set up change notifications...
-    return subscription;
+    public async Task<IDisposable?> StartListeningAsync(
+        SubjectPropertyWriter propertyWriter,
+        CancellationToken cancellationToken)
+    {
+        // Subscribe to lifecycle events
+        _propertyTracker.SubscribeToLifecycle(_root);
+
+        var registeredSubject = _root.TryGetRegisteredSubject();
+        if (registeredSubject is null) return null;
+
+        // Track properties - automatically calls SetSource()
+        foreach (var property in registeredSubject.GetAllProperties()
+            .Where(p => _pathProvider.IsPropertyIncluded(p)))
+        {
+            _propertyTracker.Track(property.Reference);
+        }
+
+        // Set up change notifications...
+        return subscription;
+    }
+
+    public void Dispose()
+    {
+        // Automatically unsubscribes from lifecycle and calls RemoveSource() for all tracked properties
+        _propertyTracker.Dispose();
+    }
 }
 ```
 
-### Releasing Properties
+### Extending SourcePropertyTracker
 
-Release ownership when subjects are detached or when the source is disposed:
+For protocol-specific cleanup (like OPC UA node data or MQTT topic caches), extend `SourcePropertyTracker`:
 
 ```csharp
-// Handle subject detachment
-private void OnSubjectDetached(SubjectLifecycleChange change)
+internal sealed class MyProtocolPropertyTracker : SourcePropertyTracker
 {
-    var toRemove = _trackedProperties
-        .Where(p => p.Subject == change.Subject)
-        .ToList();
+    private readonly MySource _source;
 
-    foreach (var property in toRemove)
+    public MyProtocolPropertyTracker(MySource source, ILogger? logger = null)
+        : base(source, logger)
     {
-        property.RemoveSource();
-        _trackedProperties.Remove(property);
-    }
-}
-
-// Clean up on dispose
-public async ValueTask DisposeAsync()
-{
-    // Unsubscribe from lifecycle events
-    if (_lifecycleInterceptor is not null)
-    {
-        _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
+        _source = source;
     }
 
-    // Release all property ownership
-    foreach (var property in _trackedProperties)
+    protected override void OnSubjectDetaching(IInterceptorSubject subject)
     {
-        property.RemoveSource();
+        // Protocol-specific cleanup when a subject is detached
+        _source.CleanupForSubject(subject);
     }
-    _trackedProperties.Clear();
 
-    // Other cleanup...
+    protected override void OnPropertyUntracked(PropertyReference property)
+    {
+        // Protocol-specific cleanup when a property is untracked
+        property.RemovePropertyData("MyProtocolKey");
+        base.OnPropertyUntracked(property);
+    }
 }
 ```
 
@@ -202,8 +217,7 @@ public class SampleSource : ISubjectSource, IDisposable
     private readonly IInterceptorSubject _root;
     private readonly ISourcePathProvider _pathProvider;
     private readonly ILogger _logger;
-    private readonly HashSet<PropertyReference> _trackedProperties = [];
-    private LifecycleInterceptor? _lifecycleInterceptor;
+    private readonly SourcePropertyTracker _propertyTracker;
 
     public SampleSource(
         IInterceptorSubject root,
@@ -213,6 +227,7 @@ public class SampleSource : ISubjectSource, IDisposable
         _root = root;
         _pathProvider = pathProvider;
         _logger = logger;
+        _propertyTracker = new SourcePropertyTracker(this, logger);
     }
 
     public int WriteBatchSize => 0; // No limit
@@ -221,22 +236,17 @@ public class SampleSource : ISubjectSource, IDisposable
         SubjectPropertyWriter propertyWriter,
         CancellationToken cancellationToken)
     {
-        // Subscribe to lifecycle events for cleanup
-        _lifecycleInterceptor = _root.Context.TryGetLifecycleInterceptor();
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
-        }
+        // Subscribe to lifecycle events for automatic cleanup
+        _propertyTracker.SubscribeToLifecycle(_root);
 
-        // Claim ownership of matching properties
+        // Track matching properties (automatically calls SetSource)
         var registeredSubject = _root.TryGetRegisteredSubject();
         if (registeredSubject is not null)
         {
             foreach (var property in registeredSubject.GetAllProperties()
                 .Where(p => _pathProvider.IsPropertyIncluded(p)))
             {
-                property.Reference.SetSource(this, _logger);
-                _trackedProperties.Add(property.Reference);
+                _propertyTracker.Track(property.Reference);
             }
         }
 
@@ -262,32 +272,10 @@ public class SampleSource : ISubjectSource, IDisposable
         return ValueTask.FromResult(WriteResult.Success());
     }
 
-    private void OnSubjectDetached(SubjectLifecycleChange change)
-    {
-        var toRemove = _trackedProperties
-            .Where(p => p.Subject == change.Subject)
-            .ToList();
-
-        foreach (var property in toRemove)
-        {
-            property.RemoveSource();
-            _trackedProperties.Remove(property);
-        }
-    }
-
     public void Dispose()
     {
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
-        }
-
-        foreach (var property in _trackedProperties)
-        {
-            property.RemoveSource();
-        }
-
-        _trackedProperties.Clear();
+        // Automatically unsubscribes and removes source from all tracked properties
+        _propertyTracker.Dispose();
     }
 }
 ```
