@@ -58,7 +58,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public void RemoveSource_ClearsSourceReference()
+    public void RemoveSource_WithMatchingSource_ClearsSourceReference()
     {
         var context = CreateContext();
         var person = new Person(context);
@@ -66,9 +66,27 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var sourceMock = Mock.Of<ISubjectSource>();
         property.SetSource(sourceMock);
 
-        property.RemoveSource();
+        var removed = property.RemoveSource(sourceMock);
 
+        Assert.True(removed);
         Assert.False(property.TryGetSource(out _));
+    }
+
+    [Fact]
+    public void RemoveSource_WithDifferentSource_DoesNotClearSourceReference()
+    {
+        var context = CreateContext();
+        var person = new Person(context);
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        var sourceMock = Mock.Of<ISubjectSource>();
+        var otherSourceMock = Mock.Of<ISubjectSource>();
+        property.SetSource(sourceMock);
+
+        var removed = property.RemoveSource(otherSourceMock);
+
+        Assert.False(removed);
+        Assert.True(property.TryGetSource(out var source));
+        Assert.Same(sourceMock, source);
     }
 
     [Fact]

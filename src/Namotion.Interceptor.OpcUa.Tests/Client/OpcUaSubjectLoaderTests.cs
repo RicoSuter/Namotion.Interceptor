@@ -15,12 +15,10 @@ namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 public class OpcUaSubjectLoaderTests
 {
-    private readonly HashSet<PropertyReference> _propertiesWithOpcData;
     private readonly OpcUaClientConfiguration _baseConfiguration;
 
     public OpcUaSubjectLoaderTests()
     {
-        _propertiesWithOpcData = [];
         _baseConfiguration = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
@@ -36,9 +34,9 @@ public class OpcUaSubjectLoaderTests
     public async Task LoadSubjectAsync_WithNullRegisteredSubject_ShouldReturnEmptyList()
     {
         // Arrange
-        var loader = CreateLoader();
+        var (loader, _) = CreateLoader();
         var subject = new DynamicSubject(InterceptorSubjectContext.Create()); // no registry
-            
+
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
         var mockSession = CreateMockSession();
 
@@ -53,7 +51,7 @@ public class OpcUaSubjectLoaderTests
     public async Task LoadSubjectAsync_WithNoChildNodes_ShouldReturnEmptyList()
     {
         // Arrange
-        var loader = CreateLoader();
+        var (loader, _) = CreateLoader();
         var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
         var mockSession = CreateMockSessionWithNoChildren();
@@ -69,10 +67,10 @@ public class OpcUaSubjectLoaderTests
     public async Task LoadSubjectAsync_WithMatchingProperty_ShouldCreateMonitoredItem()
     {
         // Arrange
-        var loader = CreateLoader();
+        var (loader, _) = CreateLoader();
         var subject = CreateTestSubject();
         var registeredSubject = subject.TryGetRegisteredSubject()!;
-            
+
         // Add a property with OPC UA attribute
         registeredSubject.AddProperty(
             "Temperature",
@@ -108,13 +106,13 @@ public class OpcUaSubjectLoaderTests
             .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(typeof(int));
 
-        var loader = CreateLoader(
+        var (loader, _) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
             typeResolver: mockTypeResolver.Object);
 
         var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
-            
+
         var mockSession = CreateMockSessionWithChildren(
         [
             CreateTestReferenceDescription("DynamicProperty", new NodeId(2001, 2))
@@ -132,10 +130,10 @@ public class OpcUaSubjectLoaderTests
     public async Task LoadSubjectAsync_WithDuplicatePropertyName_ShouldSkipDuplicate()
     {
         // Arrange
-        var loader = CreateLoader();
+        var (loader, _) = CreateLoader();
         var subject = CreateTestSubject();
         var registeredSubject = subject.TryGetRegisteredSubject()!;
-            
+
         // Add existing property
         registeredSubject.AddProperty("Temperature", _ => 0.0, (_, _) => { });
 
@@ -161,13 +159,13 @@ public class OpcUaSubjectLoaderTests
             .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Type?)null); // Simulate unresolved type (should return DynamicObject or similar when an expandable object is required)
 
-        var loader = CreateLoader(
+        var (loader, _) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
             typeResolver: mockTypeResolver.Object);
-            
+
         var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
-            
+
         var mockSession = CreateMockSessionWithChildren(
         [
             CreateTestReferenceDescription("UnknownTypeProperty", new NodeId(2001, 2))
@@ -184,10 +182,10 @@ public class OpcUaSubjectLoaderTests
     public async Task LoadSubjectAsync_TracksPropertiesWithOpcData()
     {
         // Arrange
-        var loader = CreateLoader();
+        var (loader, propertyTracker) = CreateLoader();
         var subject = CreateTestSubject();
         var registeredSubject = subject.TryGetRegisteredSubject()!;
-            
+
         registeredSubject.AddProperty(
             "Pressure",
             typeof(double),
@@ -209,10 +207,10 @@ public class OpcUaSubjectLoaderTests
         await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
 
         // Assert - Should track the property reference
-        Assert.Single(_propertiesWithOpcData);
+        Assert.Single(propertyTracker.TrackedProperties);
     }
 
-    private OpcUaSubjectLoader CreateLoader(
+    private (OpcUaSubjectLoader Loader, OpcUaPropertyTracker PropertyTracker) CreateLoader(
         Func<ReferenceDescription, CancellationToken, Task<bool>>? shouldAddDynamicProperties = null,
         OpcUaTypeResolver? typeResolver = null)
     {
@@ -227,11 +225,14 @@ public class OpcUaSubjectLoaderTests
             DefaultNamespaceUri = _baseConfiguration.DefaultNamespaceUri
         };
 
-        return new OpcUaSubjectLoader(
+        var source = new OpcUaSubjectClientSource(new DynamicSubject(), config, NullLogger<OpcUaSubjectClientSource>.Instance);
+        var propertyTracker = new OpcUaPropertyTracker(source, NullLogger<OpcUaSubjectClientSource>.Instance);
+        var loader = new OpcUaSubjectLoader(
             config,
-            _propertiesWithOpcData,
-            new OpcUaSubjectClientSource(new DynamicSubject(), config, NullLogger<OpcUaSubjectClientSource>.Instance),
+            propertyTracker,
+            source,
             NullLogger<OpcUaSubjectClientSource>.Instance);
+        return (loader, propertyTracker);
     }
 
     private IInterceptorSubject CreateTestSubject()
