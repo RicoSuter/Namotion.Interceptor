@@ -102,6 +102,8 @@ public class LateHandler : IWriteInterceptor { }
 - Missing dependency types are silently ignored (supports optional dependencies)
 - Circular dependencies throw `InvalidOperationException`
 - A service cannot have both `[RunsFirst]` and `[RunsLast]`
+- A `[RunsFirst]` service cannot have `[RunsAfter]` referencing Middle or Last group services
+- A `[RunsLast]` service cannot have `[RunsBefore]` referencing First or Middle group services
 
 ## Interceptor Pipeline
 
