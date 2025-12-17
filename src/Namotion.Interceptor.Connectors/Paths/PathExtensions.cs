@@ -256,18 +256,18 @@ public static class PathExtensions
 
         foreach (var path in paths)
         {
-            var segments = pathProvider.ParsePath(path).ToArray();
-            if (segments.Length == 0)
+            var segments = pathProvider.ParsePath(path);
+            if (segments.Count == 0)
             {
                 continue;
             }
 
             var currentSubject = rootSubject;
             var currentPath = new StringBuilder();
-            for (var i = 0; i < segments.Length; i++)
+            for (var i = 0; i < segments.Count; i++)
             {
                 var (segment, index) = segments[i];
-                var isLastSegment = i == segments.Length - 1;
+                var isLastSegment = i == segments.Count - 1;
 
                 string? currentPathString = null;
                 if (pathValueCache is not null)

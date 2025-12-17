@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Text;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Registry.Paths;
@@ -11,66 +12,86 @@ public static class PathExtensions
     /// <summary>
     /// Gets a full path string for a sequence of properties with their indices.
     /// </summary>
-    /// <param name="pathProvider">The path provider to use.</param>
-    /// <param name="properties">The properties in the path with their optional indices.</param>
-    /// <returns>The full path string.</returns>
     public static string GetPath(
         this PathProviderBase pathProvider,
         IEnumerable<(RegisteredSubjectProperty property, object? index)> properties)
     {
-        var stringBuilder = new System.Text.StringBuilder();
+        StringBuilder? sb = null;
         foreach (var (property, index) in properties)
         {
-            if (stringBuilder.Length > 0)
-            {
-                stringBuilder.Append(pathProvider.PathSeparator);
-            }
-
             var segment = pathProvider.TryGetPropertySegment(property);
-            if (segment is not null)
+            if (segment is null)
             {
-                stringBuilder.Append(segment);
+                continue;
             }
 
+            sb ??= new StringBuilder();
+            if (sb.Length > 0)
+            {
+                sb.Append(pathProvider.PathSeparator);
+            }
+
+            sb.Append(segment);
             if (index is not null)
             {
-                stringBuilder.Append(pathProvider.IndexOpen).Append(index).Append(pathProvider.IndexClose);
+                sb.Append(pathProvider.IndexOpen).Append(index).Append(pathProvider.IndexClose);
             }
         }
-        return stringBuilder.ToString();
+        return sb?.ToString() ?? string.Empty;
     }
 
     /// <summary>
-    /// Parses a full path string into segments with their indices.
+    /// Parses a path string into segments with their indices.
     /// </summary>
-    /// <param name="pathProvider">The path provider to use.</param>
-    /// <param name="path">The path to parse.</param>
-    /// <returns>An enumerable of segments and their optional indices.</returns>
-    public static IEnumerable<(string segment, object? index)> ParsePath(
-        this PathProviderBase pathProvider,
-        string path)
+    public static List<(string segment, object? index)> ParsePath(this PathProviderBase pathProvider, string path)
     {
         if (string.IsNullOrEmpty(path))
         {
-            yield break;
+            return [];
         }
 
-        foreach (var part in path.Split(pathProvider.PathSeparator))
+        var results = new List<(string segment, object? index)>();
+        var separator = pathProvider.PathSeparator;
+        var indexOpen = pathProvider.IndexOpen;
+        var indexClose = pathProvider.IndexClose;
+        var start = 0;
+
+        for (var i = 0; i <= path.Length; i++)
         {
-            var bracketIndex = part.IndexOf(pathProvider.IndexOpen);
-            if (bracketIndex < 0)
+            if (i == path.Length || path[i] == separator)
             {
-                yield return (part, null);
-            }
-            else
-            {
-                var name = part[..bracketIndex];
-                var closeIndex = part.IndexOf(pathProvider.IndexClose);
-                var indexString = part[(bracketIndex + 1)..closeIndex];
-                object index = int.TryParse(indexString, out var intValue) ? intValue : indexString;
-                yield return (name, index);
+                if (i > start)
+                {
+                    results.Add(ParseSegment(path.AsSpan(start, i - start), indexOpen, indexClose));
+                }
+                start = i + 1;
             }
         }
+
+        return results;
+    }
+
+    private static (string segment, object? index) ParseSegment(ReadOnlySpan<char> span, char indexOpen, char indexClose)
+    {
+        var bracketIndex = span.IndexOf(indexOpen);
+        if (bracketIndex < 0)
+        {
+            return (span.ToString(), null);
+        }
+
+        var name = span[..bracketIndex].ToString();
+
+        // Search for closing bracket after the opening bracket
+        var afterOpen = span[(bracketIndex + 1)..];
+        var closeBracket = afterOpen.IndexOf(indexClose);
+        if (closeBracket <= 0)
+        {
+            return (name, null);
+        }
+
+        var indexSpan = afterOpen[..closeBracket];
+        object? index = int.TryParse(indexSpan, out var intIndex) ? intIndex : indexSpan.ToString();
+        return (name, index);
     }
 
     /// <summary>
@@ -85,7 +106,7 @@ public static class PathExtensions
         RegisteredSubject rootSubject,
         string path)
     {
-        var segments = pathProvider.ParsePath(path).ToList();
+        var segments = pathProvider.ParsePath(path);
         if (segments.Count == 0)
         {
             return null;
