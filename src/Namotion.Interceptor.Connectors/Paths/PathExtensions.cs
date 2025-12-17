@@ -41,7 +41,7 @@ public static class PathExtensions
     {
         return subject
             .VisitPropertiesFromPathsWithTimestamp([path], timestamp,
-                (property, path, _) => SetPropertyValue(property, timestamp, getPropertyValue(property, path), source), pathProvider)
+                (property, innerPath, _) => SetPropertyValue(property, timestamp, getPropertyValue(property, innerPath), source), pathProvider)
             .Count == 1;
     }
 
@@ -150,6 +150,8 @@ public static class PathExtensions
     public static IEnumerable<(string path, SubjectPropertyChange change)> GetPaths(
         this IEnumerable<SubjectPropertyChange> changes, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
     {
+        // TODO(perf): Can be optimized probably (no sequential but reuse subbranches)
+
         foreach (var change in changes)
         {
             var registeredProperty = change.Property.TryGetRegisteredProperty();
