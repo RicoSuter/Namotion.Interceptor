@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Ordering;
 /// Resolves service execution order based on ordering attributes.
 /// Uses Kahn's algorithm for topological sorting with three-group partitioning (First, Middle, Last).
 /// </summary>
-public static class ServiceOrderResolver
+internal static class ServiceOrderResolver
 {
     private static readonly ConcurrentDictionary<Type, (Type[] RunsBefore, Type[] RunsAfter, bool RunsFirst, bool RunsLast)> Cache = new();
 
