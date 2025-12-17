@@ -18,7 +18,17 @@ Namotion.Interceptor is a .NET library for creating trackable object models thro
 - `dotnet run --project src/Extensions/Namotion.Interceptor.SampleBlazor` - Run Blazor sample
 
 ### Performance Testing
-- `dotnet run --project src/Namotion.Interceptor.Benchmarks -c Release` - Run performance benchmarks
+- `dotnet run --project src/Namotion.Interceptor.Benchmark -c Release` - Run performance benchmarks
+
+### Development Scripts
+Cross-platform PowerShell Core scripts in `scripts/` folder:
+
+- `pwsh scripts/benchmark.ps1` - Compare benchmarks between current branch and base branch
+  - Optional: `-Filter "*Pattern*"` to filter benchmarks (default: `*`)
+  - Optional: `-Stash` to auto-stash uncommitted changes (restores after completion)
+  - Requires clean working directory unless `-Stash` is used
+  - Outputs `benchmark_YYYY-MM-DD_HHmmss.md` in current directory
+  - Configuration variables at top of script: `$BenchmarkProject`, `$BaseBranch`
 
 ## Architecture
 
