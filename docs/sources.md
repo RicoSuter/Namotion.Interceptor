@@ -108,13 +108,19 @@ Properties with `[SourcePath("opc", "NodeName")]` map to OPC UA nodes in the ext
 Each property can have **at most one source** at any time. This is the single source of truth model:
 
 - Sources claim ownership of properties by calling `SetSource(this)` during initialization
-- The `SubjectSourceBackgroundService` dispatches changes only to the owning source
+- Each source runs its own `SubjectSourceBackgroundService` that dispatches changes only to properties owned by that source
 - Property ownership is stored in the subject's data dictionary and automatically cleaned up when the subject is garbage collected
 
 **Why single ownership?**
 - Prevents conflicts when multiple sources could handle the same property
 - Makes data flow deterministic and predictable
 - Simplifies debugging and error handling
+
+**Why per-source background services?**
+- **Isolation**: Each source can fail and retry independently without affecting others
+- **Buffering**: Each source has its own buffering, deduplication, and retry queue
+- **Performance**: Parallel writes to multiple sources instead of serialized dispatch
+- **Simplicity**: Source-specific lifecycle management and error handling
 
 **Warning on multiple claims**: If two sources attempt to claim the same property, the last one wins and a warning is logged. This typically indicates a configuration error.
 
