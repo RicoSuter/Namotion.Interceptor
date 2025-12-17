@@ -42,8 +42,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     private SubjectPropertyWriter? _propertyWriter;
     private MqttConnectionMonitor? _connectionMonitor;
 
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
-
     private int _disposed;
     private volatile bool _isStarted;
 
@@ -112,10 +110,8 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     }
 
     /// <inheritdoc />
-    /// <remarks>Thread-safe: uses internal lock to serialize concurrent calls.</remarks>
     public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var client = _client;
@@ -136,7 +132,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             var userPropertiesArray = _configuration.SourceTimestampPropertyName is not null
                 ? userPropsArrayPool.Rent(length)
                 : null;
-            
+
             var messageCount = 0;
             try
             {
@@ -262,10 +258,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         catch (Exception ex)
         {
             return WriteResult.Failure(ex);
-        }
-        finally
-        {
-            _writeLock.Release();
         }
     }
 
@@ -503,7 +495,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _topicToProperty.Clear();
         _propertyToTopic.Clear();
 
-        _writeLock.Dispose();
         Dispose();
     }
 }
