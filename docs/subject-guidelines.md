@@ -256,10 +256,9 @@ The `[Children]` attribute simplifies paths for subjects with child dictionaries
 
 ### Before vs After
 
-| Syntax | Without Attribute | With `[Children]` |
-|--------|-------------------|-------------------|
-| Bracket | `Root.Children[Dashboard].Children[Page]` | `Root.Dashboard.Page` |
-| Slash | `Root/Children/Dashboard/Children/Page` | `Root/Dashboard/Page` |
+| Without Attribute | With `[Children]` |
+|-------------------|-------------------|
+| `Root.Children[Documents].Children[Report]` | `Root.Documents.Report` |
 
 ### Usage
 

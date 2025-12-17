@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Registry.Paths;
 /// <summary>
 /// Caches the property name marked with [Children] attribute for each type.
 /// </summary>
-public static class ChildrenAttributeCache
+internal static class ChildrenAttributeCache
 {
     private static readonly ConcurrentDictionary<Type, string?> Cache = new();
 

@@ -42,7 +42,7 @@ public class PathExtensionsTests
         var allPaths = person
             .TryGetRegisteredSubject()?
             .GetAllProperties()
-            .GetSourcePaths(pathProvider, person)
+            .GetPaths(pathProvider, person)
             .ToArray() ?? [];
 
         // Assert
@@ -77,16 +77,16 @@ public class PathExtensionsTests
         var timestamp = DateTimeOffset.UtcNow.AddDays(-200);
 
         // Act
-        person.UpdatePropertyValuesFromSourcePaths(new Dictionary<string, object?>
+        person.UpdatePropertyValuesFromPaths(new Dictionary<string, object?>
         {
             { "FirstName", "NewPerson" },
             { "Children[0].FirstName", "NewChild1" },
             { "Children[2].FirstName", "NewChild3" }
         }, timestamp, pathProvider, null);
 
-        person.UpdatePropertyValuesFromSourcePaths(
+        person.UpdatePropertyValuesFromPaths(
             ["LastName"], timestamp, (_, _) => "NewLn", pathProvider, null);
-        person.UpdatePropertyValueFromSourcePath(
+        person.UpdatePropertyValueFromPath(
             "Father.FirstName", timestamp, "NewFather", pathProvider, null);
         
         var completeUpdate = SubjectUpdate
@@ -128,7 +128,7 @@ public class PathExtensionsTests
         var defaultPathProvider = DefaultPathProvider.Instance;
         var path = person
             .TryGetRegisteredProperty(p => p.Children[2].FirstName)?
-            .TryGetSourcePath(defaultPathProvider, null);
+            .TryGetPath(defaultPathProvider, null);
 
         // Assert
         Assert.Equal("Children[2].FirstName", path);
@@ -139,7 +139,7 @@ public class PathExtensionsTests
     [InlineData("Children", "Children")]
     [InlineData("Children[0].FirstName", "FirstName")]
     [InlineData("Children[2].FirstName", "FirstName")]
-    public void WhenTryGetPropertyFromSourcePath_ReturnsResolvedProperty(string fullPath, string propertyName)
+    public void WhenTryGetPropertyFromPath_ReturnsResolvedProperty(string fullPath, string propertyName)
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -162,7 +162,7 @@ public class PathExtensionsTests
 
         // Act
         var defaultPathProvider = DefaultPathProvider.Instance;
-        var (property, _) = person.TryGetPropertyFromSourcePath(fullPath, defaultPathProvider);
+        var (property, _) = person.TryGetPropertyFromPath(fullPath, defaultPathProvider);
 
         // Assert
         Assert.Equal(propertyName, property!.Name);

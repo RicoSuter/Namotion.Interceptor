@@ -9,16 +9,35 @@ namespace Namotion.Interceptor.Registry.Paths;
 public static class PathExtensions
 {
     /// <summary>
-    /// Builds a full path string for a sequence of properties with their indices.
+    /// Gets a full path string for a sequence of properties with their indices.
     /// </summary>
     /// <param name="pathProvider">The path provider to use.</param>
     /// <param name="properties">The properties in the path with their optional indices.</param>
     /// <returns>The full path string.</returns>
-    public static string BuildPath(
+    public static string GetPath(
         this PathProviderBase pathProvider,
         IEnumerable<(RegisteredSubjectProperty property, object? index)> properties)
     {
-        return pathProvider.BuildFullPath(properties);
+        var stringBuilder = new System.Text.StringBuilder();
+        foreach (var (property, index) in properties)
+        {
+            if (stringBuilder.Length > 0)
+            {
+                stringBuilder.Append(pathProvider.PathSeparator);
+            }
+
+            var segment = pathProvider.TryGetPropertySegment(property);
+            if (segment is not null)
+            {
+                stringBuilder.Append(segment);
+            }
+
+            if (index is not null)
+            {
+                stringBuilder.Append(pathProvider.IndexOpen).Append(index).Append(pathProvider.IndexClose);
+            }
+        }
+        return stringBuilder.ToString();
     }
 
     /// <summary>
@@ -31,7 +50,27 @@ public static class PathExtensions
         this PathProviderBase pathProvider,
         string path)
     {
-        return pathProvider.ParseFullPath(path);
+        if (string.IsNullOrEmpty(path))
+        {
+            yield break;
+        }
+
+        foreach (var part in path.Split(pathProvider.PathSeparator))
+        {
+            var bracketIndex = part.IndexOf(pathProvider.IndexOpen);
+            if (bracketIndex < 0)
+            {
+                yield return (part, null);
+            }
+            else
+            {
+                var name = part[..bracketIndex];
+                var closeIndex = part.IndexOf(pathProvider.IndexClose);
+                var indexString = part[(bracketIndex + 1)..closeIndex];
+                object index = int.TryParse(indexString, out var intValue) ? intValue : indexString;
+                yield return (name, index);
+            }
+        }
     }
 
     /// <summary>
@@ -46,7 +85,7 @@ public static class PathExtensions
         RegisteredSubject rootSubject,
         string path)
     {
-        var segments = pathProvider.ParseFullPath(path).ToList();
+        var segments = pathProvider.ParsePath(path).ToList();
         if (segments.Count == 0)
         {
             return null;
@@ -152,7 +191,7 @@ public static class PathExtensions
         }
 
         pathParts.Reverse();
-        return pathProvider.BuildFullPath(pathParts);
+        return pathProvider.GetPath(pathParts);
     }
 
     private static IInterceptorSubject? GetChildSubject(RegisteredSubjectProperty property, object? index)

@@ -66,7 +66,7 @@ public class AttributeBasedPathProvider : PathProviderBase
     public override RegisteredSubjectProperty? TryGetPropertyFromSegment(
         RegisteredSubject subject, string segment)
     {
-        // 1. Look for property with matching [Path] attribute for our name
+        // Look for property with matching [Path] attribute for our name
         foreach (var property in subject.Properties)
         {
             var pathAttribute = property.ReflectionAttributes
@@ -79,16 +79,7 @@ public class AttributeBasedPathProvider : PathProviderBase
             }
         }
 
-        // 2. Fall back to BrowseName match
-        foreach (var property in subject.Properties)
-        {
-            if (property.BrowseName == segment)
-            {
-                return property;
-            }
-        }
-
-        // 3. [Children] fallback - segment is a dictionary key
+        // [Children] fallback: Segment is a dictionary key (children property needs [Path] attribute on it)
         var childrenPropertyName = ChildrenAttributeCache.GetChildrenPropertyName(subject.Subject.GetType());
         if (childrenPropertyName is not null)
         {

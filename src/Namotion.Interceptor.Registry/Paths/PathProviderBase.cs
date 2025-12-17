@@ -1,4 +1,3 @@
-using System.Text;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Registry.Paths;
@@ -61,64 +60,5 @@ public abstract class PathProviderBase : IPathProvider
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Builds a full path from a sequence of properties and their optional indices.
-    /// </summary>
-    /// <param name="properties">The properties in the path with their indices.</param>
-    /// <returns>The full path string.</returns>
-    internal string BuildFullPath(IEnumerable<(RegisteredSubjectProperty property, object? index)> properties)
-    {
-        var stringBuilder = new StringBuilder();
-        foreach (var (property, index) in properties)
-        {
-            if (stringBuilder.Length > 0)
-            {
-                stringBuilder.Append(PathSeparator);
-            }
-
-            var segment = TryGetPropertySegment(property);
-            if (segment is not null)
-            {
-                stringBuilder.Append(segment);
-            }
-
-            if (index is not null)
-            {
-                stringBuilder.Append(IndexOpen).Append(index).Append(IndexClose);
-            }
-        }
-        return stringBuilder.ToString();
-    }
-
-    /// <summary>
-    /// Parses a full path into segments with their optional indices.
-    /// </summary>
-    /// <param name="path">The full path to parse.</param>
-    /// <returns>An enumerable of segments and their indices.</returns>
-    internal IEnumerable<(string segment, object? index)> ParseFullPath(string path)
-    {
-        if (string.IsNullOrEmpty(path))
-        {
-            yield break;
-        }
-
-        foreach (var part in path.Split(PathSeparator))
-        {
-            var bracketIndex = part.IndexOf(IndexOpen);
-            if (bracketIndex < 0)
-            {
-                yield return (part, null);
-            }
-            else
-            {
-                var name = part[..bracketIndex];
-                var closeIndex = part.IndexOf(IndexClose);
-                var indexString = part[(bracketIndex + 1)..closeIndex];
-                object index = int.TryParse(indexString, out var intValue) ? intValue : indexString;
-                yield return (name, index);
-            }
-        }
     }
 }
