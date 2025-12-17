@@ -11,4 +11,9 @@
         <PackageReference Include="System.Collections.Immutable" Version="8.0.0" />
     </ItemGroup>
 
+    <ItemGroup>
+        <InternalsVisibleTo Include="Namotion.Interceptor.Tests" />
+        <InternalsVisibleTo Include="Namotion.Interceptor.Benchmark" />
+    </ItemGroup>
+
 </Project>
