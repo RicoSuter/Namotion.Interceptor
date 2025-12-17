@@ -1,7 +1,7 @@
-@inherits HomeBlazorComponentBase
-
-@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Storage.Abstractions
+@using Namotion.Interceptor.Registry.Attributes
+
+@inherits HomeBlazorComponentBase
 
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
@@ -156,7 +156,7 @@
             if (property == null || !property.HasChildSubjects)
             {
                 // Try [Children] fallback
-                var childrenPropertyName = ChildrenAttributeCache.GetChildrenPropertyName(currentSubject.GetType());
+                var childrenPropertyName = ChildrenAttribute.GetChildrenPropertyName(currentSubject.GetType());
                 if (childrenPropertyName != null)
                 {
                     property = registered?.TryGetProperty(childrenPropertyName);
@@ -237,7 +237,7 @@
         }
 
         // Build display name and object path
-        var isChildrenProperty = ChildrenAttributeCache.IsChildrenProperty(
+        var isChildrenProperty = ChildrenAttribute.IsChildrenProperty(
             clickedPane.Subject.GetType(), propertyName);
         var displayName = index != null
             ? (isChildrenProperty ? index.ToString()! : $"{propertyName}[{index}]")
@@ -329,7 +329,7 @@
             // For [Children] properties, only add the index (key), not the property name
             var parentPane = _panes[_panes.IndexOf(pane) - 1];
             var isChildrenProperty = pane.PropertyName != null &&
-                ChildrenAttributeCache.IsChildrenProperty(parentPane.Subject.GetType(), pane.PropertyName);
+                ChildrenAttribute.IsChildrenProperty(parentPane.Subject.GetType(), pane.PropertyName);
 
             if (isChildrenProperty && pane.Index != null)
             {
@@ -368,7 +368,7 @@
             // For [Children] properties, only add the index (key), not the property name
             var parentPane = _panes[_panes.IndexOf(pane) - 1];
             var isChildrenProp = pane.PropertyName != null &&
-                ChildrenAttributeCache.IsChildrenProperty(parentPane.Subject.GetType(), pane.PropertyName);
+                ChildrenAttribute.IsChildrenProperty(parentPane.Subject.GetType(), pane.PropertyName);
 
             if (isChildrenProp && pane.Index != null)
             {

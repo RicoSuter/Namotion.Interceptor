@@ -1,5 +1,5 @@
-using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.Services.Tests.Models;
 
