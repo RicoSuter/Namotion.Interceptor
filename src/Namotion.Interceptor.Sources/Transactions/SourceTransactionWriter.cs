@@ -33,45 +33,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         }
 
         // 3. Write to each source
-        var successfulChangesBySource = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>();
-        var failedChanges = new List<SourceWriteFailure>();
-
-        foreach (var (source, sourceChanges) in changesBySource)
-        {
-            if (source == NullSource.Instance)
-            {
-                successfulChangesBySource[source] = sourceChanges;
-                continue;
-            }
-
-            var memory = new ReadOnlyMemory<SubjectPropertyChange>(sourceChanges.ToArray());
-            var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
-            if (result.Error is not null)
-            {
-                var failedList = result.FailedChanges.Length > 0
-                    ? result.FailedChanges.ToArray()
-                    : sourceChanges.ToArray();
-
-                foreach (var failedChange in failedList)
-                {
-                    failedChanges.Add(new SourceWriteFailure(
-                        failedChange,
-                        source,
-                        new SourceTransactionWriteException(source, [failedChange], result.Error)));
-                }
-
-                var failedSet = new HashSet<SubjectPropertyChange>(failedList);
-                var writtenList = sourceChanges.Where(c => !failedSet.Contains(c)).ToList();
-                if (writtenList.Count > 0)
-                {
-                    successfulChangesBySource[source] = writtenList;
-                }
-            }
-            else
-            {
-                successfulChangesBySource[source] = sourceChanges;
-            }
-        }
+        var (successfulChangesBySource, failedChanges) = await WriteToSourcesAsync(changesBySource, cancellationToken);
 
         // 4. Handle rollback mode - attempt to revert successful writes on failure
         if (mode == TransactionMode.Rollback && failedChanges.Count > 0)
@@ -95,6 +57,71 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         return new TransactionWriteResult(
             successfulChangesBySource.Values.SelectMany(c => c).ToList(),
             failedChanges);
+    }
+
+    /// <summary>
+    /// Writes changes to their respective sources and collects results.
+    /// </summary>
+    private static async Task<(Dictionary<ISubjectSource, List<SubjectPropertyChange>> Successful, List<SourceWriteFailure> Failed)> 
+        WriteToSourcesAsync(
+            Dictionary<ISubjectSource, List<SubjectPropertyChange>> changesBySource,
+            CancellationToken cancellationToken)
+    {
+        var successfulChangesBySource = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>();
+        var failedChanges = new List<SourceWriteFailure>();
+
+        foreach (var (source, sourceChanges) in changesBySource)
+        {
+            if (source == NullSource.Instance)
+            {
+                successfulChangesBySource[source] = sourceChanges;
+                continue;
+            }
+
+            var (successful, failed) = await TryWriteToSourceAsync(source, sourceChanges, cancellationToken);
+            if (successful.Count > 0)
+            {
+                successfulChangesBySource[source] = successful;
+            }
+            failedChanges.AddRange(failed);
+        }
+
+        return (successfulChangesBySource, failedChanges);
+    }
+
+    /// <summary>
+    /// Attempts to write changes to a single source, returning successful and failed changes.
+    /// </summary>
+    private static async Task<(List<SubjectPropertyChange> Successful, List<SourceWriteFailure> Failed)>
+        TryWriteToSourceAsync(
+            ISubjectSource source,
+            List<SubjectPropertyChange> sourceChanges,
+            CancellationToken cancellationToken)
+    {
+        var memory = new ReadOnlyMemory<SubjectPropertyChange>(sourceChanges.ToArray());
+        var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
+
+        if (result.Error is not null)
+        {
+            var failedList = result.FailedChanges.Length > 0
+                ? result.FailedChanges.ToArray()
+                : sourceChanges.ToArray();
+
+            var failures = new List<SourceWriteFailure>();
+            foreach (var failedChange in failedList)
+            {
+                failures.Add(new SourceWriteFailure(
+                    failedChange,
+                    source,
+                    new SourceTransactionWriteException(source, [failedChange], result.Error)));
+            }
+
+            var failedSet = new HashSet<SubjectPropertyChange>(failedList);
+            var writtenList = sourceChanges.Where(c => !failedSet.Contains(c)).ToList();
+            return (writtenList, failures);
+        }
+
+        return (sourceChanges, new List<SourceWriteFailure>());
     }
 
     /// <summary>
