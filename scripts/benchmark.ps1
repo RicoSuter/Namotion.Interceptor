@@ -6,13 +6,15 @@
 #   pwsh scripts/benchmark.ps1                       # Run all benchmarks
 #   pwsh scripts/benchmark.ps1 -Filter "*Source*"   # Filter by pattern
 #   pwsh scripts/benchmark.ps1 -Stash               # Auto-stash uncommitted changes
-#   pwsh scripts/benchmark.ps1 -Filter "*Write*" -Stash
+#   pwsh scripts/benchmark.ps1 -Short               # Quick benchmark (fewer iterations)
+#   pwsh scripts/benchmark.ps1 -Filter "*Write*" -Stash -Short
 #
 # Output: benchmark_YYYY-MM-DD_HHmmss.md in current directory
 
 param(
     [string]$Filter = "*",
-    [switch]$Stash
+    [switch]$Stash,
+    [switch]$Short
 )
 
 # ============ CONFIGURATION ============
@@ -21,6 +23,7 @@ $BaseBranch = "master"
 # =======================================
 
 $ErrorActionPreference = "Stop"
+$JobArg = if ($Short) { "--job short" } else { "" }
 
 # Save original branch
 $OriginalBranch = git rev-parse --abbrev-ref HEAD
@@ -37,9 +40,11 @@ Write-Host ""
 # Check for uncommitted changes
 $GitStatus = git status --porcelain
 $script:DidStash = $false
+$script:StashedFileCount = 0
 if ($GitStatus) {
     if ($Stash) {
-        Write-Host "Stashing uncommitted changes..."
+        $script:StashedFileCount = ($GitStatus -split "`n").Count
+        Write-Host "Stashing $($script:StashedFileCount) uncommitted file(s)..."
         git stash push -m "benchmark-script-auto-stash" --quiet
         $script:DidStash = $true
     } else {
@@ -57,21 +62,25 @@ function Restore-OriginalBranch {
 # Helper function to restore stashed changes
 function Restore-Stash {
     if ($script:DidStash) {
-        Write-Host "Restoring stashed changes..."
+        Write-Host "Restoring $($script:StashedFileCount) stashed file(s)..."
         git stash pop --quiet
     }
 }
 
-# Helper function to find the latest benchmark markdown file
-function Get-LatestBenchmarkResult {
+# Helper function to get benchmark results (--join creates a single combined file)
+function Get-BenchmarkResults {
     $artifactsPath = "BenchmarkDotNet.Artifacts/results"
     if (-not (Test-Path $artifactsPath)) {
         return $null
     }
-    $latestFile = Get-ChildItem -Path $artifactsPath -Filter "*.md" |
+    # BenchmarkDotNet creates *-report-github.md for GitHub-flavored markdown
+    $file = Get-ChildItem -Path $artifactsPath -Filter "*-github.md" |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
-    return $latestFile
+    if (-not $file) {
+        return $null
+    }
+    return (Get-Content $file.FullName -Raw)
 }
 
 # Helper function to clean BenchmarkDotNet artifacts
@@ -101,7 +110,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Running benchmark on $BaseBranch (filter: $Filter)..."
-dotnet run --project $BenchmarkProject -c Release -- --filter "$Filter" --exporters markdown
+dotnet run --project $BenchmarkProject -c Release -- --filter "$Filter" --exporters markdown --join $JobArg
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Benchmark failed on $BaseBranch"
     Restore-OriginalBranch
@@ -109,15 +118,15 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Copy base branch results to temp
-$baseResult = Get-LatestBenchmarkResult
-if (-not $baseResult) {
+# Save base branch results to temp
+$baseResultContent = Get-BenchmarkResults
+if (-not $baseResultContent) {
     Write-Error "No benchmark results found for $BaseBranch"
     Restore-OriginalBranch
     Restore-Stash
     exit 1
 }
-Copy-Item $baseResult.FullName $BaseBranchResult
+$baseResultContent | Out-File -FilePath $BaseBranchResult -Encoding utf8
 
 # Clean artifacts before next run
 Clear-BenchmarkArtifacts
@@ -132,24 +141,25 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# Restore stash before running benchmark (so uncommitted changes are included)
+Restore-Stash
+
 Write-Host "Running benchmark on $OriginalBranch (filter: $Filter)..."
-dotnet run --project $BenchmarkProject -c Release -- --filter "$Filter" --exporters markdown
+dotnet run --project $BenchmarkProject -c Release -- --filter "$Filter" --exporters markdown --join $JobArg
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Benchmark failed on $OriginalBranch"
     Remove-Item $BaseBranchResult -ErrorAction SilentlyContinue
-    Restore-Stash
     exit 1
 }
 
-# Copy current branch results to temp
-$currentResult = Get-LatestBenchmarkResult
-if (-not $currentResult) {
+# Save current branch results to temp
+$currentResultContent = Get-BenchmarkResults
+if (-not $currentResultContent) {
     Write-Error "No benchmark results found for $OriginalBranch"
     Remove-Item $BaseBranchResult -ErrorAction SilentlyContinue
-    Restore-Stash
     exit 1
 }
-Copy-Item $currentResult.FullName $CurrentBranchResult
+$currentResultContent | Out-File -FilePath $CurrentBranchResult -Encoding utf8
 
 # Clean artifacts
 Clear-BenchmarkArtifacts
@@ -187,9 +197,6 @@ $Report | Out-File -FilePath $OutputFile -Encoding utf8
 # Cleanup temp files
 Remove-Item $BaseBranchResult -ErrorAction SilentlyContinue
 Remove-Item $CurrentBranchResult -ErrorAction SilentlyContinue
-
-# Restore stashed changes
-Restore-Stash
 
 Write-Host ""
 Write-Host "Benchmark comparison saved to: $OutputFile" -ForegroundColor Green
