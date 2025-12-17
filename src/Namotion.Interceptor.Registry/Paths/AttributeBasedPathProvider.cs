@@ -80,7 +80,7 @@ public class AttributeBasedPathProvider : PathProviderBase
         }
 
         // [Children] fallback: Segment is a dictionary key (children property needs [Path] attribute on it)
-        var childrenPropertyName = ChildrenAttributeCache.GetChildrenPropertyName(subject.Subject.GetType());
+        var childrenPropertyName = ChildrenAttribute.GetChildrenPropertyName(subject.Subject.GetType());
         if (childrenPropertyName is not null)
         {
             return subject.TryGetProperty(childrenPropertyName);

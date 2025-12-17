@@ -2,8 +2,6 @@
 
 The `Namotion.Interceptor.Connectors` package provides infrastructure for connecting subject graphs to external systems. It includes **sources** (for synchronizing FROM external systems) and shared components used by both sources and servers.
 
-> **Note**: This package was previously named `Namotion.Interceptor.Sources`. The rename reflects that the path handling, update serialization, and other components are used by both sources (inbound) and servers (outbound).
-
 ## Architecture Overview
 
 ### Layers

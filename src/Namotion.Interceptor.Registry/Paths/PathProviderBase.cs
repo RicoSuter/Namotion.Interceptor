@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Registry.Paths;
 
@@ -52,7 +53,7 @@ public abstract class PathProviderBase : IPathProvider
         }
 
         // 2. [Children] fallback - segment is a dictionary key
-        var childrenPropertyName = ChildrenAttributeCache.GetChildrenPropertyName(subject.Subject.GetType());
+        var childrenPropertyName = ChildrenAttribute.GetChildrenPropertyName(subject.Subject.GetType());
         if (childrenPropertyName is not null)
         {
             // Return the Children property - caller uses segment as dictionary key
