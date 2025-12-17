@@ -65,11 +65,16 @@ public static class SourcePropertyExtensions
     }
 
     /// <summary>
-    /// Removes the source association from a property.
+    /// Atomically removes the source association from a property, but only if the current source matches the expected source.
+    /// This prevents accidentally removing another source's ownership in concurrent scenarios.
     /// </summary>
     /// <param name="property">The property reference to disassociate from its source.</param>
-    public static void RemoveSource(this PropertyReference property)
+    /// <param name="expectedSource">The source that should currently own this property.</param>
+    /// <returns><c>true</c> if the source was removed; <c>false</c> if the property had no source or a different source.</returns>
+    public static bool RemoveSource(this PropertyReference property, ISubjectSource expectedSource)
     {
-        property.RemovePropertyData(SourceKey);
+        var key = (property.Name, SourceKey);
+        var kvp = new KeyValuePair<(string, string), object?>(key, expectedSource);
+        return ((ICollection<KeyValuePair<(string, string), object?>>)property.Subject.Data).Remove(kvp);
     }
 }

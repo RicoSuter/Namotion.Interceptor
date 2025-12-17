@@ -15,17 +15,17 @@ internal class OpcUaSubjectLoader
 
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
-    private readonly HashSet<PropertyReference> _propertiesWithOpcData;
+    private readonly OpcUaPropertyTracker _propertyTracker;
     private readonly OpcUaSubjectClientSource _source;
 
     public OpcUaSubjectLoader(
         OpcUaClientConfiguration configuration,
-        HashSet<PropertyReference> propertiesWithOpcData,
+        OpcUaPropertyTracker propertyTracker,
         OpcUaSubjectClientSource source,
         ILogger logger)
     {
         _configuration = configuration;
-        _propertiesWithOpcData = propertiesWithOpcData;
+        _propertyTracker = propertyTracker;
         _source = source;
         _logger = logger;
     }
@@ -239,8 +239,7 @@ internal class OpcUaSubjectLoader
         };
 
         property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
-        property.Reference.SetSource(_source, _logger);
-        _propertiesWithOpcData.Add(property.Reference);
+        _propertyTracker.Track(property.Reference);
 
         monitoredItems.Add(monitoredItem);
     }
