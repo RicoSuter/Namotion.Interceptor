@@ -15,6 +15,7 @@ public class SubjectTransactionAsyncTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         Task<SubjectTransaction> tx2Task;
@@ -52,6 +53,7 @@ public class SubjectTransactionAsyncTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         using var tx = await context.BeginExclusiveTransactionAsync();
@@ -66,6 +68,7 @@ public class SubjectTransactionAsyncTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         using var tx1 = await context.BeginExclusiveTransactionAsync();
@@ -113,11 +116,13 @@ public class SubjectTransactionAsyncTests
         var context1 = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         var context2 = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         var person1 = new Person(context1);
@@ -139,6 +144,7 @@ public class SubjectTransactionAsyncTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         var person1 = new Person(context);
@@ -166,6 +172,7 @@ public class SubjectTransactionAsyncTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         var beforeStart = DateTimeOffset.UtcNow;
@@ -182,6 +189,7 @@ public class SubjectTransactionAsyncTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         using var tx = await context.BeginExclusiveTransactionAsync(
@@ -196,6 +204,7 @@ public class SubjectTransactionAsyncTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         var tx1 = await context.BeginExclusiveTransactionAsync();
@@ -212,6 +221,7 @@ public class SubjectTransactionAsyncTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         var person = new Person(context);
@@ -255,6 +265,7 @@ public class SubjectTransactionAsyncTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         var person = new Person(context);
@@ -293,6 +304,7 @@ public class SubjectTransactionAsyncTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         var person = new Person(context);
@@ -318,6 +330,7 @@ public class SubjectTransactionAsyncTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         var person = new Person(context);
@@ -343,6 +356,7 @@ public class SubjectTransactionAsyncTests
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking();
 
         var person = new Person(context);

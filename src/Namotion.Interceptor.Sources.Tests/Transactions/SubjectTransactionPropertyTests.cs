@@ -14,12 +14,12 @@ namespace Namotion.Interceptor.Sources.Tests.Transactions;
 public class SubjectTransactionPropertyTests : TransactionTestBase
 {
     [Fact]
-    public void WriteProperty_WhenTransactionActive_CapturesChange()
+    public async Task WriteProperty_WhenTransactionActive_CapturesChange()
     {
         var context = CreateContext();
         var person = new Person(context);
 
-        using var transaction = SubjectTransaction.BeginTransaction();
+        using var transaction = await context.BeginExclusiveTransactionAsync();
         person.FirstName = "John";
 
         Assert.Single(transaction.PendingChanges);
@@ -47,7 +47,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var person = new Person(context);
         string finalValue;
 
-        using (var transaction = SubjectTransaction.BeginTransaction())
+        using (var transaction = await context.BeginExclusiveTransactionAsync())
         {
             person.FirstName = "John";
 
@@ -60,12 +60,12 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public void WriteProperty_DerivedPropertySkipped_NotCaptured()
+    public async Task WriteProperty_DerivedPropertySkipped_NotCaptured()
     {
         var context = CreateContext();
         var person = new Person(context);
 
-        using var transaction = SubjectTransaction.BeginTransaction();
+        using var transaction = await context.BeginExclusiveTransactionAsync();
         person.FirstName = "John";
         person.LastName = "Doe";
 
@@ -76,12 +76,12 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public void WriteProperty_SamePropertyMultipleTimes_LastWriteWins()
+    public async Task WriteProperty_SamePropertyMultipleTimes_LastWriteWins()
     {
         var context = CreateContext();
         var person = new Person(context);
 
-        using var transaction = SubjectTransaction.BeginTransaction();
+        using var transaction = await context.BeginExclusiveTransactionAsync();
         person.FirstName = "John";
         person.FirstName = "Jane";
         person.FirstName = "Jack";
@@ -93,7 +93,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public void WriteProperty_PreservesChangeContext_SourceAndTimestamps()
+    public async Task WriteProperty_PreservesChangeContext_SourceAndTimestamps()
     {
         var context = CreateContext();
         var person = new Person(context);
@@ -101,7 +101,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var changedTime = DateTime.UtcNow.AddMinutes(-5);
         var receivedTime = DateTime.UtcNow;
 
-        using var transaction = SubjectTransaction.BeginTransaction();
+        using var transaction = await context.BeginExclusiveTransactionAsync();
 
         using (SubjectChangeContext.WithState(mockSource, changedTime, receivedTime))
         {
@@ -115,13 +115,13 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public void ReadProperty_WhenTransactionActive_ReturnsPendingValue()
+    public async Task ReadProperty_WhenTransactionActive_ReturnsPendingValue()
     {
         var context = CreateContext();
         var person = new Person(context);
         person.FirstName = "Original";
 
-        using (var transaction = SubjectTransaction.BeginTransaction())
+        using (var transaction = await context.BeginExclusiveTransactionAsync())
         {
             person.FirstName = "Pending";
             var readValue = person.FirstName;
@@ -146,13 +146,13 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public void ReadProperty_WhenNoPendingChange_ReturnsActualValue()
+    public async Task ReadProperty_WhenNoPendingChange_ReturnsActualValue()
     {
         var context = CreateContext();
         var person = new Person(context);
         person.FirstName = "Stored";
 
-        using var transaction = SubjectTransaction.BeginTransaction();
+        using var transaction = await context.BeginExclusiveTransactionAsync();
         var result = person.FirstName;
 
         Assert.Equal("Stored", result);
@@ -176,7 +176,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
             }
         });
 
-        using (var transaction = SubjectTransaction.BeginTransaction())
+        using (var transaction = await context.BeginExclusiveTransactionAsync())
         {
             person.FirstName = "Pending";
 
@@ -197,7 +197,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var changeObservable = context.GetPropertyChangeObservable(Scheduler.Immediate);
         changeObservable.Subscribe(change => notifications.Add(change));
 
-        using (var transaction = SubjectTransaction.BeginTransaction())
+        using (var transaction = await context.BeginExclusiveTransactionAsync())
         {
             person.FirstName = "John";
             Assert.Empty(notifications);
@@ -212,7 +212,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public void DisposeWithoutCommit_DoesNotFireChangeNotifications()
+    public async Task DisposeWithoutCommit_DoesNotFireChangeNotifications()
     {
         var context = CreateContext();
         var person = new Person(context);
@@ -221,7 +221,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var changeObservable = context.GetPropertyChangeObservable(Scheduler.Immediate);
         changeObservable.Subscribe(change => notifications.Add(change));
 
-        using (SubjectTransaction.BeginTransaction())
+        using (var transaction = await context.BeginExclusiveTransactionAsync())
         {
             person.FirstName = "John";
         }
@@ -236,7 +236,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var person1 = new Person(context);
         var person2 = new Person(context);
 
-        using (var transaction = SubjectTransaction.BeginTransaction())
+        using (var transaction = await context.BeginExclusiveTransactionAsync())
         {
             person1.FirstName = "John";
             person2.FirstName = "Jane";
@@ -256,7 +256,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var context = CreateContext();
         var person = new Person(context);
 
-        using (var transaction = SubjectTransaction.BeginTransaction())
+        using (var transaction = await context.BeginExclusiveTransactionAsync())
         {
             person.FirstName = "John";
             person.LastName = "Doe";

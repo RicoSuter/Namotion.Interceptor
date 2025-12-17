@@ -70,7 +70,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         next(ref context);
 
-        // Fast path: Skip if no derived properties depend on this property
         // Check this first as it's more likely to early-exit than transaction check
         var usedByProperties = context.Property.GetUsedByProperties().Items;
         if (usedByProperties.Length == 0)
@@ -79,9 +78,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
 
         // Skip derived property recalculation during transaction capture
-        // (derived values will be recalculated from pending values when read)
-        var transaction = SubjectTransaction.Current;
-        if (transaction is { IsCommitting: false })
+        if (SubjectTransaction.HasActiveTransaction &&
+            SubjectTransaction.Current is { IsCommitting: false })
         {
             return;
         }

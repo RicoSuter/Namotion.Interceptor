@@ -11,7 +11,8 @@ namespace Namotion.Interceptor.Tracking;
 public static class InterceptorSubjectContextExtensions
 {
     /// <summary>
-    /// Registers full property tracking including equality checks, context inheritance, derived property change detection, transactions, and property changed observable.
+    /// Registers full property tracking including equality checks, context inheritance, derived property change detection, and property changed observable.
+    /// Note: Transactions are opt-in. Call <see cref="WithTransactions"/> before <see cref="WithFullPropertyTracking"/> if needed.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
@@ -20,15 +21,14 @@ public static class InterceptorSubjectContextExtensions
         return context
             .WithEqualityCheck()
             .WithDerivedPropertyChangeDetection()
-            .WithTransactions()               // Before notifications - captures writes
-            .WithPropertyChangeObservable()   // Notifications suppressed for captured writes
+            .WithPropertyChangeObservable()
             .WithPropertyChangeQueue()
             .WithContextInheritance();
     }
 
     /// <summary>
     /// Enables transaction support for the context.
-    /// Should be registered before PropertyChangeObservable/Queue to suppress notifications during capture.
+    /// Must be called before <see cref="WithFullPropertyTracking"/> to ensure proper interceptor ordering.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>

@@ -39,7 +39,7 @@ Strongest consistency guarantee. If any source fails, attempts to revert success
 Constrains the transaction to a single `WriteChangesAsync` call by requiring all changes to use the same source and fit within one batch. Combine with Rollback mode for maximum safety when working with sources that don't guarantee atomic multi-property writes.
 
 ```csharp
-using var tx = SubjectTransaction.BeginTransaction(
+using var tx = await context.BeginExclusiveTransactionAsync(
     TransactionMode.Rollback,
     TransactionRequirement.SingleWrite);
 ```
@@ -60,7 +60,8 @@ Enable transaction support in your interceptor context:
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithFullPropertyTracking(); // Includes WithTransactions()
+    .WithFullPropertyTracking()
+    .WithTransactions(); // Required for transaction support (opt-in)
 ```
 
 Or enable transactions individually:
@@ -74,6 +75,13 @@ var context = InterceptorSubjectContext
 
 > **Important**: `WithTransactions()` should be registered before `WithPropertyChangeObservable()` or `WithPropertyChangeQueue()` to ensure change notifications are suppressed during the transaction capture phase.
 
+### Performance
+
+Transactions are designed for zero overhead when not in use:
+- **Without `WithTransactions()`**: Zero overhead - no interceptor registered
+- **With `WithTransactions()`, no active transaction**: Near-zero overhead (~1-2ns) - single volatile read of static counter
+- **Active transaction**: Full transaction logic executes
+
 ## Basic Usage
 
 ### Starting a Transaction
@@ -81,7 +89,7 @@ var context = InterceptorSubjectContext
 ```csharp
 var person = new Person(context);
 
-using (var transaction = SubjectTransaction.BeginTransaction())
+using (var transaction = await context.BeginExclusiveTransactionAsync())
 {
     person.FirstName = "John";
     person.LastName = "Doe";
@@ -100,7 +108,7 @@ using (var transaction = SubjectTransaction.BeginTransaction())
 Inside a transaction, reading a property returns the pending value:
 
 ```csharp
-using (var transaction = SubjectTransaction.BeginTransaction())
+using (var transaction = await context.BeginExclusiveTransactionAsync())
 {
     person.FirstName = "John";
 
@@ -116,7 +124,7 @@ using (var transaction = SubjectTransaction.BeginTransaction())
 If a transaction is disposed without committing, changes are discarded:
 
 ```csharp
-using (var transaction = SubjectTransaction.BeginTransaction())
+using (var transaction = await context.BeginExclusiveTransactionAsync())
 {
     person.FirstName = "John";
 
@@ -131,7 +139,7 @@ Console.WriteLine(person.FirstName); // Output: (original value, not "John")
 You can inspect which changes are pending before committing:
 
 ```csharp
-using (var transaction = SubjectTransaction.BeginTransaction())
+using (var transaction = await context.BeginExclusiveTransactionAsync())
 {
     person.FirstName = "John";
     person.LastName = "Doe";
@@ -151,7 +159,7 @@ using (var transaction = SubjectTransaction.BeginTransaction())
 If the same property is written multiple times within a transaction, only the final value is committed:
 
 ```csharp
-using (var transaction = SubjectTransaction.BeginTransaction())
+using (var transaction = await context.BeginExclusiveTransactionAsync())
 {
     person.FirstName = "John";
     person.FirstName = "Jane";
@@ -171,7 +179,7 @@ using (var transaction = SubjectTransaction.BeginTransaction())
 Calling `CommitAsync()` twice throws an exception:
 
 ```csharp
-using (var transaction = SubjectTransaction.BeginTransaction())
+using (var transaction = await context.BeginExclusiveTransactionAsync())
 {
     person.FirstName = "John";
     await transaction.CommitAsync();
@@ -185,7 +193,7 @@ using (var transaction = SubjectTransaction.BeginTransaction())
 Using a disposed transaction throws an exception:
 
 ```csharp
-var transaction = SubjectTransaction.BeginTransaction();
+var transaction = await context.BeginExclusiveTransactionAsync();
 transaction.Dispose();
 
 await transaction.CommitAsync(); // Throws ObjectDisposedException
@@ -196,9 +204,9 @@ await transaction.CommitAsync(); // Throws ObjectDisposedException
 Nested transactions are not supported:
 
 ```csharp
-using (var transaction1 = SubjectTransaction.BeginTransaction())
+using (var transaction1 = await context.BeginExclusiveTransactionAsync())
 {
-    using (var transaction2 = SubjectTransaction.BeginTransaction()) // Throws InvalidOperationException
+    using (var transaction2 = await context.BeginExclusiveTransactionAsync()) // Throws InvalidOperationException
     {
     }
 }
@@ -209,7 +217,7 @@ using (var transaction1 = SubjectTransaction.BeginTransaction())
 When creating a transaction, you can specify a `TransactionMode` to control how partial failures are handled:
 
 ```csharp
-using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Strict);
+using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Strict);
 ```
 
 Transaction modes are relevant in two scenarios:
@@ -225,7 +233,7 @@ In both cases, the transaction mode determines what happens to successfully writ
 BestEffort mode maximizes the number of successful writes. When some external sources fail, the changes that succeeded are still applied to the in-process model. This is useful when partial progress is acceptable and you want to handle failures gracefully without losing successful updates.
 
 ```csharp
-using var tx = SubjectTransaction.BeginTransaction(TransactionMode.BestEffort);
+using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
 device.Temperature = 25.5;  // Bound to Source A
 device.Pressure = 101.3;    // Bound to Source B
 
@@ -249,7 +257,7 @@ Use BestEffort when partial updates are acceptable and you prefer to maximize su
 Strict mode provides all-or-nothing semantics for the in-process model. If any external source fails, no changes are applied locally. However, sources that succeeded are **not reverted** - they keep their new values. This can lead to divergence between external sources and the local model.
 
 ```csharp
-using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Strict);
+using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Strict);
 device.Temperature = 25.5;  // Bound to Source A
 device.Pressure = 101.3;    // Bound to Source B
 
@@ -274,7 +282,7 @@ Use Strict when the in-process model must only reflect fully committed state, an
 Rollback mode provides the strongest consistency guarantee. If any external source fails, successfully written sources are **reverted** to their original values (best effort). This minimizes divergence between external sources and the local model.
 
 ```csharp
-using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Rollback);
+using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
 device.Temperature = 25.5;  // Bound to Source A
 device.Pressure = 101.3;    // Bound to Source B
 
@@ -301,7 +309,7 @@ Use Rollback when consistency is critical and you want to minimize the chance of
 In addition to the transaction mode, you can specify a `TransactionRequirement` to enforce constraints on the transaction scope. This is particularly useful for industrial protocols like OPC UA where you want to ensure predictable behavior.
 
 ```csharp
-using var tx = SubjectTransaction.BeginTransaction(
+using var tx = await context.BeginExclusiveTransactionAsync(
     TransactionMode.Rollback,
     TransactionRequirement.SingleWrite);
 ```
@@ -321,7 +329,7 @@ Changes to properties without a source are always allowed and don't count toward
 
 ```csharp
 // OPC UA scenario: maximum safety with single write requirement
-using var tx = SubjectTransaction.BeginTransaction(
+using var tx = await context.BeginExclusiveTransactionAsync(
     TransactionMode.Rollback,
     TransactionRequirement.SingleWrite);
 
@@ -348,7 +356,7 @@ If the requirements aren't met, `CommitAsync()` throws an `AggregateException` w
 new PropertyReference(device, "Temperature").SetSource(opcUaSource);
 new PropertyReference(device, "Pressure").SetSource(mqttSource);  // Different source!
 
-using var tx = SubjectTransaction.BeginTransaction(
+using var tx = await context.BeginExclusiveTransactionAsync(
     TransactionMode.Rollback,
     TransactionRequirement.SingleWrite);
 
@@ -380,7 +388,7 @@ With this configuration, `CommitAsync()` will:
 ```csharp
 try
 {
-    using (var transaction = SubjectTransaction.BeginTransaction(TransactionMode.Strict))
+    using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.Strict))
     {
         // These properties are bound to an OPC UA source
         device.Temperature = 25.5;
@@ -430,7 +438,7 @@ public partial class Person
     public string FullName => $"{FirstName} {LastName}";
 }
 
-using (var transaction = SubjectTransaction.BeginTransaction())
+using (var transaction = await context.BeginExclusiveTransactionAsync())
 {
     person.FirstName = "John";
     person.LastName = "Doe";
@@ -445,7 +453,8 @@ using (var transaction = SubjectTransaction.BeginTransaction())
 
 ## Thread Safety
 
-- `SubjectTransaction.BeginTransaction()` uses `AsyncLocal<T>` to store the current transaction, making it safe for async/await patterns
+- `context.BeginExclusiveTransactionAsync()` uses `AsyncLocal<T>` to store the current transaction, making it safe for async/await patterns
+- Exclusive transactions use a per-context semaphore to ensure only one transaction executes at a time
 - Each async execution context has its own transaction scope
 - The transaction is automatically cleared when `Dispose()` is called
 - On `CommitAsync()`, write callbacks are resolved from each subject's context, supporting multi-context scenarios
@@ -464,12 +473,19 @@ using (var transaction = SubjectTransaction.BeginTransaction())
 
 ## API Reference
 
+### IInterceptorSubjectContext Extensions
+
+| Member | Description |
+|--------|-------------|
+| `BeginExclusiveTransactionAsync(mode, requirement, ct)` | Begins a new exclusive transaction with the specified `TransactionMode` (default: `BestEffort`) and `TransactionRequirement` (default: `None`) |
+
 ### SubjectTransaction
 
 | Member | Description |
 |--------|-------------|
 | `static Current` | Gets the current transaction in the execution context, or `null` |
-| `static BeginTransaction(mode, requirement)` | Begins a new transaction with the specified `TransactionMode` (default: `BestEffort`) and `TransactionRequirement` (default: `None`) |
+| `static HasActiveTransaction` | Fast-path check for any active transaction (single volatile read) |
+| `Context` | Gets the context this transaction is bound to |
 | `GetPendingChanges()` | Returns the list of pending property changes |
 | `CommitAsync(ct)` | Commits all pending changes using the configured mode and requirement |
 | `Dispose()` | Discards uncommitted changes and clears the current transaction |
