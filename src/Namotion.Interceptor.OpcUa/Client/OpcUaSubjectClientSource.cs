@@ -27,8 +27,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
 
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
-
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
     private int _reconnectingIterations; // Tracks health check iterations while reconnecting (for stall detection)
@@ -311,12 +309,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <summary>
     /// Writes changes to OPC UA server with per-node result tracking.
     /// Returns a <see cref="WriteResult"/> indicating which nodes failed.
-    /// Thread-safe: uses internal lock to serialize concurrent calls.
     /// Zero-allocation on success path.
     /// </summary>
     public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var session = _sessionManager?.CurrentSession;
@@ -337,10 +333,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         catch (Exception ex)
         {
             return WriteResult.Failure(ex);
-        }
-        finally
-        {
-            _writeLock.Release();
         }
     }
 
@@ -511,7 +503,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         // even if properties are reused across multiple source instances
         CleanupPropertyData();
         _propertyTracker.Dispose();
-        _writeLock.Dispose();
         Dispose();
     }
 

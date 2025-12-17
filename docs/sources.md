@@ -311,33 +311,37 @@ When implementing `ISubjectSource`, use the provided `SubjectPropertyWriter` to 
 - Transaction commits via `SubjectTransaction.CommitAsync()`
 - Write retry queue flushing
 
-**Implementations MUST be thread-safe.** Use a `SemaphoreSlim` to serialize write operations:
+**Thread-safety is handled automatically.** The `WriteChangesInBatchesAsync` extension method (which all callers use) acquires a per-source lock before calling `WriteChangesAsync`. Implementations do not need to add their own synchronization:
 
 ```csharp
 public class MySource : ISubjectSource
 {
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
-
-    public async ValueTask WriteChangesAsync(
+    public async ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // No lock needed - handled by WriteChangesInBatchesAsync
         try
         {
             // Write to external system
+            return WriteResult.Success();
         }
-        finally
+        catch (Exception ex)
         {
-            _writeLock.Release();
+            return WriteResult.Failure(ex);
         }
     }
+}
+```
 
-    public async ValueTask DisposeAsync()
-    {
-        // ... other cleanup ...
-        _writeLock.Dispose();
-    }
+### Opting Out of Automatic Synchronization
+
+For sources that support concurrent writes (e.g., HTTP/2 multiplexing), implement `ISupportsConcurrentWrites` to skip the automatic lock:
+
+```csharp
+public class ConcurrentSource : ISubjectSource, ISupportsConcurrentWrites
+{
+    // WriteChangesAsync can be called concurrently - no automatic lock
 }
 ```
 

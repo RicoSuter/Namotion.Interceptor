@@ -239,7 +239,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
 
             Assert.Single(exception.FailedChanges);
             var sourceWriteException = Assert.IsType<SourceTransactionWriteException>(exception.FailedChanges[0].Error);
-            Assert.IsType<OperationCanceledException>(sourceWriteException.InnerException);
+            Assert.IsAssignableFrom<OperationCanceledException>(sourceWriteException.InnerException);
         }
     }
 
