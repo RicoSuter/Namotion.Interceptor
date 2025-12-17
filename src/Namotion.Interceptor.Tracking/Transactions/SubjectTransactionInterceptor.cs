@@ -27,11 +27,16 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
+        // Fast path: most reads occur outside transactions
         var transaction = SubjectTransaction.Current;
-        if (transaction is { IsCommitting: false } &&
-            transaction.PendingChanges.TryGetValue(context.Property, out var change))
+        if (transaction is null || transaction.IsCommitting)
         {
-            // Return pending value if transaction active and not committing
+            return next(ref context);
+        }
+
+        // Slow path: read-your-writes within active transaction
+        if (transaction.PendingChanges.TryGetValue(context.Property, out var change))
+        {
             return change.GetNewValue<TProperty>();
         }
 
