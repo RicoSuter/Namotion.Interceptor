@@ -9,7 +9,7 @@ using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.Servers.OpcUa;
 
@@ -218,15 +218,16 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
             }
 
             // Build configuration with defaults
+            var pathProvider = DefaultPathProvider.Instance;
             var defaults = new OpcUaServerConfiguration
             {
-                PathProvider = DefaultSourcePathProvider.Instance,
+                PathProvider = pathProvider,
                 ValueConverter = new OpcUaValueConverter()
             };
 
             var configuration = new OpcUaServerConfiguration
             {
-                PathProvider = DefaultSourcePathProvider.Instance,
+                PathProvider = pathProvider,
                 ValueConverter = new OpcUaValueConverter(),
                 ApplicationName = ApplicationName ?? defaults.ApplicationName,
                 NamespaceUri = NamespaceUri ?? defaults.NamespaceUri,

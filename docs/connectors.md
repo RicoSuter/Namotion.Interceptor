@@ -6,38 +6,36 @@ The `Namotion.Interceptor.Connectors` package provides infrastructure for connec
 
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Your Application                        │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │                   IInterceptorSubject                     │  │
-│  │               (Your domain model/replica)                 │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                    ▲                          │
-                    │ reads                    │ writes
-                    │                          ▼
-┌───────────────────┴──────────────────────────┴──────────────────┐
-│                      ISubjectConnector                          │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  RootSubject: The subject being connected                 │  │
-│  │  PathProvider: Maps properties to external paths          │  │
-│  └──────────────────────────────────────────────────────────┘  │
-├─────────────────────────────────────────────────────────────────┤
-│  ISubjectSource (implements ISubjectConnector)                  │
-│  - LoadInitialStateAsync() ← External System                   │
-│  - StartListeningAsync()   ← External System                   │
-│  - WriteChangesAsync()     → External System                   │
-├─────────────────────────────────────────────────────────────────┤
-│  Servers (optionally implement ISubjectConnector)               │
-│  - Publish changes         → External System                   │
-│  - Receive commands        ← External System                   │
-└─────────────────────────────────────────────────────────────────┘
-```
+### Layers
+
+1. **Your Application** - Contains `IInterceptorSubject` instances (your domain model/replica)
+2. **Connectors** - Bridge between your subjects and external systems
+
+### Connector Types
+
+| Type | Interface | Direction | Description |
+|------|-----------|-----------|-------------|
+| **Source** | `ISubjectSource` | Bidirectional | Synchronizes FROM an external system (the external system is the source of truth) |
+| **Server** | (varies) | Outbound | Exposes subjects TO external systems (the C# object is the source of truth) |
+
+### ISubjectSource Operations
+
+| Method | Direction | Description |
+|--------|-----------|-------------|
+| `LoadInitialStateAsync()` | External → Subject | Fetches complete state from external system |
+| `StartListeningAsync()` | External → Subject | Subscribes to real-time updates |
+| `WriteChangesAsync()` | Subject → External | Sends local changes to external system |
+
+### Server Operations
+
+| Operation | Direction | Description |
+|-----------|-----------|-------------|
+| Publish changes | Subject → External | Broadcasts property updates to connected clients |
+| Receive commands | External → Subject | Handles write requests from external clients |
 
 ## ISubjectConnector
 
-Base interface for components that connect subjects to external systems:
+Minimal marker interface for components that connect subjects to external systems:
 
 ```csharp
 public interface ISubjectConnector
@@ -46,17 +44,14 @@ public interface ISubjectConnector
     /// The root subject being connected to an external system.
     /// </summary>
     IInterceptorSubject RootSubject { get; }
-
-    /// <summary>
-    /// Path provider for mapping between subject paths and external paths.
-    /// </summary>
-    IPathProvider PathProvider { get; }
 }
 ```
 
 This interface is:
 - **Required** for sources (`ISubjectSource : ISubjectConnector`)
 - **Optional** for servers (they can implement it for type consistency)
+
+> **Note**: Path providers are implementation details. Sources expose `IsPropertyIncluded()` which internally delegates to their path provider. A source/server might not use a path provider at all.
 
 ## Sources (ISubjectSource)
 
@@ -78,6 +73,12 @@ A **source** represents an external authoritative system where the data originat
 ```csharp
 public interface ISubjectSource : ISubjectConnector
 {
+    /// <summary>
+    /// Checks whether the property is handled by this source.
+    /// Implementations typically delegate to an internal IPathProvider.
+    /// </summary>
+    bool IsPropertyIncluded(RegisteredSubjectProperty property);
+
     /// <summary>
     /// Maximum batch size for write operations (0 = no limit).
     /// </summary>
@@ -110,17 +111,18 @@ public interface ISubjectSource : ISubjectConnector
 
 When the external system sends new values:
 
-```
-External System → Source → propertyWriter.Write() → Subject Property Updated
-```
+1. External System sends update
+2. Source receives the update
+3. Source calls `propertyWriter.Write()`
+4. Subject property is updated
 
 #### Outbound (Subject → External)
 
 When you change a property value in code:
 
-```
-Subject Property Changed → WriteChangesAsync() → Source → External System
-```
+1. Subject property is changed
+2. `WriteChangesAsync()` is called with the change
+3. Source sends update to external system
 
 ### Initialization Sequence
 
@@ -135,6 +137,16 @@ This ensures:
 - Updates received during initialization are not lost
 - Updates are applied in the correct order relative to the initial state
 - No visible state toggle (flush before load avoids showing stale server values)
+
+### Inbound Update Error Handling
+
+When applying inbound updates (writing data from the external system to the local subject model), if an individual update fails (the action throws an exception), the error is logged and **the update is dropped**. There is no retry mechanism for inbound updates.
+
+This is by design:
+- Individual update failures don't block other updates from being applied
+- Monitor logs for `Failed to apply subject update` errors to detect issues
+
+This differs from outbound changes (writing from local model to external system), which use a retry queue to handle transient failures.
 
 ## Servers
 
@@ -165,8 +177,9 @@ public interface IPathProvider
 
     /// <summary>
     /// Get the path segment for a property.
+    /// Returns null if no explicit mapping exists.
     /// </summary>
-    string GetPropertySegment(RegisteredSubjectProperty property);
+    string? GetPropertySegment(RegisteredSubjectProperty property);
 
     /// <summary>
     /// Find a property by its path segment.
@@ -247,7 +260,7 @@ builder.Services.AddMqttSubjectClient<Sensor>(config =>
 public class DatabaseSource : ISubjectSource
 {
     private readonly IInterceptorSubject _root;
-    private readonly IPathProvider _pathProvider;
+    private readonly IPathProvider _pathProvider;  // Internal - not on interface
 
     public DatabaseSource(IInterceptorSubject root, IPathProvider pathProvider)
     {
@@ -256,8 +269,11 @@ public class DatabaseSource : ISubjectSource
     }
 
     public IInterceptorSubject RootSubject => _root;
-    public IPathProvider PathProvider => _pathProvider;
     public int WriteBatchSize => 100;
+
+    // IsPropertyIncluded delegates to internal path provider
+    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        => _pathProvider.IsPropertyIncluded(property);
 
     public async Task<IDisposable?> StartListeningAsync(
         SubjectPropertyWriter propertyWriter,

@@ -25,6 +25,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// <summary>
     /// Child subjects (files and folders).
     /// </summary>
+    [Children]
     [State]
     public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 
@@ -60,21 +61,9 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
         => Storage.WriteBlobAsync(path, content, cancellationToken);
 
     /// <summary>
-    /// Deletes a blob from storage and removes it from Children.
-    /// Path is relative to the storage root.
+    /// Deletes a blob from storage. Path is relative to the storage root.
+    /// The parent storage handles removal from the hierarchy.
     /// </summary>
-    public async Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
-    {
-        // Delete from storage
-        await Storage.DeleteBlobAsync(path, cancellationToken);
-
-        // Remove from Children directly (don't rely on FileWatcher)
-        var fileName = Path.GetFileName(path);
-        if (Children.ContainsKey(fileName))
-        {
-            var children = new Dictionary<string, IInterceptorSubject>(Children);
-            children.Remove(fileName);
-            Children = children;
-        }
-    }
+    public Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
+        => Storage.DeleteBlobAsync(path, cancellationToken);
 }

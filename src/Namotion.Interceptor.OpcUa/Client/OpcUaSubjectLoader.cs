@@ -1,8 +1,8 @@
 ﻿using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -103,7 +103,7 @@ internal class OpcUaSubjectLoader
                     new OpcUaNodeAttribute(
                         nodeRef.BrowseName.Name,
                         nodeRef.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex),
-                        sourceName: null)
+                        connectorName: null)
                     {
                         NodeIdentifier = nodeRef.NodeId.Identifier.ToString(),
                         NodeNamespaceUri = nodeRef.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex)
@@ -129,7 +129,12 @@ internal class OpcUaSubjectLoader
                 }
                 else
                 {
-                    MonitorValueNode(childNodeId, property, monitoredItems);
+                    // Only monitor value properties that should be exposed by the path provider
+                    // This prevents monitoring properties found via BrowseName that don't have proper attributes
+                    if (_configuration.PathProvider.IsPropertyIncluded(property))
+                    {
+                        MonitorValueNode(childNodeId, property, monitoredItems);
+                    }
                 }
             }
         }

@@ -9,11 +9,11 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Packets;
+using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
-using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -59,6 +59,9 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
         configuration.Validate();
     }
+
+    /// <inheritdoc />
+    public IInterceptorSubject RootSubject => _subject;
 
     /// <inheritdoc />
     public bool IsPropertyIncluded(RegisteredSubjectProperty property) =>

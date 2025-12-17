@@ -2,8 +2,8 @@ using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -59,6 +59,7 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Child subjects (files and folders).
     /// </summary>
+    [Children]
     [State]
     public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 
@@ -279,10 +280,16 @@ public partial class FluentStorageContainer :
     {
         _logger?.LogDebug("File deleted: {Path}", relativePath);
 
+        if (!_pathRegistry.TryGetSubject(relativePath, out var subject))
+        {
+            _logger?.LogDebug("Subject not found for path: {Path}", relativePath);
+            return Task.CompletedTask;
+        }
+
         _pathRegistry.Unregister(relativePath);
 
         var children = new Dictionary<string, IInterceptorSubject>(Children);
-        _hierarchyManager.RemoveFromHierarchy(relativePath, children);
+        _hierarchyManager.RemoveFromHierarchy(relativePath, subject, children);
         Children = children;
 
         _logger?.LogInformation("Removed deleted file: {Path}", relativePath);
@@ -428,10 +435,13 @@ public partial class FluentStorageContainer :
         await _client.DeleteAsync(path, cancellationToken: cancellationToken);
 
         // Remove from hierarchy directly (don't rely on FileWatcher)
-        _pathRegistry.Unregister(path);
-        var children = new Dictionary<string, IInterceptorSubject>(Children);
-        _hierarchyManager.RemoveFromHierarchy(path, children);
-        Children = children;
+        if (_pathRegistry.TryGetSubject(path, out var subject))
+        {
+            _pathRegistry.Unregister(path);
+            var children = new Dictionary<string, IInterceptorSubject>(Children);
+            _hierarchyManager.RemoveFromHierarchy(path, subject, children);
+            Children = children;
+        }
 
         _logger?.LogDebug("Deleted blob from storage: {Path}", path);
     }

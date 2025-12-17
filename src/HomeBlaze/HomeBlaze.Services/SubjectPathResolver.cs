@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Concurrent;
+using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -33,13 +34,18 @@ public class SubjectPathResolver : ILifecycleHandler
     /// <summary>
     /// Converts bracket notation to slash notation.
     /// Children[demo].Children[file.json] → Children/demo/Children/file.json
+    /// [Demo].[Inline.md] (when using [Children]) → Demo/Inline.md
     /// </summary>
     public static string BracketToSlash(string bracketPath)
     {
-        return bracketPath
-            .Replace("].", "/")
-            .Replace("[", "/")
-            .Replace("]", "");
+        var result = bracketPath
+            .Replace("].[", "/")  // Handle [key].[key] from [Children] (must be before ].)
+            .Replace("].", "/")   // Handle Property[key].Next
+            .Replace("[", "/")    // Handle Property[key] opening bracket
+            .Replace("]", "");    // Handle trailing bracket
+
+        // Trim leading slash (from paths starting with [key])
+        return result.TrimStart('/');
     }
 
     /// <summary>
@@ -167,7 +173,23 @@ public class SubjectPathResolver : ILifecycleHandler
             var property = registered?.TryGetProperty(segment);
 
             if (property is not { HasChildSubjects: true })
+            {
+                // No direct property match - try [Children] fallback
+                var childrenPropertyName = ChildrenAttributeCache.GetChildrenPropertyName(current.GetType());
+                if (childrenPropertyName != null)
+                {
+                    var childrenProperty = registered?.TryGetProperty(childrenPropertyName);
+                    if (childrenProperty?.GetValue() is IDictionary childrenDictionary && childrenDictionary.Contains(segment))
+                    {
+                        if (childrenDictionary[segment] is IInterceptorSubject childSubject)
+                        {
+                            current = childSubject;
+                            continue;
+                        }
+                    }
+                }
                 return null;
+            }
 
             var value = property.GetValue();
             if (value == null)
@@ -279,11 +301,23 @@ public class SubjectPathResolver : ILifecycleHandler
         {
             var parentSubject = parent.Property.Subject;
 
-            // Build bracket segment: PropertyName or PropertyName[key]
+            // Build bracket segment: PropertyName, PropertyName[key], or [key] for [Children]
             var segment = parent.Property.Name;
+            var isChildrenProperty = ChildrenAttributeCache.IsChildrenProperty(
+                parentSubject.GetType(), parent.Property.Name);
+
             if (parent.Index != null)
             {
-                segment += $"[{parent.Index}]";
+                if (isChildrenProperty)
+                {
+                    // For [Children] properties, use just the key - no property name, no brackets
+                    // This makes paths like "Notes" instead of "Children[Notes]"
+                    segment = parent.Index.ToString()!;
+                }
+                else
+                {
+                    segment += $"[{parent.Index}]";
+                }
             }
             pathSegments.Add(segment);
 

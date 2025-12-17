@@ -6,9 +6,9 @@ using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Mqtt;
 using Namotion.Interceptor.Mqtt.Client;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.SamplesModel;
 using Namotion.Interceptor.SamplesModel.Workers;
-using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 
@@ -34,7 +34,7 @@ builder.Services.AddMqttSubjectClient(
     {
         BrokerHost = "localhost",
         BrokerPort = 1883,
-        PathProvider = new AttributeBasedSourcePathProvider("mqtt", "/", null),
+        PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
         DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
         UseRetainedMessages = true
     });

@@ -63,7 +63,7 @@
     <Project Path="Namotion.Interceptor.Mqtt.Tests/Namotion.Interceptor.Mqtt.Tests.csproj" />
     <Project Path="Namotion.Interceptor.OpcUa.Tests/Namotion.Interceptor.OpcUa.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj" />
-    <Project Path="Namotion.Interceptor.Sources.Tests/Namotion.Interceptor.Sources.Tests.csproj" />
+    <Project Path="Namotion.Interceptor.Connectors.Tests/Namotion.Interceptor.Connectors.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Validation.Tests/Namotion.Interceptor.Validation.Tests.csproj" />
@@ -72,7 +72,7 @@
   <Project Path="Namotion.Interceptor.Generator/Namotion.Interceptor.Generator.csproj" />
   <Project Path="Namotion.Interceptor.Hosting/Namotion.Interceptor.Hosting.csproj" />
   <Project Path="Namotion.Interceptor.Registry/Namotion.Interceptor.Registry.csproj" />
-  <Project Path="Namotion.Interceptor.Sources/Namotion.Interceptor.Sources.csproj" />
+  <Project Path="Namotion.Interceptor.Connectors/Namotion.Interceptor.Connectors.csproj" />
   <Project Path="Namotion.Interceptor.Testing/Namotion.Interceptor.Testing.csproj" />
   <Project Path="Namotion.Interceptor.Tracking/Namotion.Interceptor.Tracking.csproj" />
   <Project Path="Namotion.Interceptor.Validation/Namotion.Interceptor.Validation.csproj" />

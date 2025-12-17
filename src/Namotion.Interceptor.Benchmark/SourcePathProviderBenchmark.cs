@@ -1,8 +1,9 @@
 ﻿using System;
 using BenchmarkDotNet.Attributes;
+using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Benchmark;
@@ -13,6 +14,7 @@ namespace Namotion.Interceptor.Benchmark;
 public class SourcePathProviderBenchmark
 {
     private Car _car;
+    private PathProviderBase _pathProvider;
 
     [GlobalSetup]
     public void Setup()
@@ -23,12 +25,13 @@ public class SourcePathProviderBenchmark
             .WithRegistry();
 
         _car = new Car(context);
+        _pathProvider = DefaultPathProvider.Instance;
     }
 
     [Benchmark]
     public void TryGetPropertyFromSourcePath()
     {
-        var (property, _) = _car.TryGetPropertyFromSourcePath("Tires[1].Pressure", DefaultSourcePathProvider.Instance);
+        var (property, _) = _car.TryGetPropertyFromSourcePath("Tires[1].Pressure", _pathProvider);
         if (property is null)
         {
             throw new InvalidOperationException();
@@ -47,7 +50,7 @@ public class SourcePathProviderBenchmark
             (p, _, _) =>
             {
                 property = p;
-            }, DefaultSourcePathProvider.Instance);
+            }, _pathProvider);
 
         if (property is null)
         {
@@ -56,11 +59,10 @@ public class SourcePathProviderBenchmark
     }
 
     [Benchmark]
-    public void TryGetPropertyFromSegment()
+    public void GetPropertyFromSegment()
     {
         var subject = _car.TryGetRegisteredSubject();
-        var property = DefaultSourcePathProvider
-            .Instance
+        var property = _pathProvider
             .TryGetPropertyFromSegment(subject ?? throw new InvalidOperationException(), "Name");
 
         if (property is null)
@@ -73,7 +75,7 @@ public class SourcePathProviderBenchmark
     public void TryGetSourcePath()
     {
         var property = _car.Tires[1].TryGetRegisteredSubject()?.TryGetProperty("Pressure");
-        var path = property!.TryGetSourcePath(DefaultSourcePathProvider.Instance, null);
+        var path = property!.TryGetSourcePath(_pathProvider, null);
         if (path is null)
         {
             throw new InvalidOperationException();

@@ -1,3 +1,4 @@
+@using System.Text.RegularExpressions
 @using BlazorMonaco.Editor
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Components.Abstractions
@@ -6,10 +7,9 @@
 @using HomeBlaze.Storage.Blazor.Models
 @using HomeBlaze.Storage.Files
 @using HomeBlaze.Storage.Internal
+@using Microsoft.JSInterop
 @using MudBlazor
 @using Namotion.Interceptor
-@using Microsoft.JSInterop
-@using System.Text.RegularExpressions
 
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService

@@ -74,8 +74,8 @@ Folders in your data directory become the object hierarchy:
 ```
 Data/
 ├── demo/
-│   ├── motor1.json      → Root.Children[demo].Children[motor1.json]
-│   └── motor2.json      → Root.Children[demo].Children[motor2.json]
+│   ├── motor1.json      → Root.Children[demo].Children[motor1]
+│   └── motor2.json      → Root.Children[demo].Children[motor2]
 └── docs/
     └── guide.md         → Root.Children[docs].Children[guide.md]
 ```
@@ -128,7 +128,7 @@ Paths let you reference subjects and their properties anywhere in the object gra
 
 | Prefix | Description | Example |
 |--------|-------------|---------|
-| `Root.` | Absolute path from root | `Root.Children[demo].Children[motor.json]` |
+| `Root.` | Absolute path from root | `Root.Children[demo].Children[motor]` |
 | `this.` | Relative to current subject | `this.Child.Name` |
 | `../` | Navigate up to parent | `../Sibling.Temperature` |
 | *(none)* | Relative to current context | `Children[item].Speed` |
@@ -138,7 +138,7 @@ Paths let you reference subjects and their properties anywhere in the object gra
 Access dictionary children using brackets:
 
 ```
-Children[folder-name].Children[file.json].PropertyName
+Children[folder-name].Children[subject].PropertyName
 ```
 
 - Keys are case-sensitive
@@ -149,8 +149,8 @@ Children[folder-name].Children[file.json].PropertyName
 
 | Path | Description |
 |------|-------------|
-| `Root.Children[demo].Children[Conveyor.json]` | Absolute path to a motor |
-| `Root.Children[demo].Children[Conveyor.json].CurrentSpeed` | Property on that motor |
+| `Root.Children[demo].Children[Conveyor]` | Absolute path to a motor |
+| `Root.Children[demo].Children[Conveyor].CurrentSpeed` | Property on that motor |
 | `this.Child.Name` | Property on current subject's child |
 | `../Temperature` | Go up one level, access Temperature |
 | `../../Children[data].Value` | Go up two levels, then navigate down |
@@ -182,7 +182,7 @@ Use the `Widget` subject to embed another subject's widget by path:
 ```json
 {
     "type": "HomeBlaze.Components.Widget",
-    "path": "Root.Children[demo].Children[Conveyor.json]"
+    "path": "Root.Children[demo].Children[Conveyor]"
 }
 ```
 
@@ -196,7 +196,7 @@ Embed a widget inline:
 ```subject(mywidget)
 {
     "type": "HomeBlaze.Components.Widget",
-    "path": "Root.Children[demo].Children[motor.json]"
+    "path": "Root.Children[demo].Children[motor]"
 }
 ```
 ~~~
@@ -215,7 +215,7 @@ The demo includes pre-configured motors in the `demo/` folder:
 | Water Pump | 2,400 RPM | 1s |
 | Compressor | 3,000 RPM | 1s |
 
-See the [Demo Setup Guide](../demo/Setup.md) for details.
+See the [Demo Setup Guide](../Demo/Setup.md) for details.
 
 ---
 

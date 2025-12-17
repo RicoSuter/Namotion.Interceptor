@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
-using Namotion.Interceptor.Sources.Resilience;
+using Namotion.Interceptor.Connectors.Resilience;
 
 namespace Namotion.Interceptor.Mqtt.Client;
 
