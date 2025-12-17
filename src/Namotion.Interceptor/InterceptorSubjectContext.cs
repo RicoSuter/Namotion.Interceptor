@@ -239,7 +239,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             .OfType<TInterface>()
             .Concat(_fallbackContexts.SelectMany(c => c.GetServices<TInterface>()))
             .Distinct()
-            .ToList();
+            .ToArray();
 
         return ServiceOrderResolver.OrderByDependencies(services);
     }

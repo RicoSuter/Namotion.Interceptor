@@ -11,7 +11,7 @@ public class ServiceOrderResolverTests
     public void EmptyList_ReturnsEmptyArray()
     {
         // Arrange
-        var services = new List<object>();
+        var services = Array.Empty<object>();
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -25,7 +25,7 @@ public class ServiceOrderResolverTests
     {
         // Arrange
         var service = new ServiceA();
-        var services = new List<object> { service };
+        var services = new object[] { service };
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -42,7 +42,7 @@ public class ServiceOrderResolverTests
         var serviceA = new ServiceA();
         var serviceB = new ServiceB();
         var serviceC = new ServiceC();
-        var services = new List<object> { serviceA, serviceB, serviceC };
+        var services = new object[] { serviceA, serviceB, serviceC };
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -65,7 +65,7 @@ public class ServiceOrderResolverTests
         // Arrange: ServiceBeforeA runs before ServiceA
         var serviceA = new ServiceA();
         var serviceBeforeA = new ServiceBeforeA();
-        var services = new List<object> { serviceA, serviceBeforeA };
+        var services = new object[] { serviceA, serviceBeforeA };
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -82,7 +82,7 @@ public class ServiceOrderResolverTests
         // Arrange: ServiceAfterA runs after ServiceA
         var serviceA = new ServiceA();
         var serviceAfterA = new ServiceAfterA();
-        var services = new List<object> { serviceAfterA, serviceA };
+        var services = new object[] { serviceAfterA, serviceA };
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -100,7 +100,7 @@ public class ServiceOrderResolverTests
         var serviceA = new ServiceA();
         var serviceBeforeA = new ServiceBeforeA();
         var serviceAfterA = new ServiceAfterA();
-        var services = new List<object> { serviceAfterA, serviceA, serviceBeforeA };
+        var services = new object[] { serviceAfterA, serviceA, serviceBeforeA };
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -119,7 +119,7 @@ public class ServiceOrderResolverTests
         var chainStart = new ChainStart();
         var chainMiddle = new ChainMiddle();
         var chainEnd = new ChainEnd();
-        var services = new List<object> { chainEnd, chainStart, chainMiddle };
+        var services = new object[] { chainEnd, chainStart, chainMiddle };
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -136,7 +136,7 @@ public class ServiceOrderResolverTests
     {
         // Arrange: ServiceBeforeA references ServiceA, but ServiceA is not in the list
         var serviceBeforeA = new ServiceBeforeA();
-        var services = new List<object> { serviceBeforeA };
+        var services = new object[] { serviceBeforeA };
 
         // Act - should not throw
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -147,13 +147,83 @@ public class ServiceOrderResolverTests
     }
 
     [Fact]
+    public void ServiceWithDependency_PreservesOrderOfUnrelatedServices()
+    {
+        // Arrange: Register A, B, C, D, E where A runs before D
+        // Registration order: A, B, C, D, E
+        // Expected: A, B, C, D, E (D must come after A, unrelated services keep relative order)
+        var serviceA = new ServiceARunsBeforeD();
+        var serviceB = new ServiceB();
+        var serviceC = new ServiceC();
+        var serviceD = new ServiceD();
+        var serviceE = new ServiceE();
+        var services = new object[] { serviceA, serviceB, serviceC, serviceD, serviceE };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert: A should be before D, and unrelated services should maintain registration order
+        Assert.Equal(5, result.Length);
+
+        // A must be before D (due to constraint)
+        var indexA = Array.IndexOf(result, serviceA);
+        var indexD = Array.IndexOf(result, serviceD);
+        Assert.True(indexA < indexD, "A should come before D");
+
+        // B, C, E should maintain their relative registration order
+        var indexB = Array.IndexOf(result, serviceB);
+        var indexC = Array.IndexOf(result, serviceC);
+        var indexE = Array.IndexOf(result, serviceE);
+        Assert.True(indexB < indexC, "B should come before C (registration order)");
+        Assert.True(indexC < indexE, "C should come before E (registration order)");
+
+        // D should come before E (registration order)
+        Assert.True(indexD < indexE, "D should come before E (registration order)");
+    }
+
+    [Fact]
+    public void ComplexDependencyChain_PreservesUnrelatedOrder()
+    {
+        // Arrange: X -> Y -> Z (chain), plus unrelated A, B, C interspersed
+        // Registration order: A, X, B, Y, C, Z
+        // Expected: A, X, B, Y, C, Z (chain respected, unrelated services in place)
+        var serviceA = new ServiceA();
+        var serviceX = new ChainStart();
+        var serviceB = new ServiceB();
+        var serviceY = new ChainMiddle();
+        var serviceC = new ServiceC();
+        var serviceZ = new ChainEnd();
+        var services = new object[] { serviceA, serviceX, serviceB, serviceY, serviceC, serviceZ };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert
+        Assert.Equal(6, result.Length);
+
+        // Chain must be maintained: X -> Y -> Z
+        var indexX = Array.IndexOf(result, serviceX);
+        var indexY = Array.IndexOf(result, serviceY);
+        var indexZ = Array.IndexOf(result, serviceZ);
+        Assert.True(indexX < indexY, "X should come before Y");
+        Assert.True(indexY < indexZ, "Y should come before Z");
+
+        // Unrelated services should maintain their relative order
+        var indexA = Array.IndexOf(result, serviceA);
+        var indexB = Array.IndexOf(result, serviceB);
+        var indexC = Array.IndexOf(result, serviceC);
+        Assert.True(indexA < indexB, "A should come before B (registration order)");
+        Assert.True(indexB < indexC, "B should come before C (registration order)");
+    }
+
+    [Fact]
     public void MultipleRunsBeforeAttributes_OrdersCorrectly()
     {
         // Arrange: ServiceBeforeAAndB has two [RunsBefore] attributes
         var serviceA = new ServiceA();
         var serviceB = new ServiceB();
         var serviceBeforeAAndB = new ServiceBeforeAAndB();
-        var services = new List<object> { serviceA, serviceB, serviceBeforeAAndB };
+        var services = new object[] { serviceA, serviceB, serviceBeforeAAndB };
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -170,7 +240,7 @@ public class ServiceOrderResolverTests
         var serviceA = new ServiceA();
         var serviceC = new ServiceC();
         var serviceBetween = new ServiceBetweenAAndC();
-        var services = new List<object> { serviceC, serviceBetween, serviceA };
+        var services = new object[] { serviceC, serviceBetween, serviceA };
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -193,7 +263,7 @@ public class ServiceOrderResolverTests
         var first = new FirstService();
         var middle = new ServiceA();
         var last = new LastService();
-        var services = new List<object> { middle, last, first };
+        var services = new object[] { middle, last, first };
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -212,7 +282,7 @@ public class ServiceOrderResolverTests
         var first = new FirstService();
         var middle = new ServiceA();
         var last = new LastService();
-        var services = new List<object> { last, first, middle };
+        var services = new object[] { last, first, middle };
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -231,7 +301,7 @@ public class ServiceOrderResolverTests
         var first1 = new FirstService();
         var first2 = new FirstServiceBeforeFirst1();
         var middle = new ServiceA();
-        var services = new List<object> { middle, first1, first2 };
+        var services = new object[] { middle, first1, first2 };
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -250,7 +320,7 @@ public class ServiceOrderResolverTests
         var middle = new ServiceA();
         var last1 = new LastService();
         var last2 = new LastServiceAfterLast1();
-        var services = new List<object> { last2, middle, last1 };
+        var services = new object[] { last2, middle, last1 };
 
         // Act
         var result = ServiceOrderResolver.OrderByDependencies(services);
@@ -272,7 +342,7 @@ public class ServiceOrderResolverTests
         // Arrange: Circular1 -> Circular2 -> Circular1
         var circular1 = new Circular1();
         var circular2 = new Circular2();
-        var services = new List<object> { circular1, circular2 };
+        var services = new object[] { circular1, circular2 };
 
         // Act & Assert
         var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -287,7 +357,7 @@ public class ServiceOrderResolverTests
     {
         // Arrange
         var invalid = new FirstAndLastService();
-        var services = new List<object> { invalid };
+        var services = new object[] { invalid };
 
         // Act & Assert
         var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -302,7 +372,7 @@ public class ServiceOrderResolverTests
         // Arrange: FirstService with RunsAfter pointing to middle group
         var invalid = new FirstServiceWithRunsAfterMiddle();
         var middle = new ServiceA();
-        var services = new List<object> { invalid, middle };
+        var services = new object[] { invalid, middle };
 
         // Act & Assert
         var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -317,7 +387,7 @@ public class ServiceOrderResolverTests
         // Arrange: LastService with RunsBefore pointing to middle group
         var invalid = new LastServiceWithRunsBeforeMiddle();
         var middle = new ServiceA();
-        var services = new List<object> { invalid, middle };
+        var services = new object[] { invalid, middle };
 
         // Act & Assert
         var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -334,6 +404,12 @@ public class ServiceOrderResolverTests
     private class ServiceA { }
     private class ServiceB { }
     private class ServiceC { }
+    private class ServiceD { }
+    private class ServiceE { }
+
+    // Service that runs before D (for order preservation tests)
+    [RunsBefore(typeof(ServiceD))]
+    private class ServiceARunsBeforeD { }
 
     // RunsBefore/RunsAfter services
     [RunsBefore(typeof(ServiceA))]

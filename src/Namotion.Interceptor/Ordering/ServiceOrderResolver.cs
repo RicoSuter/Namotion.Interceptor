@@ -4,327 +4,246 @@ using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Interceptor.Ordering;
 
-internal readonly struct ServiceOrderInfo
-{
-    public Type[] RunsBefore { get; }
-    public Type[] RunsAfter { get; }
-    public bool RunsFirst { get; }
-    public bool RunsLast { get; }
-
-    public ServiceOrderInfo(Type[] runsBefore, Type[] runsAfter, bool runsFirst, bool runsLast)
-    {
-        RunsBefore = runsBefore;
-        RunsAfter = runsAfter;
-        RunsFirst = runsFirst;
-        RunsLast = runsLast;
-    }
-}
-
 /// <summary>
 /// Resolves service execution order based on ordering attributes.
 /// Uses Kahn's algorithm for topological sorting with three-group partitioning (First, Middle, Last).
 /// </summary>
 public static class ServiceOrderResolver
 {
-    private static readonly ConcurrentDictionary<Type, ServiceOrderInfo> AttributeCache = new();
+    private static readonly ConcurrentDictionary<Type, (Type[] RunsBefore, Type[] RunsAfter, bool RunsFirst, bool RunsLast)> Cache = new();
 
     /// <summary>
     /// Orders services by their ordering attributes.
     /// </summary>
-    public static T[] OrderByDependencies<T>(List<T> services)
+    public static T[] OrderByDependencies<T>(T[] services)
     {
-        if (services.Count == 0)
+        if (services.Length <= 1)
         {
-            return [];
+            if (services.Length == 1)
+                ValidateService(services[0]!);
+            return services.Length == 0 ? [] : [services[0]];
         }
 
-        if (services.Count == 1)
+        // Fast path: check if partitioning is needed
+        var hasFirstOrLast = false;
+        for (var i = 0; i < services.Length; i++)
         {
-            ValidateSingleService(services[0]!);
-            return [services[0]];
+            var info = GetOrderInfo(services[i]!.GetType());
+            if (info.RunsFirst || info.RunsLast)
+            {
+                hasFirstOrLast = true;
+                break;
+            }
         }
 
-        var (firstGroup, middleGroup, lastGroup) = PartitionIntoGroups(services);
-        ValidateCrossGroupDependencies(firstGroup, middleGroup, lastGroup);
-
-        var orderedFirst = TopologicalSort(firstGroup);
-        var orderedMiddle = TopologicalSort(middleGroup);
-        var orderedLast = TopologicalSort(lastGroup);
-
-        return ConcatenateResults(orderedFirst, orderedMiddle, orderedLast, services.Count);
+        return hasFirstOrLast ? OrderWithPartitioning(services) : TopologicalSort(services);
     }
 
-    private static void ValidateSingleService<T>(T service)
+    private static T[] OrderWithPartitioning<T>(T[] services)
     {
-        var info = GetOrderInfo(service!.GetType());
-        if (info is { RunsFirst: true, RunsLast: true })
+        // Count group sizes
+        var firstCount = 0;
+        var lastCount = 0;
+        for (var i = 0; i < services.Length; i++)
         {
-            throw new InvalidOperationException(
-                $"Service {service.GetType().Name} cannot have both [RunsFirst] and [RunsLast]");
-        }
-    }
-
-    private static (List<T> first, List<T> middle, List<T> last) PartitionIntoGroups<T>(List<T> services)
-    {
-        var firstGroup = new List<T>();
-        var middleGroup = new List<T>();
-        var lastGroup = new List<T>();
-
-        foreach (var service in services)
-        {
-            var info = GetOrderInfo(service!.GetType());
+            var info = GetOrderInfo(services[i]!.GetType());
             if (info is { RunsFirst: true, RunsLast: true })
-            {
-                throw new InvalidOperationException(
-                    $"Service {service.GetType().Name} cannot have both [RunsFirst] and [RunsLast]");
-            }
-
-            if (info.RunsFirst)
-            {
-                firstGroup.Add(service);
-            }
-            else if (info.RunsLast)
-            {
-                lastGroup.Add(service);
-            }
-            else
-            {
-                middleGroup.Add(service);
-            }
+                throw new InvalidOperationException($"Service {services[i]!.GetType().Name} cannot have both [RunsFirst] and [RunsLast]");
+            if (info.RunsFirst) firstCount++;
+            else if (info.RunsLast) lastCount++;
         }
 
-        return (firstGroup, middleGroup, lastGroup);
-    }
+        var middleCount = services.Length - firstCount - lastCount;
 
-    private static T[] ConcatenateResults<T>(T[] first, T[] middle, T[] last, int totalCount)
-    {
-        var result = new T[totalCount];
-        first.CopyTo(result, 0);
-        middle.CopyTo(result, first.Length);
-        last.CopyTo(result, first.Length + middle.Length);
-        return result;
-    }
+        // Partition into groups
+        var firstGroup = firstCount > 0 ? new T[firstCount] : null;
+        var middleGroup = middleCount > 0 ? new T[middleCount] : null;
+        var lastGroup = lastCount > 0 ? new T[lastCount] : null;
+        int fi = 0, mi = 0, li = 0;
 
-    private static T[] TopologicalSort<T>(List<T> services)
-    {
-        if (services.Count == 0)
-        {
-            return [];
-        }
-
-        if (services.Count == 1)
-        {
-            return [services[0]];
-        }
-
-        var (typeToIndex, indexToService) = BuildTypeIndexMapping(services);
-        var (inDegree, adjacency) = BuildAdjacencyGraph(indexToService, typeToIndex);
-        return ExecuteKahnsAlgorithm(indexToService, inDegree, adjacency);
-    }
-
-    private static (Dictionary<Type, int> typeToIndex, T[] indexToService) BuildTypeIndexMapping<T>(List<T> services)
-    {
-        var count = services.Count;
-        var typeToIndex = new Dictionary<Type, int>(count);
-        var indexToService = new T[count];
-
-        for (var i = 0; i < count; i++)
+        for (var i = 0; i < services.Length; i++)
         {
             var service = services[i];
-            indexToService[i] = service;
-            typeToIndex[service!.GetType()] = i;
+            var info = GetOrderInfo(service!.GetType());
+            if (info.RunsFirst) firstGroup![fi++] = service;
+            else if (info.RunsLast) lastGroup![li++] = service;
+            else middleGroup![mi++] = service;
         }
 
-        return (typeToIndex, indexToService);
-    }
+        ValidateCrossGroupDependencies(firstGroup, middleGroup, lastGroup);
 
-    private static (int[] inDegree, List<int>?[] adjacency) BuildAdjacencyGraph<T>(
-        T[] indexToService, Dictionary<Type, int> typeToIndex)
-    {
-        var count = indexToService.Length;
-        var inDegree = new int[count];
-        var adjacency = new List<int>?[count];
+        // Sort each group and write to result
+        var result = new T[services.Length];
+        var offset = 0;
 
-        for (var i = 0; i < count; i++)
+        if (firstGroup != null)
         {
-            var info = GetOrderInfo(indexToService[i]!.GetType());
-            AddRunsBeforeEdges(i, info.RunsBefore, typeToIndex, adjacency, inDegree);
-            AddRunsAfterEdges(i, info.RunsAfter, typeToIndex, adjacency, inDegree);
+            TopologicalSortInto(firstGroup, result, offset);
+            offset += firstCount;
         }
-
-        return (inDegree, adjacency);
-    }
-
-    private static void AddRunsBeforeEdges(
-        int sourceIndex, Type[] beforeTypes, Dictionary<Type, int> typeToIndex,
-        List<int>?[] adjacency, int[] inDegree)
-    {
-        foreach (var beforeType in beforeTypes)
+        if (middleGroup != null)
         {
-            if (typeToIndex.TryGetValue(beforeType, out var targetIndex))
-            {
-                adjacency[sourceIndex] ??= [];
-                adjacency[sourceIndex]!.Add(targetIndex);
-                inDegree[targetIndex]++;
-            }
+            TopologicalSortInto(middleGroup, result, offset);
+            offset += middleCount;
         }
-    }
-
-    private static void AddRunsAfterEdges(
-        int targetIndex, Type[] afterTypes, Dictionary<Type, int> typeToIndex,
-        List<int>?[] adjacency, int[] inDegree)
-    {
-        foreach (var afterType in afterTypes)
+        if (lastGroup != null)
         {
-            if (typeToIndex.TryGetValue(afterType, out var sourceIndex))
-            {
-                adjacency[sourceIndex] ??= [];
-                adjacency[sourceIndex]!.Add(targetIndex);
-                inDegree[targetIndex]++;
-            }
-        }
-    }
-
-    private static T[] ExecuteKahnsAlgorithm<T>(T[] indexToService, int[] inDegree, List<int>?[] adjacency)
-    {
-        var count = indexToService.Length;
-        var queue = InitializeQueue(inDegree, count);
-        var (result, processedCount) = ProcessQueue(queue, indexToService, adjacency, inDegree);
-
-        if (processedCount != count)
-        {
-            ThrowCycleDetectedError(indexToService, inDegree);
+            TopologicalSortInto(lastGroup, result, offset);
         }
 
         return result;
     }
 
-    private static Queue<int> InitializeQueue(int[] inDegree, int count)
+    private static T[] TopologicalSort<T>(T[] services)
     {
-        var queue = new Queue<int>();
+        var result = new T[services.Length];
+        TopologicalSortInto(services, result, 0);
+        return result;
+    }
+
+    private static void TopologicalSortInto<T>(T[] services, T[] result, int resultOffset)
+    {
+        var count = services.Length;
+        if (count == 0) return;
+        if (count == 1)
+        {
+            result[resultOffset] = services[0];
+            return;
+        }
+
+        // Build type-to-index mapping
+        var typeToIndex = new Dictionary<Type, int>(count);
+        for (var i = 0; i < count; i++)
+            typeToIndex[services[i]!.GetType()] = i;
+
+        // Build adjacency list and in-degree counts
+        var adjacency = new List<int>[count];
+        var inDegree = new int[count];
+
+        for (var i = 0; i < count; i++)
+        {
+            var info = GetOrderInfo(services[i]!.GetType());
+
+            foreach (var beforeType in info.RunsBefore)
+            {
+                if (typeToIndex.TryGetValue(beforeType, out var target))
+                {
+                    (adjacency[i] ??= []).Add(target);
+                    inDegree[target]++;
+                }
+            }
+
+            foreach (var afterType in info.RunsAfter)
+            {
+                if (typeToIndex.TryGetValue(afterType, out var source))
+                {
+                    (adjacency[source] ??= []).Add(i);
+                    inDegree[i]++;
+                }
+            }
+        }
+
+        // Kahn's algorithm with sorted ready set (preserves registration order)
+        var ready = new SortedSet<int>();
         for (var i = 0; i < count; i++)
         {
             if (inDegree[i] == 0)
-            {
-                queue.Enqueue(i);
-            }
+                ready.Add(i);
         }
-        return queue;
-    }
 
-    private static (T[] result, int processedCount) ProcessQueue<T>(Queue<int> queue, T[] indexToService, List<int>?[] adjacency, int[] inDegree)
-    {
-        var result = new T[indexToService.Length];
         var resultIndex = 0;
-
-        while (queue.Count > 0)
+        while (ready.Count > 0)
         {
-            var current = queue.Dequeue();
-            result[resultIndex++] = indexToService[current];
+            var current = ready.Min;
+            ready.Remove(current);
+            result[resultOffset + resultIndex++] = services[current];
 
-            if (adjacency[current] is { } neighbors)
+            if (adjacency[current] != null)
             {
-                foreach (var neighbor in neighbors)
+                foreach (var neighbor in adjacency[current])
                 {
                     if (--inDegree[neighbor] == 0)
-                    {
-                        queue.Enqueue(neighbor);
-                    }
+                        ready.Add(neighbor);
                 }
             }
         }
 
-        return (result, resultIndex);
-    }
-
-    private static void ThrowCycleDetectedError<T>(T[] indexToService, int[] inDegree)
-    {
-        var cycleTypes = new List<string>();
-        for (var i = 0; i < indexToService.Length; i++)
+        if (resultIndex != count)
         {
-            if (inDegree[i] > 0)
+            var cycleTypes = new List<string>();
+            for (var i = 0; i < count; i++)
             {
-                cycleTypes.Add(indexToService[i]!.GetType().Name);
+                if (inDegree[i] > 0)
+                    cycleTypes.Add(services[i]!.GetType().Name);
             }
+            throw new InvalidOperationException($"Circular dependency detected in service ordering: {string.Join(" -> ", cycleTypes)}");
         }
-
-        throw new InvalidOperationException(
-            $"Circular dependency detected in service ordering: {string.Join(" -> ", cycleTypes)}");
     }
 
-    private static void ValidateCrossGroupDependencies<T>(
-        List<T> firstGroup, List<T> middleGroup, List<T> lastGroup)
+    private static void ValidateService<T>(T service)
     {
-        var firstTypes = ToTypeSet(firstGroup);
-        var middleTypes = ToTypeSet(middleGroup);
-        var lastTypes = ToTypeSet(lastGroup);
+        var info = GetOrderInfo(service!.GetType());
+        if (info is { RunsFirst: true, RunsLast: true })
+            throw new InvalidOperationException($"Service {service.GetType().Name} cannot have both [RunsFirst] and [RunsLast]");
+    }
 
-        ValidateFirstGroupDependencies(firstGroup, middleTypes, lastTypes);
-        ValidateLastGroupDependencies(lastGroup, middleTypes, firstTypes);
+    private static void ValidateCrossGroupDependencies<T>(T[]? firstGroup, T[]? middleGroup, T[]? lastGroup)
+    {
+        HashSet<Type>? middleTypes = null;
+        HashSet<Type>? lastTypes = null;
+        HashSet<Type>? firstTypes = null;
 
-        static HashSet<Type> ToTypeSet<TService>(List<TService> services)
+        HashSet<Type> GetTypes(T[]? group)
         {
             var set = new HashSet<Type>();
-            foreach (var service in services)
-            {
-                set.Add(service!.GetType());
-            }
+            if (group != null)
+                foreach (var s in group)
+                    set.Add(s!.GetType());
             return set;
         }
-    }
 
-    private static void ValidateFirstGroupDependencies<T>(
-        List<T> firstGroup, HashSet<Type> middleTypes, HashSet<Type> lastTypes)
-    {
-        foreach (var service in firstGroup)
+        if (firstGroup != null)
         {
-            var info = GetOrderInfo(service!.GetType());
-            foreach (var afterType in info.RunsAfter)
+            foreach (var service in firstGroup)
             {
-                if (middleTypes.Contains(afterType) || lastTypes.Contains(afterType))
+                var info = GetOrderInfo(service!.GetType());
+                foreach (var afterType in info.RunsAfter)
                 {
-                    throw new InvalidOperationException(
-                        $"[RunsFirst] service {service.GetType().Name} cannot have [RunsAfter({afterType.Name})] " +
-                        $"where {afterType.Name} is not also [RunsFirst]");
+                    middleTypes ??= GetTypes(middleGroup);
+                    lastTypes ??= GetTypes(lastGroup);
+                    if (middleTypes.Contains(afterType) || lastTypes.Contains(afterType))
+                        throw new InvalidOperationException(
+                            $"[RunsFirst] service {service.GetType().Name} cannot have [RunsAfter({afterType.Name})] " +
+                            $"where {afterType.Name} is not also [RunsFirst]");
+                }
+            }
+        }
+
+        if (lastGroup != null)
+        {
+            foreach (var service in lastGroup)
+            {
+                var info = GetOrderInfo(service!.GetType());
+                foreach (var beforeType in info.RunsBefore)
+                {
+                    firstTypes ??= GetTypes(firstGroup);
+                    middleTypes ??= GetTypes(middleGroup);
+                    if (firstTypes.Contains(beforeType) || middleTypes.Contains(beforeType))
+                        throw new InvalidOperationException(
+                            $"[RunsLast] service {service.GetType().Name} cannot have [RunsBefore({beforeType.Name})] " +
+                            $"where {beforeType.Name} is not also [RunsLast]");
                 }
             }
         }
     }
 
-    private static void ValidateLastGroupDependencies<T>(
-        List<T> lastGroup, HashSet<Type> middleTypes, HashSet<Type> firstTypes)
+    private static (Type[] RunsBefore, Type[] RunsAfter, bool RunsFirst, bool RunsLast) GetOrderInfo(Type type)
     {
-        foreach (var service in lastGroup)
-        {
-            var info = GetOrderInfo(service!.GetType());
-            foreach (var beforeType in info.RunsBefore)
-            {
-                if (middleTypes.Contains(beforeType) || firstTypes.Contains(beforeType))
-                {
-                    throw new InvalidOperationException(
-                        $"[RunsLast] service {service.GetType().Name} cannot have [RunsBefore({beforeType.Name})] " +
-                        $"where {beforeType.Name} is not also [RunsLast]");
-                }
-            }
-        }
-    }
-
-    private static ServiceOrderInfo GetOrderInfo(Type type)
-    {
-        return AttributeCache.GetOrAdd(type, static t =>
-        {
-            var runsBefore = t.GetCustomAttributes<RunsBeforeAttribute>()
-                .SelectMany(a => a.Types)
-                .ToArray();
-
-            var runsAfter = t.GetCustomAttributes<RunsAfterAttribute>()
-                .SelectMany(a => a.Types)
-                .ToArray();
-
-            var runsFirst = t.GetCustomAttribute<RunsFirstAttribute>() is not null;
-            var runsLast = t.GetCustomAttribute<RunsLastAttribute>() is not null;
-
-            return new ServiceOrderInfo(runsBefore, runsAfter, runsFirst, runsLast);
-        });
+        return Cache.GetOrAdd(type, static t => (
+            t.GetCustomAttributes<RunsBeforeAttribute>().SelectMany(a => a.Types).ToArray(),
+            t.GetCustomAttributes<RunsAfterAttribute>().SelectMany(a => a.Types).ToArray(),
+            t.GetCustomAttribute<RunsFirstAttribute>() is not null,
+            t.GetCustomAttribute<RunsLastAttribute>() is not null
+        ));
     }
 }
