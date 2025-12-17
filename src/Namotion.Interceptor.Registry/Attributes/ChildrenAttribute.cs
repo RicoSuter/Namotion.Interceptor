@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using System.Reflection;
+
 namespace Namotion.Interceptor.Registry.Attributes;
 
 /// <summary>
@@ -12,4 +15,24 @@ namespace Namotion.Interceptor.Registry.Attributes;
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
 public sealed class ChildrenAttribute : Attribute
 {
+    private static readonly ConcurrentDictionary<Type, string?> Cache = new();
+
+    /// <summary>
+    /// Gets the property name marked with [Children] for the given type, or null if none.
+    /// </summary>
+    public static string? GetChildrenPropertyName(Type type)
+    {
+        return Cache.GetOrAdd(type, t =>
+            t.GetProperties()
+                .FirstOrDefault(p => p.GetCustomAttribute<ChildrenAttribute>() != null)
+                ?.Name);
+    }
+
+    /// <summary>
+    /// Returns true if the specified property has the [Children] attribute.
+    /// </summary>
+    public static bool IsChildrenProperty(Type type, string propertyName)
+    {
+        return GetChildrenPropertyName(type) == propertyName;
+    }
 }

@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services;
@@ -175,7 +176,7 @@ public class SubjectPathResolver : ILifecycleHandler
             if (property is not { HasChildSubjects: true })
             {
                 // No direct property match - try [Children] fallback
-                var childrenPropertyName = ChildrenAttributeCache.GetChildrenPropertyName(current.GetType());
+                var childrenPropertyName = ChildrenAttribute.GetChildrenPropertyName(current.GetType());
                 if (childrenPropertyName != null)
                 {
                     var childrenProperty = registered?.TryGetProperty(childrenPropertyName);
@@ -303,7 +304,7 @@ public class SubjectPathResolver : ILifecycleHandler
 
             // Build bracket segment: PropertyName, PropertyName[key], or [key] for [Children]
             var segment = parent.Property.Name;
-            var isChildrenProperty = ChildrenAttributeCache.IsChildrenProperty(
+            var isChildrenProperty = ChildrenAttribute.IsChildrenProperty(
                 parentSubject.GetType(), parent.Property.Name);
 
             if (parent.Index != null)

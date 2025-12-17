@@ -3,7 +3,6 @@ using Microsoft.Extensions.Hosting;
 using MQTTnet.Protocol;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
-using Namotion.Interceptor.Mqtt;
 using Namotion.Interceptor.Mqtt.Client;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
