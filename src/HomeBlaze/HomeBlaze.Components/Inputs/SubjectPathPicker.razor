@@ -1,4 +1,5 @@
 @using HomeBlaze.Abstractions
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Services
 @using Microsoft.AspNetCore.Components.Web
 @using Namotion.Interceptor.Registry.Abstractions
@@ -183,10 +184,15 @@
             // Check collection/dictionary first (before reference)
             if (parent.Property.IsSubjectDictionary || parent.Property.IsSubjectCollection)
             {
+                var isChildrenProperty = parent.Subject != null &&
+                    ChildrenAttributeCache.IsChildrenProperty(parent.Subject.GetType(), parent.Property.Name);
+
                 // For collection/dictionary, show child subjects by index
                 foreach (var child in parent.Property.Children)
                 {
-                    var childPath = $"{parent.Path}[{child.Index}]";
+                    var childPath = isChildrenProperty
+                        ? $"{parent.Path}.{child.Index}"  // Simplified path
+                        : $"{parent.Path}[{child.Index}]"; // Standard bracket path
                     var childDisplayName = $"[{child.Index}]";
 
                     children.Add(CreateSubjectTreeItem(child.Subject, childDisplayName, childPath));

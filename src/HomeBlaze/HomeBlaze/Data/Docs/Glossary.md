@@ -247,13 +247,13 @@ Paths reference subjects and properties in the object graph:
 
 | Prefix | Description | Example |
 |--------|-------------|---------|
-| `Root.` | Absolute from root | `Root.Children[demo].Children[motor.json]` |
+| `Root.` | Absolute from root | `Root.Children[demo].Children[motor]` |
 | `this.` | Relative to current | `this.Child.Name` |
 | `../` | Parent navigation | `../Sibling.Temperature` |
 
 ### Bracket Notation
 
-Access dictionary children using brackets: `Children[folder-name].Children[file.json]`
+Access dictionary children using brackets: `Children[folder-name].Children[subject]`
 
 ---
 

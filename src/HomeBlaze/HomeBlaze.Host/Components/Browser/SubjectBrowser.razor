@@ -1,5 +1,6 @@
 @inherits HomeBlazorComponentBase
 
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Storage.Abstractions
 
 @inject NavigationManager NavigationManager
@@ -153,7 +154,31 @@
             var property = registered?.TryGetProperty(propertyName);
 
             if (property == null || !property.HasChildSubjects)
+            {
+                // Try [Children] fallback
+                var childrenPropertyName = ChildrenAttributeCache.GetChildrenPropertyName(currentSubject.GetType());
+                if (childrenPropertyName != null)
+                {
+                    property = registered?.TryGetProperty(childrenPropertyName);
+                    if (property is { HasChildSubjects: true })
+                    {
+                        // This segment is actually a child key, not a property name
+                        var childKey = propertyName;
+                        var child = SubjectPathResolverExtensions.FindChildByIndex(property, childKey);
+                        if (child != null)
+                        {
+                            currentPathParts.Add(childKey);
+                            currentObjectPath = $"{currentObjectPath}.{childKey}";
+                            var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
+                            _breadcrumbs.Add(new BreadcrumbItem(childKey, breadcrumbPath));
+                            _panes.Add(new SubjectPane { Subject = child, DisplayName = childKey, ObjectPath = currentObjectPath, PropertyName = childrenPropertyName, Index = childKey });
+                            currentSubject = child;
+                            continue;
+                        }
+                    }
+                }
                 break;
+            }
 
             currentPathParts.Add(propertyName);
 
@@ -212,10 +237,14 @@
         }
 
         // Build display name and object path
-        var displayName = index != null ? $"{propertyName}[{index}]" : propertyName;
+        var isChildrenProperty = ChildrenAttributeCache.IsChildrenProperty(
+            clickedPane.Subject.GetType(), propertyName);
+        var displayName = index != null
+            ? (isChildrenProperty ? index.ToString()! : $"{propertyName}[{index}]")
+            : propertyName;
         var parentPath = clickedPane.ObjectPath;
         var objectPath = index != null
-            ? $"{parentPath}.{propertyName}[{index}]"
+            ? (isChildrenProperty ? $"{parentPath}.{index}" : $"{parentPath}.{propertyName}[{index}]")
             : $"{parentPath}.{propertyName}";
 
         // Add the new subject pane
@@ -297,16 +326,29 @@
         // Skip the first pane (root) when building path
         foreach (var pane in _panes.Skip(1))
         {
-            // Add property name
-            if (pane.PropertyName != null)
-            {
-                pathParts.Add(Uri.EscapeDataString(pane.PropertyName));
-            }
+            // For [Children] properties, only add the index (key), not the property name
+            var parentPane = _panes[_panes.IndexOf(pane) - 1];
+            var isChildrenProperty = pane.PropertyName != null &&
+                ChildrenAttributeCache.IsChildrenProperty(parentPane.Subject.GetType(), pane.PropertyName);
 
-            // Add index/key if present (for collections/dictionaries)
-            if (pane.Index != null)
+            if (isChildrenProperty && pane.Index != null)
             {
+                // Only add the key for [Children] properties
                 pathParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+            }
+            else
+            {
+                // Add property name
+                if (pane.PropertyName != null)
+                {
+                    pathParts.Add(Uri.EscapeDataString(pane.PropertyName));
+                }
+
+                // Add index/key if present (for collections/dictionaries)
+                if (pane.Index != null)
+                {
+                    pathParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+                }
             }
         }
 
@@ -323,13 +365,26 @@
         var breadcrumbParts = new List<string>();
         foreach (var pane in _panes.Skip(1))
         {
-            if (pane.PropertyName != null)
+            // For [Children] properties, only add the index (key), not the property name
+            var parentPane = _panes[_panes.IndexOf(pane) - 1];
+            var isChildrenProp = pane.PropertyName != null &&
+                ChildrenAttributeCache.IsChildrenProperty(parentPane.Subject.GetType(), pane.PropertyName);
+
+            if (isChildrenProp && pane.Index != null)
             {
-                breadcrumbParts.Add(Uri.EscapeDataString(pane.PropertyName));
-            }
-            if (pane.Index != null)
-            {
+                // Only add the key for [Children] properties
                 breadcrumbParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+            }
+            else
+            {
+                if (pane.PropertyName != null)
+                {
+                    breadcrumbParts.Add(Uri.EscapeDataString(pane.PropertyName));
+                }
+                if (pane.Index != null)
+                {
+                    breadcrumbParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+                }
             }
 
             var breadcrumbPath = "/browser/" + string.Join("/", breadcrumbParts);

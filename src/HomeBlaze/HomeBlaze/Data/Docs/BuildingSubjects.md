@@ -633,7 +633,7 @@ Use paths to reference subjects in the object graph. See [Configuration Guide - 
 
 | Prefix | Example |
 |--------|---------|
-| `Root.` | `Root.Children[demo].Children[motor.json]` |
+| `Root.` | `Root.Children[demo].Children[motor]` |
 | `this.` | `this.Child.Property` |
 | `../` | `../Sibling.Property` |
 

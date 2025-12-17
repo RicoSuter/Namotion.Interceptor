@@ -250,6 +250,35 @@ public partial class Sensor
 }
 ```
 
+## Children Attribute
+
+The `[Children]` attribute simplifies paths for subjects with child dictionaries.
+
+### Before vs After
+
+| Syntax | Without Attribute | With `[Children]` |
+|--------|-------------------|-------------------|
+| Bracket | `Root.Children[Dashboard].Children[Page]` | `Root.Dashboard.Page` |
+| Slash | `Root/Children/Dashboard/Children/Page` | `Root/Dashboard/Page` |
+
+### Usage
+
+```csharp
+[InterceptorSubject]
+public partial class Folder
+{
+    [Children]
+    public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
+}
+```
+
+### Resolution Rules
+
+1. **Properties win** - If both property "Foo" and child key "Foo" exist, the property resolves first
+2. **One per type** - Only one `[Children]` property per class
+3. **Backward compatible** - Explicit `Children[key]` syntax still works
+4. **Any property name** - The property doesn't have to be named "Children"
+
 ## Summary
 
 1. **Mark all stored properties `partial`** - Tracking everything is safer
