@@ -245,7 +245,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             return;
         }
 
-        var subscribeOptionsBuilder = _factory!.CreateSubscribeOptionsBuilder();
+        var subscribeOptionsBuilder = _factory.CreateSubscribeOptionsBuilder();
 
         foreach (var property in properties)
         {
@@ -270,7 +270,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             return cachedTopic;
         }
 
-        var path = property.TryGetSourcePath(_configuration.PathProvider, _subject);
+        var path = property.TryGetPath(_configuration.PathProvider, _subject);
         var topic = path is null ? null : MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
 
         // Add first, then validate (guarantees no memory leak)
@@ -294,7 +294,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         }
 
         var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
-        var (property, _) = _subject.TryGetPropertyFromSourcePath(path, _configuration.PathProvider);
+        var (property, _) = _subject.TryGetPropertyFromPath(path, _configuration.PathProvider);
         var propertyReference = property?.Reference;
 
         // Add first, then validate (guarantees no memory leak)

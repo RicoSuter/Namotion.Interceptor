@@ -111,7 +111,7 @@ internal class OpcUaSubjectLoader
             }
 
             var propertyName = property.ResolvePropertyName(_configuration.PathProvider);
-            if (propertyName is not null)
+            if (propertyName is not null && _configuration.PathProvider.IsPropertyIncluded(property))
             {
                 var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, session.NamespaceUris);
 
@@ -129,12 +129,7 @@ internal class OpcUaSubjectLoader
                 }
                 else
                 {
-                    // Only monitor value properties that should be exposed by the path provider
-                    // This prevents monitoring properties found via BrowseName that don't have proper attributes
-                    if (_configuration.PathProvider.IsPropertyIncluded(property))
-                    {
-                        MonitorValueNode(childNodeId, property, monitoredItems);
-                    }
+                    MonitorValueNode(childNodeId, property, monitoredItems);
                 }
             }
         }

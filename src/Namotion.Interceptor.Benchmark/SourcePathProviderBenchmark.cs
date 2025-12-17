@@ -29,9 +29,9 @@ public class SourcePathProviderBenchmark
     }
 
     [Benchmark]
-    public void TryGetPropertyFromSourcePath()
+    public void TryGetPropertyFromPath()
     {
-        var (property, _) = _car.TryGetPropertyFromSourcePath("Tires[1].Pressure", _pathProvider);
+        var (property, _) = _car.TryGetPropertyFromPath("Tires[1].Pressure", _pathProvider);
         if (property is null)
         {
             throw new InvalidOperationException();
@@ -39,10 +39,10 @@ public class SourcePathProviderBenchmark
     }
 
     [Benchmark]
-    public void VisitPropertiesFromSourcePaths()
+    public void VisitPropertiesFromPaths()
     {
         RegisteredSubjectProperty? property = null;
-        _car.VisitPropertiesFromSourcePaths(
+        _car.VisitPropertiesFromPaths(
             [
                 "Tires[1].Pressure",
                 "Tires[3].Pressure"
@@ -59,7 +59,7 @@ public class SourcePathProviderBenchmark
     }
 
     [Benchmark]
-    public void GetPropertyFromSegment()
+    public void TryGetPropertyFromSegment()
     {
         var subject = _car.TryGetRegisteredSubject();
         var property = _pathProvider
@@ -72,10 +72,10 @@ public class SourcePathProviderBenchmark
     }
 
     [Benchmark]
-    public void TryGetSourcePath()
+    public void TryGetPath()
     {
         var property = _car.Tires[1].TryGetRegisteredSubject()?.TryGetProperty("Pressure");
-        var path = property!.TryGetSourcePath(_pathProvider, null);
+        var path = property!.TryGetPath(_pathProvider, null);
         if (path is null)
         {
             throw new InvalidOperationException();
