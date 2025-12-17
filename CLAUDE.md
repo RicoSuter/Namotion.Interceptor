@@ -24,8 +24,7 @@ Namotion.Interceptor is a .NET library for creating trackable object models thro
 Cross-platform PowerShell Core scripts in `scripts/` folder:
 
 - `pwsh scripts/benchmark.ps1` - Compare benchmarks between current branch and base branch
-  - Optional: `-Filter "*Pattern*"` to filter benchmarks (default: `*`)
-  - Optional: `-Stash` to auto-stash uncommitted changes (restores after completion)
+  - Read header of script for details/help
   - Requires clean working directory unless `-Stash` is used
   - Outputs `benchmark_YYYY-MM-DD_HHmmss.md` in current directory
   - Configuration variables at top of script: `$BenchmarkProject`, `$BaseBranch`
