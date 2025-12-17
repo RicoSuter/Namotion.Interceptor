@@ -14,9 +14,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Paths;
-using Namotion.Interceptor.Sources.Transactions;
 using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Mqtt.Client;
 
@@ -38,7 +36,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     private readonly ConcurrentDictionary<string, PropertyReference?> _topicToProperty = new();
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
 
-    private LifecycleInterceptor? _lifecycleInterceptor;
+    private readonly MqttPropertyTracker _propertyTracker;
 
     private IMqttClient? _client;
     private SubjectPropertyWriter? _propertyWriter;
@@ -59,6 +57,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         _factory = new MqttClientFactory();
+        _propertyTracker = new MqttPropertyTracker(this, _topicToProperty, _propertyToTopic, logger);
 
         configuration.Validate();
     }
@@ -72,11 +71,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to MQTT broker at {Host}:{Port}.", _configuration.BrokerHost, _configuration.BrokerPort);
 
-        _lifecycleInterceptor = _subject.Context.TryGetLifecycleInterceptor();
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
-        }
+        _propertyTracker.SubscribeToLifecycle(_subject);
 
         _client = _factory.CreateMqttClient();
         _client.ApplicationMessageReceivedAsync += OnMessageReceivedAsync;
@@ -301,7 +296,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             var topic = TryGetTopicForProperty(property.Reference, property);
             if (topic is null) continue;
 
-            property.Reference.SetSource(this, _logger);
+            _propertyTracker.Track(property.Reference);
 
             _topicToProperty[topic] = property.Reference;
             subscribeOptionsBuilder.WithTopicFilter(f => f
@@ -331,7 +326,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
             {
                 _propertyToTopic.TryRemove(propertyReference, out _);
-                propertyReference.RemoveSource();
             }
         }
 
@@ -448,30 +442,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         }
     }
 
-    private void OnSubjectDetached(SubjectLifecycleChange change)
-    {
-        // TODO(perf): O(n) scan over all cached entries per detached subject.
-        // Consider adding a reverse index (Dictionary<IInterceptorSubject, List<PropertyReference>>) for O(1) cleanup
-        // if profiling shows this as a bottleneck with large object graphs and frequent attach/detach cycles.
-        foreach (var kvp in _propertyToTopic)
-        {
-            if (kvp.Key.Subject == change.Subject)
-            {
-                _propertyToTopic.TryRemove(kvp.Key, out _);
-                kvp.Key.RemoveSource();
-            }
-        }
-
-        foreach (var kvp in _topicToProperty)
-        {
-            if (kvp.Value?.Subject == change.Subject)
-            {
-                _topicToProperty.TryRemove(kvp.Key, out _);
-                kvp.Value?.RemoveSource();
-            }
-        }
-    }
-
     private MqttClientOptions GetClientOptions()
     {
         var options = new MqttClientOptionsBuilder()
@@ -502,11 +472,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             return;
         }
 
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
-        }
-
         if (_connectionMonitor is not null)
         {
             await _connectionMonitor.DisposeAsync().ConfigureAwait(false);
@@ -534,12 +499,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             _client = null;
         }
 
-        // Remove source associations and clear caches to allow GC of subject references
-        foreach (var kvp in _propertyToTopic)
-        {
-            kvp.Key.RemoveSource();
-        }
-
+        _propertyTracker.Dispose();
         _topicToProperty.Clear();
         _propertyToTopic.Clear();
 

@@ -7,7 +7,6 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Sources.Transactions;
 using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -19,13 +18,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
-    private readonly HashSet<PropertyReference> _propertiesWithOpcData = [];
+    private readonly OpcUaPropertyTracker _propertyTracker;
 
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
 
-    private LifecycleInterceptor? _lifecycleInterceptor;
     private SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
 
@@ -39,6 +37,14 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
 
+    internal bool IsReconnecting => _sessionManager?.IsReconnecting == true;
+
+    internal void RemoveItemsForSubject(IInterceptorSubject subject)
+    {
+        _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
+        _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
+    }
+
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(subject);
@@ -51,7 +57,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _logger = logger;
         _configuration = configuration;
 
-        _subjectLoader = new OpcUaSubjectLoader(configuration, _propertiesWithOpcData, this, logger);
+        _propertyTracker = new OpcUaPropertyTracker(this, logger);
+        _subjectLoader = new OpcUaSubjectLoader(configuration, _propertyTracker, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
     }
 
@@ -62,11 +69,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
-        _lifecycleInterceptor = _subject.Context.TryGetLifecycleInterceptor();
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
-        }
+        _propertyTracker.SubscribeToLifecycle(_subject);
 
         _sessionManager = new SessionManager(this, propertyWriter, _configuration, _logger);
 
@@ -496,11 +499,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             return; // Already disposed
         }
 
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
-        }
-
         var sessionManager = _sessionManager;
         if (sessionManager is not null)
         {
@@ -512,45 +510,16 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         // This ensures that property data associated with this OpcUaNodeIdKey is cleared
         // even if properties are reused across multiple source instances
         CleanupPropertyData();
+        _propertyTracker.Dispose();
         _writeLock.Dispose();
         Dispose();
     }
 
     private void CleanupPropertyData()
     {
-        foreach (var property in _propertiesWithOpcData)
+        foreach (var property in _propertyTracker.TrackedProperties)
         {
             property.RemovePropertyData(OpcUaNodeIdKey);
-            property.RemoveSource();
-        }
-
-        _propertiesWithOpcData.Clear();
-    }
-
-    private void OnSubjectDetached(SubjectLifecycleChange change)
-    {
-        // Skip cleanup during reconnection (subscriptions being transferred)
-        if (_sessionManager?.IsReconnecting == true)
-        {
-            return;
-        }
-
-        _sessionManager?.SubscriptionManager.RemoveItemsForSubject(change.Subject);
-        _sessionManager?.PollingManager?.RemoveItemsForSubject(change.Subject);
-        
-        CleanupPropertyDataForSubject(change.Subject);
-    }
-
-    private void CleanupPropertyDataForSubject(IInterceptorSubject subject)
-    {
-        var toRemove = _propertiesWithOpcData
-            .Where(p => p.Subject == subject)
-            .ToList();
-
-        foreach (var property in toRemove)
-        {
-            property.RemovePropertyData(OpcUaNodeIdKey);
-            _propertiesWithOpcData.Remove(property);
         }
     }
 }

@@ -22,15 +22,11 @@ This approach is suitable when:
 
 Use transactions when you need guarantees about what was actually persisted to external sources.
 
-### BestEffort Mode (Default)
+### BestEffort Mode
 
 Maximizes successful writes. When some sources fail, the changes that succeeded are still applied to the in-process model. Use this when partial progress is acceptable and you want to handle failures separately.
 
-### Strict Mode
-
-All-or-nothing for the in-process model. If any source fails, no changes are applied locally. However, sources that already succeeded keep their new values, which can lead to divergence between your local model and external sources.
-
-### Rollback Mode
+### Rollback Mode (Default)
 
 Strongest consistency guarantee. If any source fails, attempts to revert successfully written sources back to their original values. This minimizes divergence but requires additional writes on failure.
 
@@ -47,7 +43,7 @@ using var tx = await context.BeginExclusiveTransactionAsync(
 ## Overview
 
 Transactions provide:
-- **Configurable commit modes**: Choose between best-effort, strict, or rollback behavior on partial failures
+- **Configurable commit modes**: Choose between best-effort or rollback behavior on partial failures
 - **Read-your-writes consistency**: Reading a property inside a transaction returns the pending value
 - **Notification suppression**: Change notifications are suppressed during the transaction and fired after commit
 - **External source integration**: Changes can be written to external sources before being applied to the in-process model
@@ -217,7 +213,7 @@ using (var transaction1 = await context.BeginExclusiveTransactionAsync())
 When creating a transaction, you can specify a `TransactionMode` to control how partial failures are handled:
 
 ```csharp
-using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Strict);
+using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
 ```
 
 Transaction modes are relevant in two scenarios:
@@ -252,32 +248,7 @@ await tx.CommitAsync();
 
 Use BestEffort when partial updates are acceptable and you prefer to maximize successful writes rather than failing entirely.
 
-### Strict
-
-Strict mode provides all-or-nothing semantics for the in-process model. If any external source fails, no changes are applied locally. However, sources that succeeded are **not reverted** - they keep their new values. This can lead to divergence between external sources and the local model.
-
-```csharp
-using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Strict);
-device.Temperature = 25.5;  // Bound to Source A
-device.Pressure = 101.3;    // Bound to Source B
-
-await tx.CommitAsync();
-```
-
-**When all sources succeed:**
-- All changes are applied to the in-process model
-- No exception is thrown
-
-**When Source A succeeds but Source B fails:**
-- Source A has the new Temperature value (25.5) - **not reverted**
-- Source B was not updated (Pressure write failed)
-- In-process model: **Unchanged** (both Temperature and Pressure keep old values)
-- `AggregateException` is thrown
-- **Divergence**: Source A now has a different value than the local model
-
-Use Strict when the in-process model must only reflect fully committed state, and you can tolerate potential divergence with external sources on failure.
-
-### Rollback
+### Rollback (Default)
 
 Rollback mode provides the strongest consistency guarantee. If any external source fails, successfully written sources are **reverted** to their original values (best effort). This minimizes divergence between external sources and the local model.
 
@@ -302,7 +273,7 @@ await tx.CommitAsync();
 
 Use Rollback when consistency is critical and you want to minimize the chance of external sources having different values than the local model. Note that rollback is best-effort - if the revert write also fails, you'll receive both the original failure and the revert failure in the exception.
 
-> **Performance note**: Rollback mode may perform additional writes on failure (to revert successful sources), making it slower than Strict mode in failure scenarios.
+> **Performance note**: Rollback mode may perform additional writes on failure (to revert successful sources), making it slower than BestEffort mode in failure scenarios.
 
 ## Transaction Requirements
 
@@ -381,14 +352,14 @@ var context = InterceptorSubjectContext
 With this configuration, `CommitAsync()` will:
 
 1. **Write to external sources first**: Changes are grouped by their associated source and written in batches
-2. **Handle failures per mode**: BestEffort applies successes, Strict/Rollback require all to succeed
+2. **Handle failures per mode**: BestEffort applies successes, Rollback requires all to succeed
 3. **Apply to in-process model**: After external writes complete (and pass mode checks), changes are applied
 4. **Report failures**: An `AggregateException` is thrown containing all source write failures
 
 ```csharp
 try
 {
-    using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.Strict))
+    using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback))
     {
         // These properties are bound to an OPC UA source
         device.Temperature = 25.5;
@@ -494,9 +465,8 @@ using (var transaction = await context.BeginExclusiveTransactionAsync())
 
 | Value | Description |
 |-------|-------------|
-| `BestEffort` | Apply successful changes even if some sources fail (default) |
-| `Strict` | All-or-nothing for in-process model; successful sources keep new values |
-| `Rollback` | All-or-nothing with best-effort revert of successful source writes |
+| `BestEffort` | Apply successful changes even if some sources fail |
+| `Rollback` | All-or-nothing with best-effort revert of successful source writes (default) |
 
 ### TransactionRequirement
 
