@@ -1,7 +1,9 @@
-﻿using Namotion.Interceptor.Interceptors;
+﻿using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking;
 
+[RunsFirst]
 public class PropertyValueEqualityCheckHandler : IWriteInterceptor
 {
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
