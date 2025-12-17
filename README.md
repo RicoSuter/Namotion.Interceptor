@@ -124,7 +124,7 @@ For more samples, check out the "Samples" directory in the Visual Studio solutio
 
 ## Projects
 
-### Namotion.Interceptor
+### [Namotion.Interceptor](docs/interceptor.md)
 
 Core library for property and method interception with source generation support. Provides the fundamental building blocks for creating intercepted objects.
 
@@ -235,7 +235,7 @@ var registered = subject.TryGetRegisteredSubject();
 
 Enables binding subject properties to external data sources like MQTT, OPC UA, or custom providers.
 
-### Namotion.Interceptor.Tracking
+### [Namotion.Interceptor.Tracking](docs/tracking.md)
 
 Provides comprehensive change tracking for subjects, including property changes, derived properties, and subject lifecycle events.
 

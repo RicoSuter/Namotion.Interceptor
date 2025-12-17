@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Ordering;
 
 namespace Namotion.Interceptor;
 
@@ -232,12 +233,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
     }
 
-    private IEnumerable<TInterface> GetServicesWithoutCache<TInterface>()
+    private TInterface[] GetServicesWithoutCache<TInterface>()
     {
-        return _services
+        var services = _services
             .OfType<TInterface>()
             .Concat(_fallbackContexts.SelectMany(c => c.GetServices<TInterface>()))
-            .Distinct();
+            .Distinct()
+            .ToArray();
+
+        return ServiceOrderResolver.OrderByDependencies(services);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
