@@ -379,3 +379,8 @@ FodyWeavers.xsd
 
 **/pki/own/certs/**
 **/pki/trusted/certs/**
+
+# Vim swap files
+*.swp
+*.swo
+*~
