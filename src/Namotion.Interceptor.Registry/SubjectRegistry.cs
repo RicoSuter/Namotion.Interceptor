@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+﻿using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -7,44 +7,31 @@ namespace Namotion.Interceptor.Registry;
 
 public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLifecycleHandler
 {
-    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
-    
+    private readonly ConcurrentDictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
+    private readonly Lock _writeLock = new();
+
     /// <inheritdoc />
-    public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
-    {
-        get
-        {
-            lock (_knownSubjects)
-                return _knownSubjects.ToImmutableDictionary();
-        }
-    }
+    public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects => _knownSubjects;
 
     /// <inheritdoc />
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
     {
-        lock (_knownSubjects)
-        {
-            return _knownSubjects.GetValueOrDefault(subject);
-        }
+        return _knownSubjects.GetValueOrDefault(subject);
     }
 
     /// <inheritdoc />
     void ILifecycleHandler.AttachSubject(SubjectLifecycleChange change)
     {
-        lock (_knownSubjects)
+        lock (_writeLock)
         {
-            if (!_knownSubjects.TryGetValue(change.Subject, out var subject))
-            {
-                subject = RegisterSubject(change.Subject);
-            }
+            var subject = _knownSubjects.GetOrAdd(change.Subject, RegisteredSubject.Create);
 
             if (change.Property is not null)
             {
-                if (!_knownSubjects.TryGetValue(change.Property.Value.Subject, out var registeredSubject))
-                {
-                    registeredSubject = RegisterSubject(change.Property.Value.Subject);
-                }
+                var registeredSubject = _knownSubjects.GetOrAdd(
+                    change.Property.Value.Subject,
+                    RegisteredSubject.Create);
 
                 var property = registeredSubject.TryGetProperty(change.Property.Value.Name) ??
                     throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
@@ -79,16 +66,9 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
         }
     }
 
-    private RegisteredSubject RegisterSubject(IInterceptorSubject subject)
-    {
-        var registeredSubject = new RegisteredSubject(subject);
-        _knownSubjects[subject] = registeredSubject;
-        return registeredSubject;
-    }
-
     void ILifecycleHandler.DetachSubject(SubjectLifecycleChange change)
     {
-        lock (_knownSubjects)
+        lock (_writeLock)
         {
             var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
             if (registeredSubject is null)
@@ -104,8 +84,11 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                 var property = TryGetRegisteredProperty(change.Property.Value);
                 if (property is not null)
                 {
-                    // Remove parent relationship from the child subject
-                    registeredSubject.RemoveParent(property, change.Index);
+                    // Remove parent relationship from the child subject (only when it is returned anyway)
+                    if (change.ReferenceCount != 0)
+                    {
+                        registeredSubject.RemoveParent(property, change.Index);
+                    }
 
                     // Remove child from the parent property's Children collection
                     property.RemoveChild(new SubjectPropertyChild
@@ -119,7 +102,8 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
             // Only remove the subject from the registry when its reference count reaches zero
             if (change.ReferenceCount == 0)
             {
-                _knownSubjects.Remove(change.Subject);
+                _knownSubjects.TryRemove(change.Subject, out _);
+                registeredSubject.Return();
             }
         }
     }
