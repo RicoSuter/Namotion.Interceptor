@@ -298,6 +298,8 @@ lifecycleInterceptor.SubjectDetached += async change =>
 
 4. **Thread-safe operations**: Use thread-safe data structures like `ConcurrentDictionary` with atomic operations (`TryRemove`, `TryAdd`) rather than check-then-act patterns.
 
+> **Tip**: Multiple handlers can be ordered using `[RunsBefore]`, `[RunsAfter]`, `[RunsFirst]`, and `[RunsLast]` attributes. See [Service Ordering](interceptor.md#service-ordering) for details.
+
 ### Reference Counting
 
 Each subject tracks how many parent references point to it via `GetReferenceCount()`:

@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -8,6 +9,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// Handles derived property tracking and automatic recalculation using dependency recording.
 /// Requires LifecycleInterceptor to be added after this interceptor.
 /// </summary>
+[RunsBefore(typeof(LifecycleInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
     // - Records property reads during derived property evaluation
