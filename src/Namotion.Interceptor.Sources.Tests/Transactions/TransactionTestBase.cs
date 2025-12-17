@@ -13,6 +13,7 @@ public abstract class TransactionTestBase
         return InterceptorSubjectContext
             .Create()
             .WithRegistry()
+            .WithTransactions()
             .WithFullPropertyTracking()
             .WithSourceTransactions();
     }

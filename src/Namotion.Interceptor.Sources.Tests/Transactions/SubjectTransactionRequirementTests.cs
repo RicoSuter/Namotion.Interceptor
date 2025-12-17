@@ -23,7 +23,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             TransactionMode.Rollback,
             TransactionRequirement.SingleWrite);
         person.FirstName = "John";
@@ -58,7 +58,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             TransactionMode.Rollback,
             TransactionRequirement.SingleWrite);
         person.FirstName = "John";
@@ -87,7 +87,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             TransactionMode.Rollback,
             TransactionRequirement.SingleWrite);
         person.FirstName = "John";
@@ -114,7 +114,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             TransactionMode.Rollback,
             TransactionRequirement.SingleWrite);
         person.FirstName = "John";
@@ -132,7 +132,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         var context = CreateContext();
         var person = new Person(context);
 
-        using var tx = SubjectTransaction.BeginTransaction(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             TransactionMode.Rollback,
             TransactionRequirement.SingleWrite);
         person.FirstName = "John";
@@ -153,7 +153,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         var source = CreateSucceedingSource();
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             TransactionMode.Rollback,
             TransactionRequirement.SingleWrite);
         person.FirstName = "John";
@@ -180,8 +180,8 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
 
         using var tx = explicitRequirement
-            ? SubjectTransaction.BeginTransaction(TransactionMode.Rollback, TransactionRequirement.None)
-            : SubjectTransaction.BeginTransaction();
+            ? await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback, TransactionRequirement.None)
+            : await context.BeginExclusiveTransactionAsync();
         person.FirstName = "John";
         person.LastName = "Doe";
 
@@ -205,7 +205,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             TransactionMode.Rollback,
             TransactionRequirement.SingleWrite);
         person.FirstName = "John";
@@ -237,7 +237,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
         // Father has no source
 
-        using var tx = SubjectTransaction.BeginTransaction(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             TransactionMode.BestEffort, // Use BestEffort to see successful changes applied
             TransactionRequirement.SingleWrite);
         person.FirstName = "John";
@@ -285,7 +285,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
         // Father has no source
 
-        using var tx = SubjectTransaction.BeginTransaction(
+        using var tx = await context.BeginExclusiveTransactionAsync(
             TransactionMode.BestEffort,
             TransactionRequirement.SingleWrite);
         person.FirstName = "John";

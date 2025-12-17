@@ -10,15 +10,24 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 public sealed class SubjectTransaction : IDisposable
 {
     private static readonly AsyncLocal<SubjectTransaction?> CurrentTransaction = new();
+    private static int _activeTransactionCount;
+
+    /// <summary>
+    /// Gets a value indicating whether any transaction is currently active across all contexts.
+    /// This is a fast-path check using a volatile read; it may briefly return true after
+    /// all transactions have completed due to memory visibility delays. This is safe because
+    /// a false positive only results in an unnecessary AsyncLocal read.
+    /// </summary>
+    public static bool HasActiveTransaction => Volatile.Read(ref _activeTransactionCount) > 0;
 
     private readonly TransactionMode _mode;
     private readonly TransactionRequirement _requirement;
     private readonly TransactionConflictBehavior _conflictBehavior;
-    private readonly IDisposable? _lockReleaser;
+    private readonly IDisposable _lockReleaser;
 
     private volatile bool _isCommitting;
     private volatile bool _isCommitted;
-    private volatile bool _isDisposed;
+    private int _isDisposed;
 
     /// <summary>
     /// Gets the current transaction in this execution context, or null if none is active.
@@ -42,7 +51,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
     /// </summary>
-    internal SubjectTransactionInterceptor? Interceptor { get; }
+    internal SubjectTransactionInterceptor Interceptor { get; }
 
     /// <summary>
     /// Last write wins if the same property is written multiple times.
@@ -58,7 +67,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Gets the context this transaction is bound to.
     /// </summary>
-    public IInterceptorSubjectContext? Context { get; }
+    public IInterceptorSubjectContext Context { get; }
 
     /// <summary>
     /// Gets the timestamp when the transaction started.
@@ -71,13 +80,13 @@ public sealed class SubjectTransaction : IDisposable
     public TransactionConflictBehavior ConflictBehavior => _conflictBehavior;
 
     private SubjectTransaction(
-        IInterceptorSubjectContext? context,
-        SubjectTransactionInterceptor? interceptor,
+        IInterceptorSubjectContext context,
+        SubjectTransactionInterceptor interceptor,
         TransactionMode mode,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
         DateTimeOffset startTimestamp,
-        IDisposable? lockReleaser)
+        IDisposable lockReleaser)
     {
         Context = context;
         Interceptor = interceptor;
@@ -86,33 +95,6 @@ public sealed class SubjectTransaction : IDisposable
         _conflictBehavior = conflictBehavior;
         StartTimestamp = startTimestamp;
         _lockReleaser = lockReleaser;
-    }
-
-    /// <summary>
-    /// Begins a new transaction with the specified mode and requirements.
-    /// </summary>
-    /// <param name="mode">The transaction mode controlling failure handling behavior. Defaults to <see cref="TransactionMode.Rollback"/> for maximum consistency.</param>
-    /// <param name="requirement">The transaction requirement for validation. Defaults to <see cref="TransactionRequirement.None"/>.</param>
-    /// <returns>A new SubjectTransaction instance.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when a nested transaction is attempted.</exception>
-    public static SubjectTransaction BeginTransaction(
-        TransactionMode mode = TransactionMode.Rollback,
-        TransactionRequirement requirement = TransactionRequirement.None)
-    {
-        if (CurrentTransaction.Value != null)
-            throw new InvalidOperationException("Nested transactions are not supported.");
-
-        var transaction = new SubjectTransaction(
-            context: null,
-            interceptor: null,
-            mode,
-            requirement,
-            TransactionConflictBehavior.FailOnConflict,
-            DateTimeOffset.UtcNow,
-            lockReleaser: null);
-
-        CurrentTransaction.Value = transaction;
-        return transaction;
     }
 
     /// <summary>
@@ -126,6 +108,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="conflictBehavior">The conflict detection behavior.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A new SubjectTransaction instance.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when transactions are not enabled or when nested transaction is attempted.</exception>
     internal static async ValueTask<SubjectTransaction> BeginExclusiveTransactionAsync(
         IInterceptorSubjectContext context,
         TransactionMode mode,
@@ -133,14 +116,20 @@ public sealed class SubjectTransaction : IDisposable
         TransactionConflictBehavior conflictBehavior,
         CancellationToken cancellationToken)
     {
-        var interceptor = context.GetService<SubjectTransactionInterceptor>();
-        var transactionLock = await interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
-        
+        // Check for nested transactions BEFORE acquiring lock (prevents deadlock)
         if (CurrentTransaction.Value != null)
         {
-            transactionLock.Dispose(); // Release lock before throwing
             throw new InvalidOperationException("Nested transactions are not supported.");
         }
+
+        var interceptor = context.TryGetService<SubjectTransactionInterceptor>()
+            ?? throw new InvalidOperationException(
+                "Transactions are not enabled. Call WithTransactions() when creating the context.");
+
+        var transactionLock = await interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
+
+        // CRITICAL: Increment AFTER all validation, BEFORE construction
+        Interlocked.Increment(ref _activeTransactionCount);
 
         // Don't set CurrentTransaction.Value here because it won't flow to caller's context
         // The caller (extension method) will call SetCurrent after awaiting this
@@ -164,7 +153,8 @@ public sealed class SubjectTransaction : IDisposable
     /// <exception cref="TransactionException">Thrown when one or more external source writes failed.</exception>
     public async Task CommitAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_isDisposed, this);
+        if (Volatile.Read(ref _isDisposed) != 0)
+            throw new ObjectDisposedException(nameof(SubjectTransaction));
 
         if (_isCommitted)
             throw new InvalidOperationException("Transaction has already been committed.");
@@ -184,7 +174,7 @@ public sealed class SubjectTransaction : IDisposable
             {
                 // Check for conflicts at commit time if FailOnConflict behavior is enabled
                 // Value-based conflict detection: Compare captured OldValue with the current actual value
-                
+
                 var conflictingProperties = new List<PropertyReference>();
                 foreach (var change in changes)
                 {
@@ -210,28 +200,21 @@ public sealed class SubjectTransaction : IDisposable
             throw;
         }
 
-        // 2. Group changes by context and call write handlers (external source writes)
+        // 2. Call write handler on the context (single writer - no context grouping needed)
         var allSuccessfulChanges = new List<SubjectPropertyChange>();
         var allFailedChanges = new List<SourceWriteFailure>();
 
-        var changesByContext = changes.GroupBy(c => c.Property.Subject.Context);
-        foreach (var contextGroup in changesByContext)
+        var writeHandler = Context.TryGetService<ITransactionWriter>();
+        if (writeHandler != null)
         {
-            var groupContext = contextGroup.Key;
-            var contextChanges = contextGroup.ToList();
-            var writeHandler = groupContext.TryGetService<ITransactionWriter>();
-
-            if (writeHandler != null)
-            {
-                var result = await writeHandler.WriteChangesAsync(contextChanges, _mode, _requirement, cancellationToken);
-                allSuccessfulChanges.AddRange(result.SuccessfulChanges);
-                allFailedChanges.AddRange(result.FailedChanges);
-            }
-            else
-            {
-                // No handler configured: All changes are successful
-                allSuccessfulChanges.AddRange(contextChanges);
-            }
+            var result = await writeHandler.WriteChangesAsync(changes, _mode, _requirement, cancellationToken);
+            allSuccessfulChanges.AddRange(result.SuccessfulChanges);
+            allFailedChanges.AddRange(result.FailedChanges);
+        }
+        else
+        {
+            // No handler configured: All changes are successful
+            allSuccessfulChanges.AddRange(changes);
         }
 
         // 3. Handle mode-specific behavior
@@ -284,12 +267,12 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (!_isDisposed)
+        if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) == 0)
         {
+            Interlocked.Decrement(ref _activeTransactionCount);
             PendingChanges.Clear();
             CurrentTransaction.Value = null;
-            _lockReleaser?.Dispose();
-            _isDisposed = true;
+            _lockReleaser.Dispose();
         }
     }
 }

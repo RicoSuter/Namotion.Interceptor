@@ -18,6 +18,12 @@ Key characteristics:
 
 > **Note**: When the C# object IS the source of truth and you want to expose it to external systems (like an OPC UA server or MQTT broker), use standalone background services like `OpcUaSubjectServerBackgroundService` or `MqttSubjectServerBackgroundService`. These are not sources because they don't synchronize from an external system.
 
+**Why per-source background services?**
+- **Isolation**: Each source can fail and retry independently without affecting others
+- **Buffering**: Each source has its own buffering, deduplication, and retry queue
+- **Performance**: Parallel writes to multiple sources instead of serialized dispatch
+- **Simplicity**: Source-specific lifecycle management and error handling
+
 ## Data Flow
 
 Data flows bidirectionally between your C# subject and the external system:

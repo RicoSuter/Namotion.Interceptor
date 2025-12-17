@@ -23,7 +23,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(successSource.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.BestEffort);
+        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
         person.FirstName = "John";
         person.LastName = "Doe";
 
@@ -46,7 +46,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Rollback);
+        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
         person.FirstName = "John";
         person.LastName = "Doe";
 
@@ -75,7 +75,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(successSource.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Rollback);
+        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
         person.FirstName = "John";
         person.LastName = "Doe";
 
@@ -111,7 +111,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(successThenFailSource.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Rollback);
+        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
         person.FirstName = "John";
         person.LastName = "Doe";
 
@@ -134,7 +134,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         // Only FirstName has a source, LastName has no source
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(failSource.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.Rollback);
+        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
         person.FirstName = "John";
         person.LastName = "Doe"; // No source - should be in successful changes
 
@@ -164,7 +164,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         // Only FirstName has a source
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(failSource.Object);
 
-        using var tx = SubjectTransaction.BeginTransaction(TransactionMode.BestEffort);
+        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
         person.FirstName = "John";
         person.LastName = "Doe"; // No source
 

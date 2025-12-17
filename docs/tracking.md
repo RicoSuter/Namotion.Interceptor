@@ -15,10 +15,11 @@ var context = InterceptorSubjectContext
 This is a convenience method that registers:
 - Equality checking to prevent unnecessary change notifications
 - Derived property change detection
-- Transaction support for atomic commits
 - Property changed observable (Rx-based)
 - Property changed queue (high performance)
 - Context inheritance for child subjects
+
+> **Note**: Transaction support is opt-in. Add `.WithTransactions()` to enable transaction support.
 
 You can also enable features individually for more granular control.
 
@@ -117,11 +118,12 @@ Transactions allow you to batch property changes and commit them atomically. Cha
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithFullPropertyTracking(); // Includes WithTransactions()
+    .WithFullPropertyTracking()
+    .WithTransactions(); // Required for transaction support (opt-in)
 
 var person = new Person(context);
 
-using (var transaction = SubjectTransaction.BeginTransaction())
+using (var transaction = await context.BeginExclusiveTransactionAsync())
 {
     person.FirstName = "John";
     person.LastName = "Doe";

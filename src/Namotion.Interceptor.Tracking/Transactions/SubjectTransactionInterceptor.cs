@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -6,9 +7,11 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 
 /// <summary>
 /// Interceptor that captures property changes during transactions.
-/// Should be registered before PropertyChangeObservable/Queue to suppress notifications during capture.
+/// Must run before PropertyChangeObservable/Queue to suppress notifications during capture.
 /// Also manages the per-context transaction lock for serialized transactions.
 /// </summary>
+[RunsBefore(typeof(PropertyChangeObservable))]
+[RunsBefore(typeof(PropertyChangeQueue))]
 public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInterceptor
 {
     private readonly SemaphoreSlim _exclusiveTransactionLock = new(1, 1);
@@ -27,6 +30,12 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
+        // Fast path: Skip transaction check when no transaction is active (avoids AsyncLocal read)
+        if (!SubjectTransaction.HasActiveTransaction)
+        {
+            return next(ref context);
+        }
+
         var transaction = SubjectTransaction.Current;
         if (transaction is { IsCommitting: false } &&
             transaction.PendingChanges.TryGetValue(context.Property, out var change))
@@ -42,19 +51,23 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
+        // Fast path: Skip transaction check when no transaction is active (avoids AsyncLocal read)
+        if (!SubjectTransaction.HasActiveTransaction)
+        {
+            next(ref context);
+            return;
+        }
+
         var transaction = SubjectTransaction.Current;
         if (transaction is { IsCommitting: false } &&
             !context.Property.Metadata.IsDerived)
         {
-            // Validate context binding (only when the transaction is bound to an interceptor)
-            if (transaction.Interceptor is { } transactionInterceptor)
+            // Validate context binding
+            var subjectInterceptor = context.Property.Subject.Context.TryGetService<SubjectTransactionInterceptor>();
+            if (subjectInterceptor != transaction.Interceptor)
             {
-                var subjectInterceptor = context.Property.Subject.Context.TryGetService<SubjectTransactionInterceptor>();
-                if (subjectInterceptor != transactionInterceptor)
-                {
-                    throw new InvalidOperationException(
-                        $"Cannot modify property '{context.Property.Metadata.Name}': Transaction is bound to a different context.");
-                }
+                throw new InvalidOperationException(
+                    $"Cannot modify property '{context.Property.Metadata.Name}': Transaction is bound to a different context.");
             }
 
             var currentContext = SubjectChangeContext.Current;
