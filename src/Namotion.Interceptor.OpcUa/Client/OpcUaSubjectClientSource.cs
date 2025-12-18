@@ -2,6 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
+using Namotion.Interceptor.OpcUa.Sync;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
@@ -27,6 +28,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private LifecycleInterceptor? _lifecycleInterceptor;
     private SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
+    private OpcUaAddressSpaceSync? _addressSpaceSync;
+    private OpcUaClientSyncStrategy? _syncStrategy;
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
@@ -74,6 +77,18 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Connected to OPC UA server successfully.");
+
+        // Initialize address space sync if enabled
+        if (_configuration.EnableLiveSync)
+        {
+            _syncStrategy = new OpcUaClientSyncStrategy(_configuration, this, _logger);
+            _syncStrategy.SetSession(session);
+            
+            _addressSpaceSync = new OpcUaAddressSpaceSync(_syncStrategy, _configuration, _logger);
+            _addressSpaceSync.Initialize(_subject);
+            
+            _logger.LogInformation("OPC UA address space live sync enabled.");
+        }
 
         var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
         if (rootNode is not null)
@@ -269,6 +284,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             var application = _configuration.CreateApplicationInstance();
             var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("New OPC UA session created successfully.");
+
+            // Update sync strategy with new session
+            _syncStrategy?.SetSession(session);
 
             if (_initialMonitoredItems is not null && _initialMonitoredItems.Count > 0)
             {
@@ -467,6 +485,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
         }
+
+        _addressSpaceSync?.Dispose();
+        _addressSpaceSync = null;
 
         var sessionManager = _sessionManager;
         if (sessionManager is not null)
