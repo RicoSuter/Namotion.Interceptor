@@ -95,16 +95,36 @@ internal class OpcUaServerSyncStrategy : IOpcUaSyncStrategy
         }
 
         _logger.LogDebug(
-            "Server: Subject detached - {SubjectType}. Removing OPC UA node tracking...",
+            "Server: Subject detached - {SubjectType}. Removing OPC UA nodes...",
             subject.GetType().Name);
 
-        // Remove node tracking (actual nodes remain in address space until restart per OPC UA SDK limitation)
-        _nodeManager.RemoveSubjectNodes(subject);
-
-        // Fire ModelChangeEvent to notify connected clients
-        if (_configuration.EnableLiveSync && _configuration.EnableRemoteNodeManagement)
+        try
         {
-            await FireModelChangeEventAsync(ModelChangeStructureVerbMask.NodeDeleted, cancellationToken).ConfigureAwait(false);
+            // Remove nodes dynamically at runtime
+            var removed = _nodeManager.RemoveDynamicSubjectNodes(subject);
+            
+            if (removed)
+            {
+                _logger.LogInformation(
+                    "Dynamically removed OPC UA nodes for subject {SubjectType}",
+                    subject.GetType().Name);
+
+                // Fire ModelChangeEvent to notify connected clients
+                if (_configuration.EnableLiveSync && _configuration.EnableRemoteNodeManagement)
+                {
+                    await FireModelChangeEventAsync(ModelChangeStructureVerbMask.NodeDeleted, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "No nodes found to remove for subject {SubjectType}",
+                    subject.GetType().Name);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to remove dynamic nodes for subject {SubjectType}", subject.GetType().Name);
         }
 
         // Clean up mappings
