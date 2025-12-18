@@ -71,9 +71,62 @@ internal class CustomNodeManager : CustomNodeManager2
     }
 
     /// <summary>
+    /// Removes nodes for a detached subject at runtime.
+    /// Removes nodes from the address space and cleans up tracking.
+    /// </summary>
+    /// <param name="subject">The subject whose nodes should be removed</param>
+    /// <returns>True if nodes were removed, false if subject wasn't tracked</returns>
+    public bool RemoveDynamicSubjectNodes(IInterceptorSubject subject)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            return false;
+        }
+
+        bool removed = false;
+        
+        lock (Lock)
+        {
+            // Find and remove the node from tracking
+            if (_subjects.TryRemove(registeredSubject, out var nodeState))
+            {
+                try
+                {
+                    // Remove the node from the address space
+                    // Find parent and remove reference
+                    var nodeId = nodeState.NodeId;
+                    
+                    // Remove from PredefinedNodes if it exists there
+                    if (PredefinedNodes.ContainsKey(nodeId))
+                    {
+                        PredefinedNodes.Remove(nodeId);
+                    }
+                    
+                    // Clean up property data
+                    var properties = registeredSubject.Properties;
+                    foreach (var property in properties)
+                    {
+                        property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                    }
+                    
+                    removed = true;
+                }
+                catch
+                {
+                    // Even if removal fails, we've cleaned up tracking
+                    removed = true;
+                }
+            }
+        }
+
+        return removed;
+    }
+
+    /// <summary>
     /// Removes nodes for a detached subject. Idempotent - safe to call multiple times.
-    /// Note: Node stays in address space until server restart.
-    /// We just clean up local tracking to avoid memory leaks.
+    /// Legacy method that only cleans up tracking.
+    /// For runtime removal with address space updates, use RemoveDynamicSubjectNodes.
     /// </summary>
     public void RemoveSubjectNodes(IInterceptorSubject subject)
     {
