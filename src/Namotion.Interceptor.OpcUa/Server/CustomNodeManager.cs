@@ -86,6 +86,48 @@ internal class CustomNodeManager : CustomNodeManager2
         }
     }
 
+    /// <summary>
+    /// Dynamically creates OPC UA nodes for a subject at runtime.
+    /// Used when subjects are attached after server initialization.
+    /// </summary>
+    /// <param name="subject">The subject to create nodes for</param>
+    /// <param name="parentNodeId">Optional parent node ID. If null, uses ObjectsFolder or configured root</param>
+    /// <param name="pathPrefix">Optional path prefix for node identification</param>
+    /// <returns>The created node, or null if subject is already registered</returns>
+    public NodeState? CreateDynamicSubjectNodes(IInterceptorSubject subject, NodeId? parentNodeId = null, string? pathPrefix = null)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            return null;
+        }
+
+        // Check if already created
+        if (_subjects.ContainsKey(registeredSubject))
+        {
+            return _subjects[registeredSubject];
+        }
+
+        // Determine parent node and path
+        var effectiveParentNodeId = parentNodeId ?? (_configuration.RootName is not null
+            ? new NodeId(_configuration.RootName, NamespaceIndex)
+            : ObjectIds.ObjectsFolder);
+
+        var effectivePath = pathPrefix ?? (_configuration.RootName is not null
+            ? _configuration.RootName + PathDelimiter
+            : string.Empty);
+
+        // Create nodes for the subject
+        lock (Lock)
+        {
+            CreateObjectNode(effectiveParentNodeId, registeredSubject, effectivePath);
+            
+            // Return the created node
+            _subjects.TryGetValue(registeredSubject, out var node);
+            return node;
+        }
+    }
+
     private void CreateObjectNode(NodeId parentNodeId, RegisteredSubject subject, string prefix)
     {
         foreach (var property in subject.Properties)
