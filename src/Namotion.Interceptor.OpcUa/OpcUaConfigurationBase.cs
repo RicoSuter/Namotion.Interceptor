@@ -75,4 +75,21 @@ public abstract class OpcUaConfigurationBase
     /// Gets or sets the retry time (default: 10s).
     /// </summary>
     public TimeSpan? RetryTime { get; init; }
+
+    /// <summary>
+    /// Validates common configuration values shared between client and server.
+    /// Derived classes should call this method and add their own validations.
+    /// </summary>
+    protected void ValidateBase()
+    {
+        ArgumentNullException.ThrowIfNull(PathProvider);
+        ArgumentNullException.ThrowIfNull(ValueConverter);
+
+        if (EnablePeriodicResync && PeriodicResyncInterval < TimeSpan.FromSeconds(1))
+        {
+            throw new ArgumentException(
+                $"PeriodicResyncInterval must be at least 1 second when EnablePeriodicResync is true (got: {PeriodicResyncInterval.TotalSeconds}s)",
+                nameof(PeriodicResyncInterval));
+        }
+    }
 }

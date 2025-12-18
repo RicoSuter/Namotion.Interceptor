@@ -75,8 +75,8 @@ public class OpcUaAddressSpaceSync : IDisposable
     /// </summary>
     private void OnSubjectAttached(SubjectLifecycleChange change)
     {
-        // Fire and forget - don't block lifecycle event
-        _ = OnSubjectAttachedAsync(change);
+        // Fire and forget - don't block lifecycle event, but capture exceptions in the async method
+        _ = Task.Run(() => OnSubjectAttachedAsync(change));
     }
 
     private async Task OnSubjectAttachedAsync(SubjectLifecycleChange change)
@@ -118,8 +118,8 @@ public class OpcUaAddressSpaceSync : IDisposable
     /// </summary>
     private void OnSubjectDetached(SubjectLifecycleChange change)
     {
-        // Fire and forget - don't block lifecycle event
-        _ = OnSubjectDetachedAsync(change);
+        // Fire and forget - don't block lifecycle event, but capture exceptions in the async method
+        _ = Task.Run(() => OnSubjectDetachedAsync(change));
     }
 
     private async Task OnSubjectDetachedAsync(SubjectLifecycleChange change)
