@@ -25,9 +25,13 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         _output = output;
     }
 
-    public async Task StartAsync(Func<IInterceptorSubjectContext, TRoot> createRoot,
+    public async Task StartAsync(
+        Func<IInterceptorSubjectContext, TRoot> createRoot,
         Func<TRoot, bool> isConnected,
-        string serverUrl = DefaultServerUrl)
+        string serverUrl = DefaultServerUrl,
+        bool enableLiveSync = false,
+        bool enableRemoteNodeManagement = false,
+        bool enablePeriodicResync = false)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddLogging(logging =>
@@ -47,7 +51,13 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         Root = createRoot(context);
 
         builder.Services.AddSingleton(Root);
-        builder.Services.AddOpcUaSubjectClient<TRoot>(serverUrl, "opc", rootName: "Root");
+        builder.Services.AddOpcUaSubjectClient<TRoot>(
+            serverUrl, 
+            "opc", 
+            rootName: "Root",
+            enableLiveSync: enableLiveSync,
+            enableRemoteNodeManagement: enableRemoteNodeManagement,
+            enablePeriodicResync: enablePeriodicResync);
 
         _host = builder.Build();
         await _host.StartAsync();
