@@ -14,7 +14,7 @@ The `Namotion.Interceptor.Connectors` package provides infrastructure for connec
 | Type | Interface | Direction | Description |
 |------|-----------|-----------|-------------|
 | **Source** | `ISubjectSource` | Bidirectional | Synchronizes FROM an external system (the external system is the source of truth) |
-| **Server** | (varies) | Outbound | Exposes subjects TO external systems (the C# object is the source of truth) |
+| **Server** | `ISubjectConnector` | Outbound | Exposes subjects TO external systems (the C# object is the source of truth) |
 
 ### ISubjectSource Operations
 
