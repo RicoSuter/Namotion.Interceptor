@@ -57,7 +57,7 @@ internal class OpcUaServerSyncStrategy : IOpcUaSyncStrategy
         // This will be similar to logic in CustomNodeManager.CreateObjectNode
         // For now, just track the subject
 
-        // Fire ModelChangeEvent to notify connected clients
+        // TODO Phase 4: Fire ModelChangeEvent to notify connected clients (currently stub)
         if (_configuration.EnableLiveSync && _configuration.EnableRemoteNodeManagement)
         {
             await FireModelChangeEventAsync(ModelChangeStructureVerbMask.NodeAdded, cancellationToken).ConfigureAwait(false);
@@ -79,7 +79,7 @@ internal class OpcUaServerSyncStrategy : IOpcUaSyncStrategy
         // Remove node tracking (actual nodes remain in address space until restart per OPC UA SDK limitation)
         _nodeManager.RemoveSubjectNodes(subject);
 
-        // Fire ModelChangeEvent to notify connected clients
+        // TODO Phase 4: Fire ModelChangeEvent to notify connected clients (currently stub)
         if (_configuration.EnableLiveSync && _configuration.EnableRemoteNodeManagement)
         {
             await FireModelChangeEventAsync(ModelChangeStructureVerbMask.NodeDeleted, cancellationToken).ConfigureAwait(false);

@@ -56,7 +56,7 @@ public class OpcUaClientConfiguration : OpcUaConfigurationBase
     /// Gets the subject factory used to create interceptor subject instances for OPC UA object nodes.
     /// Required for clients that need to create subjects for dynamically discovered nodes.
     /// </summary>
-    public new required OpcUaSubjectFactory SubjectFactory { get; init; }
+    public required new OpcUaSubjectFactory SubjectFactory { get; init; }
 
     /// <summary>
     /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute (default: 0).
@@ -239,18 +239,11 @@ public class OpcUaClientConfiguration : OpcUaConfigurationBase
     /// </summary>
     public void Validate()
     {
-        ArgumentNullException.ThrowIfNull(ServerUrl);
-        ArgumentNullException.ThrowIfNull(PathProvider);
-        ArgumentNullException.ThrowIfNull(TypeResolver);
-        ArgumentNullException.ThrowIfNull(ValueConverter);
-        ArgumentNullException.ThrowIfNull(SubjectFactory);
+        ValidateBase();
 
-        if (EnablePeriodicResync && PeriodicResyncInterval < TimeSpan.FromSeconds(1))
-        {
-            throw new ArgumentException(
-                $"PeriodicResyncInterval must be at least 1 second when EnablePeriodicResync is true (got: {PeriodicResyncInterval.TotalSeconds}s)",
-                nameof(PeriodicResyncInterval));
-        }
+        ArgumentNullException.ThrowIfNull(ServerUrl);
+        ArgumentNullException.ThrowIfNull(TypeResolver);
+        ArgumentNullException.ThrowIfNull(SubjectFactory);
 
         if (WriteRetryQueueSize < 0)
         {
