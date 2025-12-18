@@ -79,6 +79,50 @@ public static class OpcUaSubjectExtensions
         });
     }
 
+    public static IServiceCollection AddOpcUaSubjectClient<TSubject>(
+        this IServiceCollection serviceCollection,
+        string serverUrl,
+        string sourceName,
+        string? rootName = null,
+        bool enableLiveSync = false,
+        bool enableRemoteNodeManagement = false,
+        bool enablePeriodicResync = false)
+        where TSubject : IInterceptorSubject
+    {
+        return serviceCollection.AddOpcUaSubjectClient(
+            serverUrl,
+            sourceName,
+            sp => sp.GetRequiredService<TSubject>(),
+            rootName,
+            enableLiveSync,
+            enableRemoteNodeManagement,
+            enablePeriodicResync);
+    }
+
+    public static IServiceCollection AddOpcUaSubjectClient(
+        this IServiceCollection serviceCollection,
+        string serverUrl,
+        string sourceName,
+        Func<IServiceProvider, IInterceptorSubject> subjectSelector,
+        string? rootName = null,
+        bool enableLiveSync = false,
+        bool enableRemoteNodeManagement = false,
+        bool enablePeriodicResync = false)
+    {
+        return serviceCollection.AddOpcUaSubjectClient(subjectSelector, sp => new OpcUaClientConfiguration
+        {
+            ServerUrl = serverUrl,
+            RootName = rootName,
+            PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", null),
+            TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
+            ValueConverter = new OpcUaValueConverter(),
+            SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
+            EnableLiveSync = enableLiveSync,
+            EnableRemoteNodeManagement = enableRemoteNodeManagement,
+            EnablePeriodicResync = enablePeriodicResync
+        });
+    }
+
     public static IServiceCollection AddOpcUaSubjectClient(
         this IServiceCollection serviceCollection,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
@@ -137,6 +181,44 @@ public static class OpcUaSubjectExtensions
             RootName = rootName,
             PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
             ValueConverter = new OpcUaValueConverter()
+        });
+    }
+
+    public static IServiceCollection AddOpcUaSubjectServer<TSubject>(
+        this IServiceCollection serviceCollection,
+        string sourceName,
+        string? rootName = null,
+        bool enableLiveSync = false,
+        bool enableRemoteNodeManagement = false,
+        bool enablePeriodicResync = false)
+        where TSubject : IInterceptorSubject
+    {
+        return serviceCollection.AddOpcUaSubjectServer(
+            sourceName,
+            sp => sp.GetRequiredService<TSubject>(),
+            rootName,
+            enableLiveSync,
+            enableRemoteNodeManagement,
+            enablePeriodicResync);
+    }
+
+    public static IServiceCollection AddOpcUaSubjectServer(
+        this IServiceCollection serviceCollection,
+        string sourceName,
+        Func<IServiceProvider, IInterceptorSubject> subjectSelector,
+        string? rootName = null,
+        bool enableLiveSync = false,
+        bool enableRemoteNodeManagement = false,
+        bool enablePeriodicResync = false)
+    {
+        return serviceCollection.AddOpcUaSubjectServer(subjectSelector, _ => new OpcUaServerConfiguration
+        {
+            RootName = rootName,
+            PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", null),
+            ValueConverter = new OpcUaValueConverter(),
+            EnableLiveSync = enableLiveSync,
+            EnableRemoteNodeManagement = enableRemoteNodeManagement,
+            EnablePeriodicResync = enablePeriodicResync
         });
     }
 
