@@ -57,7 +57,7 @@ internal class OpcUaServerSyncStrategy : IOpcUaSyncStrategy
         // This will be similar to logic in CustomNodeManager.CreateObjectNode
         // For now, just track the subject
 
-        // TODO Phase 4: Fire ModelChangeEvent to notify connected clients (currently stub)
+        // Fire ModelChangeEvent to notify connected clients
         if (_configuration.EnableLiveSync && _configuration.EnableRemoteNodeManagement)
         {
             await FireModelChangeEventAsync(ModelChangeStructureVerbMask.NodeAdded, cancellationToken).ConfigureAwait(false);
@@ -79,7 +79,7 @@ internal class OpcUaServerSyncStrategy : IOpcUaSyncStrategy
         // Remove node tracking (actual nodes remain in address space until restart per OPC UA SDK limitation)
         _nodeManager.RemoveSubjectNodes(subject);
 
-        // TODO Phase 4: Fire ModelChangeEvent to notify connected clients (currently stub)
+        // Fire ModelChangeEvent to notify connected clients
         if (_configuration.EnableLiveSync && _configuration.EnableRemoteNodeManagement)
         {
             await FireModelChangeEventAsync(ModelChangeStructureVerbMask.NodeDeleted, cancellationToken).ConfigureAwait(false);
@@ -144,12 +144,41 @@ internal class OpcUaServerSyncStrategy : IOpcUaSyncStrategy
 
         try
         {
-            // TODO Phase 3: Implement firing GeneralModelChangeEvent
-            // This requires:
-            // 1. Creating a GeneralModelChangeEventState
-            // 2. Populating Changes array with affected NodeIds
-            // 3. Calling ReportEvent on the server
-
+            // Create a GeneralModelChangeEventState
+            var eventState = new GeneralModelChangeEventState(null);
+            
+            // Set standard event properties
+            var context = _server.DefaultSystemContext;
+            eventState.Initialize(context, null, EventSeverity.Low, new LocalizedText("Address space structure changed"));
+            
+            // Set the source (Server object)
+            eventState.SetChildValue(context, Opc.Ua.BrowseNames.SourceNode, ObjectIds.Server, false);
+            eventState.SetChildValue(context, Opc.Ua.BrowseNames.SourceName, "Server", false);
+            
+            // Set event-specific properties
+            eventState.SetChildValue(context, Opc.Ua.BrowseNames.Message, 
+                new LocalizedText($"Address space structure changed: {verb}"), false);
+            
+            // Create the Changes array - in a real implementation, this would contain the actual affected NodeIds
+            // For now, we'll create a minimal change structure
+            var changes = new ModelChangeStructureDataType[]
+            {
+                new ModelChangeStructureDataType
+                {
+                    Verb = (byte)verb,
+                    Affected = ObjectIds.Server, // Would be the actual affected node
+                    AffectedType = ObjectTypeIds.BaseObjectType
+                }
+            };
+            
+            eventState.SetChildValue(context, Opc.Ua.BrowseNames.Changes, changes, false);
+            
+            // Report the event to the server
+            eventState.SetChildValue(context, Opc.Ua.BrowseNames.Time, DateTime.UtcNow, false);
+            eventState.SetChildValue(context, Opc.Ua.BrowseNames.ReceiveTime, DateTime.UtcNow, false);
+            
+            _server.ReportEvent(eventState);
+            
             _logger.LogDebug("Fired ModelChangeEvent with verb: {Verb}", verb);
 
             await Task.CompletedTask.ConfigureAwait(false);

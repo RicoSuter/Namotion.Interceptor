@@ -30,6 +30,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private SubjectPropertyWriter? _propertyWriter;
     private OpcUaAddressSpaceSync? _addressSpaceSync;
     private OpcUaClientSyncStrategy? _syncStrategy;
+    private ModelChangeEventSubscription? _modelChangeEventSubscription;
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
@@ -86,6 +87,20 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             
             _addressSpaceSync = new OpcUaAddressSpaceSync(_syncStrategy, _configuration, _logger);
             _addressSpaceSync.Initialize(_subject);
+            
+            // Subscribe to ModelChangeEvents if remote node management is enabled
+            if (_configuration.EnableRemoteNodeManagement)
+            {
+                try
+                {
+                    _modelChangeEventSubscription = new ModelChangeEventSubscription(_addressSpaceSync, _logger);
+                    _modelChangeEventSubscription.Subscribe(session);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to subscribe to ModelChangeEvents. Sync will work for local changes only.");
+                }
+            }
             
             _logger.LogInformation("OPC UA address space live sync enabled.");
         }
@@ -288,6 +303,21 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             // Update sync strategy with new session
             _syncStrategy?.SetSession(session);
 
+            // Recreate ModelChangeEvent subscription if it was active
+            if (_configuration.EnableLiveSync && _configuration.EnableRemoteNodeManagement)
+            {
+                try
+                {
+                    _modelChangeEventSubscription?.Dispose();
+                    _modelChangeEventSubscription = new ModelChangeEventSubscription(_addressSpaceSync!, _logger);
+                    _modelChangeEventSubscription.Subscribe(session);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to resubscribe to ModelChangeEvents after reconnection.");
+                }
+            }
+
             if (_initialMonitoredItems is not null && _initialMonitoredItems.Count > 0)
             {
                 await sessionManager.CreateSubscriptionsAsync(_initialMonitoredItems, session, cancellationToken).ConfigureAwait(false);
@@ -485,6 +515,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
         }
+
+        _modelChangeEventSubscription?.Dispose();
+        _modelChangeEventSubscription = null;
 
         _addressSpaceSync?.Dispose();
         _addressSpaceSync = null;
