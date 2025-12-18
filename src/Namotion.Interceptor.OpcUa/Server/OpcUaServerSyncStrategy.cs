@@ -56,23 +56,31 @@ internal class OpcUaServerSyncStrategy : IOpcUaSyncStrategy
         try
         {
             // Create OPC UA nodes for this subject dynamically
-            // Note: CustomNodeManager's CreateObjectNode method already handles subject node creation
-            // The challenge is that we need to trigger it for dynamically attached subjects
-            // For now, we log that the subject was attached and track it for future node creation
+            var createdNode = _nodeManager.CreateDynamicSubjectNodes(subject);
             
-            _logger.LogInformation(
-                "Subject attached: {SubjectType}. Dynamic node creation requires CustomNodeManager integration.",
-                subject.GetType().Name);
-
-            // Fire ModelChangeEvent to notify connected clients
-            if (_configuration.EnableLiveSync && _configuration.EnableRemoteNodeManagement)
+            if (createdNode is not null)
             {
-                await FireModelChangeEventAsync(ModelChangeStructureVerbMask.NodeAdded, cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation(
+                    "Dynamically created OPC UA nodes for subject {SubjectType} at NodeId {NodeId}",
+                    subject.GetType().Name,
+                    createdNode.NodeId);
+
+                // Fire ModelChangeEvent to notify connected clients
+                if (_configuration.EnableLiveSync && _configuration.EnableRemoteNodeManagement)
+                {
+                    await FireModelChangeEventAsync(ModelChangeStructureVerbMask.NodeAdded, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "Subject {SubjectType} already has nodes in address space",
+                    subject.GetType().Name);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to handle subject attachment on server");
+            _logger.LogError(ex, "Failed to create dynamic nodes for subject {SubjectType}", subject.GetType().Name);
         }
 
         await Task.CompletedTask.ConfigureAwait(false);
