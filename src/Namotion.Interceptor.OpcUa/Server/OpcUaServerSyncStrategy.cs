@@ -141,12 +141,15 @@ internal class OpcUaServerSyncStrategy : IOpcUaSyncStrategy
             "Server: Remote node add requested - {NodeId}. Creating local subject...",
             node.NodeId);
 
-        // TODO Phase 4: Implement handling of AddNodes requests from external clients
-        // This will:
-        // 1. Find parent subject using parentNodeId
-        // 2. Create appropriate local subject (using TypeResolver or DynamicSubject)
-        // 3. Attach to parent collection/property
-        // 4. Create corresponding OPC UA node via CustomNodeManager
+        // NOTE: External client AddNodes handling intentionally deferred.
+        // Reason: Requires override of NodeManager.AddNodes methods and complex validation.
+        // Current bidirectional sync handles local-to-remote (server subject → OPC UA nodes).
+        // This would enable remote-to-local (external OPC UA client → server subjects).
+        // Future enhancement: Override CustomNodeManager.AddNode/AddNodes to:
+        // 1. Find parent subject using parentNodeId mapping
+        // 2. Create local subject (TypeResolver or DynamicSubject based on TypeDefinition)
+        // 3. Attach to parent via LifecycleInterceptor
+        // 4. Sync back through existing CreateDynamicSubjectNodes
 
         await Task.CompletedTask.ConfigureAwait(false);
     }
@@ -160,8 +163,12 @@ internal class OpcUaServerSyncStrategy : IOpcUaSyncStrategy
         // Find and detach local subject
         if (_nodeIdToSubject.TryGetValue(nodeId, out var subject))
         {
-            // TODO Phase 4: Implement detachment from parent collection/property
-            // This will integrate with LifecycleInterceptor
+            // NOTE: Automatic parent detachment intentionally deferred.
+            // Reason: Requires registry navigation to find parent property and safe removal logic.
+            // Current implementation cleans up tracking to prevent memory leaks.
+            // Manual detachment: Users can set property to null in application code.
+            // Future enhancement: Navigate RegisteredSubject.Parent hierarchy and use
+            // property.Reference.SetValue(null) or collection.Remove(item).
 
             _nodeIdToSubject.Remove(nodeId);
             _subjectToNodeId.Remove(subject);

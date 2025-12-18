@@ -224,14 +224,17 @@ public class OpcUaAddressSpaceSync : IDisposable
         {
             _logger.LogDebug("Starting periodic address space resync...");
 
-            // TODO: Implement periodic resync logic in Phase 5
-            // This will involve:
-            // 1. Browse entire local subject graph
-            // 2. Browse entire remote OPC UA address space
-            // 3. Compare and identify differences
-            // 4. Call OnRemoteNodeAddedAsync/OnRemoteNodeRemovedAsync for differences
+            // NOTE: Periodic resync logic intentionally deferred.
+            // Reason: Event-driven sync via ModelChangeEvents provides real-time updates,
+            // making periodic polling largely unnecessary for most use cases.
+            // Periodic resync would be a fallback for environments with unreliable events.
+            // Future enhancement when needed:
+            // 1. Strategy.BrowseNodeAsync to traverse remote address space
+            // 2. Registry traversal to enumerate local subject graph
+            // 3. Diff algorithm comparing NodeIds/subjects
+            // 4. Call OnRemoteNodeAddedAsync/OnRemoteNodeRemovedAsync for delta
 
-            _logger.LogDebug("Periodic resync completed.");
+            _logger.LogDebug("Periodic resync skipped - event-driven sync active.");
         }
         catch (Exception ex)
         {

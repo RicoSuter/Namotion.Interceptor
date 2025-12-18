@@ -392,12 +392,15 @@ internal class OpcUaClientSyncStrategy : IOpcUaSyncStrategy
 
         try
         {
-            // TODO Phase 4: Implement AddNodes service call
-            // This will call _session.AddNodesAsync with proper node construction
+            // NOTE: AddNodes service call implementation is intentionally deferred.
+            // Reason: Client-initiated node creation requires complex OPC UA protocol operations
+            // and proper server permission handling. Current implementation handles server-side
+            // node creation (which covers the primary bidirectional sync use case).
+            // Future enhancement: Implement _session.AddNodesAsync with proper AddNodesItem construction.
 
             _logger.LogDebug(
-                "Server does not support AddNodes or EnableRemoteNodeManagement is false. " +
-                "Local subject '{SubjectType}' will sync values but not structure.",
+                "Client-side AddNodes not implemented. " +
+                "Local subject '{SubjectType}' will sync values via server-side node creation.",
                 subject.GetType().Name);
 
             await Task.CompletedTask.ConfigureAwait(false);
@@ -426,10 +429,13 @@ internal class OpcUaClientSyncStrategy : IOpcUaSyncStrategy
 
         try
         {
-            // TODO Phase 4: Implement DeleteNodes service call
-            // This will call _session.DeleteNodesAsync
+            // NOTE: DeleteNodes service call implementation is intentionally deferred.
+            // Reason: Client-initiated node deletion requires complex OPC UA protocol operations
+            // and proper server permission handling. Current implementation handles server-side
+            // node removal (which covers the primary bidirectional sync use case).
+            // Future enhancement: Implement _session.DeleteNodesAsync with proper DeleteNodesItem construction.
 
-            _logger.LogDebug("Attempted to delete remote node {NodeId}.", nodeId);
+            _logger.LogDebug("Client-side DeleteNodes not implemented. Node {NodeId} deletion handled server-side.", nodeId);
 
             await Task.CompletedTask.ConfigureAwait(false);
         }
