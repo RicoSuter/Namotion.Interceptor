@@ -633,9 +633,10 @@ Use paths to reference subjects in the object graph. See [Configuration Guide - 
 
 | Prefix | Example |
 |--------|---------|
-| `Root.` | `Root.Children[demo].Children[motor.json]` |
+| `Root.` | `Root.Demo.Conveyor` |
 | `this.` | `this.Child.Property` |
 | `../` | `../Sibling.Property` |
+| Brackets | `Root.Demo[Setup.md]` (for keys with dots) |
 
 Use `SubjectPathResolver.ResolveFromRelativePath()` to resolve paths in code:
 
@@ -663,7 +664,7 @@ For subject path configuration properties, use the `SubjectPathField` component 
 <SubjectPathField @bind-Value="_path"
                   @bind-Value:after="OnFieldChanged"
                   Label="Subject Path"
-                  Placeholder="e.g., Root or Root.Children[demo]"
+                  Placeholder="e.g., Root or Root.Demo.Conveyor"
                   Class="mt-4" />
 ```
 
