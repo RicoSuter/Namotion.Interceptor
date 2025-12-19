@@ -74,11 +74,13 @@ Folders in your data directory become the object hierarchy:
 ```
 Data/
 ├── demo/
-│   ├── motor1.json      → Root.Children[demo].Children[motor1]
-│   └── motor2.json      → Root.Children[demo].Children[motor2]
+│   ├── motor1.json      → Root.demo.motor1
+│   └── motor2.json      → Root.demo.motor2
 └── docs/
-    └── guide.md         → Root.Children[docs].Children[guide.md]
+    └── guide.md         → Root.docs[guide.md]
 ```
+
+Note: Keys with dots (like `guide.md`) use brackets to preserve the extension.
 
 ---
 
@@ -128,32 +130,41 @@ Paths let you reference subjects and their properties anywhere in the object gra
 
 | Prefix | Description | Example |
 |--------|-------------|---------|
-| `Root.` | Absolute path from root | `Root.Children[demo].Children[motor]` |
+| `Root.` | Absolute path from root | `Root.Demo.Conveyor` |
 | `this.` | Relative to current subject | `this.Child.Name` |
 | `../` | Navigate up to parent | `../Sibling.Temperature` |
-| *(none)* | Relative to current context | `Children[item].Speed` |
+| *(none)* | Relative to current context | `Demo.Conveyor.Speed` |
 
-### Bracket Notation
+### Simplified Path Syntax
 
-Access dictionary children using brackets:
+For `[InlinePaths]` dictionaries (like the Children dictionary), use simple dot notation:
 
 ```
-Children[folder-name].Children[subject].PropertyName
+Root.Demo.Conveyor.PropertyName
 ```
 
-- Keys are case-sensitive
-- Special characters in keys are supported
-- Multiple levels can be chained
+This is equivalent to the verbose form `Root.Children[Demo].Children[Conveyor].PropertyName`.
+
+### Bracket Notation for Keys with Dots
+
+When a key contains a dot (like file extensions), use brackets to preserve it:
+
+```
+Root.Demo[Setup.md]
+Root.Docs[Pages.md].Title
+```
+
+Without brackets, `Root.Demo.Setup.md` would be interpreted as 4 segments instead of 3.
 
 ### Examples
 
 | Path | Description |
 |------|-------------|
-| `Root.Children[demo].Children[Conveyor]` | Absolute path to a motor |
-| `Root.Children[demo].Children[Conveyor].CurrentSpeed` | Property on that motor |
+| `Root.Demo.Conveyor` | Absolute path to a motor (simplified) |
+| `Root.Demo.Conveyor.CurrentSpeed` | Property on that motor |
+| `Root.Demo[Setup.md]` | File with extension (brackets preserve dot) |
 | `this.Child.Name` | Property on current subject's child |
 | `../Temperature` | Go up one level, access Temperature |
-| `../../Children[data].Value` | Go up two levels, then navigate down |
 | `motor.Speed` | Inline subject named "motor" (in markdown) |
 
 ### Resolution Order
@@ -182,7 +193,7 @@ Use the `Widget` subject to embed another subject's widget by path:
 ```json
 {
     "type": "HomeBlaze.Components.Widget",
-    "path": "Root.Children[demo].Children[Conveyor]"
+    "path": "Root.Demo.Conveyor"
 }
 ```
 
@@ -196,7 +207,7 @@ Embed a widget inline:
 ```subject(mywidget)
 {
     "type": "HomeBlaze.Components.Widget",
-    "path": "Root.Children[demo].Children[motor]"
+    "path": "Root.Demo.Conveyor"
 }
 ```
 ~~~

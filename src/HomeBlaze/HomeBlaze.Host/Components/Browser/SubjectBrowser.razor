@@ -168,7 +168,10 @@
                         if (child != null)
                         {
                             currentPathParts.Add(childKey);
-                            currentObjectPath = $"{currentObjectPath}.{childKey}";
+                            // Use brackets for keys with dots to preserve them
+                            currentObjectPath = childKey.Contains('.')
+                                ? $"{currentObjectPath}[{childKey}]"
+                                : $"{currentObjectPath}.{childKey}";
                             var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
                             _breadcrumbs.Add(new BreadcrumbItem(childKey, breadcrumbPath));
                             _panes.Add(new SubjectPane { Subject = child, DisplayName = childKey, ObjectPath = currentObjectPath, PropertyName = inlinePathsPropertyName, Index = childKey });
@@ -243,8 +246,12 @@
             ? (isInlinePathsProperty ? index.ToString()! : $"{propertyName}[{index}]")
             : propertyName;
         var parentPath = clickedPane.ObjectPath;
+        // Use brackets for [InlinePaths] keys with dots to preserve them
+        var indexStr = index?.ToString();
         var objectPath = index != null
-            ? (isInlinePathsProperty ? $"{parentPath}.{index}" : $"{parentPath}.{propertyName}[{index}]")
+            ? (isInlinePathsProperty
+                ? (indexStr!.Contains('.') ? $"{parentPath}[{index}]" : $"{parentPath}.{index}")
+                : $"{parentPath}.{propertyName}[{index}]")
             : $"{parentPath}.{propertyName}";
 
         // Add the new subject pane

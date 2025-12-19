@@ -36,12 +36,29 @@ public class SubjectPathResolver : ILifecycleHandler
     /// Converts bracket notation to slash notation.
     /// Children[demo].Children[file.json] → Children/demo/Children/file.json
     /// [Demo].[Inline.md] (when using [InlinePaths]) → Demo/Inline.md
+    /// Root.Demo.Conveyor (simple dot notation) → Root/Demo/Conveyor
     /// </summary>
+    /// <remarks>
+    /// Two modes:
+    /// - No brackets: treats all dots as separators (simple paths like Root.Demo.Conveyor)
+    /// - Has brackets: uses bracket conversion, preserving dots inside brackets (for file extensions)
+    /// Use brackets when keys contain dots: Root.[Demo].[Inline.md]
+    /// </remarks>
     public static string BracketToSlash(string bracketPath)
     {
+        // Simple mode: no brackets means all dots are separators
+        // Use this for paths like "Root.Demo.Conveyor"
+        if (!bracketPath.Contains('['))
+        {
+            return bracketPath.Replace('.', '/');
+        }
+
+        // Bracket mode: convert bracket patterns, preserving dots inside brackets
+        // Use this for paths with file extensions: "Root.[Demo].[Inline.md]"
         var result = bracketPath
-            .Replace("].[", "/")  // Handle [key].[key] from [InlinePaths] (must be before ].)
+            .Replace("].[", "/")  // Handle [key].[key] from [InlinePaths]
             .Replace("].", "/")   // Handle Property[key].Next
+            .Replace(".[", "/")   // Handle Segment.[key] (mixed mode: Demo.[Setup.md])
             .Replace("[", "/")    // Handle Property[key] opening bracket
             .Replace("]", "");    // Handle trailing bracket
 
@@ -277,11 +294,38 @@ public class SubjectPathResolver : ILifecycleHandler
             if (BuildPathRecursive(subject, parent, pathSegments, visited, registry, root))
             {
                 pathSegments.Reverse();
-                paths.Add(string.Join(".", pathSegments));
+                paths.Add(JoinPathSegments(pathSegments));
             }
         }
 
         return paths.Count > 0 ? paths : Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// Joins path segments, omitting the dot separator before bracketed segments.
+    /// Demo + Conveyor → Demo.Conveyor
+    /// Demo + [Inline.md] → Demo[Inline.md]
+    /// </summary>
+    private static string JoinPathSegments(List<string> segments)
+    {
+        if (segments.Count == 0)
+            return string.Empty;
+
+        var result = new System.Text.StringBuilder();
+        result.Append(segments[0]);
+
+        for (int i = 1; i < segments.Count; i++)
+        {
+            var segment = segments[i];
+            // Only add dot separator if segment doesn't start with bracket
+            if (!segment.StartsWith('['))
+            {
+                result.Append('.');
+            }
+            result.Append(segment);
+        }
+
+        return result.ToString();
     }
 
     private bool BuildPathRecursive(
@@ -311,9 +355,11 @@ public class SubjectPathResolver : ILifecycleHandler
             {
                 if (isInlinePathsProperty)
                 {
-                    // For [InlinePaths] properties, use just the key - no property name, no brackets
-                    // This makes paths like "Notes" instead of "Children[Notes]"
-                    segment = parent.Index.ToString()!;
+                    // For [InlinePaths] properties, use just the key (no property name)
+                    // If key contains a dot (like "Readme.md"), wrap in brackets to preserve it
+                    // This makes paths like "Notes" or "[Readme.md]" instead of "Children[Notes]"
+                    var key = parent.Index.ToString()!;
+                    segment = key.Contains('.') ? $"[{key}]" : key;
                 }
                 else
                 {
