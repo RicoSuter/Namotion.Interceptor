@@ -23,7 +23,7 @@ public class PageEditTests
         var page = await _fixture.CreatePageAsync();
 
         // Act - Navigate to Dashboard (a markdown page)
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Assert - Edit mode menu should be visible
@@ -36,7 +36,7 @@ public class PageEditTests
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Act - Open Split mode via dropdown menu
@@ -55,7 +55,7 @@ public class PageEditTests
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Act - Open Split mode via dropdown menu
@@ -78,7 +78,7 @@ public class PageEditTests
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Act - Open Split mode
@@ -104,7 +104,7 @@ public class PageEditTests
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Dashboard.md");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Dashboard.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Act - Open Source mode via dropdown menu

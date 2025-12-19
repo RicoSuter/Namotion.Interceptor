@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -16,6 +17,24 @@ internal sealed class StorageHierarchyManager
         _logger = logger;
     }
 
+    /// <summary>
+    /// Computes the dictionary key for a child subject.
+    /// Configurable subjects from .json files use filename without extension.
+    /// All other files use filename with extension.
+    /// </summary>
+    private static string GetChildKey(string fullPath, IInterceptorSubject subject)
+    {
+        var fileName = Path.GetFileName(fullPath);
+        
+        if (subject is IConfigurableSubject &&
+            Path.GetExtension(fullPath).Equals(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.GetFileNameWithoutExtension(fullPath);
+        }
+
+        return fileName;
+    }
+
     public void PlaceInHierarchy(
         string path,
         IInterceptorSubject subject,
@@ -28,7 +47,13 @@ internal sealed class StorageHierarchyManager
 
         if (segments.Length == 1)
         {
-            children[segments[0]] = subject;
+            var key = GetChildKey(path, subject);
+
+            if (!children.TryAdd(key, subject))
+            {
+                _logger?.LogWarning("Skipping '{Path}' - key \"{Key}\" already claimed", path, key);
+            }
+
             return;
         }
 
@@ -61,23 +86,30 @@ internal sealed class StorageHierarchyManager
         }
 
         // Add the subject to the leaf folder's children
-        current[segments[^1]] = subject;
+        var childKey = GetChildKey(path, subject);
+        if (!current.TryAdd(childKey, subject))
+        {
+            _logger?.LogWarning("Skipping '{Path}' - key \"{Key}\" already claimed", path, childKey);
+            return;
+        }
 
         // Reassign Children for all traversed folders (triggers change tracking)
-        foreach (var folder in foldersTraversed.AsEnumerable().Reverse())
+        for (var i = foldersTraversed.Count - 1; i >= 0; i--)
         {
+            var folder = foldersTraversed[i];
             folder.Children = new Dictionary<string, IInterceptorSubject>(folder.Children);
         }
     }
 
-    public void RemoveFromHierarchy(string path, Dictionary<string, IInterceptorSubject> children)
+    public void RemoveFromHierarchy(string path, IInterceptorSubject subject, Dictionary<string, IInterceptorSubject> children)
     {
         path = NormalizePath(path);
         var segments = path.Split('/');
+        var key = GetChildKey(path, subject);
 
         if (segments.Length == 1)
         {
-            children.Remove(segments[0]);
+            children.Remove(key);
             return;
         }
 
@@ -94,11 +126,12 @@ internal sealed class StorageHierarchyManager
         }
 
         // Remove the subject from the leaf folder's children
-        current.Remove(segments[^1]);
+        current.Remove(key);
 
         // Reassign Children for all traversed folders (triggers change tracking)
-        foreach (var folder in foldersTraversed.AsEnumerable().Reverse())
+        for (var i = foldersTraversed.Count - 1; i >= 0; i--)
         {
+            var folder = foldersTraversed[i];
             folder.Children = new Dictionary<string, IInterceptorSubject>(folder.Children);
         }
     }

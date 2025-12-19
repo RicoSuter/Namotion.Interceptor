@@ -1,21 +1,21 @@
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Sources.Paths.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.SamplesModel;
 
 [InterceptorSubject]
 public partial class Root
 {
-    [SourcePath("opc", "Name")]
-    [SourcePath("mqtt", "Name")]
+    [Path("opc", "Name")]
+    [Path("mqtt", "Name")]
     public partial string Name { get; set; }
 
-    [SourcePath("opc", "Number")]
-    [SourcePath("mqtt", "Number")]
+    [Path("opc", "Number")]
+    [Path("mqtt", "Number")]
     public partial decimal Number { get; set; }
 
-    [SourcePath("opc", "Persons")]
-    [SourcePath("mqtt", "Persons")]
+    [Path("opc", "Persons")]
+    [Path("mqtt", "Persons")]
     public partial Person[] Persons { get; set; }
 
     public Root()
