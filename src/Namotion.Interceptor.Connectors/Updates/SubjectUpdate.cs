@@ -211,7 +211,9 @@ public class SubjectUpdate
                 return;
             }
 
-            var parentProperty = registeredSubject.Parents.FirstOrDefault().Property;
+            var parentProperty = registeredSubject.Parents.Length > 0
+                ? registeredSubject.Parents[0].Property
+                : null;
             if (parentProperty?.Parent is not { } parentRegisteredSubject)
             {
                 return;
