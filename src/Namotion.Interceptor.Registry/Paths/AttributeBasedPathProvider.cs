@@ -34,7 +34,7 @@ public class AttributeBasedPathProvider : PathProviderBase
     /// <inheritdoc />
     /// <remarks>
     /// Includes properties that have a [Path] attribute with matching name,
-    /// or properties marked with [Children] for path resolution.
+    /// or properties marked with [InlinePaths] for path resolution.
     /// </remarks>
     public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
@@ -46,9 +46,9 @@ public class AttributeBasedPathProvider : PathProviderBase
         if (hasPathAttribute)
             return true;
 
-        // Also include [Children] properties for path resolution (transparent containers)
+        // Also include [InlinePaths] properties for path resolution (transparent containers)
         return property.ReflectionAttributes
-            .OfType<ChildrenAttribute>()
+            .OfType<InlinePathsAttribute>()
             .Any();
     }
 

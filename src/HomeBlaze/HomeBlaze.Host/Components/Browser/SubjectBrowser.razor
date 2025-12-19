@@ -153,13 +153,13 @@
             var registered = currentSubject.TryGetRegisteredSubject();
             var property = registered?.TryGetProperty(propertyName);
 
-            if (property == null || !property.HasChildSubjects)
+            if (property is not { HasChildSubjects: true })
             {
-                // Try [Children] fallback
-                var childrenPropertyName = ChildrenAttribute.GetChildrenPropertyName(currentSubject.GetType());
-                if (childrenPropertyName != null)
+                // Try [InlinePaths] fallback
+                var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(currentSubject.GetType());
+                if (inlinePathsPropertyName != null)
                 {
-                    property = registered?.TryGetProperty(childrenPropertyName);
+                    property = registered?.TryGetProperty(inlinePathsPropertyName);
                     if (property is { HasChildSubjects: true })
                     {
                         // This segment is actually a child key, not a property name
@@ -171,7 +171,7 @@
                             currentObjectPath = $"{currentObjectPath}.{childKey}";
                             var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
                             _breadcrumbs.Add(new BreadcrumbItem(childKey, breadcrumbPath));
-                            _panes.Add(new SubjectPane { Subject = child, DisplayName = childKey, ObjectPath = currentObjectPath, PropertyName = childrenPropertyName, Index = childKey });
+                            _panes.Add(new SubjectPane { Subject = child, DisplayName = childKey, ObjectPath = currentObjectPath, PropertyName = inlinePathsPropertyName, Index = childKey });
                             currentSubject = child;
                             continue;
                         }
@@ -237,14 +237,14 @@
         }
 
         // Build display name and object path
-        var isChildrenProperty = ChildrenAttribute.IsChildrenProperty(
+        var isInlinePathsProperty = InlinePathsAttribute.IsInlinePathsProperty(
             clickedPane.Subject.GetType(), propertyName);
         var displayName = index != null
-            ? (isChildrenProperty ? index.ToString()! : $"{propertyName}[{index}]")
+            ? (isInlinePathsProperty ? index.ToString()! : $"{propertyName}[{index}]")
             : propertyName;
         var parentPath = clickedPane.ObjectPath;
         var objectPath = index != null
-            ? (isChildrenProperty ? $"{parentPath}.{index}" : $"{parentPath}.{propertyName}[{index}]")
+            ? (isInlinePathsProperty ? $"{parentPath}.{index}" : $"{parentPath}.{propertyName}[{index}]")
             : $"{parentPath}.{propertyName}";
 
         // Add the new subject pane
@@ -326,14 +326,14 @@
         // Skip the first pane (root) when building path
         foreach (var pane in _panes.Skip(1))
         {
-            // For [Children] properties, only add the index (key), not the property name
+            // For [InlinePaths] properties, only add the index (key), not the property name
             var parentPane = _panes[_panes.IndexOf(pane) - 1];
-            var isChildrenProperty = pane.PropertyName != null &&
-                ChildrenAttribute.IsChildrenProperty(parentPane.Subject.GetType(), pane.PropertyName);
+            var isInlinePathsProperty = pane.PropertyName != null &&
+                InlinePathsAttribute.IsInlinePathsProperty(parentPane.Subject.GetType(), pane.PropertyName);
 
-            if (isChildrenProperty && pane.Index != null)
+            if (isInlinePathsProperty && pane.Index != null)
             {
-                // Only add the key for [Children] properties
+                // Only add the key for [InlinePaths] properties
                 pathParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
             }
             else
@@ -365,14 +365,14 @@
         var breadcrumbParts = new List<string>();
         foreach (var pane in _panes.Skip(1))
         {
-            // For [Children] properties, only add the index (key), not the property name
+            // For [InlinePaths] properties, only add the index (key), not the property name
             var parentPane = _panes[_panes.IndexOf(pane) - 1];
-            var isChildrenProp = pane.PropertyName != null &&
-                ChildrenAttribute.IsChildrenProperty(parentPane.Subject.GetType(), pane.PropertyName);
+            var isInlinePathsProp = pane.PropertyName != null &&
+                InlinePathsAttribute.IsInlinePathsProperty(parentPane.Subject.GetType(), pane.PropertyName);
 
-            if (isChildrenProp && pane.Index != null)
+            if (isInlinePathsProp && pane.Index != null)
             {
-                // Only add the key for [Children] properties
+                // Only add the key for [InlinePaths] properties
                 breadcrumbParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
             }
             else

@@ -189,7 +189,7 @@ public class SubjectPathResolverGetPathTests : SubjectPathResolverTestBase
     }
 
     [Fact]
-    public void GetPath_WithChildrenAttribute_ReturnsPathWithoutPropertyName()
+    public void GetPath_WithInlinePathsAttribute_ReturnsPathWithoutPropertyName()
     {
         // Arrange
         var notes = new TestContainerWithChildren(Context) { Name = "Notes" };
@@ -204,7 +204,7 @@ public class SubjectPathResolverGetPathTests : SubjectPathResolverTestBase
     }
 
     [Fact]
-    public void GetPath_WithChildrenAttribute_ReturnsNestedPathWithoutPropertyNames()
+    public void GetPath_WithInlinePathsAttribute_ReturnsNestedPathWithoutPropertyNames()
     {
         // Arrange
         var page = new TestContainerWithChildren(Context) { Name = "Page" };
@@ -221,7 +221,7 @@ public class SubjectPathResolverGetPathTests : SubjectPathResolverTestBase
     }
 
     [Fact]
-    public void GetPath_WithChildrenAttribute_SlashFormat_ReturnsSimplifiedPath()
+    public void GetPath_WithInlinePathsAttribute_SlashFormat_ReturnsSimplifiedPath()
     {
         // Arrange
         var notes = new TestContainerWithChildren(Context) { Name = "Notes" };

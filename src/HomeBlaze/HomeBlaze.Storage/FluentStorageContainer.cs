@@ -60,7 +60,7 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Child subjects (files and folders).
     /// </summary>
-    [Children]
+    [InlinePaths]
     [State]
     public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 

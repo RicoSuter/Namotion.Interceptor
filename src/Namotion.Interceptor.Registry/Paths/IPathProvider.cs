@@ -26,7 +26,7 @@ public interface IPathProvider
 
     /// <summary>
     /// Finds a property by its path segment.
-    /// Override for camelCase conversion, [Children] fallback, etc.
+    /// Override for camelCase conversion, [InlinePaths] fallback, etc.
     /// </summary>
     /// <param name="subject">The subject to search in.</param>
     /// <param name="segment">The path segment to look up.</param>

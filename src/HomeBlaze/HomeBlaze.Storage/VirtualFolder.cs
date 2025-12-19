@@ -26,7 +26,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// <summary>
     /// Child subjects (files and folders).
     /// </summary>
-    [Children]
+    [InlinePaths]
     [State]
     public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 

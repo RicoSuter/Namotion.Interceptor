@@ -209,9 +209,9 @@ public partial class Sensor
 }
 ```
 
-### [Children] Attribute
+### [InlinePaths] Attribute
 
-Marks a dictionary property as an implicit child container for path resolution:
+Marks a dictionary property as a transparent container for path resolution:
 
 ```csharp
 [InterceptorSubject]
@@ -219,7 +219,7 @@ public partial class ProductionLine
 {
     public partial string Name { get; set; }
 
-    [Children]
+    [InlinePaths]
     public partial Dictionary<string, Machine> Machines { get; set; }
 }
 
@@ -231,7 +231,7 @@ public partial class Machine
 }
 ```
 
-With `[Children]`:
+With `[InlinePaths]`:
 - Path `Line.CNC01.Status` resolves to `Line.Machines["CNC01"].Status`
 - Direct properties take precedence over child keys
 - Works with `AttributeBasedPathProvider` without requiring `[Path]` attribute on the dictionary

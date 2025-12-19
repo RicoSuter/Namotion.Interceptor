@@ -4,7 +4,7 @@ using Namotion.Interceptor.Registry.Attributes;
 namespace HomeBlaze.Services.Tests.Models;
 
 /// <summary>
-/// Test model for [Children] attribute behavior.
+/// Test model for [InlinePaths] attribute behavior.
 /// Has both Child property and Children dictionary for precedence tests.
 /// </summary>
 [InterceptorSubject]
@@ -14,7 +14,7 @@ public partial class TestContainerWithChildren
 
     public partial TestContainerWithChildren? Child { get; set; }
 
-    [Children]
+    [InlinePaths]
     public partial Dictionary<string, TestContainerWithChildren> Children { get; set; }
 
     public TestContainerWithChildren()
