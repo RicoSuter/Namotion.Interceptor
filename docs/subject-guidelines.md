@@ -250,6 +250,34 @@ public partial class Sensor
 }
 ```
 
+## InlinePaths Attribute
+
+The `[InlinePaths]` attribute simplifies paths for subjects with child dictionaries.
+
+### Before vs After
+
+| Without Attribute | With `[InlinePaths]` |
+|-------------------|----------------------|
+| `Root.Children[Documents].Children[Report]` | `Root.Documents.Report` |
+
+### Usage
+
+```csharp
+[InterceptorSubject]
+public partial class Folder
+{
+    [InlinePaths]
+    public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
+}
+```
+
+### Resolution Rules
+
+1. **Properties win** - If both property "Foo" and child key "Foo" exist, the property resolves first
+2. **One per type** - Only one `[InlinePaths]` property per class
+3. **Backward compatible** - Explicit `Children[key]` syntax still works
+4. **Any property name** - The property doesn't have to be named "Children"
+
 ## Summary
 
 1. **Mark all stored properties `partial`** - Tracking everything is safer

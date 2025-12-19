@@ -1,6 +1,6 @@
-using HomeBlaze.Services.Components;
 using HomeBlaze.Host.Services.Navigation;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Components;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HomeBlaze.Host.Services;

@@ -17,7 +17,7 @@
 		<ProjectReference Include="..\Namotion.Interceptor.GraphQL\Namotion.Interceptor.GraphQL.csproj" />
 		<ProjectReference Include="..\Namotion.Interceptor.Mqtt\Namotion.Interceptor.Mqtt.csproj" />
 		<ProjectReference Include="..\Namotion.Interceptor.OpcUa\Namotion.Interceptor.OpcUa.csproj" />
-		<ProjectReference Include="..\Namotion.Interceptor.Sources\Namotion.Interceptor.Sources.csproj" />
+		<ProjectReference Include="..\Namotion.Interceptor.Connectors\Namotion.Interceptor.Connectors.csproj" />
 	</ItemGroup>
 
 </Project>

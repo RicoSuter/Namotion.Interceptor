@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Connectors;
 
 namespace Namotion.Interceptor.Mqtt.Client;
 

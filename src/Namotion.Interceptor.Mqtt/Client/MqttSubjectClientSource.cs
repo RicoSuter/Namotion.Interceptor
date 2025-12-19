@@ -9,11 +9,11 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Packets;
+using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
-using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt.Client;
@@ -59,6 +59,9 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
         configuration.Validate();
     }
+
+    /// <inheritdoc />
+    public IInterceptorSubject RootSubject => _subject;
 
     /// <inheritdoc />
     public int WriteBatchSize => 0; // No server-imposed limit for MQTT
@@ -308,7 +311,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             return cachedTopic;
         }
 
-        var path = property.TryGetSourcePath(_configuration.PathProvider, _subject);
+        var path = property.TryGetPath(_configuration.PathProvider, _subject);
         var topic = path is null ? null : MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
 
         // Add first, then validate (guarantees no memory leak)
@@ -332,7 +335,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         }
 
         var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
-        var (property, _) = _subject.TryGetPropertyFromSourcePath(path, _configuration.PathProvider);
+        var (property, _) = _subject.TryGetPropertyFromPath(path, _configuration.PathProvider);
         var propertyReference = property?.Reference;
 
         // Add first, then validate (guarantees no memory leak)
