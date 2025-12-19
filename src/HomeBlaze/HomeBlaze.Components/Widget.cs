@@ -17,7 +17,7 @@ public partial class Widget : ITitleProvider, IConfigurableSubject
 
     /// <summary>
     /// Path to the subject to render.
-    /// Supports "Root.Children[folder].Children[file.json]" for absolute paths from root.
+    /// Supports "Root.folder.file.json" (with [InlinePaths] attribute) for absolute paths from root.
     /// </summary>
     [Configuration]
     public partial string Path { get; set; }

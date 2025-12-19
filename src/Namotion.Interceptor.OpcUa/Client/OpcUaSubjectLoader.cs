@@ -1,8 +1,8 @@
 ﻿using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -70,7 +70,17 @@ internal class OpcUaSubjectLoader
             {
                 var dynamicPropertyName = nodeRef.BrowseName.Name;
 
-                if (registeredSubject.Properties.Any(t => t.Name == dynamicPropertyName))
+                var propertyExists = false;
+                foreach (var childProperty in registeredSubject.Properties)
+                {
+                    if (childProperty.Name == dynamicPropertyName)
+                    {
+                        propertyExists = true;
+                        break;
+                    }
+                }
+
+                if (propertyExists)
                 {
                     continue;
                 }
@@ -103,7 +113,7 @@ internal class OpcUaSubjectLoader
                     new OpcUaNodeAttribute(
                         nodeRef.BrowseName.Name,
                         nodeRef.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex),
-                        sourceName: null)
+                        connectorName: null)
                     {
                         NodeIdentifier = nodeRef.NodeId.Identifier.ToString(),
                         NodeNamespaceUri = nodeRef.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex)
@@ -111,7 +121,7 @@ internal class OpcUaSubjectLoader
             }
 
             var propertyName = property.ResolvePropertyName(_configuration.PathProvider);
-            if (propertyName is not null)
+            if (propertyName is not null && _configuration.PathProvider.IsPropertyIncluded(property))
             {
                 var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, session.NamespaceUris);
 

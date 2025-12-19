@@ -1,5 +1,5 @@
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Sources.Paths.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.SamplesModel;
 
@@ -11,12 +11,12 @@ public partial class Person
         Children = [];
     }
 
-    [SourcePath("opc", "FirstName")]
-    [SourcePath("mqtt", "FirstName")]
+    [Path("opc", "FirstName")]
+    [Path("mqtt", "FirstName")]
     public partial string? FirstName { get; set; }
 
-    [SourcePath("opc", "LastName")]
-    [SourcePath("mqtt", "LastName")]
+    [Path("opc", "LastName")]
+    [Path("mqtt", "LastName")]
     public partial string? LastName { get; set; }
 
     [Derived]

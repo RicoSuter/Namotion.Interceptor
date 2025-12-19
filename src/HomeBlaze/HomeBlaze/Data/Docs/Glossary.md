@@ -247,13 +247,17 @@ Paths reference subjects and properties in the object graph:
 
 | Prefix | Description | Example |
 |--------|-------------|---------|
-| `Root.` | Absolute from root | `Root.Children[demo].Children[motor.json]` |
+| `Root.` | Absolute from root | `Root.Demo.Conveyor` |
 | `this.` | Relative to current | `this.Child.Name` |
 | `../` | Parent navigation | `../Sibling.Temperature` |
 
+### Simplified Syntax
+
+For `[InlinePaths]` dictionaries, use dot notation: `Root.Demo.Conveyor`
+
 ### Bracket Notation
 
-Access dictionary children using brackets: `Children[folder-name].Children[file.json]`
+Use brackets when keys contain dots (like file extensions): `Root.Demo[Setup.md]`
 
 ---
 
