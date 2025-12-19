@@ -94,8 +94,9 @@ internal sealed class StorageHierarchyManager
         }
 
         // Reassign Children for all traversed folders (triggers change tracking)
-        foreach (var folder in foldersTraversed.AsEnumerable().Reverse())
+        for (var i = foldersTraversed.Count - 1; i >= 0; i--)
         {
+            var folder = foldersTraversed[i];
             folder.Children = new Dictionary<string, IInterceptorSubject>(folder.Children);
         }
     }
@@ -128,8 +129,9 @@ internal sealed class StorageHierarchyManager
         current.Remove(key);
 
         // Reassign Children for all traversed folders (triggers change tracking)
-        foreach (var folder in foldersTraversed.AsEnumerable().Reverse())
+        for (var i = foldersTraversed.Count - 1; i >= 0; i--)
         {
+            var folder = foldersTraversed[i];
             folder.Children = new Dictionary<string, IInterceptorSubject>(folder.Children);
         }
     }

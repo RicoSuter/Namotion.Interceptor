@@ -20,9 +20,9 @@ public class CamelCasePathDecorator : IPathProvider
     }
 
     /// <summary>
-    /// Gets a default instance that wraps the <see cref="DefaultPathProvider"/>.
+    /// Gets a singleton instance that wraps the <see cref="DefaultPathProvider"/>.
     /// </summary>
-    public static CamelCasePathDecorator Default { get; } = new(DefaultPathProvider.Instance);
+    public static CamelCasePathDecorator Instance { get; } = new(DefaultPathProvider.Instance);
 
     /// <inheritdoc />
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)

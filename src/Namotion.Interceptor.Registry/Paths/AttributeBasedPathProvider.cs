@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
 /// Path provider that uses [Path] attributes for custom segment mapping.
-/// Requires a name to filter attributes. Falls back to BrowseName when no matching attribute found.
+/// Requires a name to filter attributes. Returns null for properties without matching [Path] attribute.
 /// </summary>
 public class AttributeBasedPathProvider : PathProviderBase
 {
@@ -33,19 +33,28 @@ public class AttributeBasedPathProvider : PathProviderBase
 
     /// <inheritdoc />
     /// <remarks>
-    /// Only includes properties that have a [Path] attribute with matching name.
+    /// Includes properties that have a [Path] attribute with matching name,
+    /// or properties marked with [Children] for path resolution.
     /// </remarks>
     public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return property.ReflectionAttributes
+        // Include if has matching [Path] attribute
+        var hasPathAttribute = property.ReflectionAttributes
             .OfType<PathAttribute>()
             .Any(a => a.Name == _name);
+
+        if (hasPathAttribute)
+            return true;
+
+        // Also include [Children] properties for path resolution (transparent containers)
+        return property.ReflectionAttributes
+            .OfType<ChildrenAttribute>()
+            .Any();
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// Returns the [Path] attribute value matching the name, or BrowseName if no match.
-    /// The fallback to BrowseName enables path building through parent properties without attributes.
+    /// Returns the [Path] attribute value matching the name, or null if no match.
     /// Use <see cref="IsPropertyIncluded"/> to check if a property should be monitored/exposed.
     /// </remarks>
     public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
@@ -54,38 +63,6 @@ public class AttributeBasedPathProvider : PathProviderBase
             .OfType<PathAttribute>()
             .FirstOrDefault(a => a.Name == _name);
 
-        return pathAttribute?.Path ?? property.BrowseName;
-    }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// First looks for a property with a matching [Path] attribute,
-    /// then falls back to matching by BrowseName,
-    /// then falls back to [Children] dictionary lookup.
-    /// </remarks>
-    public override RegisteredSubjectProperty? TryGetPropertyFromSegment(
-        RegisteredSubject subject, string segment)
-    {
-        // Look for property with matching [Path] attribute for our name
-        foreach (var property in subject.Properties)
-        {
-            var pathAttribute = property.ReflectionAttributes
-                .OfType<PathAttribute>()
-                .FirstOrDefault(a => a.Name == _name);
-
-            if (pathAttribute?.Path == segment)
-            {
-                return property;
-            }
-        }
-
-        // [Children] fallback: Segment is a dictionary key (children property needs [Path] attribute on it)
-        var childrenPropertyName = ChildrenAttribute.GetChildrenPropertyName(subject.Subject.GetType());
-        if (childrenPropertyName is not null)
-        {
-            return subject.TryGetProperty(childrenPropertyName);
-        }
-
-        return null;
+        return pathAttribute?.Path;
     }
 }

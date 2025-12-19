@@ -19,11 +19,8 @@ public static class PathExtensions
         StringBuilder? sb = null;
         foreach (var (property, index) in properties)
         {
-            var segment = pathProvider.TryGetPropertySegment(property);
-            if (segment is null)
-            {
-                continue;
-            }
+            // Use explicit segment or fall back to BrowseName for path building
+            var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
 
             sb ??= new StringBuilder();
             if (sb.Length > 0)
@@ -178,12 +175,6 @@ public static class PathExtensions
     {
         var pathParts = new List<(RegisteredSubjectProperty property, object? index)>();
         var current = property;
-        var registry = property.Subject.Context.TryGetService<ISubjectRegistry>();
-
-        if (registry is null)
-        {
-            return null;
-        }
 
         while (current is not null)
         {
@@ -195,7 +186,7 @@ public static class PathExtensions
             }
 
             // Find parent property that references this subject
-            var parentInfo = FindParentProperty(registry, current.Parent);
+            var parentInfo = FindParentProperty(current.Parent);
             if (parentInfo is null)
             {
                 break;
@@ -242,18 +233,12 @@ public static class PathExtensions
     }
 
     private static (RegisteredSubjectProperty property, object? index)? FindParentProperty(
-        ISubjectRegistry registry,
         RegisteredSubject subject)
     {
-        foreach (var parent in subject.Parents)
+        if (subject.Parents.Length > 0)
         {
-            var parentSubject = registry.TryGetRegisteredSubject(parent.Property.Subject);
-
-            var parentProperty = parentSubject?.TryGetProperty(parent.Property.Name);
-            if (parentProperty != null)
-            {
-                return (parentProperty, parent.Index);
-            }
+            var parent = subject.Parents[0];
+            return (parent.Property, parent.Index);
         }
 
         return null;
