@@ -11,15 +11,21 @@ namespace Namotion.Interceptor.OpcUa.Sync;
 internal class ModelChangeEventSubscription : IDisposable
 {
     private readonly OpcUaAddressSpaceSync _sync;
+    private readonly IOpcUaSyncStrategy _strategy;
     private readonly ILogger _logger;
+    private readonly CancellationTokenSource _disposalCts = new();
     private Session? _session;
     private Subscription? _subscription;
     private MonitoredItem? _monitoredItem;
     private bool _disposed;
 
-    public ModelChangeEventSubscription(OpcUaAddressSpaceSync sync, ILogger logger)
+    public ModelChangeEventSubscription(
+        OpcUaAddressSpaceSync sync,
+        IOpcUaSyncStrategy strategy,
+        ILogger logger)
     {
         _sync = sync ?? throw new ArgumentNullException(nameof(sync));
+        _strategy = strategy ?? throw new ArgumentNullException(nameof(strategy));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -151,55 +157,78 @@ internal class ModelChangeEventSubscription : IDisposable
 
             _logger.LogDebug("Received ModelChangeEvent with {ChangeCount} changes", changes.Length);
 
-            // Process each change
-            foreach (var change in changes)
+            // Process changes asynchronously to avoid blocking the notification handler
+            if (!_disposalCts.IsCancellationRequested)
             {
-                if (change.Body is not ModelChangeStructureDataType changeData)
-                {
-                    continue;
-                }
-
-                var verb = (ModelChangeStructureVerbMask)changeData.Verb;
-                
-                _logger.LogDebug(
-                    "ModelChange detected - Verb: {Verb}, Affected: {Affected}", 
-                    verb, 
-                    changeData.Affected);
-
-                // Trigger sync operations based on the verb
-                try
-                {
-                    if (verb == ModelChangeStructureVerbMask.NodeAdded && changeData.Affected is NodeId affectedNodeId)
-                    {
-                        // For node additions, we would need to browse the new node to get its details
-                        // This is a simplified trigger - full implementation would need more context
-                        _logger.LogInformation(
-                            "ModelChangeEvent NodeAdded: {NodeId}. Sync coordinator notified.",
-                            affectedNodeId);
-                        
-                        // Note: Full implementation would call:
-                        // var nodeDescription = await BrowseNodeAsync(affectedNodeId);
-                        // await _sync.OnRemoteNodeAddedAsync(nodeDescription, parentNodeId, cancellationToken);
-                    }
-                    else if (verb == ModelChangeStructureVerbMask.NodeDeleted && changeData.Affected is NodeId deletedNodeId)
-                    {
-                        _logger.LogInformation(
-                            "ModelChangeEvent NodeDeleted: {NodeId}. Sync coordinator notified.",
-                            deletedNodeId);
-                        
-                        // Note: Full implementation would call:
-                        // await _sync.OnRemoteNodeRemovedAsync(deletedNodeId, cancellationToken);
-                    }
-                }
-                catch (Exception ex2)
-                {
-                    _logger.LogError(ex2, "Failed to process ModelChangeEvent verb {Verb}", verb);
-                }
+                _ = ProcessChangesAsync(changes, _disposalCts.Token);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing ModelChangeEvent notification");
+        }
+    }
+
+    private async Task ProcessChangesAsync(ExtensionObject[] changes, CancellationToken cancellationToken)
+    {
+        foreach (var change in changes)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            if (change.Body is not ModelChangeStructureDataType changeData)
+            {
+                continue;
+            }
+
+            var verb = (ModelChangeStructureVerbMask)changeData.Verb;
+
+            _logger.LogDebug(
+                "ModelChange detected - Verb: {Verb}, Affected: {Affected}",
+                verb,
+                changeData.Affected);
+
+            try
+            {
+                if (verb == ModelChangeStructureVerbMask.NodeAdded && changeData.Affected is NodeId affectedNodeId)
+                {
+                    _logger.LogInformation("ModelChangeEvent NodeAdded: {NodeId}", affectedNodeId);
+
+                    // Browse the parent to find this node's details
+                    // Note: ModelChangeEvent doesn't provide parent info directly,
+                    // so we create a ReferenceDescription with available info
+                    var nodeDescription = new ReferenceDescription
+                    {
+                        NodeId = new ExpandedNodeId(affectedNodeId),
+                        BrowseName = new QualifiedName(affectedNodeId.Identifier?.ToString() ?? "Unknown"),
+                        NodeClass = NodeClass.Object // Assume object, could be improved by reading node class
+                    };
+
+                    // The parent NodeId is not provided by ModelChangeEvent
+                    // We pass the affected node's parent (if available from AffectedType context)
+                    // For now, we use NodeId.Null and let the sync coordinator handle resolution
+                    var parentNodeId = NodeId.Null;
+
+                    await _sync.OnRemoteNodeAddedAsync(nodeDescription, parentNodeId, cancellationToken).ConfigureAwait(false);
+                }
+                else if (verb == ModelChangeStructureVerbMask.NodeDeleted && changeData.Affected is NodeId deletedNodeId)
+                {
+                    _logger.LogInformation("ModelChangeEvent NodeDeleted: {NodeId}", deletedNodeId);
+
+                    await _sync.OnRemoteNodeRemovedAsync(deletedNodeId, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Disposal in progress - exit silently
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to process ModelChangeEvent verb {Verb}", verb);
+            }
         }
     }
 
@@ -211,6 +240,9 @@ internal class ModelChangeEventSubscription : IDisposable
         }
 
         _disposed = true;
+
+        // Cancel any in-flight operations first
+        _disposalCts.Cancel();
 
         try
         {
@@ -231,6 +263,7 @@ internal class ModelChangeEventSubscription : IDisposable
             _logger.LogError(ex, "Error disposing ModelChangeEventSubscription");
         }
 
+        _disposalCts.Dispose();
         _subscription = null;
         _monitoredItem = null;
         _session = null;
