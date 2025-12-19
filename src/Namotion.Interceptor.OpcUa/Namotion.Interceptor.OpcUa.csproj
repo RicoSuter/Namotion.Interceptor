@@ -37,8 +37,8 @@
 
   <!-- NuGet package references for production -->
   <ItemGroup Condition="'$(UseLocalOpcUaProjects)' != 'true'">
-    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Server" Version="1.5.378.10-preview" />
-    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.378.10-preview" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Server" Version="1.5.378.65" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.378.65" />
   </ItemGroup>
 
   <ItemGroup>
