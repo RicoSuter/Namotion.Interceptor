@@ -1,11 +1,10 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Transactions;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -59,6 +58,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _subjectLoader = new OpcUaSubjectLoader(configuration, _propertyTracker, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
     }
+
+    /// <inheritdoc />
+    public IInterceptorSubject RootSubject => _subject;
 
     public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {

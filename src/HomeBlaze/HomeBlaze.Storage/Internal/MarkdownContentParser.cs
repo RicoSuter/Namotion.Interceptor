@@ -75,13 +75,13 @@ public sealed partial class MarkdownContentParser
         var resolvedPath = ResolvePath(basePath, url);
 
         // Convert to /pages/... format with Children segments
-        // e.g., "foo/bar/baz.md" => "/pages/Children/foo/Children/bar/Children/baz.md"
+        // e.g., "foo/bar/baz.md" => "/pages/foo/bar/baz.md"
         var segments = resolvedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var result = new StringBuilder("/pages");
 
         foreach (var segment in segments)
         {
-            result.Append("/Children/");
+            result.Append("/");
             result.Append(segment);
         }
 

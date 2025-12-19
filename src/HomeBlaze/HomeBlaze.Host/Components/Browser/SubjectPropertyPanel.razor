@@ -63,40 +63,30 @@
             var methods = GetMethods();
             if (methods.Count > 0)
             {
-                <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Style="overflow: hidden;">
-                    <MudExpansionPanel Expanded="true" Gutters="false" Class="px-4">
-                        <TitleContent>
-                            Methods
-                            <MudChip T="string" Size="Size.Small" Color="Color.Dark">@methods.Count</MudChip>
-                        </TitleContent>
-                        <ChildContent>
-                            <MudStack Spacing="2" Class="py-2">
-                                @foreach (var method in methods)
-                                {
-                                    var isQuery = method.Kind == SubjectMethodKind.Query;
-                                    var defaultIcon = isQuery ? "Search" : "PlayArrow";
-                                    var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
-                                    var methodProperty = _registeredSubject?.TryGetProperty(methodName);
-                                    var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
-                                    var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
-                                    <MudButton Variant="Variant.Filled"
-                                               Color="@(isQuery ? Color.Info : Color.Primary)"
-                                               Size="Size.Small"
-                                               FullWidth="true"
-                                               StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
-                                               Disabled="@(!method.IsSupported || _executingOperation == method || !isEnabled)"
-                                               OnClick="@(() => ExecuteMethodAsync(method))">
-                                        @if (_executingOperation == method)
-                                        {
-                                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                                        }
-                                        @method.Title
-                                    </MudButton>
-                                }
-                            </MudStack>
-                        </ChildContent>
-                    </MudExpansionPanel>
-                </MudExpansionPanels>
+                <MudStack Class="pl-4 pr-4">
+                    @foreach (var method in methods)
+                    {
+                        var isQuery = method.Kind == SubjectMethodKind.Query;
+                        var defaultIcon = isQuery ? "Search" : "PlayArrow";
+                        var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
+                        var methodProperty = _registeredSubject?.TryGetProperty(methodName);
+                        var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
+                        var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
+                        <MudButton Variant="Variant.Filled"
+                                   Color="@(isQuery ? Color.Info : Color.Primary)"
+                                   Size="Size.Small"
+                                   FullWidth="true"
+                                   StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
+                                   Disabled="@(!method.IsSupported || _executingOperation == method || !isEnabled)"
+                                   OnClick="@(() => ExecuteMethodAsync(method))">
+                            @if (_executingOperation == method)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            }
+                            @method.Title
+                        </MudButton>
+                    }
+                </MudStack>
             }
         }
 
@@ -107,7 +97,7 @@
             @if (children.Length == 1)
             {
                 @* Single child - no expansion panel *@
-                <MudList T="object" SelectedValue="SelectedChild" Style="padding-top: 0; padding-bottom: 0">
+                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Style="padding-top: 0; padding-bottom: 0">
                     @{
                         var child = children[0];
                         var isSelected = child.Subject == SelectedChild;
@@ -116,11 +106,12 @@
                     <MudListItem Value="@child.Subject"
                                  OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
                                  Icon="@GetSubjectIcon(child.Subject)"
-                                 IconColor="Color.Default">
+                                 IconColor="@(isSelected ? Color.Primary : Color.Default)"
+                                 Class="@(isSelected ? "mud-primary-text" : "")">
                         @if (isSelected)
                         {
                             <div style="float: right; line-height: 0">
-                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                             </div>
                         }
                         <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
@@ -140,7 +131,7 @@
                         <MudChip T="string" Size="Size.Small" Color="Color.Dark">@children.Length</MudChip>
                     </TitleContent>
                     <ChildContent>
-                        <MudList T="object" SelectedValue="SelectedChild">
+                        <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary">
                             @foreach (var child in children)
                             {
                                 var isSelected = child.Subject == SelectedChild;
@@ -149,11 +140,12 @@
                                 <MudListItem Value="@child.Subject"
                                              OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
                                              Icon="@GetSubjectIcon(child.Subject)"
-                                             IconColor="Color.Default">
+                                             IconColor="@(isSelected ? Color.Primary : Color.Default)"
+                                             Class="@(isSelected ? "mud-primary-text" : "")">
                                     @if (isSelected)
                                     {
                                         <div style="float: right; line-height: 0">
-                                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                         </div>
                                     }
                                     <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>

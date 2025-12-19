@@ -3,7 +3,6 @@ using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Sources.Paths.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 
@@ -12,17 +11,17 @@ namespace Namotion.Interceptor.SampleWeb
     [InterceptorSubject]
     public partial class Car
     {
-        [SourcePath("mqtt", "name")]
-        [SourcePath("opc", "Name")]
+        [Path("mqtt", "name")]
+        [Path("opc", "Name")]
         public partial string Name { get; set; }
 
-        [SourcePath("mqtt", "tires")]
-        [SourcePath("opc", "Tires")]
+        [Path("mqtt", "tires")]
+        [Path("opc", "Tires")]
         public partial Tire[] Tires { get; set; }
 
         [Derived]
-        [SourcePath("mqtt", "averagePressure")]
-        [SourcePath("opc", "AveragePressure")]
+        [Path("mqtt", "averagePressure")]
+        [Path("opc", "AveragePressure")]
         public decimal AveragePressure => Tires.Average(t => t.Pressure);
 
         public Car()
@@ -39,19 +38,19 @@ namespace Namotion.Interceptor.SampleWeb
     [InterceptorSubject]
     public partial class Tire //: BackgroundService
     {
-        [SourcePath("mqtt", "pressure")]
-        [SourcePath("opc", "Pressure")]
+        [Path("mqtt", "pressure")]
+        [Path("opc", "Pressure")]
         [Unit("bar")]
         public partial decimal Pressure { get; set; }
 
         [Unit("bar")]
-        [SourcePath("mqtt", "minimum")]
+        [Path("mqtt", "minimum")]
         [PropertyAttribute(nameof(Pressure), "Minimum")]
         public partial decimal Pressure_Minimum { get; set; }
 
         [Derived]
-        [SourcePath("mqtt", "maximum")]
-        [SourcePath("opc", "Maximum")]
+        [Path("mqtt", "maximum")]
+        [Path("opc", "Maximum")]
         [PropertyAttribute(nameof(Pressure), "Maximum")]
         public decimal Pressure_Maximum => 4 * Pressure;
 
@@ -84,7 +83,7 @@ namespace Namotion.Interceptor.SampleWeb
         {
             property.AddAttribute("Unit", typeof(string),
                 _ => _unit, null,
-                new SourcePathAttribute("mqtt", "unit"));
+                new PathAttribute("mqtt", "unit"));
         }
     }
 

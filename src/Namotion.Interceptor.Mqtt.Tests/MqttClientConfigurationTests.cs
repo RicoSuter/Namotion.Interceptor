@@ -1,11 +1,14 @@
 using Namotion.Interceptor.Mqtt.Client;
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Registry.Paths;
 using Xunit;
 
 namespace Namotion.Interceptor.Mqtt.Tests;
 
 public class MqttClientConfigurationTests
 {
+    private static PathProviderBase CreateTestPathProvider() =>
+        new AttributeBasedPathProvider("test", '/');
+
     [Fact]
     public void Validate_ValidConfiguration_DoesNotThrow()
     {
@@ -14,7 +17,7 @@ public class MqttClientConfigurationTests
         {
             BrokerHost = "localhost",
             BrokerPort = 1883,
-            PathProvider = new AttributeBasedSourcePathProvider("test", "/", null)
+            PathProvider = CreateTestPathProvider()
         };
 
         // Act & Assert
@@ -29,7 +32,7 @@ public class MqttClientConfigurationTests
         {
             BrokerHost = null!,
             BrokerPort = 1883,
-            PathProvider = new AttributeBasedSourcePathProvider("test", "/", null)
+            PathProvider = CreateTestPathProvider()
         };
 
         // Act & Assert
@@ -44,7 +47,7 @@ public class MqttClientConfigurationTests
         {
             BrokerHost = "",
             BrokerPort = 1883,
-            PathProvider = new AttributeBasedSourcePathProvider("test", "/", null)
+            PathProvider = CreateTestPathProvider()
         };
 
         // Act & Assert
@@ -62,7 +65,7 @@ public class MqttClientConfigurationTests
         {
             BrokerHost = "localhost",
             BrokerPort = port,
-            PathProvider = new AttributeBasedSourcePathProvider("test", "/", null)
+            PathProvider = CreateTestPathProvider()
         };
 
         // Act & Assert
@@ -92,7 +95,7 @@ public class MqttClientConfigurationTests
         {
             BrokerHost = "localhost",
             BrokerPort = 1883,
-            PathProvider = new AttributeBasedSourcePathProvider("test", "/", null),
+            PathProvider = CreateTestPathProvider(),
             WriteRetryQueueSize = -1
         };
 
@@ -108,7 +111,7 @@ public class MqttClientConfigurationTests
         {
             BrokerHost = "localhost",
             BrokerPort = 1883,
-            PathProvider = new AttributeBasedSourcePathProvider("test", "/", null),
+            PathProvider = CreateTestPathProvider(),
             ReconnectDelay = TimeSpan.FromSeconds(10),
             MaximumReconnectDelay = TimeSpan.FromSeconds(5)
         };
@@ -124,7 +127,7 @@ public class MqttClientConfigurationTests
         var config = new MqttClientConfiguration
         {
             BrokerHost = "localhost",
-            PathProvider = new AttributeBasedSourcePathProvider("test", "/", null)
+            PathProvider = CreateTestPathProvider()
         };
 
         // Assert

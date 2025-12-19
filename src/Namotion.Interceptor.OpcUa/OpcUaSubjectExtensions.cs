@@ -1,11 +1,11 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Server;
-using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Registry.Paths;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -72,7 +72,7 @@ public static class OpcUaSubjectExtensions
         {
             ServerUrl = serverUrl,
             RootName = rootName,
-            PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
+            PathProvider = new AttributeBasedPathProvider(sourceName),
             TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)
@@ -135,7 +135,7 @@ public static class OpcUaSubjectExtensions
         return serviceCollection.AddOpcUaSubjectServer(subjectSelector, _ => new OpcUaServerConfiguration
         {
             RootName = rootName,
-            PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
+            PathProvider = new AttributeBasedPathProvider(sourceName),
             ValueConverter = new OpcUaValueConverter()
         });
     }
