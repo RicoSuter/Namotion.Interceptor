@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.OpcUa.Sync;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
@@ -22,6 +23,8 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
     private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaSubjectServer? _server;
     private int _consecutiveFailures;
+    private OpcUaAddressSpaceSync? _addressSpaceSync;
+    private OpcUaServerSyncStrategy? _syncStrategy;
 
     public OpcUaSubjectServerBackgroundService(
         IInterceptorSubject subject,
@@ -115,6 +118,27 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                     await application.CheckApplicationInstanceCertificates(true);
                     await application.Start(server);
 
+                    // Initialize address space sync if enabled
+                    if (_configuration.EnableStructureSynchronization)
+                    {
+                        var nodeManager = server.GetNodeManager();
+                        _syncStrategy = new OpcUaServerSyncStrategy(_configuration, this, _logger);
+                        _syncStrategy.SetNodeManager(nodeManager, server.GetServerInternal());
+
+                        // Get root node ID for strategy and address space sync
+                        NodeId? rootNodeId = null;
+                        if (nodeManager is not null)
+                        {
+                            rootNodeId = nodeManager.GetRootNodeId();
+                            _syncStrategy.Initialize(_subject, rootNodeId);
+                        }
+
+                        _addressSpaceSync = new OpcUaAddressSpaceSync(_syncStrategy, _configuration, _logger);
+                        _addressSpaceSync.Initialize(_subject, rootNodeId);
+
+                        _logger.LogInformation("OPC UA address space structure synchronization enabled.");
+                    }
+
                     using var changeQueueProcessor = new ChangeQueueProcessor(
                         source: this, _context,
                         propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
@@ -125,6 +149,10 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                 }
                 finally
                 {
+                    _addressSpaceSync?.Dispose();
+                    _addressSpaceSync = null;
+                    _syncStrategy = null;
+
                     var serverToClean = _server;
                     _server = null;
                     serverToClean?.ClearPropertyData();

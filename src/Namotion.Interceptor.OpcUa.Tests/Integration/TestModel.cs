@@ -11,6 +11,7 @@ public partial class TestRoot
         ScalarNumbers = [1, 2, 3, 4, 5];
         ScalarStrings = ["Hello", "World", "OPC", "UA"];
         People = [];
+        PeopleByName = new Dictionary<string, TestPerson>();
     }
 
     [SourcePath("opc", "Connected")]
@@ -24,7 +25,7 @@ public partial class TestRoot
 
     [SourcePath("opc", "ScalarNumbers")]
     public partial int[] ScalarNumbers { get; set; }
-    
+
     [SourcePath("opc", "ScalarStrings")]
     public partial string[] ScalarStrings { get; set; }
 
@@ -33,6 +34,9 @@ public partial class TestRoot
 
     [SourcePath("opc", "People")]
     public partial TestPerson[] People { get; set; }
+
+    [SourcePath("opc", "PeopleByName")]
+    public partial Dictionary<string, TestPerson> PeopleByName { get; set; }
 }
 
 [InterceptorSubject]

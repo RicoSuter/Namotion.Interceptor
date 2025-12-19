@@ -439,3 +439,171 @@ When subjects are detached from the object graph (removed from collections, set 
 - New subjects added after startup require a restart to appear in OPC UA
 
 This minimal lifecycle integration prevents memory leaks in long-running services with dynamic object graphs.
+
+## Dynamic Address Space Synchronization
+
+The library provides bidirectional address space synchronization for scenarios where the object graph structure changes at runtime. This enables real-time updates when subjects are attached or detached from the object graph.
+
+### Configuration
+
+Enable live synchronization with the `EnableLiveSync` configuration option:
+
+```csharp
+// Server configuration
+builder.Services.AddOpcUaSubjectServer(
+    subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
+    configurationProvider: sp => new OpcUaServerConfiguration
+    {
+        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        ValueConverter = new OpcUaValueConverter(),
+        
+        // Enable dynamic address space synchronization
+        EnableLiveSync = true,  // Default: false
+        EnableRemoteNodeManagement = true,  // Enable ModelChangeEvents (default: false)
+        EnablePeriodicResync = false  // Periodic fallback polling (default: false)
+    });
+
+// Client configuration
+builder.Services.AddOpcUaSubjectClient(
+    subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
+    configurationProvider: sp => new OpcUaClientConfiguration
+    {
+        ServerUrl = "opc.tcp://localhost:4840",
+        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        TypeResolver = new OpcUaTypeResolver(logger),
+        ValueConverter = new OpcUaValueConverter(),
+        SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
+        
+        // Enable dynamic address space synchronization
+        EnableLiveSync = true,  // Default: false
+        EnableRemoteNodeManagement = true,  // Subscribe to ModelChangeEvents (default: false)
+    });
+```
+
+### Server-Side: Runtime Node Creation
+
+When `EnableLiveSync` is enabled, the server automatically creates OPC UA nodes when subjects are attached to the object graph at runtime:
+
+```csharp
+// Dynamically add a new machine to the collection
+var newMachine = new Machine { Name = "Machine-5", Speed = 100 };
+root.Machines = root.Machines.Append(newMachine).ToArray();
+
+// With EnableLiveSync=true:
+// 1. OPC UA nodes are created immediately (no restart required)
+// 2. ModelChangeEvent is fired to notify connected clients
+// 3. Nodes become available for clients to browse and subscribe
+```
+
+**How it works:**
+- `CustomNodeManager.CreateDynamicSubjectNodes()` creates complete node trees
+- Thread-safe using existing lock mechanism
+- Reuses all existing node creation infrastructure
+- ModelChangeEvents fired for real-time client notification
+
+### Server-Side: Runtime Node Removal
+
+When subjects are detached, corresponding OPC UA nodes are cleaned up:
+
+```csharp
+// Remove a machine from the collection
+root.Machines = root.Machines.Where(m => m.Id != machineId).ToArray();
+
+// With EnableLiveSync=true:
+// 1. Internal tracking cleaned up immediately
+// 2. ModelChangeEvent fired to notify clients
+// 3. Clients receive deletion notifications
+```
+
+**Note:** Actual nodes remain in the address space until server restart due to OPC UA SDK limitations, but all tracking and references are cleaned up immediately.
+
+### Client-Side: Dynamic Monitored Item Management
+
+When `EnableLiveSync` is enabled, the client automatically manages subscriptions as subjects are attached/detached:
+
+```csharp
+// When server adds a new node, client receives ModelChangeEvent
+// Client automatically:
+// 1. Creates local subject using SubjectFactory
+// 2. Creates monitored items for all properties
+// 3. Begins real-time value synchronization
+
+// When server removes a node:
+// 1. Monitored items are removed
+// 2. Subscriptions are cleaned up
+// 3. Local subject references are cleared
+```
+
+### ModelChangeEvents
+
+The library uses OPC UA's `GeneralModelChangeEvent` for real-time structure change notifications:
+
+**Server fires events when:**
+- Subject attached → `ModelChangeStructureVerbMask.NodeAdded`
+- Subject detached → `ModelChangeStructureVerbMask.NodeDeleted`
+
+**Client receives events:**
+- Subscribes to ModelChangeEvents when `EnableRemoteNodeManagement=true`
+- Automatically reconnects subscriptions after connection loss
+- Processes events to trigger sync operations
+
+### Architecture
+
+The synchronization infrastructure follows a strategy pattern:
+
+- **`IOpcUaSyncStrategy`** - Strategy interface for client/server implementations
+- **`OpcUaAddressSpaceSync`** - Coordinator managing lifecycle events with thread-safe serialization
+- **`OpcUaClientSyncStrategy`** - Client-side: monitored items, NodeId↔Subject mappings
+- **`OpcUaServerSyncStrategy`** - Server-side: node creation/removal, event firing
+- **`ModelChangeEventSubscription`** - Client event subscription helper with reconnection support
+
+### What's Included
+
+✅ **Server-to-Client Synchronization:**
+- Server creates nodes → Clients receive ModelChangeEvents → Clients create subjects
+- Server removes nodes → Clients receive events → Clients cleanup subscriptions
+- Runtime node creation/removal without restart
+
+✅ **Client-to-Server Value Synchronization:**
+- Client property changes write to server nodes
+- Server property changes subscribe back to clients
+- Bidirectional value flow with change detection
+
+✅ **Event-Driven Updates:**
+- Real-time ModelChangeEvent notifications
+- Automatic reconnection and resubscription
+- No polling required for structure changes
+
+### Advanced Scenarios Not Included
+
+The following advanced features are intentionally deferred as they're not critical for common use cases:
+
+❌ **Client-Initiated Node Creation** (`AddNodes` service calls)
+- Would allow OPC UA clients to create nodes on servers programmatically
+- Requires complex protocol operations and permission handling
+- Current implementation covers server-side creation (primary use case)
+
+❌ **External Client Node Management**
+- Would allow external OPC UA clients (non-library) to trigger local subject creation
+- Requires CustomNodeManager method overrides and validation logic
+- Use case: external tools creating nodes that become local subjects
+
+❌ **Periodic Resync**
+- Would periodically compare address spaces and sync differences
+- Event-driven sync via ModelChangeEvents provides real-time updates
+- Only needed as fallback in unreliable event environments
+
+### Performance Considerations
+
+- Node creation/removal uses existing thread-safe mechanisms
+- ModelChangeEvents are lightweight notification messages
+- Monitored item management is batched and efficient
+- All operations designed for production use with minimal overhead
+
+### Thread Safety
+
+All synchronization operations are thread-safe:
+- Node creation/removal protected by `CustomNodeManager.Lock`
+- Event firing uses thread-safe NodeManager event infrastructure
+- Client subscription management uses concurrent dictionaries
+- Lifecycle events serialized via semaphore to prevent race conditions

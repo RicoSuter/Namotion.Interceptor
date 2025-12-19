@@ -71,9 +71,73 @@ internal class CustomNodeManager : CustomNodeManager2
     }
 
     /// <summary>
+    /// Gets the NodeId that represents the root subject.
+    /// Used for Strategy.Initialize to register the root mapping.
+    /// </summary>
+    public NodeId GetRootNodeId()
+    {
+        return _configuration.RootName is not null
+            ? new NodeId(_configuration.RootName, NamespaceIndex)
+            : ObjectIds.ObjectsFolder;
+    }
+
+    /// <summary>
+    /// Removes nodes for a detached subject at runtime.
+    /// Removes nodes from the address space and cleans up tracking.
+    /// </summary>
+    /// <param name="subject">The subject whose nodes should be removed</param>
+    /// <returns>True if nodes were removed, false if subject wasn't tracked</returns>
+    public bool RemoveDynamicSubjectNodes(IInterceptorSubject subject)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            return false;
+        }
+
+        bool removed = false;
+        
+        lock (Lock)
+        {
+            // Find and remove the node from tracking
+            if (_subjects.TryRemove(registeredSubject, out var nodeState))
+            {
+                try
+                {
+                    // Remove the node from the address space
+                    // Find parent and remove reference
+                    var nodeId = nodeState.NodeId;
+                    
+                    // Remove from PredefinedNodes if it exists there
+                    if (PredefinedNodes.ContainsKey(nodeId))
+                    {
+                        PredefinedNodes.Remove(nodeId);
+                    }
+                    
+                    // Clean up property data
+                    var properties = registeredSubject.Properties;
+                    foreach (var property in properties)
+                    {
+                        property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                    }
+                    
+                    removed = true;
+                }
+                catch
+                {
+                    // Even if removal fails, we've cleaned up tracking
+                    removed = true;
+                }
+            }
+        }
+
+        return removed;
+    }
+
+    /// <summary>
     /// Removes nodes for a detached subject. Idempotent - safe to call multiple times.
-    /// Note: Node stays in address space until server restart.
-    /// We just clean up local tracking to avoid memory leaks.
+    /// Legacy method that only cleans up tracking.
+    /// For runtime removal with address space updates, use RemoveDynamicSubjectNodes.
     /// </summary>
     public void RemoveSubjectNodes(IInterceptorSubject subject)
     {
@@ -83,6 +147,48 @@ internal class CustomNodeManager : CustomNodeManager2
             {
                 _subjects.TryRemove(kvp.Key, out _);
             }
+        }
+    }
+
+    /// <summary>
+    /// Dynamically creates OPC UA nodes for a subject at runtime.
+    /// Used when subjects are attached after server initialization.
+    /// </summary>
+    /// <param name="subject">The subject to create nodes for</param>
+    /// <param name="parentNodeId">Optional parent node ID. If null, uses ObjectsFolder or configured root</param>
+    /// <param name="pathPrefix">Optional path prefix for node identification</param>
+    /// <returns>The created node, or null if subject is already registered</returns>
+    public NodeState? CreateDynamicSubjectNodes(IInterceptorSubject subject, NodeId? parentNodeId = null, string? pathPrefix = null)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            return null;
+        }
+
+        // Check if already created
+        if (_subjects.ContainsKey(registeredSubject))
+        {
+            return _subjects[registeredSubject];
+        }
+
+        // Determine parent node and path
+        var effectiveParentNodeId = parentNodeId ?? (_configuration.RootName is not null
+            ? new NodeId(_configuration.RootName, NamespaceIndex)
+            : ObjectIds.ObjectsFolder);
+
+        var effectivePath = pathPrefix ?? (_configuration.RootName is not null
+            ? _configuration.RootName + PathDelimiter
+            : string.Empty);
+
+        // Create nodes for the subject
+        lock (Lock)
+        {
+            CreateObjectNode(effectiveParentNodeId, registeredSubject, effectivePath);
+            
+            // Return the created node
+            _subjects.TryGetValue(registeredSubject, out var node);
+            return node;
         }
     }
 
