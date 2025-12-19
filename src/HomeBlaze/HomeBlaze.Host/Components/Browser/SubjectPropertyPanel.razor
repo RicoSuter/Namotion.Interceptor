@@ -63,40 +63,30 @@
             var methods = GetMethods();
             if (methods.Count > 0)
             {
-                <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Style="overflow: hidden;">
-                    <MudExpansionPanel Expanded="true" Gutters="false" Class="px-4">
-                        <TitleContent>
-                            Methods
-                            <MudChip T="string" Size="Size.Small" Color="Color.Dark">@methods.Count</MudChip>
-                        </TitleContent>
-                        <ChildContent>
-                            <MudStack Spacing="2" Class="py-2">
-                                @foreach (var method in methods)
-                                {
-                                    var isQuery = method.Kind == SubjectMethodKind.Query;
-                                    var defaultIcon = isQuery ? "Search" : "PlayArrow";
-                                    var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
-                                    var methodProperty = _registeredSubject?.TryGetProperty(methodName);
-                                    var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
-                                    var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
-                                    <MudButton Variant="Variant.Filled"
-                                               Color="@(isQuery ? Color.Info : Color.Primary)"
-                                               Size="Size.Small"
-                                               FullWidth="true"
-                                               StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
-                                               Disabled="@(!method.IsSupported || _executingOperation == method || !isEnabled)"
-                                               OnClick="@(() => ExecuteMethodAsync(method))">
-                                        @if (_executingOperation == method)
-                                        {
-                                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                                        }
-                                        @method.Title
-                                    </MudButton>
-                                }
-                            </MudStack>
-                        </ChildContent>
-                    </MudExpansionPanel>
-                </MudExpansionPanels>
+                <MudStack Class="pl-4 pr-4">
+                    @foreach (var method in methods)
+                    {
+                        var isQuery = method.Kind == SubjectMethodKind.Query;
+                        var defaultIcon = isQuery ? "Search" : "PlayArrow";
+                        var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
+                        var methodProperty = _registeredSubject?.TryGetProperty(methodName);
+                        var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
+                        var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
+                        <MudButton Variant="Variant.Filled"
+                                   Color="@(isQuery ? Color.Info : Color.Primary)"
+                                   Size="Size.Small"
+                                   FullWidth="true"
+                                   StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
+                                   Disabled="@(!method.IsSupported || _executingOperation == method || !isEnabled)"
+                                   OnClick="@(() => ExecuteMethodAsync(method))">
+                            @if (_executingOperation == method)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            }
+                            @method.Title
+                        </MudButton>
+                    }
+                </MudStack>
             }
         }
 

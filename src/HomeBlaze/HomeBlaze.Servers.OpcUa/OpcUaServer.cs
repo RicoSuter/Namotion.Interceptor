@@ -130,7 +130,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
 
     [Derived]
     [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
-    public bool Stop_IsEnabled => Status == ServerStatus.Running || Status == ServerStatus.Starting;
+    public bool Stop_IsEnabled => Status is ServerStatus.Running or ServerStatus.Starting; // TODO: Should check state of _serverService
 
     // Interface implementations
 
@@ -239,7 +239,6 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
             };
 
             _serverService = targetSubject.CreateOpcUaServer(configuration, _logger);
-
             await this.AttachHostedServiceAsync(_serverService, cancellationToken);
 
             Status = ServerStatus.Running;
