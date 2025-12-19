@@ -143,6 +143,7 @@ When applying inbound updates (writing data from the external system to the loca
 This is by design:
 - Individual update failures don't block other updates from being applied
 - Monitor logs for `Failed to apply subject update` errors to detect issues
+- Write failures to internal models are treated as non-transient because property writes are deterministic: they either succeed or fail consistently, so retrying would not help (this includes custom validation failures)
 
 This differs from outbound changes (writing from local model to external system), which use a retry queue to handle transient failures.
 
@@ -214,17 +215,27 @@ Marks a dictionary property as an implicit child container for path resolution:
 
 ```csharp
 [InterceptorSubject]
-public partial class Storage
+public partial class ProductionLine
 {
+    public partial string Name { get; set; }
+
     [Children]
-    public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
+    public partial Dictionary<string, Machine> Machines { get; set; }
+}
+
+[InterceptorSubject]
+public partial class Machine
+{
+    public partial string Status { get; set; }
+    public partial decimal Temperature { get; set; }
 }
 ```
 
 With `[Children]`:
-- Path `files/readme.md` resolves to `Children["files"].Children["readme.md"]`
+- Path `Line.CNC01.Status` resolves to `Line.Machines["CNC01"].Status`
 - Direct properties take precedence over child keys
-- Built into `PathProviderBase.GetPropertyFromSegment`
+- Works with `AttributeBasedPathProvider` without requiring `[Path]` attribute on the dictionary
+- Built into `PathProviderBase.TryGetPropertyFromSegment`
 
 ## Updates
 
