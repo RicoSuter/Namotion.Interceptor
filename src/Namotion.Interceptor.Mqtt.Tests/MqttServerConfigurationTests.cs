@@ -1,11 +1,14 @@
 using Namotion.Interceptor.Mqtt.Server;
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Registry.Paths;
 using Xunit;
 
 namespace Namotion.Interceptor.Mqtt.Tests;
 
 public class MqttServerConfigurationTests
 {
+    private static PathProviderBase CreateTestPathProvider() =>
+        new AttributeBasedPathProvider("test", '/');
+
     [Fact]
     public void Validate_ValidConfiguration_DoesNotThrow()
     {
@@ -13,7 +16,7 @@ public class MqttServerConfigurationTests
         var config = new MqttServerConfiguration
         {
             BrokerPort = 1883,
-            PathProvider = new AttributeBasedSourcePathProvider("test", "/", null)
+            PathProvider = CreateTestPathProvider()
         };
 
         // Act & Assert
@@ -28,7 +31,7 @@ public class MqttServerConfigurationTests
         {
             BrokerHost = "127.0.0.1",
             BrokerPort = 1883,
-            PathProvider = new AttributeBasedSourcePathProvider("test", "/", null)
+            PathProvider = CreateTestPathProvider()
         };
 
         // Act & Assert
@@ -55,7 +58,7 @@ public class MqttServerConfigurationTests
         // Arrange & Act
         var config = new MqttServerConfiguration
         {
-            PathProvider = new AttributeBasedSourcePathProvider("test", "/", null)
+            PathProvider = CreateTestPathProvider()
         };
 
         // Assert

@@ -2,6 +2,7 @@
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Components.Inputs
 @using Namotion.Interceptor
+@using Namotion.Interceptor.Registry.Abstractions
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(OpcUaServer))]
 @implements ISubjectEditComponent
@@ -20,7 +21,13 @@
                               @bind-Value:after="OnFieldChanged"
                               Label="Subject Path"
                               Placeholder="e.g., Root or Root.Children[demo]"
+                              CanSelectProperty="CanSelectSubjectProperty"
                               Class="mt-4" />
+
+            <MudCheckBox @bind-Value="_isEnabled"
+                         @bind-Value:after="OnFieldChanged"
+                         Label="Enabled (auto-start on application startup)"
+                         Class="mt-4" />
 
             <br />
             <br />
@@ -87,6 +94,7 @@
 
     private string _name = string.Empty;
     private string _path = string.Empty;
+    private bool _isEnabled = true;
     private string? _baseAddress;
     private string? _applicationName;
     private string? _namespaceUri;
@@ -97,6 +105,7 @@
 
     private string _originalName = string.Empty;
     private string _originalPath = string.Empty;
+    private bool _originalIsEnabled = true;
     private string? _originalBaseAddress;
     private string? _originalApplicationName;
     private string? _originalNamespaceUri;
@@ -109,6 +118,7 @@
 
     public bool IsDirty => _name != _originalName ||
                            _path != _originalPath ||
+                           _isEnabled != _originalIsEnabled ||
                            _baseAddress != _originalBaseAddress ||
                            _applicationName != _originalApplicationName ||
                            _namespaceUri != _originalNamespaceUri ||
@@ -128,6 +138,7 @@
         {
             _name = ServerSubject.Name ?? string.Empty;
             _path = ServerSubject.Path ?? string.Empty;
+            _isEnabled = ServerSubject.IsEnabled;
             _baseAddress = ServerSubject.BaseAddress;
             _applicationName = ServerSubject.ApplicationName;
             _namespaceUri = ServerSubject.NamespaceUri;
@@ -138,6 +149,7 @@
 
             _originalName = _name;
             _originalPath = _path;
+            _originalIsEnabled = _isEnabled;
             _originalBaseAddress = _baseAddress;
             _originalApplicationName = _applicationName;
             _originalNamespaceUri = _namespaceUri;
@@ -154,12 +166,19 @@
         IsDirtyChanged?.Invoke(IsDirty);
     }
 
+    private static bool CanSelectSubjectProperty(RegisteredSubjectProperty property)
+    {
+        // Only allow selecting subject references
+        return property.IsSubjectReference;
+    }
+
     public Task SaveAsync(CancellationToken cancellationToken)
     {
         if (ServerSubject != null && IsValid)
         {
             ServerSubject.Name = _name;
             ServerSubject.Path = _path;
+            ServerSubject.IsEnabled = _isEnabled;
             ServerSubject.BaseAddress = _baseAddress;
             ServerSubject.ApplicationName = _applicationName;
             ServerSubject.NamespaceUri = _namespaceUri;
@@ -170,6 +189,7 @@
 
             _originalName = _name;
             _originalPath = _path;
+            _originalIsEnabled = _isEnabled;
             _originalBaseAddress = _baseAddress;
             _originalApplicationName = _applicationName;
             _originalNamespaceUri = _namespaceUri;

@@ -1,5 +1,5 @@
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Sources.Paths.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
@@ -13,25 +13,25 @@ public partial class TestRoot
         People = [];
     }
 
-    [SourcePath("opc", "Connected")]
+    [Path("opc", "Connected")]
     public partial bool Connected { get; set; }
 
-    [SourcePath("opc", "Name")]
+    [Path("opc", "Name")]
     public partial string Name { get; set; }
 
-    [SourcePath("opc", "Number")]
+    [Path("opc", "Number")]
     public partial decimal Number { get; set; }
 
-    [SourcePath("opc", "ScalarNumbers")]
+    [Path("opc", "ScalarNumbers")]
     public partial int[] ScalarNumbers { get; set; }
-    
-    [SourcePath("opc", "ScalarStrings")]
+
+    [Path("opc", "ScalarStrings")]
     public partial string[] ScalarStrings { get; set; }
 
-    [SourcePath("opc", "Person")]
+    [Path("opc", "Person")]
     public partial TestPerson Person { get; set; }
 
-    [SourcePath("opc", "People")]
+    [Path("opc", "People")]
     public partial TestPerson[] People { get; set; }
 }
 
@@ -45,16 +45,16 @@ public partial class TestPerson
         Scores = [];
     }
 
-    [SourcePath("opc", "FirstName")]
+    [Path("opc", "FirstName")]
     public partial string FirstName { get; set; }
 
-    [SourcePath("opc", "LastName")]
+    [Path("opc", "LastName")]
     public partial string LastName { get; set; }
 
     [Derived]
-    [SourcePath("opc", "FullName")]
+    [Path("opc", "FullName")]
     public string FullName => $"{FirstName} {LastName}";
 
-    [SourcePath("opc", "Scores")]
+    [Path("opc", "Scores")]
     public partial double[] Scores { get; set; }
 }

@@ -211,4 +211,68 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
         // Assert
         Assert.Same(child, result);
     }
+
+    [Fact]
+    public void ResolveSubject_WithInlinePathsAttribute_ResolvesWithoutPropertyName()
+    {
+        // Arrange
+        var notes = new TestContainerWithChildren(Context) { Name = "Notes" };
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Children["Notes"] = notes;
+
+        // Act - "Notes" should resolve via [InlinePaths] property without "Children/" prefix
+        var result = Resolver.ResolveSubject("Notes", PathFormat.Slash, root);
+
+        // Assert
+        Assert.Same(notes, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_WithInlinePathsAttribute_ResolvesNestedPath()
+    {
+        // Arrange
+        var page = new TestContainerWithChildren(Context) { Name = "Page" };
+        var folder = new TestContainerWithChildren(Context) { Name = "Folder" };
+        folder.Children["Page"] = page;
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Children["Folder"] = folder;
+
+        // Act - "Folder/Page" should resolve through nested [InlinePaths]
+        var result = Resolver.ResolveSubject("Folder/Page", PathFormat.Slash, root);
+
+        // Assert
+        Assert.Same(page, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_WithInlinePathsAttribute_PropertyTakesPrecedenceOverChildKey()
+    {
+        // Arrange
+        var childProperty = new TestContainerWithChildren(Context) { Name = "ChildProperty" };
+        var childInDictionary = new TestContainerWithChildren(Context) { Name = "ChildInDictionary" };
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Child = childProperty;
+        root.Children["Child"] = childInDictionary; // Same name as property
+
+        // Act - "Child" should resolve to the property, not the dictionary entry
+        var result = Resolver.ResolveSubject("Child", PathFormat.Slash, root);
+
+        // Assert - Property takes precedence
+        Assert.Same(childProperty, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_WithInlinePathsAttribute_ExplicitBracketSyntaxStillWorks()
+    {
+        // Arrange
+        var notes = new TestContainerWithChildren(Context) { Name = "Notes" };
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Children["Notes"] = notes;
+
+        // Act - Explicit "Children[Notes]" should still work
+        var result = Resolver.ResolveSubject("Children[Notes]", PathFormat.Bracket, root);
+
+        // Assert
+        Assert.Same(notes, result);
+    }
 }

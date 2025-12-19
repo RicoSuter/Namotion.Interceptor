@@ -6,13 +6,13 @@
 public enum PathFormat
 {
     /// <summary>
-    /// Bracket notation: Children[demo].Children[file.json]
+    /// Bracket notation: demo.file.json (with [InlinePaths] attribute) or Children[demo].Children[file.json]
     /// Used by Widget, RenderExpression configurations.
     /// </summary>
     Bracket,
 
     /// <summary>
-    /// Slash notation: Children/demo/Children/file.json
+    /// Slash notation: demo/file.json (with [InlinePaths] attribute) or Children/demo/Children/file.json
     /// Used by URLs and Blazor routing.
     /// </summary>
     Slash

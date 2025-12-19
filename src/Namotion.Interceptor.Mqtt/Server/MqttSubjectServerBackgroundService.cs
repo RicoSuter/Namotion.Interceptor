@@ -10,10 +10,10 @@ using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Packets;
 using MQTTnet.Server;
+using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -240,7 +240,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             return cachedTopic;
         }
 
-        var path = property.TryGetSourcePath(_configuration.PathProvider, _subject);
+        var path = property.TryGetPath(_configuration.PathProvider, _subject);
         var topic = path is null ? null : MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
 
         // Add first, then validate (guarantees no memory leak)
@@ -263,7 +263,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             return cachedProperty;
         }
 
-        var (property, _) = _subject.TryGetPropertyFromSourcePath(path, _configuration.PathProvider);
+        var (property, _) = _subject.TryGetPropertyFromPath(path, _configuration.PathProvider);
         var propertyReference = property?.Reference;
 
         // Add first, then validate (guarantees no memory leak)
@@ -331,7 +331,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                 .TryGetRegisteredSubject()?
                 .GetAllProperties()
                 .Where(p => !p.HasChildSubjects)
-                .GetSourcePaths(_configuration.PathProvider, _subject);
+                .GetPaths(_configuration.PathProvider, _subject);
 
             if (properties is null) return;
 
