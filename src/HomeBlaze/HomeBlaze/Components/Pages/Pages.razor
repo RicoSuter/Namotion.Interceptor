@@ -1,0 +1,264 @@
+@page "/pages/{*Path}"
+
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
+@using HomeBlaze.Host.Components.Editors
+@using HomeBlaze.Services.Components
+@using Microsoft.AspNetCore.Components.Sections
+@using Namotion.Interceptor.Blazor
+@using Toolbelt.Blazor.HotKeys2
+
+@inherits HomeBlazorComponentBase
+@implements IAsyncDisposable
+
+@inject SubjectComponentRegistry ComponentRegistry
+@inject SubjectPathResolver PathResolver
+@inject DeveloperModeService DeveloperMode
+@inject HotKeys HotKeys
+
+<PageTitle>@_title - HomeBlaze</PageTitle>
+
+<TrackingScope Context="_subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
+    @if (_subject == null)
+    {
+        <MudAlert Severity="Severity.Warning">Subject not found at path: @Path</MudAlert>
+    }
+    else
+    {
+        <CascadingValue Value="@IsEditing" Name="IsEditing">
+            @if (_editMode == PageEditMode.Split && CanEdit())
+            {
+                <div data-testid="edit-splitter">
+                    <MudSplitter @bind-Dimension="_splitDimension"
+                                 Height="calc(100vh - 80px)"
+                                 EnableSlide="true"
+                                 OnDoubleClicked="ResetSplitDimension">
+                        <StartContent>
+                            <div style="width: 100%; height: 100%; overflow-y: auto;">
+                                <SubjectComponent @key="_componentKey"
+                                                  Subject="@_subject"
+                                                  Type="SubjectComponentType.Page"/>
+                            </div>
+                        </StartContent>
+                        <EndContent>
+                            <div class="d-flex flex-column" style="height: 100%; width: 100%">
+                                <div class="d-flex align-center justify-space-between gap-2 px-4 py-2" style="height: 56px; flex-shrink: 0; border-bottom: 1px solid var(--mud-palette-divider); width: 100%">
+                                    <div class="d-flex gap-2">
+                                        <SectionOutlet SectionName="EditActions" />
+                                    </div>
+                                    @RenderEditMenu()
+                                </div>
+                                <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
+                                    <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
+                                        <SubjectEditPanel @ref="_editPanel" Subject="@_subject"/>
+                                    </div>
+
+                                    <div class="d-flex justify-end gap-2 pa-4" style="border-top: 1px solid var(--mud-palette-divider); flex-shrink: 0; width: 100%">
+                                        <span data-testid="save-button">
+                                            <MudButton Color="Color.Primary"
+                                                       OnClick="OnSaveClicked"
+                                                       Disabled="@(!(_editPanel?.IsValid ?? true))">Save (Ctrl+S)</MudButton>
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </EndContent>
+                    </MudSplitter>
+                </div>
+            }
+            else if (_editMode == PageEditMode.Source && CanEdit())
+            {
+                <div class="d-flex flex-column" style="height: calc(100vh - 80px); width: 100%">
+                    <div class="d-flex align-center justify-space-between gap-2 px-4 py-2" style="height: 56px; flex-shrink: 0; border-bottom: 1px solid var(--mud-palette-divider); width: 100%">
+                        <div class="d-flex gap-2">
+                            <SectionOutlet SectionName="EditActions" />
+                        </div>
+                        @RenderEditMenu()
+                    </div>
+                    <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
+                        <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
+                            <SubjectEditPanel @ref="_editPanel" Subject="@_subject"/>
+                        </div>
+
+                        <div class="d-flex justify-end gap-2 pa-4" style="border-top: 1px solid var(--mud-palette-divider); flex-shrink: 0; width: 100%">
+                            <span data-testid="save-button">
+                                <MudButton Color="Color.Primary"
+                                           OnClick="OnSaveClicked"
+                                           Disabled="@(!(_editPanel?.IsValid ?? true))">Save (Ctrl+S)</MudButton>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                @if (CanEdit())
+                {
+                    <div style="position: absolute; top: 80px; right: 20px; z-index: 100;">
+                        @RenderEditMenu()
+                    </div>
+                }
+
+                @* View or Inline mode - show page component *@
+                <SubjectComponent @key="_componentKey"
+                                  Subject="@_subject"
+                                  Type="SubjectComponentType.Page"/>
+            }
+        </CascadingValue>
+    }
+</TrackingScope>
+
+@code {
+    [Parameter] public string? Path { get; set; }
+
+    private IInterceptorSubject? _subject;
+    private string _title = "";
+    private int _componentKey;
+    private PageEditMode _editMode = PageEditMode.View;
+    private double _splitDimension = 50;
+    private SubjectEditPanel? _editPanel;
+    private HotKeysContext? _hotKeysContext;
+
+    private enum PageEditMode
+    {
+        View, // Read-only rendered page
+        Split, // Page on left, Monaco editor on right
+        Source, // Full Monaco editor only
+        Inline // View with inline editing on widgets
+    }
+
+    private bool IsEditing => _editMode != PageEditMode.View;
+    private bool ShowEditor => _editMode is PageEditMode.Split or PageEditMode.Source;
+
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _hotKeysContext = HotKeys.CreateContext()
+                .Add(ModCode.Ctrl, Code.S, OnCtrlS, exclude: Exclude.None);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    protected override void OnParametersSet()
+    {
+        LoadSubject();
+        _editMode = PageEditMode.View;
+    }
+
+    private void LoadSubject()
+    {
+        _subject = null;
+        _title = "";
+
+        var path = Path;
+        if (string.IsNullOrEmpty(path) || Root is null)
+            return;
+
+        var subject = PathResolver.ResolveSubject(path, PathFormat.Slash);
+        if (subject != null)
+        {
+            if (subject is ITitleProvider titleProvider)
+            {
+                _title = titleProvider.Title ?? subject.GetType().Name;
+            }
+            else
+            {
+                _title = subject.GetType().Name;
+            }
+
+            _subject = subject;
+        }
+    }
+
+    private bool CanEdit()
+    {
+        if (_subject == null) return false;
+
+        var hasEditComponent = ComponentRegistry.HasComponent(
+            _subject.GetType(),
+            SubjectComponentType.Edit);
+
+        return hasEditComponent || _subject.HasConfigurationProperties();
+    }
+
+    private void SetEditMode(PageEditMode mode)
+    {
+        _editMode = mode;
+    }
+
+    private async Task OnCtrlS()
+    {
+        if (ShowEditor && _editPanel?.IsValid == true)
+        {
+            await OnSaveClicked();
+        }
+    }
+
+    private string GetModeIcon() => _editMode switch
+    {
+        PageEditMode.View => Icons.Material.Filled.Visibility,
+        PageEditMode.Split => Icons.Material.Filled.VerticalSplit,
+        PageEditMode.Source => Icons.Material.Filled.Code,
+        PageEditMode.Inline => Icons.Material.Filled.Edit,
+        _ => Icons.Material.Filled.Visibility
+    };
+
+    private async Task OnSaveClicked()
+    {
+        if (_editPanel != null)
+        {
+            await _editPanel.SaveAsync();
+            // Increment key to refresh page component with saved changes
+            _componentKey++;
+            StateHasChanged();
+        }
+    }
+
+    private void ResetSplitDimension()
+    {
+        _splitDimension = 50;
+    }
+
+    private RenderFragment RenderEditMenu() => __builder =>
+    {
+        <MudMenu Icon="@GetModeIcon()"
+                 data-testid="edit-mode-menu"
+                 Color="@(IsEditing ? Color.Primary : Color.Default)"
+                 Variant="Variant.Filled"
+                 Size="Size.Small"
+                 AnchorOrigin="Origin.BottomRight"
+                 TransformOrigin="Origin.TopRight">
+            <MudMenuItem Icon="@Icons.Material.Filled.Visibility"
+                         IconColor="@(_editMode == PageEditMode.View ? Color.Primary : Color.Default)"
+                         OnClick="@(() => SetEditMode(PageEditMode.View))">
+                View
+            </MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.VerticalSplit"
+                         IconColor="@(_editMode == PageEditMode.Split ? Color.Primary : Color.Default)"
+                         OnClick="@(() => SetEditMode(PageEditMode.Split))">
+                Split
+            </MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.Code"
+                         IconColor="@(_editMode == PageEditMode.Source ? Color.Primary : Color.Default)"
+                         OnClick="@(() => SetEditMode(PageEditMode.Source))">
+                Source
+            </MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.Edit"
+                         IconColor="@(_editMode == PageEditMode.Inline ? Color.Primary : Color.Default)"
+                         OnClick="@(() => SetEditMode(PageEditMode.Inline))">
+                Inline
+            </MudMenuItem>
+        </MudMenu>
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hotKeysContext != null)
+        {
+            await _hotKeysContext.DisposeAsync();
+        }
+    }
+
+}

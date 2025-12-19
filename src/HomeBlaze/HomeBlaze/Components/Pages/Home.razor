@@ -1,0 +1,52 @@
+@page "/"
+
+@using HomeBlaze.Components.Abstractions.Pages
+
+@inherits HomeBlazorComponentBase
+
+@inject NavigationItemResolver NavigationResolver
+@inject NavigationManager Navigation
+
+@code {
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        RedirectToDefaultPage();
+    }
+
+    private void RedirectToDefaultPage()
+    {
+        if (Root == null)
+            return;
+
+        var items = NavigationResolver.GetChildItems(Root).Where(i => i.IsPage).ToList();
+
+        // Try first AppBar page (left aligned first, then right)
+        var appBarPage = items
+            .Where(i => i.Location == NavigationLocation.AppBar)
+            .OrderBy(i => i.Alignment == AppBarAlignment.Left ? 0 : 1)
+            .ThenBy(i => i.Order)
+            .FirstOrDefault();
+
+        if (appBarPage != null)
+        {
+            Navigation.NavigateTo(appBarPage.PageUrl);
+            return;
+        }
+
+        // Try first NavBar page
+        var navBarPage = items
+            .Where(i => i.Location == NavigationLocation.NavBar)
+            .OrderBy(i => i.Order)
+            .FirstOrDefault();
+
+        if (navBarPage != null)
+        {
+            Navigation.NavigateTo(navBarPage.PageUrl);
+            return;
+        }
+
+        // Fallback to browser
+        Navigation.NavigateTo("/browser");
+    }
+}

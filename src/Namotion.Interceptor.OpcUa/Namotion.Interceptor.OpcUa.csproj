@@ -43,7 +43,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.Interceptor.Dynamic\Namotion.Interceptor.Dynamic.csproj" />
-    <ProjectReference Include="..\Namotion.Interceptor.Sources\Namotion.Interceptor.Sources.csproj" />
+    <ProjectReference Include="..\Namotion.Interceptor.Connectors\Namotion.Interceptor.Connectors.csproj" />
   </ItemGroup>
 
 </Project>

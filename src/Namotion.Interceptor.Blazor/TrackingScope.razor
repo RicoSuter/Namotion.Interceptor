@@ -1,0 +1,330 @@
+@using System.Collections.Concurrent
+@using Namotion.Interceptor.Tracking
+@using Namotion.Interceptor.Tracking.Parent
+@using Namotion.Interceptor.Tracking.Recorder
+
+@implements IDisposable
+
+@if (ShowDebugInfo)
+{
+    <style>
+        @@keyframes tracking-glow {
+            0% {
+                box-shadow: 0 0 15px 5px #4CAF50;
+            }
+            100% {
+                box-shadow: none;
+            }
+        }
+    </style>
+    <div @key="_glowCounter" style="@GetDebugBorderStyle()" title="@GetTooltipText()">
+        @WrappedChildContent
+    </div>
+}
+else
+{
+    @WrappedChildContent
+}
+
+@code {
+    private readonly Lock _lock = new();
+    private IDisposable? _subscription;
+    private IInterceptorSubjectContext? _subscribedContext;
+    private ReadPropertyRecorderScope? _currentScope;
+    private int _glowCounter;
+    private volatile int _disposed;
+    private volatile int _rerenderPending;
+
+    private ConcurrentDictionary<PropertyReference, bool> _collectingProperties = [];
+    private ConcurrentDictionary<PropertyReference, bool> _properties = [];
+
+    // Track subjects whose properties were read (for descendant checking)
+    private HashSet<IInterceptorSubject> _trackedSubjects = [];
+
+    // Cache for "is ancestor" results - only cache true results
+    // False results are never cached to guarantee at-least-once rerender
+    private readonly ConcurrentDictionary<IInterceptorSubject, bool> _ancestorCache = [];
+
+    /// <summary>
+    /// The interceptor subject context to track for property changes.
+    /// All property reads on subjects sharing this context will be automatically tracked.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public IInterceptorSubjectContext? Context { get; set; }
+
+    /// <summary>
+    /// When true, displays debug information (border and tooltip with tracked properties).
+    /// </summary>
+    [Parameter]
+    public bool ShowDebugInfo { get; set; }
+
+    /// <summary>
+    /// The content to render within the tracking scope.
+    /// Property reads within this content are automatically tracked.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private RenderFragment WrappedChildContent
+    {
+        get
+        {
+            return builder =>
+            {
+                using var recorder = ReadPropertyRecorder.Start(_collectingProperties);
+                ChildContent?.Invoke(builder);
+            };
+        }
+    }
+
+    /// <summary>
+    /// Gets the names of currently tracked properties (for debugging).
+    /// </summary>
+    private IEnumerable<string> TrackedPropertyNames =>
+        _properties.Keys.Select(p => $"{p.Subject.GetType().Name}.{p.Name}");
+
+    protected override void OnParametersSet()
+    {
+        if (_disposed != 0) return;
+
+        // Handle Context changes - resubscribe if context changed
+        if (_subscribedContext != Context)
+        {
+            _subscription?.Dispose();
+            _subscription = null;
+            _subscribedContext = Context;
+
+            _subscription = Context?
+                .GetPropertyChangeObservable()
+                .Subscribe(change =>
+                {
+                    if (_disposed != 0) return;
+
+                    try
+                    {
+                        // Check if this property is directly tracked
+                        if (_properties.TryGetValue(change.Property, out _))
+                        {
+                            TriggerRerender();
+                            return;
+                        }
+
+                        // Check if the changed subject is a descendant of any tracked subject
+                        var changedSubject = change.Property.Subject;
+                        if (IsDescendantOfTrackedSubject(changedSubject))
+                        {
+                            TriggerRerender();
+                        }
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Component was disposed during callback, ignore
+                    }
+                });
+        }
+        
+        StartRecording();
+        base.OnParametersSet();
+    }
+    
+    protected override bool ShouldRender()
+    {
+        if (_disposed != 0) return false;
+
+        StartRecording();
+        return base.ShouldRender();
+    }
+
+    private void StartRecording()
+    {
+        if (_disposed != 0) return;
+
+        if (_currentScope == null)
+        {
+            _collectingProperties.Clear();
+            _currentScope = ReadPropertyRecorder.Start(_collectingProperties);
+        }
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (_disposed != 0) return;
+
+        StopRecording();
+
+        // Only swap if we collected properties during this render.
+        // This prevents losing tracking when a spurious render happens without executing RenderFragments.
+        if (_collectingProperties.Count > 0)
+        {
+            lock (_lock)
+            {
+                (_properties, _collectingProperties) = (_collectingProperties, _properties);
+                _collectingProperties.Clear();
+
+                // Update tracked subjects from the new properties
+                _trackedSubjects = new HashSet<IInterceptorSubject>(
+                    _properties.Keys.Select(p => p.Subject));
+
+                // Clear ancestor cache when tracked subjects change
+                _ancestorCache.Clear();
+            }
+        }
+
+        // Reset rerender flag after render completes
+        Interlocked.Exchange(ref _rerenderPending, 0);
+
+        base.OnAfterRender(firstRender);
+        
+        if (firstRender)
+        {
+            // WORKAROUND: Properties accessed during first render are not collected.
+            // This may be due to Blazor's render tree initialization timing - the recording
+            // scope may not be fully active when BuildRenderTree first executes.
+            // Triggering a second render ensures properties are properly tracked.
+            // TODO: Investigate root cause - check if recording scope starts too late
+            // or if Blazor's first render has special behavior that bypasses interception.
+            Task.Run(async () => await Task.Yield()).ContinueWith(_ => InvokeAsync(StateHasChanged));
+        }
+    }
+
+    private void StopRecording()
+    {
+        if (_currentScope != null)
+        {
+            _currentScope.Dispose();
+            _currentScope = null;
+        }
+    }
+
+    /// <summary>
+    /// Triggers a rerender with coalescing to prevent rapid successive rerenders.
+    /// </summary>
+    private void TriggerRerender()
+    {
+        if (_disposed != 0) return;
+
+        // Use Interlocked to coalesce rapid property changes
+        if (Interlocked.Exchange(ref _rerenderPending, 1) == 0)
+        {
+            _glowCounter++;
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// Checks if the given subject is a descendant of any tracked subject
+    /// by walking up the parent hierarchy using BFS.
+    /// </summary>
+    private bool IsDescendantOfTrackedSubject(IInterceptorSubject subject)
+    {
+        // Check cache first (only true results are cached)
+        if (_ancestorCache.TryGetValue(subject, out var cached) && cached)
+        {
+            return true;
+        }
+
+        // Get current tracked subjects snapshot under lock
+        HashSet<IInterceptorSubject> trackedSnapshot;
+        lock (_lock)
+        {
+            if (_trackedSubjects.Count == 0)
+                return false;
+
+            // Quick check: is the subject itself tracked?
+            if (_trackedSubjects.Contains(subject))
+            {
+                _ancestorCache.TryAdd(subject, true);
+                return true;
+            }
+
+            trackedSnapshot = new HashSet<IInterceptorSubject>(_trackedSubjects);
+        }
+
+        // BFS to walk up ALL parent branches (fixes multi-parent traversal bug)
+        var visited = new HashSet<IInterceptorSubject>();
+        var queue = new Queue<IInterceptorSubject>();
+        queue.Enqueue(subject);
+        visited.Add(subject);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+
+            HashSet<SubjectParent> parents;
+            try
+            {
+                parents = current.GetParents();
+            }
+            catch
+            {
+                // Subject may have been disposed, skip
+                continue;
+            }
+
+            foreach (var parent in parents)
+            {
+                var parentSubject = parent.Property.Subject;
+
+                // Found a tracked ancestor!
+                if (trackedSnapshot.Contains(parentSubject))
+                {
+                    // Cache only positive results
+                    _ancestorCache.TryAdd(subject, true);
+                    return true;
+                }
+
+                // Continue BFS if not visited (handles cycles)
+                if (visited.Add(parentSubject))
+                {
+                    queue.Enqueue(parentSubject);
+                }
+            }
+        }
+
+        // Don't cache false results - they may become stale when graph changes
+        return false;
+    }
+
+    private string GetDebugBorderStyle()
+    {
+        var count = _properties.Count;
+        if (count == 0)
+            return "border: 1px dashed gray;";
+
+        // Green border with glow animation when tracking properties
+        // The @key on the div forces recreation, restarting the animation on each property change
+        return "border: 2px solid #4CAF50; animation: tracking-glow 1s ease-out; --glow-color: #4CAF50;";
+    }
+
+    private string GetTooltipText()
+    {
+        var count = _properties.Count;
+        if (count == 0)
+            return "No tracked properties";
+
+        var names = string.Join("\n", TrackedPropertyNames.Take(20));
+        if (count > 20)
+            names += $"\n... and {count - 20} more";
+
+        return $"Tracked Properties ({count}):\n{names}";
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        StopRecording();
+        _subscription?.Dispose();
+        _subscription = null;
+        _subscribedContext = null;
+
+        lock (_lock)
+        {
+            _properties.Clear();
+            _collectingProperties.Clear();
+            _trackedSubjects.Clear();
+            _ancestorCache.Clear();
+        }
+    }
+}

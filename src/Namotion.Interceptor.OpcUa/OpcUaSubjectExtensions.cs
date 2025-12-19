@@ -1,11 +1,11 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Server;
-using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 
 // ReSharper disable once CheckNamespace
@@ -13,6 +13,38 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class OpcUaSubjectExtensions
 {
+    /// <summary>
+    /// Creates an OPC UA server hosted service for the given subject.
+    /// The server exposes the subject's properties as OPC UA nodes.
+    /// </summary>
+    /// <param name="subject">The subject to expose via OPC UA.</param>
+    /// <param name="configuration">The OPC UA server configuration.</param>
+    /// <param name="logger">The logger instance.</param>
+    /// <returns>An IHostedService that runs the OPC UA server.</returns>
+    public static IHostedService CreateOpcUaServer(
+        this IInterceptorSubject subject,
+        OpcUaServerConfiguration configuration,
+        ILogger logger)
+    {
+        return new OpcUaSubjectServerBackgroundService(subject, configuration, logger);
+    }
+
+    /// <summary>
+    /// Creates an OPC UA client source hosted service for the given subject.
+    /// The client synchronizes the subject's properties with an OPC UA server.
+    /// </summary>
+    /// <param name="subject">The subject to synchronize with OPC UA.</param>
+    /// <param name="configuration">The OPC UA client configuration.</param>
+    /// <param name="logger">The logger instance.</param>
+    /// <returns>An IHostedService that runs the OPC UA client.</returns>
+    public static IHostedService CreateOpcUaClientSource(
+        this IInterceptorSubject subject,
+        OpcUaClientConfiguration configuration,
+        ILogger logger)
+    {
+        return new OpcUaSubjectClientSource(subject, configuration, logger);
+    }
+
     public static IServiceCollection AddOpcUaSubjectClient<TSubject>(
         this IServiceCollection serviceCollection,
         string serverUrl,
@@ -47,7 +79,7 @@ public static class OpcUaSubjectExtensions
             {
                 ServerUrl = serverUrl,
                 RootName = rootName,
-                PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
+                PathProvider = new AttributeBasedPathProvider(sourceName),
                 TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
                 ValueConverter = new OpcUaValueConverter(),
                 SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -118,7 +150,7 @@ public static class OpcUaSubjectExtensions
             return new OpcUaServerConfiguration
             {
                 RootName = rootName,
-                PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
+                PathProvider = new AttributeBasedPathProvider(sourceName),
                 ValueConverter = new OpcUaValueConverter(),
                 TelemetryContext = telemetryContext
             };

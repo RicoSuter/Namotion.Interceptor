@@ -1,0 +1,441 @@
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Abstractions.Services
+@using HomeBlaze.Host.Components.Dialogs
+@using HomeBlaze.Storage.Abstractions
+
+@inject IDialogService DialogService
+@inject SubjectComponentRegistry ComponentRegistry
+@inject DeveloperModeService DeveloperMode
+@inject ISubjectMethodInvoker MethodInvoker
+
+<TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
+@if (Subject != null)
+{
+    @* Header - Fixed at top *@
+    <MudListSubheader Style="flex-shrink: 0;">
+        @if (CanClose)
+        {
+            <MudFab OnClick="@(() => OnClose.InvokeAsync())"
+                    Color="Color.Primary"
+                    StartIcon="@Icons.Material.Filled.Close"
+                    Size="Size.Small"
+                    Style="float: right" />
+        }
+
+        <h1 style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0;">
+            <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" Class="mr-2" Style="vertical-align: middle;" />
+            @GetSubjectTitle()
+        </h1>
+    </MudListSubheader>
+    <MudListSubheader Style="word-break: break-word;">
+        @* Action Buttons *@
+        @if (CanEdit())
+        {
+            <MudIconButton OnClick="@OpenEditDialog"
+                           Icon="@Icons.Material.Filled.Edit"
+                           Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           Size="Size.Small"
+                           Class="mr-2" />
+        }
+        @if (Subject is IStorageFile)
+        {
+            <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
+                           Icon="@Icons.Material.Filled.Delete"
+                           Variant="Variant.Filled"
+                           Color="Color.Error"
+                           Size="Size.Small"
+                           Class="mr-2" />
+        }
+    </MudListSubheader>
+
+    <div style="max-height: calc(100vh - 300px); overflow-y: auto; overflow-x: hidden;">
+        <MudListSubheader Style="word-break: break-word;">
+            @* Primitive Properties *@
+            @foreach (var prop in GetPrimitiveProperties())
+            {
+                @RenderProperty(prop, 0)
+            }
+        </MudListSubheader>
+
+        @* Methods Section (Operations & Queries) *@
+        @{
+            var methods = GetMethods();
+            if (methods.Count > 0)
+            {
+                <MudStack Class="pl-4 pr-4">
+                    @foreach (var method in methods)
+                    {
+                        var isQuery = method.Kind == SubjectMethodKind.Query;
+                        var defaultIcon = isQuery ? "Search" : "PlayArrow";
+                        var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
+                        var methodProperty = _registeredSubject?.TryGetProperty(methodName);
+                        var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
+                        var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
+                        <MudButton Variant="Variant.Filled"
+                                   Color="@(isQuery ? Color.Info : Color.Primary)"
+                                   Size="Size.Small"
+                                   FullWidth="true"
+                                   StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
+                                   Disabled="@(!method.IsSupported || _executingOperation == method || !isEnabled)"
+                                   OnClick="@(() => ExecuteMethodAsync(method))">
+                            @if (_executingOperation == method)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            }
+                            @method.Title
+                        </MudButton>
+                    }
+                </MudStack>
+            }
+        }
+
+        @* Child Collections *@
+        @foreach (var property in GetChildProperties())
+        {
+            var children = property.Children;
+            @if (children.Length == 1)
+            {
+                @* Single child - no expansion panel *@
+                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Style="padding-top: 0; padding-bottom: 0">
+                    @{
+                        var child = children[0];
+                        var isSelected = child.Subject == SelectedChild;
+                        var childCount = GetChildCount(child);
+                    }
+                    <MudListItem Value="@child.Subject"
+                                 OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
+                                 Icon="@GetSubjectIcon(child.Subject)"
+                                 IconColor="@(isSelected ? Color.Primary : Color.Default)"
+                                 Class="@(isSelected ? "mud-primary-text" : "")">
+                        @if (isSelected)
+                        {
+                            <div style="float: right; line-height: 0">
+                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
+                            </div>
+                        }
+                        <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
+                        @if (childCount > 0)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Dark">@childCount</MudChip>
+                        }
+                    </MudListItem>
+                    <MudDivider />
+                </MudList>
+            }
+            else if (children.Length > 1)
+            {
+                <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="px-4">
+                    <TitleContent>
+                        @GetPropertyDisplayName(property)
+                        <MudChip T="string" Size="Size.Small" Color="Color.Dark">@children.Length</MudChip>
+                    </TitleContent>
+                    <ChildContent>
+                        <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary">
+                            @foreach (var child in children)
+                            {
+                                var isSelected = child.Subject == SelectedChild;
+                                var childCount = GetChildCount(child);
+                                
+                                <MudListItem Value="@child.Subject"
+                                             OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
+                                             Icon="@GetSubjectIcon(child.Subject)"
+                                             IconColor="@(isSelected ? Color.Primary : Color.Default)"
+                                             Class="@(isSelected ? "mud-primary-text" : "")">
+                                    @if (isSelected)
+                                    {
+                                        <div style="float: right; line-height: 0">
+                                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
+                                        </div>
+                                    }
+                                    <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
+                                    @if (childCount > 0)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark">@childCount</MudChip>
+                                    }
+                                </MudListItem>
+                                <MudDivider />
+                            }
+                        </MudList>
+                    </ChildContent>
+                </MudExpansionPanel>
+            }
+        }
+
+        @* Details Accordion *@
+        <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Style="overflow: hidden;">
+            <MudExpansionPanel Expanded="false" Gutters="false" Class="px-4">
+                <TitleContent>
+                    Details
+                </TitleContent>
+                <ChildContent>
+                    <div class="mb-4">
+                        <small style="word-break: break-all;">
+                            <p class="my-1"><strong>ID:</strong> @GetObjectPath()</p>
+                            <p class="my-1"><strong>Type:</strong> @Subject.GetType().FullName</p>
+                        </small>
+                    </div>
+                </ChildContent>
+            </MudExpansionPanel>
+        </MudExpansionPanels>
+    </div>
+}
+</TrackingScope>
+
+@code {
+    private readonly HashSet<string> _expandedProperties = [];
+
+    private RegisteredSubject? _registeredSubject;
+    private SubjectMethodInfo? _executingOperation;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public ISubjectRegistry? SubjectRegistry { get; set; }
+
+    [Parameter]
+    public IInterceptorSubject? SelectedChild { get; set; }
+
+    [Parameter]
+    public bool CanClose { get; set; }
+
+    [Parameter]
+    public string? ObjectPath { get; set; }
+
+    [Parameter]
+    public EventCallback<PropertyClickEventArgs> OnPropertyClick { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    [Parameter]
+    public EventCallback OnDelete { get; set; }
+    
+    protected override void OnParametersSet()
+    {
+        base.OnParametersSet();
+        _registeredSubject = Subject != null && SubjectRegistry != null
+            ? SubjectRegistry.TryGetRegisteredSubject(Subject)
+            : null;
+    }
+
+    private string GetSubjectTitle()
+    {
+        return Subject switch
+        {
+            null => "No Selection",
+            ITitleProvider titleProvider when !string.IsNullOrEmpty(titleProvider.Title) => titleProvider.Title,
+            _ => Subject.GetType().Name
+        };
+    }
+
+    private string GetSubjectIcon(IInterceptorSubject? subject)
+    {
+        if (subject == null)
+            return Icons.Material.Filled.QuestionMark;
+
+        return SubjectIconExtensions.ResolveMudBlazorIcon(subject.GetIcon());
+    }
+
+    private string GetObjectPath()
+    {
+        return ObjectPath ?? "Root";
+    }
+
+    private IEnumerable<RegisteredSubjectProperty> GetPrimitiveProperties()
+    {
+        if (_registeredSubject == null)
+            return [];
+
+        return _registeredSubject.Properties
+            .Where(p => p.GetStateAttribute() != null && !HasChildSubjects(p))
+            .OrderBy(p => p.GetDisplayPosition());
+    }
+
+    private IEnumerable<RegisteredSubjectProperty> GetChildProperties()
+    {
+        if (_registeredSubject == null)
+            return [];
+
+        return _registeredSubject.Properties
+            .Where(p => !p.IsAttribute && HasChildSubjects(p))
+            .OrderBy(p => p.GetDisplayPosition());
+    }
+
+    private void TogglePropertyExpanded(string propertyName)
+    {
+        if (!_expandedProperties.Remove(propertyName))
+            _expandedProperties.Add(propertyName);
+    }
+
+    private RenderFragment RenderProperty(RegisteredSubjectProperty prop, int depth) => __builder =>
+    {
+        // Property reads are automatically recorded via the context-based ReadPropertyRecorder
+        var value = prop.GetValue();
+        var attributes = prop.Attributes.ToArray();
+        var hasAttributes = attributes.Length > 0;
+        var isExpanded = _expandedProperties.Contains(prop.Name);
+        var marginLeft = depth * 24;
+        var displayName = prop.IsAttribute ? prop.AttributeMetadata.AttributeName : GetPropertyDisplayName(prop);
+
+        <MudText Style="@($"margin-left: {marginLeft}px; {(value is null ? "opacity: 0.5" : "")}")">
+            @if (hasAttributes)
+            {
+                <MudIconButton Icon="@(isExpanded ? Icons.Material.Filled.ArrowDropDown : Icons.Material.Filled.ArrowRight)"
+                               Size="Size.Small"
+                               Class="mr-1"
+                               Style="padding: 0; width: 20px; height: 20px;"
+                               OnClick="@(() => TogglePropertyExpanded(prop.Name))" />
+            }
+            else if (depth > 0)
+            {
+                <span style="display: inline-block; width: 24px;"></span>
+            }
+            <strong>@displayName: </strong>
+            @prop.GetPropertyDisplayValue(value)
+        </MudText>
+
+        @if (isExpanded)
+        {
+            foreach (var attr in attributes)
+            {
+                @RenderProperty(attr, depth + 1)
+            }
+        }
+    };
+
+    private string GetPropertyDisplayName(RegisteredSubjectProperty property)
+    {
+        return property.GetDisplayName();
+    }
+
+    private bool HasChildSubjects(RegisteredSubjectProperty property)
+    {
+        return property.HasChildSubjects;
+    }
+
+    private string GetSubjectDisplayName(SubjectPropertyChild child)
+    {
+        var subject = child.Subject;
+        if (subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
+            return titleProvider.Title;
+
+        return subject?.ToString() ?? "n/a";
+    }
+
+    private int GetChildCount(SubjectPropertyChild child)
+    {
+        var subject = child.Subject;
+        var registered = SubjectRegistry?.TryGetRegisteredSubject(subject);
+        if (registered == null) return 0;
+
+        return registered.Properties
+            .Where(p => !p.IsAttribute && HasChildSubjects(p))
+            .Sum(p => p.Children.Length);
+    }
+
+    public record PropertyClickEventArgs(string PropertyName, object? Index, IInterceptorSubject Subject);
+
+    private bool CanEdit()
+    {
+        if (Subject == null) return false;
+
+        // Can edit if there's a custom edit component or configuration properties
+        var hasEditComponent = ComponentRegistry.HasComponent(
+            Subject.GetType(),
+            SubjectComponentType.Edit);
+
+        return hasEditComponent || Subject.HasConfigurationProperties();
+    }
+
+    private async Task OpenEditDialog()
+    {
+        if (Subject == null) return;
+
+        var parameters = new DialogParameters<SubjectEditDialog>
+        {
+            { x => x.Subject, Subject }
+        };
+
+        // Check if custom edit component exists to determine dialog size
+        var editRegistration = ComponentRegistry.GetComponent(
+            Subject.GetType(),
+            SubjectComponentType.Edit);
+
+        var maxWidth = editRegistration != null ? MaxWidth.Large : MaxWidth.Small;
+
+        var options = new DialogOptions
+        {
+            MaxWidth = maxWidth,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        var title = GetSubjectTitle();
+        await DialogService.ShowAsync<SubjectEditDialog>($"Edit {title}", parameters, options);
+    }
+
+    private IReadOnlyList<SubjectMethodInfo> GetMethods() =>
+        _registeredSubject?.GetAllMethods() ?? [];
+
+    private async Task ExecuteMethodAsync(SubjectMethodInfo operation)
+    {
+        if (Subject == null || _executingOperation != null)
+            return;
+
+        try
+        {
+            object?[]? parameters = null;
+
+            // If operation has parameters, show parameter dialog
+            if (operation.Parameters.Length > 0)
+            {
+                var parameterDialog = await MethodParameterDialog.ShowAsync(DialogService, operation);
+                var parameterResult = await parameterDialog.Result;
+                if (parameterResult == null || parameterResult.Canceled)
+                    return;
+
+                parameters = parameterResult.Data as object?[];
+            }
+            // If operation requires confirmation, show confirmation dialog
+            else if (operation.RequiresConfirmation)
+            {
+                var confirmDialog = await MethodConfirmationDialog.ShowAsync(DialogService, operation);
+                var confirmResult = await confirmDialog.Result;
+                if (confirmResult == null || confirmResult.Canceled)
+                    return;
+            }
+
+            // Execute the operation
+            _executingOperation = operation;
+            StateHasChanged();
+
+            var result = await MethodInvoker.InvokeAsync(
+                Subject,
+                operation,
+                parameters ?? []);
+
+            _executingOperation = null;
+            StateHasChanged();
+
+            // Show result or error dialog
+            if (result.Success)
+            {
+                if (result.Result != null)
+                {
+                    await MethodResultDialog.ShowAsync(DialogService, operation.Title, result.Result);
+                }
+            }
+            else
+            {
+                await MethodErrorDialog.ShowAsync(DialogService, operation.Title, result.Exception!);
+            }
+        }
+        catch (Exception ex)
+        {
+            _executingOperation = null;
+            await MethodErrorDialog.ShowAsync(DialogService, operation.Title, ex);
+        }
+    }
+}

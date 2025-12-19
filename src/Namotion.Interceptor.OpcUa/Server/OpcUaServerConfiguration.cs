@@ -1,4 +1,4 @@
-﻿using Namotion.Interceptor.Sources.Paths;
+﻿using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 using Opc.Ua.Export;
@@ -26,10 +26,10 @@ public class OpcUaServerConfiguration
     public string NamespaceUri { get; init; } = "http://namotion.com/Interceptor/";
     
     /// <summary>
-    /// Gets the source path provider used to map between OPC UA node browse names and C# property names.
+    /// Gets the path provider used to map between OPC UA node browse names and C# property names.
     /// This provider determines which properties are included and how their names are translated.
     /// </summary>
-    public required ISourcePathProvider PathProvider { get; init; }
+    public required PathProviderBase PathProvider { get; init; }
 
     /// <summary>
     /// Gets the value converter used to convert between OPC UA node values and C# property values.
@@ -52,6 +52,12 @@ public class OpcUaServerConfiguration
     /// Gets or sets the retry time (default: 10s).
     /// </summary>
     public TimeSpan? RetryTime { get; init; }
+
+    /// <summary>
+    /// Gets or sets the base address for the OPC UA server.
+    /// Default is "opc.tcp://localhost:4840/".
+    /// </summary>
+    public string BaseAddress { get; init; } = "opc.tcp://localhost:4840/";
 
     /// <summary>
     /// Gets or sets the telemetry context for OPC UA operations.
@@ -120,7 +126,7 @@ public class OpcUaServerConfiguration
             ServerConfiguration = new ServerConfiguration
             {
                 // Base addresses kept minimal (tcp only). Add https if required later.
-                BaseAddresses = { "opc.tcp://localhost:4840/" },
+                BaseAddresses = { BaseAddress },
                 SecurityPolicies =
                 [
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.Sign, SecurityPolicyUri = SecurityPolicies.Basic256Sha256 },

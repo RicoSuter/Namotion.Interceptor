@@ -1,0 +1,85 @@
+@using HomeBlaze.Components.Abstractions.Pages
+@using Microsoft.Extensions.Logging
+
+@inject RootManager RootManager
+@inject NavigationItemResolver NavigationResolver
+@inject NavigationManager NavigationManager
+@inject ILogger<NavMenu> Logger
+
+@implements IDisposable
+
+<MudNavMenu>
+    @if (RootManager.Root != null)
+    {
+        @foreach (var item in GetRootItems().Where(i => i.Location == NavigationLocation.NavBar))
+        {
+            @if (item.IsPage && !item.IsFolder)
+            {
+                <MudNavLink Href="@item.PageUrl"
+                            Match="NavLinkMatch.All"
+                            Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(item.Icon)">
+                    @item.Title
+                </MudNavLink>
+            }
+            else if (item.IsFolder)
+            {
+                <NavFolder Item="item" NavigationResolver="NavigationResolver" CurrentPath="@_currentPath" />
+            }
+        }
+    }
+
+    <MudDivider Class="my-2" />
+    <MudNavLink Href="browser"
+                Match="NavLinkMatch.Prefix"
+                Icon="@Icons.Material.Filled.FolderOpen">
+        Browser
+    </MudNavLink>
+</MudNavMenu>
+
+@code {
+    private Timer? _refreshTimer;
+    private string _currentPath = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        // Periodically refresh to catch new files
+        _refreshTimer = new Timer(_ => InvokeAsync(StateHasChanged),
+            null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+
+        NavigationManager.LocationChanged += OnLocationChanged;
+        UpdateCurrentPath();
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        UpdateCurrentPath();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void UpdateCurrentPath()
+    {
+        _currentPath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+    }
+
+    private IEnumerable<NavigationItem> GetRootItems()
+    {
+        if (RootManager.Root == null)
+            return Enumerable.Empty<NavigationItem>();
+
+        try
+        {
+            return NavigationResolver.GetChildItems(RootManager.Root);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Error getting navigation items");
+            return Enumerable.Empty<NavigationItem>();
+        }
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}
