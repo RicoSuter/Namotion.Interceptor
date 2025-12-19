@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Services.Serialization;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Abstractions.Attributes;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,6 +30,7 @@ public class ConfigurableSubjectSerializer
         _serviceProvider = serviceProvider;
         _jsonOptions = new JsonSerializerOptions
         {
+            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(),
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull

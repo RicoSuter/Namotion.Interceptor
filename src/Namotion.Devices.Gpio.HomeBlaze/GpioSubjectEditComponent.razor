@@ -1,0 +1,127 @@
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(GpioSubject))]
+@implements ISubjectComponent
+
+<MudStack Spacing="4">
+    <MudText Typo="Typo.h6">GPIO Configuration</MudText>
+
+    @* Pin Configuration Section *@
+    <MudExpansionPanels>
+        <MudExpansionPanel Text="Digital Pins" Expanded="true">
+            @if (GpioSubject?.Pins.Count > 0)
+            {
+                <MudTable Items="@GpioSubject.Pins.Values.OrderBy(p => p.PinNumber)" Dense="true">
+                    <HeaderContent>
+                        <MudTh>Pin</MudTh>
+                        <MudTh>Mode</MudTh>
+                        <MudTh>Value</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@context.PinNumber</MudTd>
+                        <MudTd>
+                            <MudSelect T="GpioPinMode" Value="@context.Mode" ValueChanged="@(v => OnModeChanged(context, v))" Dense="true">
+                                @foreach (var mode in Enum.GetValues<GpioPinMode>())
+                                {
+                                    <MudSelectItem Value="@mode">@mode</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudTd>
+                        <MudTd>
+                            @if (context.Mode == GpioPinMode.Output)
+                            {
+                                <MudSwitch T="bool" Value="@context.Value" ValueChanged="@(v => OnValueChanged(context, v))" Color="Color.Primary" />
+                            }
+                            else
+                            {
+                                <MudChip T="string" Color="@(context.Value ? Color.Success : Color.Default)" Size="Size.Small">
+                                    @(context.Value ? "HIGH" : "LOW")
+                                </MudChip>
+                            }
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info">No GPIO pins detected. Running on non-Pi hardware?</MudAlert>
+            }
+        </MudExpansionPanel>
+
+        @* MCP3008 ADC Section *@
+        <MudExpansionPanel Text="MCP3008 ADC (SPI)">
+            <MudStack Spacing="2">
+                <MudSwitch T="bool" Value="@(GpioSubject?.Mcp3008 != null)" ValueChanged="@OnMcp3008EnabledChanged" Label="Enable MCP3008" Color="Color.Primary" />
+
+                @if (GpioSubject?.Mcp3008 != null)
+                {
+                    <MudNumericField T="int" Value="@GpioSubject.Mcp3008.ClockPin" ValueChanged="@(v => GpioSubject.Mcp3008.ClockPin = v)" Label="Clock Pin" />
+                    <MudNumericField T="int" Value="@GpioSubject.Mcp3008.MosiPin" ValueChanged="@(v => GpioSubject.Mcp3008.MosiPin = v)" Label="MOSI Pin" />
+                    <MudNumericField T="int" Value="@GpioSubject.Mcp3008.MisoPin" ValueChanged="@(v => GpioSubject.Mcp3008.MisoPin = v)" Label="MISO Pin" />
+                    <MudNumericField T="int" Value="@GpioSubject.Mcp3008.ChipSelectPin" ValueChanged="@(v => GpioSubject.Mcp3008.ChipSelectPin = v)" Label="Chip Select Pin" />
+                }
+            </MudStack>
+        </MudExpansionPanel>
+
+        @* ADS1115 ADC Section *@
+        <MudExpansionPanel Text="ADS1115 ADC (I2C)">
+            <MudStack Spacing="2">
+                <MudSwitch T="bool" Value="@(GpioSubject?.Ads1115 != null)" ValueChanged="@OnAds1115EnabledChanged" Label="Enable ADS1115" Color="Color.Primary" />
+
+                @if (GpioSubject?.Ads1115 != null)
+                {
+                    <MudNumericField T="int" Value="@GpioSubject.Ads1115.I2cBus" ValueChanged="@(v => GpioSubject.Ads1115.I2cBus = v)" Label="I2C Bus" />
+                    <MudNumericField T="int" Value="@GpioSubject.Ads1115.Address" ValueChanged="@(v => GpioSubject.Ads1115.Address = v)" Label="I2C Address" />
+                }
+            </MudStack>
+        </MudExpansionPanel>
+
+        @* Analog Channels Section *@
+        @if (GpioSubject?.AnalogChannels.Count > 0)
+        {
+            <MudExpansionPanel Text="Analog Channels">
+                <MudTable Items="@GpioSubject.AnalogChannels.Values.OrderBy(c => c.ChannelNumber)" Dense="true">
+                    <HeaderContent>
+                        <MudTh>Channel</MudTh>
+                        <MudTh>Value</MudTh>
+                        <MudTh>Raw</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@context.ChannelNumber</MudTd>
+                        <MudTd>@context.Value.ToString("P1")</MudTd>
+                        <MudTd>@context.RawValue</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            </MudExpansionPanel>
+        }
+    </MudExpansionPanels>
+</MudStack>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private GpioSubject? GpioSubject => Subject as GpioSubject;
+
+    private void OnModeChanged(GpioPin pin, GpioPinMode mode)
+    {
+        pin.Mode = mode;
+    }
+
+    private void OnValueChanged(GpioPin pin, bool value)
+    {
+        pin.Value = value;
+    }
+
+    private void OnMcp3008EnabledChanged(bool enabled)
+    {
+        if (GpioSubject == null) return;
+        GpioSubject.Mcp3008 = enabled ? new Mcp3008Configuration() : null;
+    }
+
+    private void OnAds1115EnabledChanged(bool enabled)
+    {
+        if (GpioSubject == null) return;
+        GpioSubject.Ads1115 = enabled ? new Ads1115Configuration() : null;
+    }
+}
