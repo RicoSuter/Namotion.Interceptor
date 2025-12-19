@@ -59,6 +59,13 @@ public class OpcUaClientConfiguration : OpcUaConfigurationBase
     public required new OpcUaSubjectFactory SubjectFactory { get; init; }
 
     /// <summary>
+    /// Enables calling AddNodes/DeleteNodes on the server when local subjects change.
+    /// Only works if the server supports these services (graceful degradation if not).
+    /// Default: false.
+    /// </summary>
+    public bool EnableRemoteNodeManagement { get; set; } = false;
+
+    /// <summary>
     /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute (default: 0).
     /// </summary>
     public int DefaultSamplingInterval { get; init; }

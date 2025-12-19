@@ -134,8 +134,8 @@ public class OpcUaModelChangeEventTests
                     new TestPerson { FirstName = "Jane", LastName = "Smith", Scores = [88.1, 95.7] }
                 ];
             },
-            enableLiveSync: enableLiveSync,
-            enableRemoteNodeManagement: enableRemoteNodeManagement);
+            enableStructureSynchronization: enableLiveSync,
+            allowRemoteNodeManagement: enableRemoteNodeManagement);
     }
 
     private async Task StartClientAsync(bool enableLiveSync = false, bool enableRemoteNodeManagement = false)
@@ -144,7 +144,7 @@ public class OpcUaModelChangeEventTests
         await _client.StartAsync(
             context => new TestRoot(context),
             isConnected: root => root.Connected,
-            enableLiveSync: enableLiveSync,
+            enableStructureSynchronization: enableLiveSync,
             enableRemoteNodeManagement: enableRemoteNodeManagement);
     }
 }

@@ -32,6 +32,14 @@ public class OpcUaServerConfiguration : OpcUaConfigurationBase
     public bool CleanCertificateStore { get; init; } = true;
 
     /// <summary>
+    /// Allows external OPC UA clients to add/remove nodes via AddNodes/DeleteNodes services.
+    /// When true, server creates local subjects when external client adds nodes.
+    /// Security consideration: Only enable if you trust connected clients.
+    /// Default: false.
+    /// </summary>
+    public bool AllowRemoteNodeManagement { get; set; } = false;
+
+    /// <summary>
     /// Gets or sets the base address for the OPC UA server.
     /// Default is "opc.tcp://localhost:4840/".
     /// </summary>
