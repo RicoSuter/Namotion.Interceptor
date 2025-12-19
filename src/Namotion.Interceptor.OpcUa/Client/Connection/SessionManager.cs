@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Polling;
-using Namotion.Interceptor.Sources;
 using Opc.Ua;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;

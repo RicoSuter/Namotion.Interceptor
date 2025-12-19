@@ -4,10 +4,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -42,15 +42,14 @@ public class SubjectSourceBenchmark
             .Select(i => $"Name{i}")
             .ToArray();
 
-        _source = new TestSubjectSource(_propertyNames.Length);
+        _car = new Car(_context);
+        _source = new TestSubjectSource(_propertyNames.Length) { RootSubject = _car };
         _service = new SubjectSourceBackgroundService(
             _source,
             _context,
             NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(1),
             retryTime: TimeSpan.FromSeconds(1));
-
-        _car = new Car(_context);
 
         foreach (var name in _propertyNames)
         {
@@ -121,6 +120,8 @@ public class SubjectSourceBenchmark
         private readonly AutoResetEvent _signal = new(false);
 
         public SubjectPropertyWriter PropertyWriter { get; private set; }
+
+        public IInterceptorSubject RootSubject { get; set; }
 
         public TestSubjectSource(int targetCount)
         {

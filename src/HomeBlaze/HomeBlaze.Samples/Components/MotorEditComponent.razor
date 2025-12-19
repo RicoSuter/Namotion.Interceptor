@@ -1,0 +1,97 @@
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Motor))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name"
+                  Label="Name"
+                  Required="true"
+                  RequiredError="Name is required"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged" />
+
+    <MudNumericField @bind-Value="_targetSpeed"
+                     Label="Target Speed (RPM)"
+                     Min="0"
+                     Max="10000"
+                     Class="mt-4" />
+
+    <MudNumericField @bind-Value="_simulationIntervalMs"
+                     Label="Simulation Interval (ms)"
+                     Min="100"
+                     Max="10000"
+                     Class="mt-4" />
+
+    <MudDivider Class="my-4" />
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Current State (Read-only)</MudText>
+    <MudText>Current Speed: @MotorSubject?.CurrentSpeed RPM</MudText>
+    <MudText>Temperature: @MotorSubject?.Temperature.ToString("F1")°C</MudText>
+    <MudText>Status: @MotorSubject?.Status</MudText>
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private Motor? MotorSubject => Subject as Motor;
+
+    private string _name = string.Empty;
+    private int _targetSpeed;
+    private int _simulationIntervalMs;
+
+    private string _originalName = string.Empty;
+    private int _originalTargetSpeed;
+    private int _originalSimulationIntervalMs;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_name);
+    public bool IsDirty => _name != _originalName ||
+                           _targetSpeed != _originalTargetSpeed ||
+                           _simulationIntervalMs != _originalSimulationIntervalMs;
+
+    public MaxWidth PreferredDialogSize => MaxWidth.Small;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnParametersSet()
+    {
+        if (MotorSubject != null)
+        {
+            _name = MotorSubject.Name;
+            _targetSpeed = MotorSubject.TargetSpeed;
+            _simulationIntervalMs = (int)MotorSubject.SimulationInterval.TotalMilliseconds;
+
+            _originalName = _name;
+            _originalTargetSpeed = _targetSpeed;
+            _originalSimulationIntervalMs = _simulationIntervalMs;
+        }
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (MotorSubject != null && IsValid)
+        {
+            MotorSubject.Name = _name;
+            MotorSubject.TargetSpeed = _targetSpeed;
+            MotorSubject.SimulationInterval = TimeSpan.FromMilliseconds(_simulationIntervalMs);
+
+            _originalName = _name;
+            _originalTargetSpeed = _targetSpeed;
+            _originalSimulationIntervalMs = _simulationIntervalMs;
+
+            IsDirtyChanged?.Invoke(false); // TODO: Move to base class (StorageFileBase with events, etc.)
+        }
+
+        return Task.CompletedTask;
+    }
+}

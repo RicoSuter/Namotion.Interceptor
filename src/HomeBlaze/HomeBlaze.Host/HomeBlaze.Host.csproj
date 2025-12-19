@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+        <PackageReference Include="Toolbelt.Blazor.HotKeys2" Version="6.0.1" />
+        <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Storage.Abstractions\HomeBlaze.Storage.Abstractions.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Host.Services\HomeBlaze.Host.Services.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Storage.Blazor\HomeBlaze.Storage.Blazor.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Blazor\Namotion.Interceptor.Blazor.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj" />
+        <PackageReference Include="MudBlazor" Version="8.*" />
+        <PackageReference Include="Markdig" Version="0.*" />
+    </ItemGroup>
+
+</Project>

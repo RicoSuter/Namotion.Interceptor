@@ -8,6 +8,8 @@ Namotion.Interceptor is a .NET library designed to simplify the creation of trac
 
 In addition to property tracking, Namotion.Interceptor offers advanced features such as automatic change detection (including derived properties), reactive source mapping (e.g., for GraphQL subscriptions or MQTT publishing), and other powerful capabilities that integrate seamlessly into your workflow.
 
+**[Subject Design Guidelines](docs/subject-guidelines.md)** - Complete reference for property patterns and best practices
+
 ![Feature Map](./features.png)
 
 ## Change tracking sample
@@ -122,7 +124,7 @@ For more samples, check out the "Samples" directory in the Visual Studio solutio
 
 ## Projects
 
-### Namotion.Interceptor
+### [Namotion.Interceptor](docs/interceptor.md)
 
 Core library for property and method interception with source generation support. Provides the fundamental building blocks for creating intercepted objects.
 
@@ -233,7 +235,7 @@ var registered = subject.TryGetRegisteredSubject();
 
 Enables binding subject properties to external data sources like MQTT, OPC UA, or custom providers.
 
-### Namotion.Interceptor.Tracking
+### [Namotion.Interceptor.Tracking](docs/tracking.md)
 
 Provides comprehensive change tracking for subjects, including property changes, derived properties, and subject lifecycle events.
 
@@ -277,7 +279,7 @@ var context = InterceptorSubjectContext
 
 **Namotion.Interceptor.AspNetCore** - ASP.NET Core integration for exposing subjects as web APIs
 
-**Namotion.Interceptor.Blazor** - Blazor components for data binding with interceptor subjects
+**[Namotion.Interceptor.Blazor](docs/blazor.md)** - Blazor components for data binding with interceptor subjects
 
 **Namotion.Interceptor.GraphQL** - GraphQL integration with subscription support for real-time updates
 

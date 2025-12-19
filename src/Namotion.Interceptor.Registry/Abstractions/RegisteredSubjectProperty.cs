@@ -152,7 +152,7 @@ public class RegisteredSubjectProperty
     {
         return Reference.Metadata.GetValue?.Invoke(Subject);
     }
-
+    
     /// <summary>
     /// Sets the value of the property.
     /// </summary>

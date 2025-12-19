@@ -18,6 +18,8 @@ public static class ParentsHandlerExtensions
     
     public static HashSet<SubjectParent> GetParents(this IInterceptorSubject subject)
     {
+        // TODO: Make thread safe!
+        
         return (HashSet<SubjectParent>)subject.Data.GetOrAdd((null, ParentsKey), (_) => new HashSet<SubjectParent>())!;
     }
 }
