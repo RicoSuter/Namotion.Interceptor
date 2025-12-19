@@ -29,9 +29,9 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Func<TRoot, bool> isConnected,
         string serverUrl = DefaultServerUrl,
-        bool enableLiveSync = false,
+        bool enableStructureSynchronization = true,
         bool enableRemoteNodeManagement = false,
-        bool enablePeriodicResync = false)
+        bool enablePeriodicResynchronization = false)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddLogging(logging =>
@@ -52,12 +52,15 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
         builder.Services.AddSingleton(Root);
         builder.Services.AddOpcUaSubjectClient<TRoot>(
-            serverUrl, 
-            "opc", 
+            serverUrl,
+            "opc",
             rootName: "Root",
-            enableLiveSync: enableLiveSync,
-            enableRemoteNodeManagement: enableRemoteNodeManagement,
-            enablePeriodicResync: enablePeriodicResync);
+            configure: configuration =>
+            {
+                configuration.EnableStructureSynchronization = enableStructureSynchronization;
+                configuration.EnableRemoteNodeManagement = enableRemoteNodeManagement;
+                configuration.EnablePeriodicResynchronization = enablePeriodicResynchronization;
+            });
 
         _host = builder.Build();
         await _host.StartAsync();

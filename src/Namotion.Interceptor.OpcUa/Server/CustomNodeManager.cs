@@ -71,6 +71,17 @@ internal class CustomNodeManager : CustomNodeManager2
     }
 
     /// <summary>
+    /// Gets the NodeId that represents the root subject.
+    /// Used for Strategy.Initialize to register the root mapping.
+    /// </summary>
+    public NodeId GetRootNodeId()
+    {
+        return _configuration.RootName is not null
+            ? new NodeId(_configuration.RootName, NamespaceIndex)
+            : ObjectIds.ObjectsFolder;
+    }
+
+    /// <summary>
     /// Removes nodes for a detached subject at runtime.
     /// Removes nodes from the address space and cleans up tracking.
     /// </summary>

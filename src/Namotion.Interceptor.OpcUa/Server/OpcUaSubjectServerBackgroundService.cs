@@ -119,15 +119,24 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                     await application.Start(server);
 
                     // Initialize address space sync if enabled
-                    if (_configuration.EnableLiveSync)
+                    if (_configuration.EnableStructureSynchronization)
                     {
+                        var nodeManager = server.GetNodeManager();
                         _syncStrategy = new OpcUaServerSyncStrategy(_configuration, this, _logger);
-                        _syncStrategy.SetNodeManager(server.GetNodeManager(), server.GetServerInternal());
-                        
+                        _syncStrategy.SetNodeManager(nodeManager, server.GetServerInternal());
+
+                        // Get root node ID for strategy and address space sync
+                        NodeId? rootNodeId = null;
+                        if (nodeManager is not null)
+                        {
+                            rootNodeId = nodeManager.GetRootNodeId();
+                            _syncStrategy.Initialize(_subject, rootNodeId);
+                        }
+
                         _addressSpaceSync = new OpcUaAddressSpaceSync(_syncStrategy, _configuration, _logger);
-                        _addressSpaceSync.Initialize(_subject);
-                        
-                        _logger.LogInformation("OPC UA address space live sync enabled.");
+                        _addressSpaceSync.Initialize(_subject, rootNodeId);
+
+                        _logger.LogInformation("OPC UA address space structure synchronization enabled.");
                     }
 
                     using var changeQueueProcessor = new ChangeQueueProcessor(

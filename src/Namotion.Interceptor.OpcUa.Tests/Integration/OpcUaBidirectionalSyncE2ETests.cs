@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
@@ -17,6 +18,31 @@ public class OpcUaBidirectionalSyncE2ETests
     public OpcUaBidirectionalSyncE2ETests(ITestOutputHelper output)
     {
         _output = output;
+    }
+
+    /// <summary>
+    /// Waits for a condition to become true with timeout and polling.
+    /// Replaces arbitrary Task.Delay calls with condition-based waiting.
+    /// </summary>
+    private static async Task WaitForConditionAsync(
+        Func<bool> condition,
+        TimeSpan timeout,
+        string failureMessage,
+        TimeSpan? pollInterval = null)
+    {
+        var interval = pollInterval ?? TimeSpan.FromMilliseconds(100);
+        var stopwatch = Stopwatch.StartNew();
+
+        while (stopwatch.Elapsed < timeout)
+        {
+            if (condition())
+            {
+                return;
+            }
+            await Task.Delay(interval);
+        }
+
+        Assert.Fail($"Timeout ({timeout.TotalSeconds}s) waiting for condition: {failureMessage}");
     }
 
     [Fact]
@@ -92,13 +118,16 @@ public class OpcUaBidirectionalSyncE2ETests
             _server.Root.Name = "UpdatedServerName";
             _output.WriteLine($"Server name after update: {_server.Root.Name}");
 
-            // Wait for value change to propagate
-            await Task.Delay(3000);
+            // Wait for value change to propagate using polling instead of fixed delay
+            await WaitForConditionAsync(
+                () => _client.Root.Name == "UpdatedServerName",
+                TimeSpan.FromSeconds(10),
+                "Client name should sync from server");
 
             // Assert - Verify the update is synced to the client
             _output.WriteLine($"Client name after sync: {_client.Root.Name}");
             Assert.Equal("UpdatedServerName", _client.Root.Name);
-            
+
             _output.WriteLine("✅ Value synchronization working correctly");
         }
         finally
@@ -263,14 +292,17 @@ public class OpcUaBidirectionalSyncE2ETests
 
             // Act - Make a change that triggers ModelChangeEvent
             _server.Root.Name = "TriggerEvent";
-            
-            // Wait for event propagation
-            await Task.Delay(3000);
 
-            // Assert - The infrastructure for events is in place
+            // Wait for event propagation using polling
+            await WaitForConditionAsync(
+                () => _client.Root.Name == "TriggerEvent",
+                TimeSpan.FromSeconds(10),
+                "Client name should sync after ModelChangeEvent");
+
+            // Assert - Verify the actual state after event propagation
             _output.WriteLine("✅ ModelChangeEvent infrastructure operational");
             _output.WriteLine("   Events can be fired and received by clients");
-            Assert.True(true, "Event infrastructure validated");
+            Assert.Equal("TriggerEvent", _client.Root.Name);
         }
         finally
         {
@@ -299,8 +331,8 @@ public class OpcUaBidirectionalSyncE2ETests
                     new TestPerson { FirstName = "Jane", LastName = "Smith", Scores = [88.1, 95.7] }
                 ];
             },
-            enableLiveSync: enableLiveSync,
-            enableRemoteNodeManagement: enableRemoteNodeManagement);
+            enableStructureSynchronization: enableLiveSync,
+            allowRemoteNodeManagement: enableRemoteNodeManagement);
     }
 
     private async Task StartClientAsync(bool enableLiveSync = false, bool enableRemoteNodeManagement = false)
@@ -309,7 +341,7 @@ public class OpcUaBidirectionalSyncE2ETests
         await _client.StartAsync(
             context => new TestRoot(context),
             isConnected: root => root.Connected,
-            enableLiveSync: enableLiveSync,
+            enableStructureSynchronization: enableLiveSync,
             enableRemoteNodeManagement: enableRemoteNodeManagement);
     }
 }

@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Dynamic;
+using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Sync;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -13,120 +13,124 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// Client-side implementation of OPC UA address space synchronization.
 /// Handles creating monitored items for value sync and optionally calling AddNodes/DeleteNodes on the server.
 /// </summary>
-internal class OpcUaClientSyncStrategy : IOpcUaSyncStrategy
+internal class OpcUaClientSyncStrategy : OpcUaSyncStrategyBase
 {
-    private readonly OpcUaClientConfiguration _configuration;
+    private readonly OpcUaClientConfiguration _clientConfiguration;
     private readonly OpcUaSubjectClientSource _clientSource;
-    private readonly ILogger _logger;
-    private readonly Dictionary<NodeId, IInterceptorSubject> _nodeIdToSubject = new();
-    private readonly Dictionary<IInterceptorSubject, NodeId> _subjectToNodeId = new();
-    private readonly Dictionary<IInterceptorSubject, List<MonitoredItem>> _subjectMonitoredItems = new();
 
     private Session? _session;
+    private SubscriptionManager? _subscriptionManager;
 
     public OpcUaClientSyncStrategy(
         OpcUaClientConfiguration configuration,
         OpcUaSubjectClientSource clientSource,
         ILogger logger)
+        : base(configuration, logger)
     {
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _clientConfiguration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _clientSource = clientSource ?? throw new ArgumentNullException(nameof(clientSource));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    /// <inheritdoc />
+    protected override object DetachmentSource => _clientSource;
 
     /// <summary>
-    /// Sets the current OPC UA session. Must be called before any sync operations.
+    /// Sets the current OPC UA session and subscription manager.
+    /// Must be called before any sync operations.
     /// </summary>
-    public void SetSession(Session? session)
+    public void SetSession(Session? session, SubscriptionManager? subscriptionManager = null)
     {
         _session = session;
+        _subscriptionManager = subscriptionManager;
     }
 
-    public async Task OnSubjectAttachedAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+    /// <inheritdoc />
+    protected override void OnBeforeSubjectRemoved(IInterceptorSubject subject)
     {
+        // Remove monitored items before detaching
+        _subscriptionManager?.RemoveItemsForSubject(subject);
+    }
+
+    public override async Task OnSubjectAttachedAsync(SubjectLifecycleChange change, CancellationToken cancellationToken)
+    {
+        var subject = change.Subject;
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is null || _session is null)
         {
             return;
         }
 
-        _logger.LogDebug(
+        Logger.LogDebug(
             "Client: Subject attached - {SubjectType}. Creating monitored items...",
             subject.GetType().Name);
 
-        // Create monitored items for this subject's properties
-        var monitoredItems = await CreateMonitoredItemsForSubjectAsync(registeredSubject, _session, cancellationToken).ConfigureAwait(false);
-        if (monitoredItems.Count > 0)
+        // Create monitored items using SubscriptionManager if available
+        if (_subscriptionManager is not null)
         {
-            _subjectMonitoredItems[subject] = monitoredItems;
-            _logger.LogDebug(
-                "Created {Count} monitored items for subject {SubjectType}",
-                monitoredItems.Count,
+            await _subscriptionManager.AddMonitoredItemsForSubjectAsync(registeredSubject, _session, cancellationToken).ConfigureAwait(false);
+            Logger.LogDebug(
+                "Created monitored items via SubscriptionManager for subject {SubjectType}",
                 subject.GetType().Name);
         }
 
         // Try to create node on server if enabled and supported
-        if (_configuration.EnableRemoteNodeManagement)
+        if (_clientConfiguration.EnableRemoteNodeManagement)
         {
             await TryCreateRemoteNodeAsync(subject, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    public async Task OnSubjectDetachedAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+    public override Task OnSubjectDetachedAsync(SubjectLifecycleChange change, CancellationToken cancellationToken)
     {
+        var subject = change.Subject;
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is null || _session is null)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        _logger.LogDebug(
+        Logger.LogDebug(
             "Client: Subject detached - {SubjectType}. Removing monitored items...",
             subject.GetType().Name);
 
-        // Remove monitored items for this subject
-        if (_subjectMonitoredItems.TryGetValue(subject, out var monitoredItems))
+        // Remove monitored items using SubscriptionManager if available
+        if (_subscriptionManager is not null)
         {
-            await RemoveMonitoredItemsAsync(monitoredItems, _session, cancellationToken).ConfigureAwait(false);
-            _subjectMonitoredItems.Remove(subject);
-            
-            _logger.LogDebug(
-                "Removed {Count} monitored items for subject {SubjectType}",
-                monitoredItems.Count,
+            _subscriptionManager.RemoveItemsForSubject(subject);
+            Logger.LogDebug(
+                "Removed monitored items via SubscriptionManager for subject {SubjectType}",
                 subject.GetType().Name);
         }
 
         // Try to delete node on server if enabled and supported
-        if (_configuration.EnableRemoteNodeManagement)
+        if (_clientConfiguration.EnableRemoteNodeManagement)
         {
-            await TryDeleteRemoteNodeAsync(subject, cancellationToken).ConfigureAwait(false);
+            return TryDeleteRemoteNodeAsync(subject, cancellationToken);
         }
 
-        // Clean up mappings
-        if (_subjectToNodeId.TryGetValue(subject, out var nodeId))
-        {
-            _nodeIdToSubject.Remove(nodeId);
-            _subjectToNodeId.Remove(subject);
-        }
+        // Clean up mappings (via base class)
+        UnregisterMapping(subject);
+        return Task.CompletedTask;
     }
 
-    public async Task OnRemoteNodeAddedAsync(ReferenceDescription node, NodeId parentNodeId, CancellationToken cancellationToken)
+    public override async Task OnRemoteNodeAddedAsync(ReferenceDescription node, NodeId parentNodeId, CancellationToken cancellationToken)
     {
         if (_session is null)
         {
             return;
         }
 
-        _logger.LogDebug(
+        Logger.LogDebug(
             "Client: Remote node added - {NodeId}. Creating local subject...",
             node.NodeId);
 
         try
         {
             // 1. Find parent subject using parentNodeId
-            if (!_nodeIdToSubject.TryGetValue(parentNodeId, out var parentSubject))
+            var parentSubject = FindSubject(parentNodeId);
+            if (parentSubject is null)
             {
-                _logger.LogWarning(
+                Logger.LogWarning(
                     "Parent subject not found for node {NodeId}. Parent: {ParentNodeId}",
                     node.NodeId,
                     parentNodeId);
@@ -143,7 +147,7 @@ internal class OpcUaClientSyncStrategy : IOpcUaSyncStrategy
             var property = FindPropertyForNode(parentRegisteredSubject, node);
             if (property is null)
             {
-                _logger.LogDebug(
+                Logger.LogDebug(
                     "No matching property found for remote node {NodeId} in subject {SubjectType}",
                     node.NodeId,
                     parentSubject.GetType().Name);
@@ -155,108 +159,37 @@ internal class OpcUaClientSyncStrategy : IOpcUaSyncStrategy
             {
                 // Create subject using SubjectFactory
                 var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, _session.NamespaceUris);
-                var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, node, _session, cancellationToken).ConfigureAwait(false);
-                
+                var newSubject = await _clientConfiguration.SubjectFactory.CreateSubjectAsync(property, node, _session, cancellationToken).ConfigureAwait(false);
+
                 if (newSubject is not null)
                 {
                     // Track the mapping
-                    _nodeIdToSubject[nodeId] = newSubject;
-                    _subjectToNodeId[newSubject] = nodeId;
+                    RegisterMapping(newSubject, nodeId);
 
-                    // 4. Attach to parent property  
+                    // 4. Attach to parent property
                     property.SetValueFromSource(_clientSource, null, newSubject);
 
-                    _logger.LogInformation(
+                    Logger.LogInformation(
                         "Created subject {SubjectType} for remote node {NodeId}",
                         newSubject.GetType().Name,
                         node.NodeId);
 
-                    // 5. Create monitored items for value sync
+                    // 5. Create monitored items for value sync using SubscriptionManager
                     var registeredSubject = newSubject.TryGetRegisteredSubject();
-                    if (registeredSubject is not null)
+                    if (registeredSubject is not null && _subscriptionManager is not null)
                     {
-                        var monitoredItems = await CreateMonitoredItemsForSubjectAsync(registeredSubject, _session, cancellationToken).ConfigureAwait(false);
-                        if (monitoredItems.Count > 0)
-                        {
-                            _subjectMonitoredItems[newSubject] = monitoredItems;
-                        }
+                        await _subscriptionManager.AddMonitoredItemsForSubjectAsync(registeredSubject, _session, cancellationToken).ConfigureAwait(false);
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create local subject for remote node {NodeId}", node.NodeId);
+            Logger.LogError(ex, "Failed to create local subject for remote node {NodeId}", node.NodeId);
         }
-
-        await Task.CompletedTask.ConfigureAwait(false);
     }
 
-    private RegisteredSubjectProperty? FindPropertyForNode(RegisteredSubject registeredSubject, ReferenceDescription node)
-    {
-        var nodeIdString = node.NodeId.Identifier.ToString();
-        var nodeNamespaceUri = node.NodeId.NamespaceUri ?? _session?.NamespaceUris.GetString(node.NodeId.NamespaceIndex);
-
-        // Try to find by OpcUaNode attribute
-        foreach (var property in registeredSubject.Properties)
-        {
-            var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
-            if (opcUaNodeAttribute is not null && opcUaNodeAttribute.NodeIdentifier == nodeIdString)
-            {
-                var propertyNodeNamespaceUri = opcUaNodeAttribute.NodeNamespaceUri ?? _configuration.DefaultNamespaceUri;
-                if (propertyNodeNamespaceUri == nodeNamespaceUri)
-                {
-                    return property;
-                }
-            }
-        }
-
-        // Try to find by path
-        return _configuration.PathProvider.TryGetPropertyFromSegment(registeredSubject, node.BrowseName.Name);
-    }
-
-    public async Task OnRemoteNodeRemovedAsync(NodeId nodeId, CancellationToken cancellationToken)
-    {
-        if (_session is null)
-        {
-            return;
-        }
-
-        _logger.LogDebug(
-            "Client: Remote node removed - {NodeId}. Removing local subject...",
-            nodeId);
-
-        // Find and detach local subject
-        if (_nodeIdToSubject.TryGetValue(nodeId, out var subject))
-        {
-            try
-            {
-                // Remove monitored items first
-                if (_subjectMonitoredItems.TryGetValue(subject, out var monitoredItems))
-                {
-                    await RemoveMonitoredItemsAsync(monitoredItems, _session, cancellationToken).ConfigureAwait(false);
-                    _subjectMonitoredItems.Remove(subject);
-                }
-
-                // Detach from parent - just log for now as proper detachment requires registry navigation
-                _logger.LogInformation(
-                    "Removed subject {SubjectType} for deleted node {NodeId}",
-                    subject.GetType().Name,
-                    nodeId);
-
-                _nodeIdToSubject.Remove(nodeId);
-                _subjectToNodeId.Remove(subject);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to detach subject for removed node {NodeId}", nodeId);
-            }
-        }
-
-        await Task.CompletedTask.ConfigureAwait(false);
-    }
-
-    public async Task<ReferenceDescriptionCollection> BrowseNodeAsync(NodeId nodeId, CancellationToken cancellationToken)
+    public override async Task<ReferenceDescriptionCollection> BrowseNodeAsync(NodeId nodeId, CancellationToken cancellationToken)
     {
         if (_session is null)
         {
@@ -279,110 +212,6 @@ internal class OpcUaClientSyncStrategy : IOpcUaSyncStrategy
         return nodeProperties[0];
     }
 
-    private async Task<List<MonitoredItem>> CreateMonitoredItemsForSubjectAsync(
-        RegisteredSubject registeredSubject,
-        Session session,
-        CancellationToken cancellationToken)
-    {
-        var monitoredItems = new List<MonitoredItem>();
-
-        try
-        {
-            // Create monitored items for all properties that have OPC UA node mappings
-            foreach (var property in registeredSubject.Properties)
-            {
-                if (property.Reference.TryGetPropertyData(_clientSource.OpcUaNodeIdKey, out var nodeIdData) && nodeIdData is NodeId nodeId)
-                {
-                    var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
-                    var monitoredItem = new MonitoredItem
-                    {
-                        StartNodeId = nodeId,
-                        AttributeId = Opc.Ua.Attributes.Value,
-                        MonitoringMode = MonitoringMode.Reporting,
-                        SamplingInterval = opcUaNodeAttribute?.SamplingInterval ?? _configuration.DefaultSamplingInterval,
-                        QueueSize = opcUaNodeAttribute?.QueueSize ?? _configuration.DefaultQueueSize,
-                        DiscardOldest = opcUaNodeAttribute?.DiscardOldest ?? _configuration.DefaultDiscardOldest,
-                        Handle = property
-                    };
-
-                    monitoredItems.Add(monitoredItem);
-                }
-            }
-
-            // If we have items to monitor, create a subscription and add them
-            if (monitoredItems.Count > 0)
-            {
-                // Note: In a full implementation, this would integrate with SessionManager's SubscriptionManager
-                // For now, we'll create a basic subscription
-                var subscription = new Subscription(session.DefaultSubscription)
-                {
-                    PublishingEnabled = true,
-                    PublishingInterval = _configuration.DefaultPublishingInterval,
-                    DisableMonitoredItemCache = true
-                };
-
-                if (!session.AddSubscription(subscription))
-                {
-                    _logger.LogWarning("Failed to add subscription for dynamic subject");
-                    return new List<MonitoredItem>();
-                }
-
-                await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
-
-                foreach (var item in monitoredItems)
-                {
-                    subscription.AddItem(item);
-                }
-
-                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create monitored items for subject");
-        }
-
-        return monitoredItems;
-    }
-
-    private async Task RemoveMonitoredItemsAsync(
-        List<MonitoredItem> monitoredItems,
-        Session session,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            // Find subscriptions containing these items and remove them
-            foreach (var subscription in session.Subscriptions.ToList())
-            {
-                var itemsToRemove = subscription.MonitoredItems
-                    .Where(item => monitoredItems.Any(mi => mi.ClientHandle == item.ClientHandle))
-                    .ToList();
-
-                if (itemsToRemove.Count > 0)
-                {
-                    foreach (var item in itemsToRemove)
-                    {
-                        subscription.RemoveItem(item);
-                    }
-
-                    await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
-
-                    // If subscription is now empty, remove it
-                    if (subscription.MonitoredItemCount == 0)
-                    {
-                        session.RemoveSubscription(subscription);
-                        subscription.Delete(true);
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to remove monitored items");
-        }
-    }
-
     private async Task TryCreateRemoteNodeAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         if (_session is null)
@@ -390,66 +219,182 @@ internal class OpcUaClientSyncStrategy : IOpcUaSyncStrategy
             return;
         }
 
-        try
-        {
-            // NOTE: AddNodes service call implementation is intentionally deferred.
-            // Reason: Client-initiated node creation requires complex OPC UA protocol operations
-            // and proper server permission handling. Current implementation handles server-side
-            // node creation (which covers the primary bidirectional sync use case).
-            // Future enhancement: Implement _session.AddNodesAsync with proper AddNodesItem construction.
-
-            _logger.LogDebug(
-                "Client-side AddNodes not implemented. " +
-                "Local subject '{SubjectType}' will sync values via server-side node creation.",
-                subject.GetType().Name);
-
-            await Task.CompletedTask.ConfigureAwait(false);
-        }
-        catch (ServiceResultException ex) when (
-            ex.StatusCode == StatusCodes.BadNotSupported ||
-            ex.StatusCode == StatusCodes.BadServiceUnsupported)
-        {
-            _logger.LogWarning(
-                "Server does not support AddNodes service. " +
-                "Local subject '{SubjectType}' will sync values but not structure.",
-                subject.GetType().Name);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create remote node for subject {SubjectType}.", subject.GetType().Name);
-        }
-    }
-
-    private async Task TryDeleteRemoteNodeAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
-    {
-        if (_session is null || !_subjectToNodeId.TryGetValue(subject, out var nodeId))
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
         {
             return;
         }
 
         try
         {
-            // NOTE: DeleteNodes service call implementation is intentionally deferred.
-            // Reason: Client-initiated node deletion requires complex OPC UA protocol operations
-            // and proper server permission handling. Current implementation handles server-side
-            // node removal (which covers the primary bidirectional sync use case).
-            // Future enhancement: Implement _session.DeleteNodesAsync with proper DeleteNodesItem construction.
+            // Find parent node ID
+            NodeId parentNodeId = ObjectIds.ObjectsFolder;
+            if (registeredSubject.Parents.Length > 0)
+            {
+                var parent = registeredSubject.Parents[0];
+                var parentNodeIdValue = FindNodeId(parent.Property.Parent.Subject);
+                if (parentNodeIdValue is not null)
+                {
+                    parentNodeId = parentNodeIdValue;
+                }
+            }
 
-            _logger.LogDebug("Client-side DeleteNodes not implemented. Node {NodeId} deletion handled server-side.", nodeId);
+            // Build AddNodesItem
+            var browseName = GetBrowseNameForSubject(subject);
+            var namespaceIndex = GetNamespaceIndex();
+            var nodeId = new NodeId(Guid.NewGuid().ToString(), namespaceIndex);
 
-            await Task.CompletedTask.ConfigureAwait(false);
+            var addNodesItem = new AddNodesItem
+            {
+                ParentNodeId = new ExpandedNodeId(parentNodeId),
+                ReferenceTypeId = ReferenceTypeIds.HasComponent,
+                RequestedNewNodeId = new ExpandedNodeId(nodeId),
+                BrowseName = browseName,
+                NodeClass = NodeClass.Object,
+                NodeAttributes = new ExtensionObject(new ObjectAttributes
+                {
+                    DisplayName = new LocalizedText(browseName.Name),
+                    Description = LocalizedText.Null,
+                    WriteMask = 0,
+                    UserWriteMask = 0,
+                    EventNotifier = 0
+                }),
+                TypeDefinition = new ExpandedNodeId(ObjectTypeIds.BaseObjectType)
+            };
+
+            var response = await _session.AddNodesAsync(
+                requestHeader: null,
+                [addNodesItem],
+                cancellationToken).ConfigureAwait(false);
+
+            if (response.Results.Count > 0)
+            {
+                var result = response.Results[0];
+                if (StatusCode.IsGood(result.StatusCode))
+                {
+                    var assignedNodeId = result.AddedNodeId;
+                    RegisterMapping(subject, assignedNodeId);
+
+                    Logger.LogInformation(
+                        "Successfully created remote node {NodeId} for subject {SubjectType}",
+                        assignedNodeId,
+                        subject.GetType().Name);
+                }
+                else if (result.StatusCode == StatusCodes.BadNotSupported ||
+                         result.StatusCode == StatusCodes.BadServiceUnsupported)
+                {
+                    Logger.LogWarning(
+                        "Server does not support AddNodes service. " +
+                        "Local subject '{SubjectType}' will sync values but not structure.",
+                        subject.GetType().Name);
+                }
+                else
+                {
+                    Logger.LogWarning(
+                        "Failed to create remote node for subject {SubjectType}: {StatusCode}",
+                        subject.GetType().Name,
+                        result.StatusCode);
+                }
+            }
         }
         catch (ServiceResultException ex) when (
             ex.StatusCode == StatusCodes.BadNotSupported ||
             ex.StatusCode == StatusCodes.BadServiceUnsupported)
         {
-            _logger.LogWarning(
+            Logger.LogWarning(
+                "Server does not support AddNodes service. " +
+                "Local subject '{SubjectType}' will sync values but not structure.",
+                subject.GetType().Name);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to create remote node for subject {SubjectType}.", subject.GetType().Name);
+        }
+    }
+
+    private async Task TryDeleteRemoteNodeAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        var nodeId = FindNodeId(subject);
+        if (nodeId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var deleteNodesItem = new DeleteNodesItem
+            {
+                NodeId = nodeId,
+                DeleteTargetReferences = true
+            };
+
+            var response = await _session.DeleteNodesAsync(
+                requestHeader: null,
+                [deleteNodesItem],
+                cancellationToken).ConfigureAwait(false);
+
+            if (response.Results.Count > 0)
+            {
+                var result = response.Results[0];
+                if (StatusCode.IsGood(result))
+                {
+                    Logger.LogInformation(
+                        "Successfully deleted remote node {NodeId} for subject {SubjectType}",
+                        nodeId,
+                        subject.GetType().Name);
+                }
+                else if (result == StatusCodes.BadNotSupported ||
+                         result == StatusCodes.BadServiceUnsupported)
+                {
+                    Logger.LogWarning(
+                        "Server does not support DeleteNodes service for node {NodeId}.",
+                        nodeId);
+                }
+                else
+                {
+                    Logger.LogWarning(
+                        "Failed to delete remote node {NodeId}: {StatusCode}",
+                        nodeId,
+                        result);
+                }
+            }
+        }
+        catch (ServiceResultException ex) when (
+            ex.StatusCode == StatusCodes.BadNotSupported ||
+            ex.StatusCode == StatusCodes.BadServiceUnsupported)
+        {
+            Logger.LogWarning(
                 "Server does not support DeleteNodes service for node {NodeId}.",
                 nodeId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to delete remote node {NodeId}.", nodeId);
+            Logger.LogError(ex, "Failed to delete remote node {NodeId}.", nodeId);
         }
+
+        UnregisterMapping(subject);
+    }
+
+    private QualifiedName GetBrowseNameForSubject(IInterceptorSubject subject)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        var name = registeredSubject?.Parents
+            .Select(p => p.Property.Name)
+            .FirstOrDefault()
+            ?? subject.GetType().Name;
+
+        var namespaceIndex = GetNamespaceIndex();
+        return new QualifiedName(name, namespaceIndex);
+    }
+
+    private ushort GetNamespaceIndex()
+    {
+        var namespaceUri = _clientConfiguration.DefaultNamespaceUri ?? "http://namotion.com/Interceptor/";
+        return (ushort)_session!.NamespaceUris.GetIndex(namespaceUri);
     }
 }

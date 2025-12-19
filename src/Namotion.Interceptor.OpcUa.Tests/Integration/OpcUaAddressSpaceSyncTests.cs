@@ -137,7 +137,7 @@ public class OpcUaAddressSpaceSyncTests
                     new TestPerson { FirstName = "Jane", LastName = "Smith", Scores = [88.1, 95.7] }
                 ];
             },
-            enableLiveSync: enableLiveSync);
+            enableStructureSynchronization: enableLiveSync);
     }
 
     private async Task StartClientAsync(bool enableLiveSync = false)
@@ -146,6 +146,6 @@ public class OpcUaAddressSpaceSyncTests
         await _client.StartAsync(
             context => new TestRoot(context),
             isConnected: root => root.Connected,
-            enableLiveSync: enableLiveSync);
+            enableStructureSynchronization: enableLiveSync);
     }
 }

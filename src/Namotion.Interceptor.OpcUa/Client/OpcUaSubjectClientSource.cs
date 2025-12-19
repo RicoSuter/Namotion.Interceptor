@@ -80,34 +80,45 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _logger.LogInformation("Connected to OPC UA server successfully.");
 
         // Initialize address space sync if enabled
-        if (_configuration.EnableLiveSync)
+        if (_configuration.EnableStructureSynchronization)
         {
             _syncStrategy = new OpcUaClientSyncStrategy(_configuration, this, _logger);
-            _syncStrategy.SetSession(session);
-            
+            _syncStrategy.SetSession(session, _sessionManager.SubscriptionManager);
+
             _addressSpaceSync = new OpcUaAddressSpaceSync(_syncStrategy, _configuration, _logger);
             _addressSpaceSync.Initialize(_subject);
-            
-            // Subscribe to ModelChangeEvents if remote node management is enabled
-            if (_configuration.EnableRemoteNodeManagement)
+
+            // Subscribe to ModelChangeEvents for remote node changes
+            try
             {
-                try
-                {
-                    _modelChangeEventSubscription = new ModelChangeEventSubscription(_addressSpaceSync, _logger);
-                    _modelChangeEventSubscription.Subscribe(session);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to subscribe to ModelChangeEvents. Sync will work for local changes only.");
-                }
+                _modelChangeEventSubscription = new ModelChangeEventSubscription(_addressSpaceSync, _syncStrategy, _logger);
+                _modelChangeEventSubscription.Subscribe(session);
             }
-            
-            _logger.LogInformation("OPC UA address space live sync enabled.");
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to subscribe to ModelChangeEvents. Sync will work for local changes only.");
+            }
+
+            _logger.LogInformation("OPC UA address space structure synchronization enabled.");
         }
 
         var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
         if (rootNode is not null)
         {
+            var rootNodeId = ExpandedNodeId.ToNodeId(rootNode.NodeId, session.NamespaceUris);
+
+            // Initialize strategy with root subject and NodeId mapping
+            if (_syncStrategy is not null)
+            {
+                _syncStrategy.Initialize(_subject, rootNodeId);
+            }
+
+            // Update address space sync with root node ID for periodic resync
+            if (_addressSpaceSync is not null)
+            {
+                _addressSpaceSync.SetRootNodeId(rootNodeId);
+            }
+
             var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken).ConfigureAwait(false);
             if (monitoredItems.Count > 0)
             {
@@ -303,13 +314,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             // Update sync strategy with new session
             _syncStrategy?.SetSession(session);
 
-            // Recreate ModelChangeEvent subscription if it was active
-            if (_configuration.EnableLiveSync && _configuration.EnableRemoteNodeManagement)
+            // Recreate ModelChangeEvent subscription if structure sync was active
+            if (_configuration.EnableStructureSynchronization)
             {
                 try
                 {
                     _modelChangeEventSubscription?.Dispose();
-                    _modelChangeEventSubscription = new ModelChangeEventSubscription(_addressSpaceSync!, _logger);
+                    _modelChangeEventSubscription = new ModelChangeEventSubscription(_addressSpaceSync!, _syncStrategy!, _logger);
                     _modelChangeEventSubscription.Subscribe(session);
                 }
                 catch (Exception ex)
