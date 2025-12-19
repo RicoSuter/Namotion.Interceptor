@@ -1,5 +1,5 @@
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
-using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Sync;
 
@@ -10,16 +10,26 @@ namespace Namotion.Interceptor.OpcUa.Sync;
 public interface IOpcUaSyncStrategy
 {
     /// <summary>
+    /// Initializes the strategy with the root subject and its corresponding NodeId.
+    /// Must be called before any sync operations.
+    /// </summary>
+    void Initialize(IInterceptorSubject rootSubject, NodeId rootNodeId);
+
+    /// <summary>
     /// Called when a local subject is attached to the object graph.
     /// Implementations should create corresponding OPC UA nodes/monitored items.
     /// </summary>
-    Task OnSubjectAttachedAsync(IInterceptorSubject subject, CancellationToken cancellationToken);
+    /// <param name="change">The lifecycle change containing subject, parent property, and index information.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task OnSubjectAttachedAsync(SubjectLifecycleChange change, CancellationToken cancellationToken);
 
     /// <summary>
     /// Called when a local subject is detached from the object graph.
     /// Implementations should remove corresponding OPC UA nodes/monitored items.
     /// </summary>
-    Task OnSubjectDetachedAsync(IInterceptorSubject subject, CancellationToken cancellationToken);
+    /// <param name="change">The lifecycle change containing subject, parent property, and index information.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task OnSubjectDetachedAsync(SubjectLifecycleChange change, CancellationToken cancellationToken);
 
     /// <summary>
     /// Called when a remote OPC UA node is added.
@@ -38,4 +48,16 @@ public interface IOpcUaSyncStrategy
     /// Used by both client (to browse server) and server (to check local state).
     /// </summary>
     Task<ReferenceDescriptionCollection> BrowseNodeAsync(NodeId nodeId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Ensures a subject is unregistered from internal mappings (idempotent).
+    /// Called in finally blocks to prevent memory leaks even when exceptions occur.
+    /// </summary>
+    void EnsureUnregistered(IInterceptorSubject subject);
+
+    /// <summary>
+    /// Clears all internal Subject ↔ NodeId mappings.
+    /// Called during dispose or full reconnection.
+    /// </summary>
+    void ClearAllMappings();
 }

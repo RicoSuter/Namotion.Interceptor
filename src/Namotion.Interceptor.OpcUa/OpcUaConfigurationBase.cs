@@ -36,35 +36,26 @@ public abstract class OpcUaConfigurationBase
         static (_, _) => Task.FromResult(true);
 
     /// <summary>
-    /// Gets or sets whether to enable live synchronization of address space changes.
-    /// When enabled, local attach/detach events and remote ModelChangeEvents trigger bidirectional sync.
-    /// Default is false.
+    /// Enables bidirectional synchronization of address space structure.
+    /// Server: Creates/removes OPC UA nodes on attach/detach AND fires ModelChangeEvents.
+    /// Client: Subscribes to ModelChangeEvents AND creates local subjects for new nodes.
+    /// Default: true (recommended for most use cases).
     /// </summary>
-    public bool EnableLiveSync { get; init; } = false;
+    public bool EnableStructureSynchronization { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets whether to enable remote node management operations (AddNodes/DeleteNodes).
-    /// When enabled, local changes attempt to modify the remote address space structure.
-    /// For clients: Calls AddNodes/DeleteNodes on the server (if supported).
-    /// For servers: Accepts AddNodes/DeleteNodes requests from external clients.
-    /// Default is false.
+    /// Enables periodic full resynchronization as a fallback mechanism.
+    /// Useful when ModelChangeEvents may be missed or are not supported.
+    /// Default: false.
     /// </summary>
-    public bool EnableRemoteNodeManagement { get; init; } = false;
+    public bool EnablePeriodicResynchronization { get; set; } = false;
 
     /// <summary>
-    /// Gets or sets whether to enable periodic address space resync as a fallback.
-    /// When enabled, the entire address space is periodically compared and synchronized.
-    /// Useful when ModelChangeEvents are not supported or may be missed.
-    /// Default is false.
+    /// The interval for periodic resynchronization.
+    /// Only used when EnablePeriodicResynchronization is true.
+    /// Default: 30 seconds.
     /// </summary>
-    public bool EnablePeriodicResync { get; init; } = false;
-
-    /// <summary>
-    /// Gets or sets the interval for periodic address space resynchronization.
-    /// Only used when EnablePeriodicResync is true.
-    /// Default is 30 seconds.
-    /// </summary>
-    public TimeSpan PeriodicResyncInterval { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan PeriodicResynchronizationInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
@@ -85,11 +76,11 @@ public abstract class OpcUaConfigurationBase
         ArgumentNullException.ThrowIfNull(PathProvider);
         ArgumentNullException.ThrowIfNull(ValueConverter);
 
-        if (EnablePeriodicResync && PeriodicResyncInterval < TimeSpan.FromSeconds(1))
+        if (EnablePeriodicResynchronization && PeriodicResynchronizationInterval < TimeSpan.FromSeconds(1))
         {
             throw new ArgumentException(
-                $"PeriodicResyncInterval must be at least 1 second when EnablePeriodicResync is true (got: {PeriodicResyncInterval.TotalSeconds}s)",
-                nameof(PeriodicResyncInterval));
+                $"PeriodicResynchronizationInterval must be at least 1 second when EnablePeriodicResynchronization is true (got: {PeriodicResynchronizationInterval.TotalSeconds}s)",
+                nameof(PeriodicResynchronizationInterval));
         }
     }
 }

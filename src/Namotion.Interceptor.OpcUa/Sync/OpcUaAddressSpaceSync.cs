@@ -16,9 +16,12 @@ public class OpcUaAddressSpaceSync : IDisposable
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _syncLock = new(1, 1);
     private readonly HashSet<IInterceptorSubject> _processedSubjects = new();
+    private readonly HashSet<NodeId> _knownRemoteNodeIds = new();
+    private readonly CancellationTokenSource _disposalCts = new();
 
     private LifecycleInterceptor? _lifecycleInterceptor;
     private Timer? _periodicResyncTimer;
+    private NodeId? _rootNodeId;
     private bool _disposed;
 
     public OpcUaAddressSpaceSync(
@@ -34,9 +37,13 @@ public class OpcUaAddressSpaceSync : IDisposable
     /// <summary>
     /// Initializes synchronization by subscribing to lifecycle events and starting periodic resync if enabled.
     /// </summary>
-    public void Initialize(IInterceptorSubject rootSubject)
+    /// <param name="rootSubject">The root subject to sync.</param>
+    /// <param name="rootNodeId">The root OPC UA node ID for periodic resync (optional).</param>
+    public void Initialize(IInterceptorSubject rootSubject, NodeId? rootNodeId = null)
     {
-        if (!_configuration.EnableLiveSync)
+        _rootNodeId = rootNodeId;
+
+        if (!_configuration.EnableStructureSynchronization)
         {
             return;
         }
@@ -55,18 +62,27 @@ public class OpcUaAddressSpaceSync : IDisposable
                 "Local changes will not be synchronized.");
         }
 
-        if (_configuration.EnablePeriodicResync)
+        if (_configuration.EnablePeriodicResynchronization)
         {
             _periodicResyncTimer = new Timer(
                 _ => _ = PeriodicResyncAsync(),
                 null,
-                _configuration.PeriodicResyncInterval,
-                _configuration.PeriodicResyncInterval);
+                _configuration.PeriodicResynchronizationInterval,
+                _configuration.PeriodicResynchronizationInterval);
 
             _logger.LogInformation(
                 "Periodic address space resync enabled with interval: {Interval}",
-                _configuration.PeriodicResyncInterval);
+                _configuration.PeriodicResynchronizationInterval);
         }
+    }
+
+    /// <summary>
+    /// Sets the root node ID for periodic resynchronization.
+    /// This can be called after Initialize if the root node ID is not known at initialization time.
+    /// </summary>
+    public void SetRootNodeId(NodeId? rootNodeId)
+    {
+        _rootNodeId = rootNodeId;
     }
 
     /// <summary>
@@ -75,13 +91,19 @@ public class OpcUaAddressSpaceSync : IDisposable
     /// </summary>
     private void OnSubjectAttached(SubjectLifecycleChange change)
     {
+        // Check if disposal is in progress
+        if (_disposalCts.IsCancellationRequested)
+        {
+            return;
+        }
+
         // Fire and forget - don't block lifecycle event, but capture exceptions in the async method
-        _ = Task.Run(() => OnSubjectAttachedAsync(change));
+        _ = Task.Run(() => OnSubjectAttachedAsync(change, _disposalCts.Token));
     }
 
-    private async Task OnSubjectAttachedAsync(SubjectLifecycleChange change)
+    private async Task OnSubjectAttachedAsync(SubjectLifecycleChange change, CancellationToken cancellationToken)
     {
-        await _syncLock.WaitAsync().ConfigureAwait(false);
+        await _syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_processedSubjects.Contains(change.Subject))
@@ -95,9 +117,13 @@ public class OpcUaAddressSpaceSync : IDisposable
                 "Local subject attached: {SubjectType}. Syncing to OPC UA...",
                 change.Subject.GetType().Name);
 
-            await _strategy.OnSubjectAttachedAsync(change.Subject, CancellationToken.None).ConfigureAwait(false);
+            await _strategy.OnSubjectAttachedAsync(change, cancellationToken).ConfigureAwait(false);
 
             _logger.LogDebug("Subject sync completed for {SubjectType}.", change.Subject.GetType().Name);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Disposal in progress - exit silently
         }
         catch (Exception ex)
         {
@@ -118,13 +144,19 @@ public class OpcUaAddressSpaceSync : IDisposable
     /// </summary>
     private void OnSubjectDetached(SubjectLifecycleChange change)
     {
+        // Check if disposal is in progress
+        if (_disposalCts.IsCancellationRequested)
+        {
+            return;
+        }
+
         // Fire and forget - don't block lifecycle event, but capture exceptions in the async method
-        _ = Task.Run(() => OnSubjectDetachedAsync(change));
+        _ = Task.Run(() => OnSubjectDetachedAsync(change, _disposalCts.Token));
     }
 
-    private async Task OnSubjectDetachedAsync(SubjectLifecycleChange change)
+    private async Task OnSubjectDetachedAsync(SubjectLifecycleChange change, CancellationToken cancellationToken)
     {
-        await _syncLock.WaitAsync().ConfigureAwait(false);
+        await _syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             _processedSubjects.Remove(change.Subject);
@@ -133,9 +165,13 @@ public class OpcUaAddressSpaceSync : IDisposable
                 "Local subject detached: {SubjectType}. Syncing to OPC UA...",
                 change.Subject.GetType().Name);
 
-            await _strategy.OnSubjectDetachedAsync(change.Subject, CancellationToken.None).ConfigureAwait(false);
+            await _strategy.OnSubjectDetachedAsync(change, cancellationToken).ConfigureAwait(false);
 
             _logger.LogDebug("Subject detach sync completed for {SubjectType}.", change.Subject.GetType().Name);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Disposal in progress - exit silently
         }
         catch (Exception ex)
         {
@@ -146,6 +182,8 @@ public class OpcUaAddressSpaceSync : IDisposable
         }
         finally
         {
+            // Ensure mapping is cleaned up even if exception occurred (memory leak prevention)
+            _strategy.EnsureUnregistered(change.Subject);
             _syncLock.Release();
         }
     }
@@ -220,25 +258,139 @@ public class OpcUaAddressSpaceSync : IDisposable
     /// </summary>
     private async Task PeriodicResyncAsync()
     {
+        if (_disposed || _rootNodeId is null)
+        {
+            return;
+        }
+
         try
         {
             _logger.LogDebug("Starting periodic address space resync...");
 
-            // NOTE: Periodic resync logic intentionally deferred.
-            // Reason: Event-driven sync via ModelChangeEvents provides real-time updates,
-            // making periodic polling largely unnecessary for most use cases.
-            // Periodic resync would be a fallback for environments with unreliable events.
-            // Future enhancement when needed:
-            // 1. Strategy.BrowseNodeAsync to traverse remote address space
-            // 2. Registry traversal to enumerate local subject graph
-            // 3. Diff algorithm comparing NodeIds/subjects
-            // 4. Call OnRemoteNodeAddedAsync/OnRemoteNodeRemovedAsync for delta
+            await _syncLock.WaitAsync(_disposalCts.Token).ConfigureAwait(false);
+            try
+            {
+                // 1. Browse current remote address space
+                var currentRemoteNodes = new HashSet<NodeId>();
+                await BrowseAddressSpaceRecursiveAsync(_rootNodeId, currentRemoteNodes, _disposalCts.Token).ConfigureAwait(false);
 
-            _logger.LogDebug("Periodic resync skipped - event-driven sync active.");
+                // 2. Find added nodes (in remote but not in known)
+                var addedNodes = currentRemoteNodes.Except(_knownRemoteNodeIds).ToList();
+
+                // 3. Find removed nodes (in known but not in remote)
+                var removedNodes = _knownRemoteNodeIds.Except(currentRemoteNodes).ToList();
+
+                _logger.LogDebug(
+                    "Periodic resync found {AddedCount} added nodes and {RemovedCount} removed nodes",
+                    addedNodes.Count,
+                    removedNodes.Count);
+
+                // 4. Process removals
+                foreach (var nodeId in removedNodes)
+                {
+                    try
+                    {
+                        await _strategy.OnRemoteNodeRemovedAsync(nodeId, _disposalCts.Token).ConfigureAwait(false);
+                        _knownRemoteNodeIds.Remove(nodeId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to process removed node {NodeId} during periodic resync", nodeId);
+                    }
+                }
+
+                // 5. Process additions
+                foreach (var nodeId in addedNodes)
+                {
+                    try
+                    {
+                        // Browse the node to get its details
+                        var children = await _strategy.BrowseNodeAsync(nodeId, _disposalCts.Token).ConfigureAwait(false);
+
+                        // Create a reference description for the added node
+                        var nodeDescription = new ReferenceDescription
+                        {
+                            NodeId = new ExpandedNodeId(nodeId),
+                            NodeClass = NodeClass.Object
+                        };
+
+                        // Find parent - for simplicity, assume direct child of root
+                        // In a more complete implementation, we would track parent relationships
+                        await _strategy.OnRemoteNodeAddedAsync(
+                            nodeDescription,
+                            _rootNodeId,
+                            _disposalCts.Token).ConfigureAwait(false);
+
+                        _knownRemoteNodeIds.Add(nodeId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to process added node {NodeId} during periodic resync", nodeId);
+                    }
+                }
+
+                // 6. Update known nodes
+                _knownRemoteNodeIds.Clear();
+                foreach (var nodeId in currentRemoteNodes)
+                {
+                    _knownRemoteNodeIds.Add(nodeId);
+                }
+
+                _logger.LogDebug("Periodic resync completed successfully");
+            }
+            finally
+            {
+                _syncLock.Release();
+            }
+        }
+        catch (OperationCanceledException) when (_disposalCts.IsCancellationRequested)
+        {
+            // Expected during shutdown
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Periodic address space resync failed.");
+        }
+    }
+
+    /// <summary>
+    /// Recursively browses the OPC UA address space starting from the given node.
+    /// </summary>
+    private async Task BrowseAddressSpaceRecursiveAsync(
+        NodeId nodeId,
+        HashSet<NodeId> collectedNodes,
+        CancellationToken cancellationToken,
+        int depth = 0)
+    {
+        // Prevent infinite recursion with reasonable depth limit
+        if (depth > 10)
+        {
+            return;
+        }
+
+        try
+        {
+            var children = await _strategy.BrowseNodeAsync(nodeId, cancellationToken).ConfigureAwait(false);
+
+            foreach (var child in children)
+            {
+                var childNodeId = ExpandedNodeId.ToNodeId(child.NodeId, null);
+                if (childNodeId is not null && collectedNodes.Add(childNodeId))
+                {
+                    if (child.NodeClass == NodeClass.Object)
+                    {
+                        await BrowseAddressSpaceRecursiveAsync(
+                            childNodeId,
+                            collectedNodes,
+                            cancellationToken,
+                            depth + 1).ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to browse node {NodeId} during periodic resync", nodeId);
         }
     }
 
@@ -251,6 +403,9 @@ public class OpcUaAddressSpaceSync : IDisposable
 
         _disposed = true;
 
+        // Cancel any in-flight operations first
+        _disposalCts.Cancel();
+
         if (_lifecycleInterceptor is not null)
         {
             _lifecycleInterceptor.SubjectAttached -= OnSubjectAttached;
@@ -258,6 +413,12 @@ public class OpcUaAddressSpaceSync : IDisposable
         }
 
         _periodicResyncTimer?.Dispose();
+
+        // Clear all mappings to prevent memory leaks
+        _strategy.ClearAllMappings();
+        _processedSubjects.Clear();
+
+        _disposalCts.Dispose();
         _syncLock.Dispose();
     }
 }

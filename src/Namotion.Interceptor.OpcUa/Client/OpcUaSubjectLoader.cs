@@ -125,7 +125,7 @@ internal class OpcUaSubjectLoader
                 }
                 else if (property.IsSubjectDictionary)
                 {
-                    // TODO: Implement dictionary support
+                    await LoadSubjectDictionaryAsync(property, childNodeId, monitoredItems, session, loadedSubjects, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
@@ -169,10 +169,10 @@ internal class OpcUaSubjectLoader
         var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
         var childCount = childNodes.Count;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childCount);
-        
+
         // Convert to array once to avoid multiple enumerations
         var existingChildren = property.Children.ToArray();
-        
+
         for (var i = 0; i < childCount; i++)
         {
             var childNode = childNodes[i];
@@ -190,6 +190,54 @@ internal class OpcUaSubjectLoader
         foreach (var child in children)
         {
             await LoadSubjectAsync(child.Subject, child.Node, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task LoadSubjectDictionaryAsync(RegisteredSubjectProperty property,
+        NodeId dictionaryNodeId,
+        List<MonitoredItem> monitoredItems,
+        ISession session,
+        HashSet<IInterceptorSubject> loadedSubjects,
+        CancellationToken cancellationToken)
+    {
+        // Browse dictionary children - each child node is a dictionary entry
+        var childNodes = await BrowseNodeAsync(dictionaryNodeId, session, cancellationToken).ConfigureAwait(false);
+        var children = new List<(string key, ReferenceDescription node, IInterceptorSubject subject)>();
+
+        // Convert existing children to lookup by key (Index contains the key for dictionaries)
+        var existingChildren = property.Children
+            .Where(c => c.Index is string)
+            .ToDictionary(c => (string)c.Index!, c => c.Subject);
+
+        foreach (var childNode in childNodes)
+        {
+            // Use the browse name as the dictionary key
+            var key = childNode.BrowseName.Name;
+
+            // Try to reuse existing subject or create new one
+            IInterceptorSubject childSubject;
+            if (!existingChildren.TryGetValue(key, out var existingSubject))
+            {
+                childSubject = DefaultSubjectFactory.Instance.CreateDictionarySubject(property, key);
+            }
+            else
+            {
+                childSubject = existingSubject;
+            }
+
+            children.Add((key, childNode, childSubject));
+        }
+
+        // Create the dictionary and set the property value
+        var dictionary = DefaultSubjectFactory.Instance
+            .CreateSubjectDictionary(property.Type, children.Select(c => (c.key, c.subject)));
+
+        property.SetValueFromSource(_source, null, dictionary);
+
+        // Load each child subject
+        foreach (var (key, node, subject) in children)
+        {
+            await LoadSubjectAsync(subject, node, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
         }
     }
 
