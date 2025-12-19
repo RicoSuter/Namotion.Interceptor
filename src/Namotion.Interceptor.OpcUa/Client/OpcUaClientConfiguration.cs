@@ -4,7 +4,7 @@ using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-public class OpcUaClientConfiguration
+public class OpcUaClientConfiguration : OpcUaConfigurationBase
 {
     /// <summary>
     /// Gets the OPC UA server endpoint URL to connect to (e.g., "opc.tcp://localhost:4840").
@@ -48,44 +48,22 @@ public class OpcUaClientConfiguration
     public TimeSpan SubscriptionHealthCheckInterval { get; init; } = TimeSpan.FromSeconds(10);
     
     /// <summary>
-    /// Gets or sets an async predicate that is called when an unknown (not statically typed) OPC UA node or variable is found during browsing.
-    /// If the function returns true, the node is added as a dynamic property to the given subject.
-    /// Default is add all missing as dynamic properties.
-    /// </summary>
-    public Func<ReferenceDescription, CancellationToken, Task<bool>>? ShouldAddDynamicProperty { get; init; } = 
-        static (_, _) => Task.FromResult(true);
-    
-    /// <summary>
-    /// Gets the source path provider used to map between OPC UA node browse names and C# property names.
-    /// This provider determines which properties are included and how their names are translated.
-    /// </summary>
-    public required ISourcePathProvider PathProvider { get; init; }
-
-    /// <summary>
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
     /// </summary>
     public required OpcUaTypeResolver TypeResolver { get; init; }
-    
-    /// <summary>
-    /// Gets the value converter used to convert between OPC UA node values and C# property values.
-    /// Handles type conversions such as decimal to double for OPC UA compatibility.
-    /// </summary>
-    public required OpcUaValueConverter ValueConverter { get; init; }
-    
+
     /// <summary>
     /// Gets the subject factory used to create interceptor subject instances for OPC UA object nodes.
+    /// Required for clients that need to create subjects for dynamically discovered nodes.
     /// </summary>
-    public required OpcUaSubjectFactory SubjectFactory { get; init; }
+    public required new OpcUaSubjectFactory SubjectFactory { get; init; }
 
     /// <summary>
-    /// Gets or sets the time window to buffer incoming changes (default: 8ms).
+    /// Enables calling AddNodes/DeleteNodes on the server when local subjects change.
+    /// Only works if the server supports these services (graceful degradation if not).
+    /// Default: false.
     /// </summary>
-    public TimeSpan? BufferTime { get; init; }
-
-    /// <summary>
-    /// Gets or sets the retry time (default: 10s).
-    /// </summary>
-    public TimeSpan? RetryTime { get; init; } = TimeSpan.FromSeconds(1);
+    public bool EnableRemoteNodeManagement { get; set; } = false;
 
     /// <summary>
     /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute (default: 0).
@@ -268,10 +246,10 @@ public class OpcUaClientConfiguration
     /// </summary>
     public void Validate()
     {
+        ValidateBase();
+
         ArgumentNullException.ThrowIfNull(ServerUrl);
-        ArgumentNullException.ThrowIfNull(PathProvider);
         ArgumentNullException.ThrowIfNull(TypeResolver);
-        ArgumentNullException.ThrowIfNull(ValueConverter);
         ArgumentNullException.ThrowIfNull(SubjectFactory);
 
         if (WriteRetryQueueSize < 0)

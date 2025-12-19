@@ -44,39 +44,38 @@ public static class OpcUaSubjectExtensions
         return new OpcUaSubjectClientSource(subject, configuration, logger);
     }
 
+    /// <summary>
+    /// Adds an OPC UA client for the specified subject type with optional configuration.
+    /// </summary>
+    /// <param name="serviceCollection">The service collection.</param>
+    /// <param name="serverUrl">The OPC UA server endpoint URL.</param>
+    /// <param name="sourceName">The source name used for path mapping.</param>
+    /// <param name="rootName">Optional root node name under ObjectsFolder.</param>
+    /// <param name="configure">Optional configuration callback.</param>
     public static IServiceCollection AddOpcUaSubjectClient<TSubject>(
         this IServiceCollection serviceCollection,
         string serverUrl,
         string sourceName,
-        string? pathPrefix = null,
-        string? rootName = null)
+        string? rootName = null,
+        Action<OpcUaClientConfiguration>? configure = null)
         where TSubject : IInterceptorSubject
     {
         return serviceCollection.AddOpcUaSubjectClient(
-            serverUrl,
-            sourceName,
             sp => sp.GetRequiredService<TSubject>(),
-            pathPrefix,
-            rootName);
-    }
-
-    public static IServiceCollection AddOpcUaSubjectClient(
-        this IServiceCollection serviceCollection,
-        string serverUrl,
-        string sourceName,
-        Func<IServiceProvider, IInterceptorSubject> subjectSelector,
-        string? pathPrefix = null,
-        string? rootName = null)
-    {
-        return serviceCollection.AddOpcUaSubjectClient(subjectSelector, sp => new OpcUaClientConfiguration
-        {
-            ServerUrl = serverUrl,
-            RootName = rootName,
-            PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
-            TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
-            ValueConverter = new OpcUaValueConverter(),
-            SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)
-        });
+            sp =>
+            {
+                var configuration = new OpcUaClientConfiguration
+                {
+                    ServerUrl = serverUrl,
+                    RootName = rootName,
+                    PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", null),
+                    TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
+                    ValueConverter = new OpcUaValueConverter(),
+                    SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)
+                };
+                configure?.Invoke(configuration);
+                return configuration;
+            });
     }
 
     public static IServiceCollection AddOpcUaSubjectClient(
@@ -111,33 +110,33 @@ public static class OpcUaSubjectExtensions
             });
     }
 
+    /// <summary>
+    /// Adds an OPC UA server for the specified subject type with optional configuration.
+    /// </summary>
+    /// <param name="serviceCollection">The service collection.</param>
+    /// <param name="sourceName">The source name used for path mapping.</param>
+    /// <param name="rootName">Optional root folder name under ObjectsFolder.</param>
+    /// <param name="configure">Optional configuration callback.</param>
     public static IServiceCollection AddOpcUaSubjectServer<TSubject>(
         this IServiceCollection serviceCollection,
         string sourceName,
-        string? pathPrefix = null,
-        string? rootName = null)
+        string? rootName = null,
+        Action<OpcUaServerConfiguration>? configure = null)
         where TSubject : IInterceptorSubject
     {
         return serviceCollection.AddOpcUaSubjectServer(
-            sourceName,
             sp => sp.GetRequiredService<TSubject>(),
-            pathPrefix,
-            rootName);
-    }
-
-    public static IServiceCollection AddOpcUaSubjectServer(
-        this IServiceCollection serviceCollection,
-        string sourceName,
-        Func<IServiceProvider, IInterceptorSubject> subjectSelector,
-        string? pathPrefix = null,
-        string? rootName = null)
-    {
-        return serviceCollection.AddOpcUaSubjectServer(subjectSelector, _ => new OpcUaServerConfiguration
-        {
-            RootName = rootName,
-            PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", pathPrefix),
-            ValueConverter = new OpcUaValueConverter()
-        });
+            _ =>
+            {
+                var configuration = new OpcUaServerConfiguration
+                {
+                    RootName = rootName,
+                    PathProvider = new AttributeBasedSourcePathProvider(sourceName, ".", null),
+                    ValueConverter = new OpcUaValueConverter()
+                };
+                configure?.Invoke(configuration);
+                return configuration;
+            });
     }
 
     public static IServiceCollection AddOpcUaSubjectServer(
