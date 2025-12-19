@@ -213,14 +213,14 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
     }
 
     [Fact]
-    public void ResolveSubject_WithChildrenAttribute_ResolvesWithoutPropertyName()
+    public void ResolveSubject_WithInlinePathsAttribute_ResolvesWithoutPropertyName()
     {
         // Arrange
         var notes = new TestContainerWithChildren(Context) { Name = "Notes" };
         var root = new TestContainerWithChildren(Context) { Name = "Root" };
         root.Children["Notes"] = notes;
 
-        // Act - "Notes" should resolve via [Children] property without "Children/" prefix
+        // Act - "Notes" should resolve via [InlinePaths] property without "Children/" prefix
         var result = Resolver.ResolveSubject("Notes", PathFormat.Slash, root);
 
         // Assert
@@ -228,7 +228,7 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
     }
 
     [Fact]
-    public void ResolveSubject_WithChildrenAttribute_ResolvesNestedPath()
+    public void ResolveSubject_WithInlinePathsAttribute_ResolvesNestedPath()
     {
         // Arrange
         var page = new TestContainerWithChildren(Context) { Name = "Page" };
@@ -237,7 +237,7 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
         var root = new TestContainerWithChildren(Context) { Name = "Root" };
         root.Children["Folder"] = folder;
 
-        // Act - "Folder/Page" should resolve through nested [Children]
+        // Act - "Folder/Page" should resolve through nested [InlinePaths]
         var result = Resolver.ResolveSubject("Folder/Page", PathFormat.Slash, root);
 
         // Assert
@@ -245,7 +245,7 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
     }
 
     [Fact]
-    public void ResolveSubject_WithChildrenAttribute_PropertyTakesPrecedenceOverChildKey()
+    public void ResolveSubject_WithInlinePathsAttribute_PropertyTakesPrecedenceOverChildKey()
     {
         // Arrange
         var childProperty = new TestContainerWithChildren(Context) { Name = "ChildProperty" };
@@ -262,7 +262,7 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
     }
 
     [Fact]
-    public void ResolveSubject_WithChildrenAttribute_ExplicitBracketSyntaxStillWorks()
+    public void ResolveSubject_WithInlinePathsAttribute_ExplicitBracketSyntaxStillWorks()
     {
         // Arrange
         var notes = new TestContainerWithChildren(Context) { Name = "Notes" };

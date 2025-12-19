@@ -6,15 +6,15 @@ namespace Namotion.Interceptor.Registry.Paths;
 /// Decorator that transforms segment names to/from camelCase.
 /// Implements IPathProvider to wrap any other IPathProvider.
 /// </summary>
-public class CamelCasePathDecorator : IPathProvider
+public class CamelCasePathProvider : IPathProvider
 {
     private readonly IPathProvider _inner;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="CamelCasePathDecorator"/> class.
+    /// Initializes a new instance of the <see cref="CamelCasePathProvider"/> class.
     /// </summary>
     /// <param name="inner">The inner path provider to wrap.</param>
-    public CamelCasePathDecorator(IPathProvider inner)
+    public CamelCasePathProvider(IPathProvider inner)
     {
         _inner = inner;
     }
@@ -22,7 +22,7 @@ public class CamelCasePathDecorator : IPathProvider
     /// <summary>
     /// Gets a singleton instance that wraps the <see cref="DefaultPathProvider"/>.
     /// </summary>
-    public static CamelCasePathDecorator Instance { get; } = new(DefaultPathProvider.Instance);
+    public static CamelCasePathProvider Instance { get; } = new(DefaultPathProvider.Instance);
 
     /// <inheritdoc />
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)

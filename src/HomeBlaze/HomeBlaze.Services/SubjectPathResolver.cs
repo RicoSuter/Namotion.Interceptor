@@ -35,12 +35,12 @@ public class SubjectPathResolver : ILifecycleHandler
     /// <summary>
     /// Converts bracket notation to slash notation.
     /// Children[demo].Children[file.json] → Children/demo/Children/file.json
-    /// [Demo].[Inline.md] (when using [Children]) → Demo/Inline.md
+    /// [Demo].[Inline.md] (when using [InlinePaths]) → Demo/Inline.md
     /// </summary>
     public static string BracketToSlash(string bracketPath)
     {
         var result = bracketPath
-            .Replace("].[", "/")  // Handle [key].[key] from [Children] (must be before ].)
+            .Replace("].[", "/")  // Handle [key].[key] from [InlinePaths] (must be before ].)
             .Replace("].", "/")   // Handle Property[key].Next
             .Replace("[", "/")    // Handle Property[key] opening bracket
             .Replace("]", "");    // Handle trailing bracket
@@ -175,11 +175,11 @@ public class SubjectPathResolver : ILifecycleHandler
 
             if (property is not { HasChildSubjects: true })
             {
-                // No direct property match - try [Children] fallback
-                var childrenPropertyName = ChildrenAttribute.GetChildrenPropertyName(current.GetType());
-                if (childrenPropertyName != null)
+                // No direct property match - try [InlinePaths] fallback
+                var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(current.GetType());
+                if (inlinePathsPropertyName != null)
                 {
-                    var childrenProperty = registered?.TryGetProperty(childrenPropertyName);
+                    var childrenProperty = registered?.TryGetProperty(inlinePathsPropertyName);
                     if (childrenProperty?.GetValue() is IDictionary childrenDictionary && childrenDictionary.Contains(segment))
                     {
                         if (childrenDictionary[segment] is IInterceptorSubject childSubject)
@@ -302,16 +302,16 @@ public class SubjectPathResolver : ILifecycleHandler
         {
             var parentSubject = parent.Property.Subject;
 
-            // Build bracket segment: PropertyName, PropertyName[key], or [key] for [Children]
+            // Build bracket segment: PropertyName, PropertyName[key], or [key] for [InlinePaths]
             var segment = parent.Property.Name;
-            var isChildrenProperty = ChildrenAttribute.IsChildrenProperty(
+            var isInlinePathsProperty = InlinePathsAttribute.IsInlinePathsProperty(
                 parentSubject.GetType(), parent.Property.Name);
 
             if (parent.Index != null)
             {
-                if (isChildrenProperty)
+                if (isInlinePathsProperty)
                 {
-                    // For [Children] properties, use just the key - no property name, no brackets
+                    // For [InlinePaths] properties, use just the key - no property name, no brackets
                     // This makes paths like "Notes" instead of "Children[Notes]"
                     segment = parent.Index.ToString()!;
                 }

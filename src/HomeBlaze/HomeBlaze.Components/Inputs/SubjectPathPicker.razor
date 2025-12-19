@@ -184,13 +184,13 @@
             // Check collection/dictionary first (before reference)
             if (parent.Property.IsSubjectDictionary || parent.Property.IsSubjectCollection)
             {
-                var isChildrenProperty = parent.Subject != null &&
-                    ChildrenAttribute.IsChildrenProperty(parent.Subject.GetType(), parent.Property.Name);
+                var isInlinePathsProperty = parent.Subject != null &&
+                    InlinePathsAttribute.IsInlinePathsProperty(parent.Subject.GetType(), parent.Property.Name);
 
                 // For collection/dictionary, show child subjects by index
                 foreach (var child in parent.Property.Children)
                 {
-                    var childPath = isChildrenProperty
+                    var childPath = isInlinePathsProperty
                         ? $"{parent.Path}.{child.Index}"  // Simplified path
                         : $"{parent.Path}[{child.Index}]"; // Standard bracket path
                     var childDisplayName = $"[{child.Index}]";

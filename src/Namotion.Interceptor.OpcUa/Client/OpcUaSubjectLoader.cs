@@ -71,14 +71,15 @@ internal class OpcUaSubjectLoader
                 var dynamicPropertyName = nodeRef.BrowseName.Name;
 
                 var propertyExists = false;
-                foreach (var prop in registeredSubject.Properties)
+                foreach (var childProperty in registeredSubject.Properties)
                 {
-                    if (prop.Name == dynamicPropertyName)
+                    if (childProperty.Name == dynamicPropertyName)
                     {
                         propertyExists = true;
                         break;
                     }
                 }
+
                 if (propertyExists)
                 {
                     continue;

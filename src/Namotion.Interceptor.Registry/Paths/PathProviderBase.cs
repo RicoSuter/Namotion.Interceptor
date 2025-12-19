@@ -4,7 +4,7 @@ using Namotion.Interceptor.Registry.Attributes;
 namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
-/// Base implementation with configurable separators and [Children] support.
+/// Base implementation with configurable separators and [InlinePaths] support.
 /// </summary>
 public abstract class PathProviderBase : IPathProvider
 {
@@ -38,7 +38,7 @@ public abstract class PathProviderBase : IPathProvider
     /// <remarks>
     /// Default implementation:
     /// 1. First looks up direct properties by matching TryGetPropertySegment
-    /// 2. Falls back to [Children] dictionary lookup if no direct match found
+    /// 2. Falls back to [InlinePaths] dictionary lookup if no direct match found
     /// </remarks>
     public virtual RegisteredSubjectProperty? TryGetPropertyFromSegment(
         RegisteredSubject subject, string segment)
@@ -52,12 +52,12 @@ public abstract class PathProviderBase : IPathProvider
             }
         }
 
-        // 2. [Children] fallback - segment is a dictionary key
-        var childrenPropertyName = ChildrenAttribute.GetChildrenPropertyName(subject.Subject.GetType());
-        if (childrenPropertyName is not null)
+        // 2. [InlinePaths] fallback - segment is a dictionary key
+        var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(subject.Subject.GetType());
+        if (inlinePathsPropertyName is not null)
         {
-            // Return the Children property - caller uses segment as dictionary key
-            return subject.TryGetProperty(childrenPropertyName);
+            // Return the InlinePaths property - caller uses segment as dictionary key
+            return subject.TryGetProperty(inlinePathsPropertyName);
         }
 
         return null;

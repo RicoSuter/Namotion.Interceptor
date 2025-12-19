@@ -250,14 +250,14 @@ public partial class Sensor
 }
 ```
 
-## Children Attribute
+## InlinePaths Attribute
 
-The `[Children]` attribute simplifies paths for subjects with child dictionaries.
+The `[InlinePaths]` attribute simplifies paths for subjects with child dictionaries.
 
 ### Before vs After
 
-| Without Attribute | With `[Children]` |
-|-------------------|-------------------|
+| Without Attribute | With `[InlinePaths]` |
+|-------------------|----------------------|
 | `Root.Children[Documents].Children[Report]` | `Root.Documents.Report` |
 
 ### Usage
@@ -266,7 +266,7 @@ The `[Children]` attribute simplifies paths for subjects with child dictionaries
 [InterceptorSubject]
 public partial class Folder
 {
-    [Children]
+    [InlinePaths]
     public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 }
 ```
@@ -274,7 +274,7 @@ public partial class Folder
 ### Resolution Rules
 
 1. **Properties win** - If both property "Foo" and child key "Foo" exist, the property resolves first
-2. **One per type** - Only one `[Children]` property per class
+2. **One per type** - Only one `[InlinePaths]` property per class
 3. **Backward compatible** - Explicit `Children[key]` syntax still works
 4. **Any property name** - The property doesn't have to be named "Children"
 
