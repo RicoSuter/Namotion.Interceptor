@@ -224,7 +224,7 @@ Transaction modes are relevant in two scenarios:
 
 In both cases, the transaction mode determines what happens to successfully written changes when a failure occurs.
 
-### BestEffort (Default)
+### BestEffort
 
 BestEffort mode maximizes the number of successful writes. When some external sources fail, the changes that succeeded are still applied to the in-process model. This is useful when partial progress is acceptable and you want to handle failures gracefully without losing successful updates.
 
@@ -244,7 +244,7 @@ await tx.CommitAsync();
 - Source A has the new Temperature value (25.5)
 - Source B was not updated (Pressure write failed)
 - In-process model: Temperature is updated to 25.5, Pressure unchanged
-- `AggregateException` is thrown containing the Source B failure
+- `TransactionException` is thrown containing the Source B failure
 
 Use BestEffort when partial updates are acceptable and you prefer to maximize successful writes rather than failing entirely.
 
@@ -268,7 +268,7 @@ await tx.CommitAsync();
 - Source A is **reverted**: Temperature written back to original value
 - Source B was not updated (Pressure write failed)
 - In-process model: **Unchanged** (both keep old values)
-- `AggregateException` is thrown (may include revert failures if revert also failed)
+- `TransactionException` is thrown (may include revert failures if revert also failed)
 - **Consistency**: All sources and local model should have the same (old) values
 
 Use Rollback when consistency is critical and you want to minimize the chance of external sources having different values than the local model. Note that rollback is best-effort - if the revert write also fails, you'll receive both the original failure and the revert failure in the exception.
@@ -320,7 +320,7 @@ For protocols like OPC UA that don't guarantee atomic multi-node writes:
 
 **Validation errors:**
 
-If the requirements aren't met, `CommitAsync()` throws an `AggregateException` with a descriptive error:
+If the requirements aren't met, `CommitAsync()` throws a `TransactionException` with a descriptive error:
 
 ```csharp
 // Multiple sources - will fail validation
@@ -354,7 +354,7 @@ With this configuration, `CommitAsync()` will:
 1. **Write to external sources first**: Changes are grouped by their associated source and written in batches
 2. **Handle failures per mode**: BestEffort applies successes, Rollback requires all to succeed
 3. **Apply to in-process model**: After external writes complete (and pass mode checks), changes are applied
-4. **Report failures**: An `AggregateException` is thrown containing all source write failures
+4. **Report failures**: A `TransactionException` is thrown containing all source write failures
 
 ```csharp
 try
@@ -368,11 +368,11 @@ try
         await transaction.CommitAsync();
     }
 }
-catch (AggregateException ex)
+catch (TransactionException ex)
 {
-    foreach (var failure in ex.InnerExceptions.OfType<SourceWriteException>())
+    foreach (var failure in ex.FailedChanges)
     {
-        Console.WriteLine($"Failed to write to {failure.SubjectSource}: {failure.InnerException?.Message}");
+        Console.WriteLine($"Failed to write {failure.Change.Property.Name}: {failure.Error?.Message}");
     }
 }
 ```
@@ -448,7 +448,7 @@ using (var transaction = await context.BeginExclusiveTransactionAsync())
 
 | Member | Description |
 |--------|-------------|
-| `BeginExclusiveTransactionAsync(mode, requirement, ct)` | Begins a new exclusive transaction with the specified `TransactionMode` (default: `BestEffort`) and `TransactionRequirement` (default: `None`) |
+| `BeginExclusiveTransactionAsync(mode, requirement, ct)` | Begins a new exclusive transaction with the specified `TransactionMode` (default: `Rollback`) and `TransactionRequirement` (default: `None`) |
 
 ### SubjectTransaction
 

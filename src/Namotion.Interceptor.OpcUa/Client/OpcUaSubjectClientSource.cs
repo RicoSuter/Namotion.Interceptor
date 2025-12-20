@@ -17,7 +17,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
-    private readonly OpcUaPropertyTracker _propertyTracker;
+    private readonly SourceOwnershipManager _ownership;
 
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
@@ -54,9 +54,24 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _logger = logger;
         _configuration = configuration;
 
-        _propertyTracker = new OpcUaPropertyTracker(this, logger);
-        _subjectLoader = new OpcUaSubjectLoader(configuration, _propertyTracker, this, logger);
+        _ownership = new SourceOwnershipManager(
+            this,
+            onReleasing: property => property.RemovePropertyData(OpcUaNodeIdKey),
+            onSubjectDetaching: OnSubjectDetaching,
+            logger);
+        _subjectLoader = new OpcUaSubjectLoader(configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
+    }
+
+    private void OnSubjectDetaching(IInterceptorSubject subject)
+    {
+        // Skip cleanup during reconnection (subscriptions being transferred)
+        if (IsReconnecting)
+        {
+            return;
+        }
+
+        RemoveItemsForSubject(subject);
     }
 
     /// <inheritdoc />
@@ -69,7 +84,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
-        _propertyTracker.SubscribeToLifecycle(_subject);
+        _ownership.SubscribeToLifecycle(_subject.Context);
 
         _sessionManager = new SessionManager(this, propertyWriter, _configuration, _logger);
 
@@ -504,13 +519,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         // This ensures that property data associated with this OpcUaNodeIdKey is cleared
         // even if properties are reused across multiple source instances
         CleanupPropertyData();
-        _propertyTracker.Dispose();
+        _ownership.Dispose();
         Dispose();
     }
 
     private void CleanupPropertyData()
     {
-        foreach (var property in _propertyTracker.TrackedProperties)
+        foreach (var property in _ownership.Properties)
         {
             property.RemovePropertyData(OpcUaNodeIdKey);
         }

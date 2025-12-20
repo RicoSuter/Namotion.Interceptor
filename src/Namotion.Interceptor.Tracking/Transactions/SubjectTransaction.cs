@@ -95,6 +95,9 @@ public sealed class SubjectTransaction : IDisposable
         _conflictBehavior = conflictBehavior;
         StartTimestamp = startTimestamp;
         _lockReleaser = lockReleaser;
+
+        // Increment in constructor ensures counter is always paired with Dispose
+        Interlocked.Increment(ref _activeTransactionCount);
     }
 
     /// <summary>
@@ -128,11 +131,9 @@ public sealed class SubjectTransaction : IDisposable
 
         var transactionLock = await interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
 
-        // CRITICAL: Increment AFTER all validation, BEFORE construction
-        Interlocked.Increment(ref _activeTransactionCount);
-
         // Don't set CurrentTransaction.Value here because it won't flow to caller's context
         // The caller (extension method) will call SetCurrent after awaiting this
+        // Counter increment is in constructor to ensure it's always paired with Dispose
         return new SubjectTransaction(
             context,
             interceptor,
@@ -148,6 +149,12 @@ public sealed class SubjectTransaction : IDisposable
     /// changes are written to external sources first, then applied to the in-process model.
     /// The behavior on partial failure depends on the <see cref="_mode"/> specified at transaction creation.
     /// </summary>
+    /// <remarks>
+    /// Conflict detection compares captured OldValue with current value at commit time.
+    /// This catches changes from other transactions and external sources that occurred
+    /// after the transaction started. However, concurrent non-transactional writes
+    /// during the commit phase are not detected (optimistic concurrency model).
+    /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ObjectDisposedException">Thrown when the transaction has been disposed.</exception>
     /// <exception cref="TransactionException">Thrown when one or more external source writes failed.</exception>

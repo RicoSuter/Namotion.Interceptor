@@ -104,14 +104,13 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
 
     private sealed class LockReleaser(SemaphoreSlim semaphore) : IDisposable
     {
-        private bool _disposed;
+        private int _disposed;
 
         public void Dispose()
         {
-            if (!_disposed)
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
             {
                 semaphore.Release();
-                _disposed = true;
             }
         }
     }

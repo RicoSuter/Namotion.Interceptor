@@ -67,11 +67,22 @@ public readonly struct TransactionAwaiter : INotifyCompletion, ICriticalNotifyCo
 
     public SubjectTransaction GetResult()
     {
-        var transaction = _awaiter.GetResult();
-        // Set the AsyncLocal in the caller's execution context
-        // This happens when the awaiter resumes the caller, in the caller's context
-        SubjectTransaction.SetCurrent(transaction);
-        return transaction;
+        SubjectTransaction? transaction = null;
+        try
+        {
+            transaction = _awaiter.GetResult();
+            // Set the AsyncLocal in the caller's execution context
+            // This happens when the awaiter resumes the caller, in the caller's context
+            SubjectTransaction.SetCurrent(transaction);
+            return transaction;
+        }
+        catch
+        {
+            // If GetResult throws, dispose the transaction to clean up resources
+            // and prevent counter/lock leaks
+            transaction?.Dispose();
+            throw;
+        }
     }
 
     public void OnCompleted(Action continuation) => _awaiter.OnCompleted(continuation);

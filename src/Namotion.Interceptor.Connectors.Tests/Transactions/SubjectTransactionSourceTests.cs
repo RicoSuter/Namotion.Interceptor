@@ -16,13 +16,16 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     [Fact]
     public void SetSource_StoresSourceReference()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
         var sourceMock = Mock.Of<ISubjectSource>();
 
+        // Act
         property.SetSource(sourceMock);
 
+        // Assert
         Assert.True(property.TryGetSource(out var retrievedSource));
         Assert.Same(sourceMock, retrievedSource);
     }
@@ -30,44 +33,72 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     [Fact]
     public void TryGetSource_WhenNoSourceSet_ReturnsFalse()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
+        // Act
         var result = property.TryGetSource(out var source);
 
+        // Assert
         Assert.False(result);
         Assert.Null(source);
     }
 
     [Fact]
-    public void SetSource_WhenCalledMultipleTimes_ReplacesReference()
+    public void SetSource_WhenCalledWithDifferentSource_ReturnsFalse()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
         var source1Mock = Mock.Of<ISubjectSource>();
         var source2Mock = Mock.Of<ISubjectSource>();
 
-        property.SetSource(source1Mock);
-        property.SetSource(source2Mock);
+        // Act
+        var result1 = property.SetSource(source1Mock);
+        var result2 = property.SetSource(source2Mock);
 
+        // Assert
+        Assert.True(result1);
+        Assert.False(result2); // Different source should return false
         Assert.True(property.TryGetSource(out var retrievedSource));
-        Assert.Same(source2Mock, retrievedSource);
-        Assert.NotSame(source1Mock, retrievedSource);
+        Assert.Same(source1Mock, retrievedSource); // Original source should remain
+    }
+
+    [Fact]
+    public void SetSource_WhenCalledWithSameSource_ReturnsTrue()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        var sourceMock = Mock.Of<ISubjectSource>();
+
+        // Act
+        var result1 = property.SetSource(sourceMock);
+        var result2 = property.SetSource(sourceMock);
+
+        // Assert
+        Assert.True(result1);
+        Assert.True(result2); // The same source should return true (idempotent)
     }
 
     [Fact]
     public void RemoveSource_WithMatchingSource_ClearsSourceReference()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
         var sourceMock = Mock.Of<ISubjectSource>();
         property.SetSource(sourceMock);
 
+        // Act
         var removed = property.RemoveSource(sourceMock);
 
+        // Assert
         Assert.True(removed);
         Assert.False(property.TryGetSource(out _));
     }
@@ -75,6 +106,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     [Fact]
     public void RemoveSource_WithDifferentSource_DoesNotClearSourceReference()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
@@ -82,8 +114,10 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var otherSourceMock = Mock.Of<ISubjectSource>();
         property.SetSource(sourceMock);
 
+        // Act
         var removed = property.RemoveSource(otherSourceMock);
 
+        // Assert
         Assert.False(removed);
         Assert.True(property.TryGetSource(out var source));
         Assert.Same(sourceMock, source);
@@ -92,6 +126,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     [Fact]
     public async Task CommitAsync_WithSourceBoundProperty_WritesToSource()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
@@ -100,12 +135,14 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var property = new PropertyReference(person, nameof(Person.FirstName));
         property.SetSource(sourceMock.Object);
 
+        // Act
         using (var transaction = await context.BeginExclusiveTransactionAsync())
         {
             person.FirstName = "John";
             await transaction.CommitAsync(CancellationToken.None);
         }
 
+        // Assert
         sourceMock.Verify(s => s.WriteChangesAsync(
             It.Is<ReadOnlyMemory<SubjectPropertyChange>>(m => m.Length == 1),
             It.IsAny<CancellationToken>()), Times.Once);
@@ -116,6 +153,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     [Fact]
     public async Task CommitAsync_WithSourceWriteFailure_ThrowsTransactionException()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
@@ -124,6 +162,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var property = new PropertyReference(person, nameof(Person.FirstName));
         property.SetSource(sourceMock.Object);
 
+        // Act
         using (var transaction = await context.BeginExclusiveTransactionAsync())
         {
             person.FirstName = "John";
@@ -131,6 +170,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             var exception = await Assert.ThrowsAsync<TransactionException>(
                 () => transaction.CommitAsync(CancellationToken.None));
 
+            // Assert
             Assert.Single(exception.FailedChanges);
             Assert.IsType<SourceTransactionWriteException>(exception.FailedChanges[0].Error);
         }
@@ -141,6 +181,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     [Fact]
     public async Task CommitAsync_WithMixedSourceAndLocal_InBestEffortMode_AppliesLocalAndSuccessfulSource()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
@@ -149,6 +190,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var firstNameProp = new PropertyReference(person, nameof(Person.FirstName));
         firstNameProp.SetSource(failingSource.Object);
 
+        // Act
         // Use BestEffort mode to test partial success (local properties should be applied)
         using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
         {
@@ -158,6 +200,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             var exception = await Assert.ThrowsAsync<TransactionException>(
                 () => transaction.CommitAsync(CancellationToken.None));
 
+            // Assert
             Assert.Single(exception.FailedChanges);
         }
 
@@ -168,6 +211,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     [Fact]
     public async Task CommitAsync_WithMultipleSources_GroupsBySource()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
@@ -196,6 +240,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         firstNameProp.SetSource(source1Mock.Object);
         lastNameProp.SetSource(source2Mock.Object);
 
+        // Act
         using (var transaction = await context.BeginExclusiveTransactionAsync())
         {
             person.FirstName = "John";
@@ -203,6 +248,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             await transaction.CommitAsync(CancellationToken.None);
         }
 
+        // Assert
         Assert.Single(source1Writes);
         Assert.Single(source2Writes);
         Assert.Equal(1, source1Writes[0]);
@@ -212,6 +258,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     [Fact]
     public async Task CommitAsync_WhenCancelled_PropagatesCancellation()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
@@ -230,6 +277,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
+        // Act
         using (var transaction = await context.BeginExclusiveTransactionAsync())
         {
             person.FirstName = "John";
@@ -237,6 +285,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             var exception = await Assert.ThrowsAsync<TransactionException>(
                 () => transaction.CommitAsync(cts.Token));
 
+            // Assert
             Assert.Single(exception.FailedChanges);
             var sourceWriteException = Assert.IsType<SourceTransactionWriteException>(exception.FailedChanges[0].Error);
             Assert.IsAssignableFrom<OperationCanceledException>(sourceWriteException.InnerException);
@@ -246,6 +295,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     [Fact]
     public async Task Integration_WithMockSource_VerifyWriteChangesAsyncCalled()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
@@ -268,6 +318,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         firstNameProp.SetSource(sourceMock.Object);
         lastNameProp.SetSource(sourceMock.Object);
 
+        // Act
         using (var transaction = await context.BeginExclusiveTransactionAsync())
         {
             person.FirstName = "John";
@@ -276,6 +327,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             await transaction.CommitAsync(CancellationToken.None);
         }
 
+        // Assert
         Assert.Equal(2, capturedChanges.Count);
         Assert.Contains(capturedChanges, c => c.Property.Metadata.Name == nameof(Person.FirstName) && c.GetNewValue<string>() == "John");
         Assert.Contains(capturedChanges, c => c.Property.Metadata.Name == nameof(Person.LastName) && c.GetNewValue<string>() == "Doe");
@@ -288,6 +340,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     [Fact]
     public async Task CommitAsync_WithMultipleContexts_ResolvesCallbacksPerContext()
     {
+        // Arrange
         var context1 = CreateContext();
         var context2 = CreateContext();
 
@@ -317,6 +370,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         new PropertyReference(person1, nameof(Person.FirstName)).SetSource(source1Mock.Object);
         new PropertyReference(person2, nameof(Person.FirstName)).SetSource(source2Mock.Object);
 
+        // Act
         // Use separate transactions for each context since transactions are now context-bound
         using (var transaction1 = await context1.BeginExclusiveTransactionAsync())
         {
@@ -330,6 +384,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             await transaction2.CommitAsync(CancellationToken.None);
         }
 
+        // Assert
         Assert.Single(source1Writes);
         Assert.Single(source2Writes);
         Assert.Equal("John", person1.FirstName);
@@ -339,6 +394,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     [Fact]
     public async Task CommitAsync_WithPartialWriteFailure_ReportsOnlyFailedChanges()
     {
+        // Arrange
         // Tests the path where WriteResult.FailedChanges contains specific failed changes
         // (not all changes in the batch failed)
         var context = CreateContext();
@@ -373,12 +429,14 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceMock.Object);
 
+        // Act
         using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
         person.FirstName = "John";
         person.LastName = "Doe";
 
         var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
 
+        // Assert
         // Only FirstName should be in FailedChanges (partial failure)
         Assert.Single(ex.FailedChanges);
         Assert.Equal(nameof(Person.FirstName), ex.FailedChanges[0].Change.Property.Metadata.Name);
@@ -392,6 +450,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     [Fact]
     public async Task CommitAsync_WithPartialWriteFailure_InRollbackMode_RevertsSuccessfulChanges()
     {
+        // Arrange
         // Tests that partial failure triggers rollback for successful changes
         var context = CreateContext();
         var person = new Person(context);
@@ -425,12 +484,14 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceMock.Object);
 
+        // Act
         using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
         person.FirstName = "John";
         person.LastName = "Doe";
 
         var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
 
+        // Assert
         // In Rollback mode, nothing should be applied when there's any failure
         Assert.Null(person.FirstName);
         Assert.Null(person.LastName);
