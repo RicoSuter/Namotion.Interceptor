@@ -13,11 +13,13 @@ public class TransactionException : Exception
     public TransactionException(
         string message,
         IReadOnlyList<SubjectPropertyChange> appliedChanges,
-        IReadOnlyList<SourceWriteFailure> failedChanges)
-        : base(message)
+        IReadOnlyList<SubjectPropertyChange> failedChanges,
+        IReadOnlyList<Exception> errors)
+        : base(message, CreateInnerException(errors))
     {
         AppliedChanges = appliedChanges;
         FailedChanges = failedChanges;
+        Errors = errors;
     }
 
     /// <summary>
@@ -28,10 +30,25 @@ public class TransactionException : Exception
     /// <summary>
     /// Gets the changes that failed to write to source (not applied to local model).
     /// </summary>
-    public IReadOnlyList<SourceWriteFailure> FailedChanges { get; }
+    public IReadOnlyList<SubjectPropertyChange> FailedChanges { get; }
+
+    /// <summary>
+    /// Gets the errors that occurred, one per source that failed.
+    /// </summary>
+    public IReadOnlyList<Exception> Errors { get; }
 
     /// <summary>
     /// Gets a value indicating whether at least one change was applied successfully.
     /// </summary>
     public bool IsPartialSuccess => AppliedChanges.Count > 0 && FailedChanges.Count > 0;
+
+    private static Exception? CreateInnerException(IReadOnlyList<Exception> errors)
+    {
+        return errors.Count switch
+        {
+            0 => null,
+            1 => errors[0],
+            _ => new AggregateException("Multiple source write failures occurred.", errors)
+        };
+    }
 }

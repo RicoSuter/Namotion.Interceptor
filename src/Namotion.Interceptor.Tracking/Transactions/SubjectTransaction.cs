@@ -227,7 +227,8 @@ public sealed class SubjectTransaction : IDisposable
 
             // 2. Call write handler on the context (single writer - no context grouping needed)
             var allSuccessfulChanges = new List<SubjectPropertyChange>();
-            var allFailedChanges = new List<SourceWriteFailure>();
+            var allFailedChanges = new List<SubjectPropertyChange>();
+            var allErrors = new List<Exception>();
 
             var writeHandler = Context.TryGetService<ITransactionWriter>();
             if (writeHandler != null)
@@ -235,6 +236,7 @@ public sealed class SubjectTransaction : IDisposable
                 var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, cancellationToken);
                 allSuccessfulChanges.AddRange(result.SuccessfulChanges);
                 allFailedChanges.AddRange(result.FailedChanges);
+                allErrors.AddRange(result.Errors);
             }
             else
             {
@@ -283,7 +285,7 @@ public sealed class SubjectTransaction : IDisposable
                     _ => "One or more external sources failed."
                 };
 
-                throw new TransactionException(message, allSuccessfulChanges, allFailedChanges);
+                throw new TransactionException(message, allSuccessfulChanges, allFailedChanges, allErrors);
             }
         }
         finally

@@ -19,7 +19,8 @@ public sealed class TransactionConflictException : TransactionException
         : base(
             $"Transaction conflict detected on {conflictingProperties.Count} property(ies): {string.Join(", ", conflictingProperties.Select(p => p.Name))}",
             Array.Empty<SubjectPropertyChange>(),
-            Array.Empty<SourceWriteFailure>())
+            Array.Empty<SubjectPropertyChange>(),
+            Array.Empty<Exception>())
     {
         ConflictingProperties = conflictingProperties;
     }
