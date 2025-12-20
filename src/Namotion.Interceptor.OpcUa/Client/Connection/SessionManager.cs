@@ -40,7 +40,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Gets a value indicating whether the session is currently reconnecting.
     /// </summary>
-    public bool IsReconnecting => Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1;
+    public bool IsReconnecting => Volatile.Read(ref _isReconnecting) == 1;
 
     /// <summary>
     /// Gets the current subscriptions managed by the subscription manager.
@@ -183,8 +183,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
         try
         {
-            if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1 ||
-                Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1)
+            if (Volatile.Read(ref _disposed) == 1 ||
+                Volatile.Read(ref _isReconnecting) == 1)
             {
                 return;
             }
@@ -226,7 +226,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         bool reconnectionSucceeded;
         lock (_reconnectingLock)
         {
-            if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
+            if (Volatile.Read(ref _disposed) == 1)
             {
                 return;
             }
@@ -279,7 +279,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         {
             Task.Run(async () =>
             {
-                if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
+                if (Volatile.Read(ref _disposed) == 1)
                 {
                     return; // Already disposing, skip reconnection work
                 }
@@ -295,8 +295,13 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         _logger.LogError(exception, "Reconnect failed, closing session. Health check will trigger full restart.");
                         await DisposeSessionAsync(session, _stoppingToken).ConfigureAwait(false);
 
-                        // Clear session - health check will detect null session and trigger full restart
-                        Volatile.Write(ref _session, null);
+                        // Only clear session if it's still the same one we tried to initialize
+                        // Prevents race with concurrent reconnection or disposal
+                        var currentSession = Volatile.Read(ref _session);
+                        if (ReferenceEquals(currentSession, session))
+                        {
+                            Volatile.Write(ref _session, null);
+                        }
                     }
                 }
             }, _stoppingToken);
@@ -315,7 +320,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         lock (_reconnectingLock)
         {
             // Double-check: still reconnecting AND session still null?
-            if (Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1 &&
+            if (Volatile.Read(ref _isReconnecting) == 1 &&
                 Volatile.Read(ref _session) is null)
             {
                 // Truly stalled - OnReconnectComplete never fired or failed:
@@ -365,7 +370,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         var sessionToDispose = _session;
         if (sessionToDispose is not null)
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var timeout = _configuration.SessionDisposalTimeout;
+            using var cts = new CancellationTokenSource(timeout);
             try
             {
                 await DisposeSessionAsync(sessionToDispose, cts.Token).ConfigureAwait(false);
@@ -373,8 +379,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             catch (OperationCanceledException)
             {
                 _logger.LogWarning(
-                    "Session disposal timed out after 5 seconds during shutdown. " +
-                    "Forcing synchronous disposal to complete cleanup.");
+                    "Session disposal timed out after {Timeout} during shutdown. " +
+                    "Forcing synchronous disposal to complete cleanup.",
+                    timeout);
 
                 // Force immediate disposal without waiting for server acknowledgment
                 try { sessionToDispose.Dispose(); } catch { /* best effort */ }
