@@ -445,13 +445,9 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 ## Best Practices
 
 1. **Always use `using` blocks**: This ensures transactions are properly disposed even if exceptions occur
-
 2. **Keep transactions short**: Long-running transactions hold pending changes in memory
-
 3. **Register transactions before notifications**: Ensure `WithTransactions()` is called before `WithPropertyChangeObservable()` or `WithPropertyChangeQueue()`
-
 4. **Handle exceptions from CommitAsync**: Especially when using external sources, commits can fail partially
-
 5. **Don't share transactions across threads**: Each async context should have its own transaction
 
 ## API Reference
@@ -467,19 +463,6 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 - `locking` (default: `Exclusive`): Concurrency control mode
 - `requirement` (default: `None`): Validation constraints
 - `conflictBehavior` (default: `FailOnConflict`): How to handle value conflicts at commit time
-
-### SubjectTransaction
-
-| Member | Description |
-|--------|-------------|
-| `static Current` | Gets the current transaction in the execution context, or `null` |
-| `static HasActiveTransaction` | Fast-path check for any active transaction (single volatile read) |
-| `Context` | Gets the context this transaction is bound to |
-| `Locking` | Gets the locking mode for this transaction |
-| `ConflictBehavior` | Gets the conflict behavior for this transaction |
-| `GetPendingChanges()` | Returns the list of pending property changes |
-| `CommitAsync(ct)` | Commits all pending changes using the configured options |
-| `Dispose()` | Discards uncommitted changes and clears the current transaction |
 
 ### TransactionFailureHandling
 
@@ -508,11 +491,3 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 |-------|-------------|
 | `FailOnConflict` | Throw `TransactionConflictException` if values changed since transaction started (default) |
 | `Ignore` | Overwrite any concurrent changes without checking |
-
-### ITransactionWriteHandler
-
-Implement this interface to customize how transaction changes are written to external systems.
-
-| Member | Description |
-|--------|-------------|
-| `WriteChangesAsync(changes, failureHandling, requirement, ct)` | Writes changes to external sources with the specified options |
