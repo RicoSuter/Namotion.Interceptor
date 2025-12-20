@@ -25,24 +25,9 @@ Enable transaction support in your interceptor context:
 var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking()
-    .WithTransactions(); // Required for transaction support (opt-in)
+    .WithTransactions() // Required for in-memory transaction support (opt-in)
+    .WithSourceTransactions(); // Required for source write transaction support (opt-in)
 ```
-
-Or enable transactions individually:
-
-```csharp
-var context = InterceptorSubjectContext
-    .Create()
-    .WithTransactions()
-    .WithPropertyChangeObservable();
-```
-
-### Performance
-
-Transactions are designed for zero overhead when not in use:
-- **Without `WithTransactions()`**: Zero overhead - no interceptor registered
-- **With `WithTransactions()`, no active transaction**: Near-zero overhead (~1-2ns) - single volatile read of static counter
-- **Active transaction**: Full transaction logic executes
 
 ## Basic Usage
 
@@ -59,7 +44,7 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
     // Changes are captured but not yet applied to the model
     // No change notifications are fired yet
 
-    await transaction.CommitAsync();
+    await transaction.CommitAsync(cancellationToken);
 
     // All changes are now applied and notifications are fired
 }
@@ -77,7 +62,7 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
     // Reading returns the pending value, not the committed value
     Console.WriteLine(person.FirstName); // Output: John
 
-    await transaction.CommitAsync();
+    await transaction.CommitAsync(cancellationToken);
 }
 ```
 
@@ -112,7 +97,7 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
         Console.WriteLine($"{change.Property.Name}: {change.GetOldValue<object>()} -> {change.GetNewValue<object>()}");
     }
 
-    await transaction.CommitAsync();
+    await transaction.CommitAsync(cancellationToken);
 }
 ```
 
@@ -130,7 +115,7 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
     // Only one pending change for FirstName
     // OldValue = original value, NewValue = "Bob"
 
-    await transaction.CommitAsync();
+    await transaction.CommitAsync(cancellationToken);
 }
 ```
 
@@ -144,9 +129,9 @@ Calling `CommitAsync()` twice throws an exception:
 using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
 {
     person.FirstName = "John";
-    await transaction.CommitAsync();
+    await transaction.CommitAsync(cancellationToken);
 
-    await transaction.CommitAsync(); // Throws InvalidOperationException
+    await transaction.CommitAsync(cancellationToken); // Throws InvalidOperationException
 }
 ```
 
@@ -158,7 +143,7 @@ Using a disposed transaction throws an exception:
 var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
 transaction.Dispose();
 
-await transaction.CommitAsync(); // Throws ObjectDisposedException
+await transaction.CommitAsync(cancellationToken); // Throws ObjectDisposedException
 ```
 
 ### Nested Transactions
@@ -199,7 +184,7 @@ using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Be
 device.Temperature = 25.5;  // Bound to Source A
 device.Pressure = 101.3;    // Bound to Source B
 
-await tx.CommitAsync();
+await tx.CommitAsync(cancellationToken);
 ```
 
 **When all sources succeed:**
@@ -223,7 +208,7 @@ using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Ro
 device.Temperature = 25.5;  // Bound to Source A
 device.Pressure = 101.3;    // Bound to Source B
 
-await tx.CommitAsync();
+await tx.CommitAsync(cancellationToken);
 ```
 
 **When all sources succeed:**
@@ -289,7 +274,7 @@ device.Temperature = 25.5;
 
 // If another transaction modified Temperature since we started,
 // CommitAsync will throw TransactionConflictException
-await tx.CommitAsync();
+await tx.CommitAsync(cancellationToken);
 ```
 
 ### Locking Mode Comparison
@@ -334,7 +319,7 @@ using var tx = await context.BeginTransactionAsync(
 device.Temperature = 25.5;  // Bound to OPC UA source
 device.Pressure = 101.3;    // Same OPC UA source
 
-await tx.CommitAsync();
+await tx.CommitAsync(cancellationToken);
 ```
 
 **Why use SingleWrite with Rollback?**
@@ -362,7 +347,7 @@ device.Temperature = 25.5;
 device.Pressure = 101.3;
 
 // Throws: "SingleWrite requirement violated: Transaction contains changes for 2 sources, but only 1 is allowed."
-await tx.CommitAsync();
+await tx.CommitAsync(cancellationToken);
 ```
 
 ## External Source Integration
@@ -392,7 +377,7 @@ try
         device.Temperature = 25.5;
         device.Pressure = 101.3;
 
-        await transaction.CommitAsync();
+        await transaction.CommitAsync(cancellationToken);
     }
 }
 catch (TransactionException ex)
@@ -444,7 +429,7 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
     // FullName is calculated from pending values
     Console.WriteLine(person.FullName); // Output: John Doe
 
-    await transaction.CommitAsync();
+    await transaction.CommitAsync(cancellationToken);
     // FullName change notification is fired after commit
 }
 ```
