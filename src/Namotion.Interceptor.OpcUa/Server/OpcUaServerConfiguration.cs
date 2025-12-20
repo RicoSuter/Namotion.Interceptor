@@ -66,6 +66,11 @@ public class OpcUaServerConfiguration
     /// </summary>
     public ITelemetryContext TelemetryContext { get; init; } = NullTelemetryContext.Instance;
 
+    /// <summary>
+    /// Creates and configures an OPC UA application instance for the server.
+    /// Override this method to customize application configuration, security settings, or certificate handling.
+    /// </summary>
+    /// <returns>A configured <see cref="ApplicationInstance"/> ready for hosting an OPC UA server.</returns>
     public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
         var application = new ApplicationInstance(TelemetryContext)

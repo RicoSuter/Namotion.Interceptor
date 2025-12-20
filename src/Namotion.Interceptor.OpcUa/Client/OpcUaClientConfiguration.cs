@@ -7,6 +7,8 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 public class OpcUaClientConfiguration
 {
+    private ISessionFactory? _resolvedSessionFactory;
+
     /// <summary>
     /// Gets the OPC UA server endpoint URL to connect to (e.g., "opc.tcp://localhost:4840").
     /// </summary>
@@ -212,9 +214,15 @@ public class OpcUaClientConfiguration
 
     /// <summary>
     /// Gets the actual session factory, creating a default one using TelemetryContext if not explicitly set.
+    /// The default factory is cached after first access.
     /// </summary>
-    public ISessionFactory ActualSessionFactory => SessionFactory ?? new DefaultSessionFactory(TelemetryContext);
+    public ISessionFactory ActualSessionFactory => SessionFactory ?? (_resolvedSessionFactory ??= new DefaultSessionFactory(TelemetryContext));
 
+    /// <summary>
+    /// Creates and configures an OPC UA application instance for the client.
+    /// Override this method to customize application configuration, security settings, or certificate handling.
+    /// </summary>
+    /// <returns>A configured <see cref="ApplicationInstance"/> ready for connecting to OPC UA servers.</returns>
     public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
         var application = new ApplicationInstance(TelemetryContext)

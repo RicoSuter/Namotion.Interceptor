@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Connection;
 /// Manages OPC UA session lifecycle, reconnection handling, and thread-safe session access.
 /// Optimized for fast session reads (hot path) with simple lock-based writes (cold path).
 /// </summary>
-internal sealed class SessionManager : IDisposable, IAsyncDisposable
+internal sealed class SessionManager : IAsyncDisposable, IDisposable
 {
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
@@ -90,12 +90,25 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
         var serverUri = new Uri(configuration.ServerUrl);
 
-        using var discoveryClient = await DiscoveryClient.CreateAsync(
-            application.ApplicationConfiguration,
-            serverUri,
-            endpointConfiguration, ct: cancellationToken).ConfigureAwait(false);
+        EndpointDescriptionCollection endpoints;
+        try
+        {
+            using var discoveryClient = await DiscoveryClient.CreateAsync(
+                application.ApplicationConfiguration,
+                serverUri,
+                endpointConfiguration, ct: cancellationToken).ConfigureAwait(false);
 
-        var endpoints = await discoveryClient.GetEndpointsAsync(null, cancellationToken).ConfigureAwait(false);
+            endpoints = await discoveryClient.GetEndpointsAsync(null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                $"Failed to discover OPC UA endpoints at '{configuration.ServerUrl}'. " +
+                $"Verify the server is running and the URL is correct. " +
+                $"The connection will be retried automatically.",
+                ex);
+        }
+
         var endpointDescription = CoreClientUtils.SelectEndpoint(
             application.ApplicationConfiguration,
             serverUri,
@@ -107,7 +120,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         var oldSession = Volatile.Read(ref _session);
 
         var sessionFactory = configuration.ActualSessionFactory;
-        var newSession = await sessionFactory.CreateAsync(
+        var sessionResult = await sessionFactory.CreateAsync(
             application.ApplicationConfiguration,
             endpoint,
             updateBeforeConnect: false,
@@ -115,8 +128,12 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
             identity: new UserIdentity(),
             preferredLocales: null,
-            cancellationToken).ConfigureAwait(false) as Session
-            ?? throw new InvalidOperationException("Failed to create OPC UA session.");
+            cancellationToken).ConfigureAwait(false);
+
+        var newSession = sessionResult as Session
+            ?? throw new InvalidOperationException(
+                $"Session factory returned unexpected type '{sessionResult?.GetType().FullName ?? "null"}'. " +
+                $"Expected '{typeof(Session).FullName}'. Ensure the configured SessionFactory returns a valid Session instance.");
 
         newSession.KeepAlive -= OnKeepAlive;
         newSession.KeepAlive += OnKeepAlive;
@@ -342,7 +359,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         }
 
         try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
-        try { SubscriptionManager.Dispose(); } catch { /* best effort */ }
+        try { await SubscriptionManager.DisposeAsync().ConfigureAwait(false); } catch { /* best effort */ }
         try { PollingManager?.Dispose(); } catch { /* best effort */ }
 
         var sessionToDispose = _session;
@@ -367,8 +384,26 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Synchronous dispose - prefer DisposeAsync() for proper cleanup.
+    /// This is only called if the caller doesn't check for IAsyncDisposable.
+    /// </summary>
     public void Dispose()
     {
-        DisposeAsync().GetAwaiter().GetResult();
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
+
+        try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
+        try { PollingManager?.Dispose(); } catch { /* best effort */ }
+
+        var sessionToDispose = _session;
+        if (sessionToDispose is not null)
+        {
+            sessionToDispose.KeepAlive -= OnKeepAlive;
+            try { sessionToDispose.Dispose(); } catch { /* best effort */ }
+            Volatile.Write(ref _session, null);
+        }
     }
 }

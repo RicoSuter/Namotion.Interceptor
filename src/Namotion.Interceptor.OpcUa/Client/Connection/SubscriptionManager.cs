@@ -11,7 +11,7 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client.Connection;
 
-internal class SubscriptionManager
+internal class SubscriptionManager : IAsyncDisposable
 {
     private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
         = new(() => new List<PropertyUpdate>(16));
@@ -298,7 +298,7 @@ internal class SubscriptionManager
         }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         _shuttingDown = true;
 
@@ -308,14 +308,20 @@ internal class SubscriptionManager
         foreach (var subscription in subscriptions)
         {
             subscription.FastDataChangeCallback -= OnFastDataChange;
+        }
+
+        var deleteTasks = subscriptions.Select(async subscription =>
+        {
             try
             {
-                subscription.DeleteAsync(true).GetAwaiter().GetResult();
+                await subscription.DeleteAsync(true).ConfigureAwait(false);
             }
-            catch
+            catch (Exception ex)
             {
-                // Best effort during disposal
+                _logger.LogWarning(ex, "Failed to delete subscription {SubscriptionId} during disposal.", subscription.Id);
             }
-        }
+        });
+
+        await Task.WhenAll(deleteTasks).ConfigureAwait(false);
     }
 }
