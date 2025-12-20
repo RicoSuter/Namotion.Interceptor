@@ -59,4 +59,15 @@ public class AnalogChannelTests
         Assert.Equal(512, channel.RawValue);
         Assert.Equal(0.5, channel.Value);
     }
+
+    [Fact]
+    public void AnalogChannel_TitleAndIcon_ReturnExpectedValues()
+    {
+        // Arrange
+        var channel = new AnalogChannel { ChannelNumber = 5 };
+
+        // Act & Assert
+        Assert.Equal("Channel 5", channel.Title);
+        Assert.Equal("ShowChart", channel.Icon);
+    }
 }

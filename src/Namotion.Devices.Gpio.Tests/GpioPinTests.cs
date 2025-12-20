@@ -76,4 +76,15 @@ public class GpioPinTests
         // Assert
         Assert.Equal(mode, pin.Mode);
     }
+
+    [Fact]
+    public void GpioPin_TitleAndIcon_ReturnExpectedValues()
+    {
+        // Arrange
+        var pin = new GpioPin { PinNumber = 17 };
+
+        // Act & Assert
+        Assert.Equal("Pin 17", pin.Title);
+        Assert.Equal("Settings", pin.Icon);
+    }
 }
