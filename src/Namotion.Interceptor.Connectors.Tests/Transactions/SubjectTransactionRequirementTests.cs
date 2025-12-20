@@ -14,6 +14,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     [Fact]
     public async Task SingleWriteRequirement_ThrowsException_WhenMultipleSources()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
@@ -23,6 +24,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
 
+        // Act
         using var tx = await context.BeginTransactionAsync(
             TransactionFailureHandling.Rollback,
             requirement: TransactionRequirement.SingleWrite);
@@ -32,6 +34,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
 
         var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
+        // Assert
         Assert.Single(ex.FailedChanges);
         Assert.IsType<InvalidOperationException>(ex.FailedChanges[0].Error);
         Assert.Contains("2 sources", ex.FailedChanges[0].Error.Message);
@@ -51,6 +54,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     [Fact]
     public async Task SingleWriteRequirement_ThrowsException_WhenChangesExceedBatchSize()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
@@ -59,6 +63,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
 
+        // Act
         using var tx = await context.BeginTransactionAsync(
             TransactionFailureHandling.Rollback,
             requirement: TransactionRequirement.SingleWrite);
@@ -68,6 +73,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
 
         var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
+        // Assert
         Assert.Single(ex.FailedChanges);
         Assert.IsType<InvalidOperationException>(ex.FailedChanges[0].Error);
         Assert.Contains("2 changes", ex.FailedChanges[0].Error.Message);
@@ -81,6 +87,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     [Fact]
     public async Task SingleWriteRequirement_Succeeds_WhenRequirementsMet()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
@@ -89,6 +96,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
 
+        // Act
         using var tx = await context.BeginTransactionAsync(
             TransactionFailureHandling.Rollback,
             requirement: TransactionRequirement.SingleWrite);
@@ -98,6 +106,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
 
         await tx.CommitAsync(CancellationToken.None);
 
+        // Assert
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
 
@@ -109,6 +118,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     [Fact]
     public async Task SingleWriteRequirement_Succeeds_WithUnlimitedBatchSize()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
@@ -117,6 +127,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
 
+        // Act
         using var tx = await context.BeginTransactionAsync(
             TransactionFailureHandling.Rollback,
             requirement: TransactionRequirement.SingleWrite);
@@ -126,6 +137,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
 
         await tx.CommitAsync(CancellationToken.None);
 
+        // Assert
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
     }
@@ -133,9 +145,11 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     [Fact]
     public async Task SingleWriteRequirement_AllowsChangesWithoutSource()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
+        // Act
         using var tx = await context.BeginTransactionAsync(
             TransactionFailureHandling.Rollback,
             requirement: TransactionRequirement.SingleWrite);
@@ -145,6 +159,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
 
         await tx.CommitAsync(CancellationToken.None);
 
+        // Assert
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
     }
@@ -152,12 +167,14 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     [Fact]
     public async Task SingleWriteRequirement_AllowsMixedSourceAndNoSource()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
         var source = CreateSucceedingSource();
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
 
+        // Act
         using var tx = await context.BeginTransactionAsync(
             TransactionFailureHandling.Rollback,
             requirement: TransactionRequirement.SingleWrite);
@@ -167,6 +184,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
 
         await tx.CommitAsync(CancellationToken.None);
 
+        // Assert
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
     }
@@ -176,6 +194,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     [InlineData(false)] // Default (no requirement specified)
     public async Task NoneRequirement_AllowsMultipleSources(bool explicitRequirement)
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
@@ -185,6 +204,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
 
+        // Act
         using var tx = explicitRequirement
             ? await context.BeginTransactionAsync(TransactionFailureHandling.Rollback, requirement: TransactionRequirement.None)
             : await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
@@ -194,6 +214,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
 
         await tx.CommitAsync(CancellationToken.None);
 
+        // Assert
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
     }
@@ -201,6 +222,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     [Fact]
     public async Task SingleWriteWithRollback_RevertsOnFailure_WithSingleSource()
     {
+        // Arrange
         var context = CreateContext();
         var person = new Person(context);
 
@@ -212,6 +234,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
 
+        // Act
         using var tx = await context.BeginTransactionAsync(
             TransactionFailureHandling.Rollback,
             requirement: TransactionRequirement.SingleWrite);
@@ -221,6 +244,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
 
         var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
+        // Assert
         Assert.Null(person.FirstName);
         Assert.Null(person.LastName);
         // Each failed property change is reported separately
@@ -230,6 +254,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     [Fact]
     public async Task SingleWriteRequirement_ValidationFailure_ReturnsChangesWithoutSourceAsSuccessful()
     {
+        // Arrange
         // Tests that when SingleWrite validation fails (multiple sources),
         // changes without source are still returned as successful in the result.
         // This tests SourceTransactionWriter line 29-31.
@@ -245,6 +270,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
         // Father has no source
 
+        // Act
         using var tx = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort, // Use BestEffort to see successful changes applied
             requirement: TransactionRequirement.SingleWrite);
@@ -255,6 +281,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
 
         var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
+        // Assert
         // Validation error should be reported
         Assert.Single(ex.FailedChanges);
         Assert.Contains("2 sources", ex.FailedChanges[0].Error.Message);
@@ -282,6 +309,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
     [Fact]
     public async Task SingleWriteRequirement_BatchSizeViolation_ReturnsChangesWithoutSourceAsSuccessful()
     {
+        // Arrange
         // Tests that when SingleWrite validation fails due to batch size,
         // changes without source are still returned as successful.
         var context = CreateContext();
@@ -294,6 +322,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);
         // Father has no source
 
+        // Act
         using var tx = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort,
             requirement: TransactionRequirement.SingleWrite);
@@ -304,6 +333,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
 
         var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
+        // Assert
         // Validation error for batch size
         Assert.Single(ex.FailedChanges);
         Assert.Contains("WriteBatchSize is 1", ex.FailedChanges[0].Error.Message);
