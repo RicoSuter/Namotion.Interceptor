@@ -16,9 +16,6 @@ public static class InterceptorSubjectContextExtensions
     /// </summary>
     /// <param name="context">The interceptor subject context to configure.</param>
     /// <returns>The same context instance for method chaining.</returns>
-    /// <exception cref="InvalidOperationException">
-    /// Thrown when WithTransactions() or WithFullPropertyTracking() has not been called first.
-    /// </exception>
     public static IInterceptorSubjectContext WithSourceTransactions(this IInterceptorSubjectContext context)
     {
         context
