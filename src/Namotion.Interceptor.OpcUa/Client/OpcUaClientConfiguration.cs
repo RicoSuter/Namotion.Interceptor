@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Registry.Paths;
+﻿using System.Threading;
+using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;
@@ -213,10 +214,18 @@ public class OpcUaClientConfiguration
     public ISessionFactory? SessionFactory { get; init; }
 
     /// <summary>
-    /// Gets the actual session factory, creating a default one using TelemetryContext if not explicitly set.
-    /// The default factory is cached after first access.
+    /// Gets or sets the timeout for session disposal during shutdown.
+    /// If the session doesn't close gracefully within this timeout, it will be forcefully disposed.
+    /// Default is 5 seconds.
     /// </summary>
-    public ISessionFactory ActualSessionFactory => SessionFactory ?? (_resolvedSessionFactory ??= new DefaultSessionFactory(TelemetryContext));
+    public TimeSpan SessionDisposalTimeout { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Gets the actual session factory, creating a default one using TelemetryContext if not explicitly set.
+    /// The default factory is cached after first access (thread-safe).
+    /// </summary>
+    public ISessionFactory ActualSessionFactory => SessionFactory ?? LazyInitializer.EnsureInitialized(
+        ref _resolvedSessionFactory, () => new DefaultSessionFactory(TelemetryContext))!;
 
     /// <summary>
     /// Creates and configures an OPC UA application instance for the client.
