@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Connectors.Transactions;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Connectors;
@@ -11,42 +12,20 @@ public static class InterceptorSubjectContextExtensions
     /// <summary>
     /// Enables external source write support for transactions.
     /// Registers an <see cref="ITransactionWriter"/> that writes changes to external sources.
+    /// Automatically registers WithTransactions() if not already registered.
     /// </summary>
     /// <param name="context">The interceptor subject context to configure.</param>
     /// <returns>The same context instance for method chaining.</returns>
     /// <exception cref="InvalidOperationException">
     /// Thrown when WithTransactions() or WithFullPropertyTracking() has not been called first.
     /// </exception>
-    /// <remarks>
-    /// <para>
-    /// Requires WithTransactions() or WithFullPropertyTracking() to be called first to register
-    /// the SubjectTransactionInterceptor. This method registers a handler that writes
-    /// property changes to their associated external sources (OPC UA, MQTT, etc.) before
-    /// applying them to the in-process model.
-    /// </para>
-    /// </remarks>
-    /// <example>
-    /// <code>
-    /// var context = InterceptorSubjectContext
-    ///     .Create()
-    ///     .WithFullPropertyTracking()   // Registers SubjectTransactionInterceptor
-    ///     .WithSourceTransactions();    // Registers ITransactionWriteHandler
-    /// </code>
-    /// </example>
     public static IInterceptorSubjectContext WithSourceTransactions(this IInterceptorSubjectContext context)
     {
-        // Verify transaction support is enabled
-        var interceptor = context.TryGetService<SubjectTransactionInterceptor>();
-        if (interceptor == null)
-        {
-            throw new InvalidOperationException(
-                "WithSourceTransactions() requires WithTransactions() or WithFullPropertyTracking() to be called first.");
-        }
-
-        // Register the source transaction write handler
-        context.TryAddService<ITransactionWriter>(
-            () => new SourceTransactionWriter(),
-            _ => true);
+        context
+            .WithTransactions()
+            .TryAddService<ITransactionWriter>(
+                () => new SourceTransactionWriter(),
+                _ => true);
 
         return context;
     }

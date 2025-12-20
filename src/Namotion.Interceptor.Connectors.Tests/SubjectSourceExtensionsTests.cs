@@ -31,7 +31,7 @@ public class SubjectSourceExtensionsTests
         sourceMock.Setup(s => s.WriteBatchSize).Returns(5);
         sourceMock
             .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(WriteResult.Success());
+            .ReturnsAsync(WriteResult.Success);
 
         var changes = CreateChanges(3);
 
@@ -53,7 +53,7 @@ public class SubjectSourceExtensionsTests
         sourceMock.Setup(s => s.WriteBatchSize).Returns(3);
         sourceMock
             .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(WriteResult.Success());
+            .ReturnsAsync(WriteResult.Success);
 
         var changes = CreateChanges(3);
 
@@ -80,7 +80,7 @@ public class SubjectSourceExtensionsTests
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 batchSizes.Add(changes.Length);
-                return new ValueTask<WriteResult>(WriteResult.Success());
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         var changes = CreateChanges(5);
@@ -113,7 +113,7 @@ public class SubjectSourceExtensionsTests
                 {
                     return new ValueTask<WriteResult>(WriteResult.Failure(new Exception("Batch 2 failed")));
                 }
-                return new ValueTask<WriteResult>(WriteResult.Success());
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         var changes = CreateChanges(5);
@@ -135,7 +135,7 @@ public class SubjectSourceExtensionsTests
         sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
         sourceMock
             .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(WriteResult.Success());
+            .ReturnsAsync(WriteResult.Success);
 
         var changes = CreateChanges(10);
 
@@ -157,7 +157,7 @@ public class SubjectSourceExtensionsTests
         sourceMock.Setup(s => s.WriteBatchSize).Returns(-1);
         sourceMock
             .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(WriteResult.Success());
+            .ReturnsAsync(WriteResult.Success);
 
         var changes = CreateChanges(10);
 
@@ -207,7 +207,7 @@ public class SubjectSourceExtensionsTests
         sourceMock.Setup(s => s.WriteBatchSize).Returns(3);
         sourceMock
             .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(WriteResult.Success());
+            .ReturnsAsync(WriteResult.Success);
 
         var changes = CreateChanges(9); // 3 batches of 3
 
@@ -239,7 +239,7 @@ public class SubjectSourceExtensionsTests
                 {
                     return new ValueTask<WriteResult>(WriteResult.Failure(new Exception("Complete batch failure")));
                 }
-                return new ValueTask<WriteResult>(WriteResult.Success());
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         var changes = CreateChanges(5);
@@ -274,7 +274,7 @@ public class SubjectSourceExtensionsTests
                 await Task.Delay(50);
 
                 Interlocked.Decrement(ref concurrentCalls);
-                return WriteResult.Success();
+                return WriteResult.Success;
             });
 
         var changes = CreateChanges(1);
@@ -321,7 +321,7 @@ public class SubjectSourceExtensionsTests
                 await canContinue.Task;
 
                 Interlocked.Decrement(ref concurrentCalls);
-                return WriteResult.Success();
+                return WriteResult.Success;
             });
 
         var changes = CreateChanges(1);
@@ -422,7 +422,7 @@ public class SubjectSourceExtensionsTests
         {
             _writeStarted.TrySetResult();
             await _canComplete.Task;
-            return WriteResult.Success();
+            return WriteResult.Success;
         }
 
         public void UnblockWrite() => _canComplete.TrySetResult();

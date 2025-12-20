@@ -34,6 +34,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
 
+    internal SourceOwnershipManager Ownership => _ownership;
+
     internal bool IsReconnecting => _sessionManager?.IsReconnecting == true;
 
     internal void RemoveItemsForSubject(IInterceptorSubject subject)
@@ -57,8 +59,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _ownership = new SourceOwnershipManager(
             this,
             onReleasing: property => property.RemovePropertyData(OpcUaNodeIdKey),
-            onSubjectDetaching: OnSubjectDetaching,
-            logger);
+            onSubjectDetaching: OnSubjectDetaching);
         _subjectLoader = new OpcUaSubjectLoader(configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
     }
@@ -83,8 +84,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
-
-        _ownership.SubscribeToLifecycle(_subject.Context);
 
         _sessionManager = new SessionManager(this, propertyWriter, _configuration, _logger);
 
@@ -341,7 +340,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             var writeValues = CreateWriteValuesCollection(changes);
             if (writeValues.Count is 0)
             {
-                return WriteResult.Success();
+                return WriteResult.Success;
             }
 
             var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
@@ -370,7 +369,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         if (failureCount == 0)
         {
-            return WriteResult.Success();
+            return WriteResult.Success;
         }
 
         // Failure case: re-scan to collect failed changes

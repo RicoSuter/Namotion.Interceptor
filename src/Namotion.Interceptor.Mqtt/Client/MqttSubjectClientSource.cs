@@ -57,8 +57,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _factory = new MqttClientFactory();
         _ownership = new SourceOwnershipManager(
             this,
-            onSubjectDetaching: CleanupTopicCachesForSubject,
-            logger: logger);
+            onSubjectDetaching: CleanupTopicCachesForSubject);
 
         configuration.Validate();
     }
@@ -96,8 +95,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     {
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to MQTT broker at {Host}:{Port}.", _configuration.BrokerHost, _configuration.BrokerPort);
-
-        _ownership.SubscribeToLifecycle(_subject.Context);
 
         _client = _factory.CreateMqttClient();
         _client.ApplicationMessageReceivedAsync += OnMessageReceivedAsync;
@@ -149,7 +146,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             }
 
             var length = changes.Length;
-            if (length == 0) return WriteResult.Success();
+            if (length == 0) return WriteResult.Success;
 
             var messagesPool = ArrayPool<MqttApplicationMessage>.Shared;
             var userPropsArrayPool = ArrayPool<List<MqttUserProperty>?>.Shared;
@@ -216,7 +213,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                 }
 
                 if (messageCount <= 0)
-                    return WriteResult.Success();
+                    return WriteResult.Success;
 
                 Exception? publishException = null;
                 var failedStartIndex = messageCount; // Index where failures start (in message space)
@@ -263,7 +260,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                         : WriteResult.Failure(failedChanges, publishException);
                 }
 
-                return WriteResult.Success();
+                return WriteResult.Success;
             }
             finally
             {

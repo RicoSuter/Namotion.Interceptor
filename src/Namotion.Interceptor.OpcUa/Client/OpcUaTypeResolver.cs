@@ -24,12 +24,12 @@ public class OpcUaTypeResolver
             return cachedType;
         }
 
-        var type = await TryGetTypeForNodeCoreAsync(session, reference, cancellationToken).ConfigureAwait(false);
+        var type = await TryGetTypeForNodeWithoutCacheAsync(session, reference, cancellationToken).ConfigureAwait(false);
         _typeCache.TryAdd(cacheKey, type);
         return type;
     }
 
-    private async Task<Type?> TryGetTypeForNodeCoreAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
+    private async Task<Type?> TryGetTypeForNodeWithoutCacheAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
     {
         var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
 

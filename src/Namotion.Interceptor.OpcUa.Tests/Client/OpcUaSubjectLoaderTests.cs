@@ -7,6 +7,7 @@ using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -225,14 +226,14 @@ public class OpcUaSubjectLoaderTests
             DefaultNamespaceUri = _baseConfiguration.DefaultNamespaceUri
         };
 
-        var source = new OpcUaSubjectClientSource(new DynamicSubject(), config, NullLogger<OpcUaSubjectClientSource>.Instance);
-        var ownership = new SourceOwnershipManager(source, logger: NullLogger<OpcUaSubjectClientSource>.Instance);
+        var context = InterceptorSubjectContext.Create().WithRegistry().WithLifecycle();
+        var source = new OpcUaSubjectClientSource(new DynamicSubject(context), config, NullLogger<OpcUaSubjectClientSource>.Instance);
         var loader = new OpcUaSubjectLoader(
             config,
-            ownership,
+            source.Ownership,
             source,
             NullLogger<OpcUaSubjectClientSource>.Instance);
-        return (loader, ownership);
+        return (loader, source.Ownership);
     }
 
     private IInterceptorSubject CreateTestSubject()

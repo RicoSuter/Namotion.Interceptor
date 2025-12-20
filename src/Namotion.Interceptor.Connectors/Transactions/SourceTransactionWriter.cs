@@ -95,7 +95,6 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         });
 
         var results = await Task.WhenAll(writeTasks);
-
         foreach (var (source, (successful, failed)) in results)
         {
             if (successful.Count > 0)
@@ -118,8 +117,8 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             CancellationToken cancellationToken)
     {
         var memory = new ReadOnlyMemory<SubjectPropertyChange>(sourceChanges.ToArray());
+    
         var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
-
         if (result.Error is not null)
         {
             var failedList = result.FailedChanges.Length > 0
@@ -171,8 +170,8 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
                 .ToArray();
 
             var memory = new ReadOnlyMemory<SubjectPropertyChange>(rollbackChanges);
+     
             var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
-
             if (result.Error is not null)
             {
                 var rollbackException = new SourceTransactionWriteException(

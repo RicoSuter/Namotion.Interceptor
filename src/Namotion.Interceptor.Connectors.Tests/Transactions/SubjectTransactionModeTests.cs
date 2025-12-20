@@ -1,6 +1,5 @@
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
-using Namotion.Interceptor.Connectors.Transactions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -27,7 +26,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         Assert.Equal("John", person.FirstName);
         Assert.Null(person.LastName);
@@ -50,7 +49,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        await tx.CommitAsync();
+        await tx.CommitAsync(CancellationToken.None);
 
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
@@ -68,7 +67,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         successSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback(() => writeCallCount++)
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
-                new ValueTask<WriteResult>(WriteResult.Success()));
+                new ValueTask<WriteResult>(WriteResult.Success));
 
         var failSource = CreateFailingSource();
 
@@ -79,7 +78,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         Assert.Null(person.FirstName);
         Assert.Null(person.LastName);
@@ -101,7 +100,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
             {
                 callCount++;
                 if (callCount == 1)
-                    return new ValueTask<WriteResult>(WriteResult.Success()); // Initial write succeeds
+                    return new ValueTask<WriteResult>(WriteResult.Success); // Initial write succeeds
                 else
                     return new ValueTask<WriteResult>(WriteResult.Failure(new InvalidOperationException("Revert failed"))); // Revert fails
             });
@@ -115,7 +114,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         Assert.Equal(2, ex.FailedChanges.Count);
     }
@@ -138,7 +137,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe"; // No source - should be in successful changes
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // LastName should NOT be applied in Rollback mode (shouldApplyChanges is false)
         // because the rollback mode check is at SubjectTransaction level, not SourceTransactionWriter
@@ -168,7 +167,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe"; // No source
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // In BestEffort, successful changes are applied
         Assert.Equal("Doe", person.LastName);

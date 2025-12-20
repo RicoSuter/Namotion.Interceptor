@@ -18,7 +18,7 @@ public sealed class SubjectTransaction : IDisposable
     /// all transactions have completed due to memory visibility delays. This is safe because
     /// a false positive only results in an unnecessary AsyncLocal read.
     /// </summary>
-    public static bool HasActiveTransaction => Volatile.Read(ref _activeTransactionCount) > 0;
+    internal static bool HasActiveTransaction => Volatile.Read(ref _activeTransactionCount) > 0;
 
     private readonly TransactionMode _mode;
     private readonly TransactionRequirement _requirement;

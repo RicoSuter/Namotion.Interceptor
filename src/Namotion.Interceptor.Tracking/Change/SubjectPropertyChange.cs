@@ -3,7 +3,7 @@ using Namotion.Interceptor.Tracking.Change.Performance;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
-public readonly record struct SubjectPropertyChange
+public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
 {
     // Discriminated union: either inline storage OR boxed holder (per value)
     private readonly InlineValueStorage _oldValueStorage;
@@ -177,4 +177,17 @@ public readonly record struct SubjectPropertyChange
         value = default!;
         return false;
     }
+
+    /// <summary>
+    /// Equality based on PropertyReference only for efficient HashSet/Dictionary usage.
+    /// </summary>
+    public bool Equals(SubjectPropertyChange other) => Property.Equals(other.Property);
+
+    public override bool Equals(object? obj) => obj is SubjectPropertyChange other && Equals(other);
+
+    public override int GetHashCode() => Property.GetHashCode();
+
+    public static bool operator ==(SubjectPropertyChange left, SubjectPropertyChange right) => left.Equals(right);
+
+    public static bool operator !=(SubjectPropertyChange left, SubjectPropertyChange right) => !left.Equals(right);
 }
