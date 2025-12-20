@@ -19,7 +19,7 @@ This is a convenience method that registers:
 - Property changed queue (high performance)
 - Context inheritance for child subjects
 
-> **Note**: Transaction support is opt-in. Add `.WithTransactions()` to enable transaction support.
+> **Note**: Transaction support is opt-in. Add `.WithTransactions()` or `.WithSourceTransactions()` to enable transaction support.
 
 You can also enable features individually for more granular control.
 
