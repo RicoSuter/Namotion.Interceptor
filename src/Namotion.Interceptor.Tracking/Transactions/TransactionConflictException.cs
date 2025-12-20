@@ -5,6 +5,11 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// <summary>
 /// Exception thrown when a transaction detects a concurrent modification conflict.
 /// </summary>
+/// <remarks>
+/// Inherits from <see cref="TransactionException"/> for unified exception handling.
+/// <see cref="TransactionException.AppliedChanges"/> and <see cref="TransactionException.FailedChanges"/>
+/// are always empty since no writes are attempted when conflicts are detected at commit time.
+/// </remarks>
 public sealed class TransactionConflictException : TransactionException
 {
     /// <summary>

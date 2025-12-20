@@ -36,7 +36,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     private readonly ConcurrentDictionary<string, PropertyReference?> _topicToProperty = new();
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
 
-    private readonly MqttPropertyTracker _propertyTracker;
+    private readonly SourceOwnershipManager _ownership;
 
     private IMqttClient? _client;
     private SubjectPropertyWriter? _propertyWriter;
@@ -55,9 +55,34 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         _factory = new MqttClientFactory();
-        _propertyTracker = new MqttPropertyTracker(this, _topicToProperty, _propertyToTopic, logger);
+        _ownership = new SourceOwnershipManager(
+            this,
+            onSubjectDetaching: CleanupTopicCachesForSubject,
+            logger: logger);
 
         configuration.Validate();
+    }
+
+    private void CleanupTopicCachesForSubject(IInterceptorSubject subject)
+    {
+        // Clean up topic caches for the detached subject
+        // TODO(perf): O(n) scan over all cached entries per detached subject.
+        // Consider adding a reverse index for O(1) cleanup if profiling shows this as a bottleneck.
+        foreach (var kvp in _propertyToTopic)
+        {
+            if (kvp.Key.Subject == subject)
+            {
+                _propertyToTopic.TryRemove(kvp.Key, out _);
+            }
+        }
+
+        foreach (var kvp in _topicToProperty)
+        {
+            if (kvp.Value?.Subject == subject)
+            {
+                _topicToProperty.TryRemove(kvp.Key, out _);
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -72,7 +97,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to MQTT broker at {Host}:{Port}.", _configuration.BrokerHost, _configuration.BrokerPort);
 
-        _propertyTracker.SubscribeToLifecycle(_subject);
+        _ownership.SubscribeToLifecycle(_subject.Context);
 
         _client = _factory.CreateMqttClient();
         _client.ApplicationMessageReceivedAsync += OnMessageReceivedAsync;
@@ -291,7 +316,13 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             var topic = TryGetTopicForProperty(property.Reference, property);
             if (topic is null) continue;
 
-            _propertyTracker.Track(property.Reference);
+            if (!_ownership.ClaimSource(property.Reference))
+            {
+                _logger.LogError(
+                    "Property {Subject}.{Property} already owned by another source. Skipping MQTT subscription.",
+                    property.Subject.GetType().Name, property.Name);
+                continue;
+            }
 
             _topicToProperty[topic] = property.Reference;
             subscribeOptionsBuilder.WithTopicFilter(f => f
@@ -494,7 +525,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             _client = null;
         }
 
-        _propertyTracker.Dispose();
+        _ownership.Dispose();
         _topicToProperty.Clear();
         _propertyToTopic.Clear();
 

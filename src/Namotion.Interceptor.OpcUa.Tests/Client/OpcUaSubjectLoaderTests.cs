@@ -207,10 +207,10 @@ public class OpcUaSubjectLoaderTests
         await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
 
         // Assert - Should track the property reference
-        Assert.Single(propertyTracker.TrackedProperties);
+        Assert.Single(propertyTracker.Properties);
     }
 
-    private (OpcUaSubjectLoader Loader, OpcUaPropertyTracker PropertyTracker) CreateLoader(
+    private (OpcUaSubjectLoader Loader, SourceOwnershipManager PropertyTracker) CreateLoader(
         Func<ReferenceDescription, CancellationToken, Task<bool>>? shouldAddDynamicProperties = null,
         OpcUaTypeResolver? typeResolver = null)
     {
@@ -226,13 +226,13 @@ public class OpcUaSubjectLoaderTests
         };
 
         var source = new OpcUaSubjectClientSource(new DynamicSubject(), config, NullLogger<OpcUaSubjectClientSource>.Instance);
-        var propertyTracker = new OpcUaPropertyTracker(source, NullLogger<OpcUaSubjectClientSource>.Instance);
+        var ownership = new SourceOwnershipManager(source, logger: NullLogger<OpcUaSubjectClientSource>.Instance);
         var loader = new OpcUaSubjectLoader(
             config,
-            propertyTracker,
+            ownership,
             source,
             NullLogger<OpcUaSubjectClientSource>.Instance);
-        return (loader, propertyTracker);
+        return (loader, ownership);
     }
 
     private IInterceptorSubject CreateTestSubject()

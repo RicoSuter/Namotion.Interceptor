@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.Logging;
 
 namespace Namotion.Interceptor.Connectors;
 
@@ -19,27 +18,34 @@ public static class SourcePropertyExtensions
 
     /// <summary>
     /// Associates a property with its external data source.
-    /// Each property can only have one source at a time. If the property already has a different
-    /// source, a warning is logged and the source is replaced.
+    /// Returns false if already owned by a different source.
+    /// Idempotent - returns true if already owned by the same source.
     /// </summary>
     /// <param name="property">The property reference to associate with a source.</param>
     /// <param name="source">The external data source that provides and synchronizes this property's value.</param>
-    /// <param name="logger">Optional logger to log warnings when replacing an existing source.</param>
-    public static void SetSource(this PropertyReference property, ISubjectSource source, ILogger? logger = null)
+    /// <returns>
+    /// <c>true</c> if the source was set or already owned by the same source;
+    /// <c>false</c> if the property is already owned by a different source.
+    /// </returns>
+    public static bool SetSource(this PropertyReference property, ISubjectSource source)
     {
-        if (logger is not null &&
-            property.TryGetSource(out var existing) &&
-            existing != source)
+        if (property.TryGetSource(out var existing))
         {
-            logger.LogWarning(
-                "Property {Subject}.{Property} already bound to source {ExistingSource}, " +
-                "replacing with {NewSource}. This may indicate a configuration error.",
-                property.Subject.GetType().Name,
-                property.Name,
-                existing.GetType().Name,
-                source.GetType().Name);
+            return ReferenceEquals(existing, source);
         }
 
+        property.SetPropertyData(SourceKey, source);
+        return true;
+    }
+
+    /// <summary>
+    /// Replaces the source unconditionally, even if already owned by another source.
+    /// Use for intentional source migration scenarios.
+    /// </summary>
+    /// <param name="property">The property reference to associate with a source.</param>
+    /// <param name="source">The external data source that provides and synchronizes this property's value.</param>
+    public static void ReplaceSource(this PropertyReference property, ISubjectSource source)
+    {
         property.SetPropertyData(SourceKey, source);
     }
 
@@ -65,16 +71,19 @@ public static class SourcePropertyExtensions
     }
 
     /// <summary>
-    /// Atomically removes the source association from a property, but only if the current source matches the expected source.
-    /// This prevents accidentally removing another source's ownership in concurrent scenarios.
+    /// Removes the source association from a property, but only if the current source matches the expected source.
+    /// This prevents accidentally removing another source's ownership.
     /// </summary>
     /// <param name="property">The property reference to disassociate from its source.</param>
     /// <param name="expectedSource">The source that should currently own this property.</param>
     /// <returns><c>true</c> if the source was removed; <c>false</c> if the property had no source or a different source.</returns>
     public static bool RemoveSource(this PropertyReference property, ISubjectSource expectedSource)
     {
-        var key = (property.Name, SourceKey);
-        var kvp = new KeyValuePair<(string, string), object?>(key, expectedSource);
-        return ((ICollection<KeyValuePair<(string, string), object?>>)property.Subject.Data).Remove(kvp);
+        if (property.TryGetSource(out var current) && ReferenceEquals(current, expectedSource))
+        {
+            property.RemovePropertyData(SourceKey);
+            return true;
+        }
+        return false;
     }
 }

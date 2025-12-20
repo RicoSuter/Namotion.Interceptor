@@ -41,7 +41,40 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public void SetSource_WhenCalledMultipleTimes_ReplacesReference()
+    public void SetSource_WhenCalledWithDifferentSource_ReturnsFalse()
+    {
+        var context = CreateContext();
+        var person = new Person(context);
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        var source1Mock = Mock.Of<ISubjectSource>();
+        var source2Mock = Mock.Of<ISubjectSource>();
+
+        var result1 = property.SetSource(source1Mock);
+        var result2 = property.SetSource(source2Mock);
+
+        Assert.True(result1);
+        Assert.False(result2); // Different source should return false
+        Assert.True(property.TryGetSource(out var retrievedSource));
+        Assert.Same(source1Mock, retrievedSource); // Original source should remain
+    }
+
+    [Fact]
+    public void SetSource_WhenCalledWithSameSource_ReturnsTrue()
+    {
+        var context = CreateContext();
+        var person = new Person(context);
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        var sourceMock = Mock.Of<ISubjectSource>();
+
+        var result1 = property.SetSource(sourceMock);
+        var result2 = property.SetSource(sourceMock);
+
+        Assert.True(result1);
+        Assert.True(result2); // Same source should return true (idempotent)
+    }
+
+    [Fact]
+    public void ReplaceSource_ReplacesExistingSource()
     {
         var context = CreateContext();
         var person = new Person(context);
@@ -50,11 +83,10 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var source2Mock = Mock.Of<ISubjectSource>();
 
         property.SetSource(source1Mock);
-        property.SetSource(source2Mock);
+        property.ReplaceSource(source2Mock);
 
         Assert.True(property.TryGetSource(out var retrievedSource));
         Assert.Same(source2Mock, retrievedSource);
-        Assert.NotSame(source1Mock, retrievedSource);
     }
 
     [Fact]

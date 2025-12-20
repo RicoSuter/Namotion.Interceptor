@@ -5,6 +5,9 @@ namespace Namotion.Interceptor.Connectors;
 
 public static class SubjectSourceExtensions
 {
+    // TODO: ConditionalWeakTable pattern means SemaphoreSlim is not explicitly disposed when source is GC'd.
+    // This relies on SemaphoreSlim's finalizer for cleanup. For long-lived sources (typical), this is acceptable.
+    // If short-lived sources become common, consider having sources own their write lock via IDisposable.
     private static readonly ConditionalWeakTable<ISubjectSource, SourceWriteLock> WriteLocks = new();
 
     /// <summary>
