@@ -8,13 +8,28 @@ namespace Namotion.Interceptor.OpcUa.Client;
 public class OpcUaTypeResolver
 {
     private readonly ILogger _logger;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string NamespaceUri, object Identifier), Type?> _typeCache = new();
 
     public OpcUaTypeResolver(ILogger logger)
     {
         _logger = logger;
     }
-    
+
     public virtual async Task<Type?> TryGetTypeForNodeAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
+    {
+        // Check cache first
+        var cacheKey = (reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex), reference.NodeId.Identifier);
+        if (_typeCache.TryGetValue(cacheKey, out var cachedType))
+        {
+            return cachedType;
+        }
+
+        var type = await TryGetTypeForNodeCoreAsync(session, reference, cancellationToken).ConfigureAwait(false);
+        _typeCache.TryAdd(cacheKey, type);
+        return type;
+    }
+
+    private async Task<Type?> TryGetTypeForNodeCoreAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
     {
         var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
 

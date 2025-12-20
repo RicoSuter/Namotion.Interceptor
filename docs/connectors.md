@@ -92,7 +92,7 @@ public interface ISubjectSource : ISubjectConnector
     /// <summary>
     /// Write property changes back to the external system.
     /// </summary>
-    ValueTask WriteChangesAsync(
+    ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken);
 
@@ -299,12 +299,19 @@ public class DatabaseSource : ISubjectSource
         return () => ApplyToSubject(_root, data);
     }
 
-    public async ValueTask WriteChangesAsync(
+    public async ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
-        // Write changes to database
-        // Throw exception for failures - entire batch will be retried
+        try
+        {
+            await WriteToDatabaseAsync(changes, cancellationToken);
+            return WriteResult.Success();
+        }
+        catch (Exception ex)
+        {
+            return WriteResult.Failure(changes, ex);
+        }
     }
 }
 ```
@@ -313,6 +320,117 @@ Register your custom source:
 
 ```csharp
 builder.Services.AddSingleton<ISubjectSource, DatabaseSource>();
+```
+
+## Source Ownership
+
+Properties use a **single-owner model**: each property can be associated with at most one source. This ensures a clear source of truth for each property and prevents conflicting updates from multiple sources.
+
+### SourceOwnershipManager
+
+The `SourceOwnershipManager` class simplifies implementing custom sources by handling:
+- Property ownership tracking (which properties this source is responsible for)
+- Automatic cleanup when subjects are detached from the object graph
+- Safe ownership claims that prevent conflicts with other sources
+
+```csharp
+public class DatabaseSource : ISubjectSource, IDisposable
+{
+    private readonly IInterceptorSubject _root;
+    private readonly SourceOwnershipManager _ownership;
+
+    public DatabaseSource(IInterceptorSubject root, ILogger<DatabaseSource> logger)
+    {
+        _root = root;
+        _ownership = new SourceOwnershipManager(
+            this,
+            onReleasing: property =>
+            {
+                // Called before a property is released - clean up protocol-specific data
+                property.RemovePropertyData("DatabaseRowId");
+            },
+            onSubjectDetaching: subject =>
+            {
+                // Called when a subject is detached from the object graph
+                // Use this to clean up caches or subscriptions for the subject
+                CleanupCachesForSubject(subject);
+            },
+            logger);
+    }
+
+    public IInterceptorSubject RootSubject => _root;
+
+    public async Task<IDisposable?> StartListeningAsync(
+        SubjectPropertyWriter propertyWriter,
+        CancellationToken cancellationToken)
+    {
+        // Subscribe to lifecycle events for automatic cleanup
+        _ownership.SubscribeToLifecycle(_root.Context);
+
+        var registeredSubject = _root.TryGetRegisteredSubject();
+        if (registeredSubject is null) return null;
+
+        foreach (var property in registeredSubject.GetAllProperties())
+        {
+            // ClaimSource returns false if already owned by another source
+            if (!_ownership.ClaimSource(property.Reference))
+            {
+                _logger.LogWarning(
+                    "Property {Name} already owned by another source, skipping.",
+                    property.Name);
+                continue;
+            }
+
+            // Set up database subscription for this property...
+            property.Reference.SetPropertyData("DatabaseRowId", rowId);
+        }
+
+        return subscription;
+    }
+
+    public void Dispose()
+    {
+        // Releases all owned properties and unsubscribes from lifecycle events
+        _ownership.Dispose();
+    }
+}
+```
+
+### Ownership Methods
+
+| Method | Description |
+|--------|-------------|
+| `ClaimSource(property)` | Returns `true` if ownership was claimed, `false` if already owned by another source |
+| `ReleaseSource(property)` | Releases ownership of a single property |
+| `Properties` | Read-only collection of currently owned properties |
+| `SubscribeToLifecycle(context)` | Enables automatic cleanup when subjects are detached |
+| `Dispose()` | Releases all owned properties and unsubscribes from events |
+
+### Lifecycle Integration
+
+When you call `SubscribeToLifecycle()`, the ownership manager automatically releases properties when their subject is detached from the object graph. This prevents memory leaks and stale subscriptions.
+
+If the context doesn't have lifecycle tracking configured (no `WithLifecycle()` call), a warning is logged and you must manually release properties when subjects are removed.
+
+### Low-Level API
+
+For advanced scenarios, you can use the extension methods directly:
+
+```csharp
+// Set source ownership (returns false if already owned by different source)
+bool claimed = property.SetSource(mySource);
+
+// Replace source unconditionally (for intentional migration)
+property.ReplaceSource(newSource);
+
+// Remove source (only if it matches expected source)
+bool removed = property.RemoveSource(expectedSource);
+
+// Check current source
+if (property.TryGetSource(out var source))
+{
+    // Property has a source
+}
 ```
 
 ## Write Retry Queue
