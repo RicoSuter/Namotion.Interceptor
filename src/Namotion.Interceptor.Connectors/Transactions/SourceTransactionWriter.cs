@@ -60,7 +60,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     }
 
     /// <summary>
-    /// Writes changes to their respective sources and collects results.
+    /// Writes changes to their respective sources in parallel and collects results.
     /// </summary>
     private static async Task<(Dictionary<ISubjectSource, List<SubjectPropertyChange>> Successful, List<SourceWriteFailure> Failed)>
         WriteToSourcesAsync(
@@ -70,15 +70,34 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         var successfulChangesBySource = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>();
         var failedChanges = new List<SourceWriteFailure>();
 
-        foreach (var (source, sourceChanges) in changesBySource)
+        // Separate null source (always successful, no async work)
+        if (changesBySource.TryGetValue(NullSource.Instance, out var nullSourceChanges))
         {
-            if (source == NullSource.Instance)
-            {
-                successfulChangesBySource[source] = sourceChanges;
-                continue;
-            }
+            successfulChangesBySource[NullSource.Instance] = nullSourceChanges;
+        }
 
-            var (successful, failed) = await TryWriteToSourceAsync(source, sourceChanges, cancellationToken);
+        // Get real sources that need actual writes
+        var realSources = changesBySource
+            .Where(kvp => kvp.Key != NullSource.Instance)
+            .ToList();
+
+        if (realSources.Count == 0)
+        {
+            return (successfulChangesBySource, failedChanges);
+        }
+
+        // Write to all real sources in parallel
+        var writeTasks = realSources.Select(async kvp =>
+        {
+            var (source, sourceChanges) = (kvp.Key, kvp.Value);
+            var result = await TryWriteToSourceAsync(source, sourceChanges, cancellationToken);
+            return (source, result);
+        });
+
+        var results = await Task.WhenAll(writeTasks);
+
+        foreach (var (source, (successful, failed)) in results)
+        {
             if (successful.Count > 0)
             {
                 successfulChangesBySource[source] = successful;
@@ -127,6 +146,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
 
     /// <summary>
     /// Attempts to revert successful source writes by writing the old values back.
+    /// Rollback is done in reverse order to properly undo changes.
     /// </summary>
     private static async Task<List<SourceWriteFailure>> TryRevertSuccessfulWritesAsync(
         Dictionary<ISubjectSource, List<SubjectPropertyChange>> successfulWrites,
@@ -135,7 +155,12 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         var revertFailures = new List<SourceWriteFailure>();
         foreach (var (source, originalChanges) in successfulWrites)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Reverse order for proper rollback (undo in opposite order of apply)
             var rollbackChanges = originalChanges
+                .AsEnumerable()
+                .Reverse()
                 .Select(c => SubjectPropertyChange.Create(
                     c.Property,
                     source: c.Source,
@@ -181,8 +206,9 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
 
         if (sourcesWithChanges.Count > 1)
         {
+            var sourceNames = string.Join(", ", sourcesWithChanges.Select(kvp => kvp.Key.GetType().Name));
             var exception = new InvalidOperationException(
-                $"SingleWrite requirement violated: Transaction contains changes for {sourcesWithChanges.Count} sources, but only 1 is allowed.");
+                $"SingleWrite requirement violated: Transaction spans {sourcesWithChanges.Count} sources ({sourceNames}), but only 1 is allowed.");
 
             return new SourceWriteFailure(
                 sourcesWithChanges.First().Value.First(),
