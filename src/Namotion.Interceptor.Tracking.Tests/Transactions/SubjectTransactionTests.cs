@@ -14,7 +14,7 @@ public class SubjectTransactionTests
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await context.BeginExclusiveTransactionAsync();
+            await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
         });
 
         Assert.Contains("WithTransactions()", exception.Message);

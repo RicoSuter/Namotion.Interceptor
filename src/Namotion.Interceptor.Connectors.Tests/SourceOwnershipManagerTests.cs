@@ -1,5 +1,4 @@
 using Moq;
-using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -10,8 +9,7 @@ public class SourceOwnershipManagerTests
     public void ClaimSource_WhenNotOwned_ReturnsTrue()
     {
         // Arrange
-        var sourceMock = CreateSourceMock();
-        var manager = new SourceOwnershipManager(sourceMock.Object);
+        var (_, manager) = CreateSourceWithManager();
         var property = CreatePropertyReference();
 
         // Act
@@ -26,8 +24,7 @@ public class SourceOwnershipManagerTests
     public void ClaimSource_WhenOwnedBySameSource_ReturnsTrue()
     {
         // Arrange
-        var sourceMock = CreateSourceMock();
-        var manager = new SourceOwnershipManager(sourceMock.Object);
+        var (_, manager) = CreateSourceWithManager();
         var property = CreatePropertyReference();
 
         // First claim
@@ -45,10 +42,9 @@ public class SourceOwnershipManagerTests
     public void ClaimSource_WhenOwnedByDifferentSource_ReturnsFalse()
     {
         // Arrange
-        var source1Mock = CreateSourceMock();
-        var source2Mock = CreateSourceMock();
-        var manager1 = new SourceOwnershipManager(source1Mock.Object);
-        var manager2 = new SourceOwnershipManager(source2Mock.Object);
+        var lifecycleInterceptor = new LifecycleInterceptor();
+        var (_, manager1) = CreateSourceWithManager(lifecycleInterceptor);
+        var (_, manager2) = CreateSourceWithManager(lifecycleInterceptor);
         var property = CreatePropertyReference();
 
         // First source claims property
@@ -67,9 +63,7 @@ public class SourceOwnershipManagerTests
     {
         // Arrange
         var releasedProperties = new List<PropertyReference>();
-        var sourceMock = CreateSourceMock();
-        var manager = new SourceOwnershipManager(
-            sourceMock.Object,
+        var (_, manager) = CreateSourceWithManager(
             onReleasing: p => releasedProperties.Add(p));
 
         var property = CreatePropertyReference();
@@ -89,9 +83,7 @@ public class SourceOwnershipManagerTests
     {
         // Arrange
         var releasedProperties = new List<PropertyReference>();
-        var sourceMock = CreateSourceMock();
-        var manager = new SourceOwnershipManager(
-            sourceMock.Object,
+        var (_, manager) = CreateSourceWithManager(
             onReleasing: p => releasedProperties.Add(p));
 
         var property = CreatePropertyReference();
@@ -108,9 +100,7 @@ public class SourceOwnershipManagerTests
     {
         // Arrange
         var releasedProperties = new List<PropertyReference>();
-        var sourceMock = CreateSourceMock();
-        var manager = new SourceOwnershipManager(
-            sourceMock.Object,
+        var (_, manager) = CreateSourceWithManager(
             onReleasing: p => releasedProperties.Add(p));
 
         var property1 = CreatePropertyReference("Prop1");
@@ -131,9 +121,7 @@ public class SourceOwnershipManagerTests
     {
         // Arrange
         var releaseCount = 0;
-        var sourceMock = CreateSourceMock();
-        var manager = new SourceOwnershipManager(
-            sourceMock.Object,
+        var (_, manager) = CreateSourceWithManager(
             onReleasing: _ => releaseCount++);
 
         var property = CreatePropertyReference();
@@ -154,18 +142,9 @@ public class SourceOwnershipManagerTests
         // Arrange
         var releasedProperties = new List<PropertyReference>();
         var detachedSubjects = new List<IInterceptorSubject>();
-        var sourceMock = CreateSourceMock();
-        var manager = new SourceOwnershipManager(
-            sourceMock.Object,
+        var (lifecycleInterceptor, manager) = CreateSourceWithManager(
             onReleasing: p => releasedProperties.Add(p),
             onSubjectDetaching: s => detachedSubjects.Add(s));
-
-        // Create context with lifecycle interceptor
-        var lifecycleInterceptor = new LifecycleInterceptor();
-        var contextMock = new Mock<IInterceptorSubjectContext>();
-        contextMock.Setup(c => c.TryGetService<LifecycleInterceptor>()).Returns(lifecycleInterceptor);
-
-        manager.SubscribeToLifecycle(contextMock.Object);
 
         // Create subjects and properties (subjects need Data for PropertyReference to work)
         var subject1Mock = new Mock<IInterceptorSubject>();
@@ -194,26 +173,31 @@ public class SourceOwnershipManagerTests
     }
 
     [Fact]
-    public void SubscribeToLifecycle_WhenLifecycleNotConfigured_DoesNotThrow()
+    public void Constructor_WhenLifecycleNotConfigured_ThrowsInvalidOperationException()
     {
         // Arrange
-        var sourceMock = CreateSourceMock();
-        var manager = new SourceOwnershipManager(sourceMock.Object);
+        var subjectMock = new Mock<IInterceptorSubject>();
         var contextMock = new Mock<IInterceptorSubjectContext>();
         contextMock.Setup(c => c.TryGetService<LifecycleInterceptor>()).Returns((LifecycleInterceptor?)null);
+        subjectMock.Setup(s => s.Context).Returns(contextMock.Object);
 
-        // Act & Assert - Should not throw
-        manager.SubscribeToLifecycle(contextMock.Object);
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.RootSubject).Returns(subjectMock.Object);
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
+
+        // Act & Assert
+        var ex = Assert.Throws<InvalidOperationException>(() => new SourceOwnershipManager(sourceMock.Object));
+        Assert.Contains("LifecycleInterceptor not configured", ex.Message);
+        Assert.Contains("WithLifecycle()", ex.Message);
     }
 
     [Fact]
     public void SetSource_AfterRelease_AllowsNewClaim()
     {
         // Arrange
-        var source1Mock = CreateSourceMock();
-        var source2Mock = CreateSourceMock();
-        var manager1 = new SourceOwnershipManager(source1Mock.Object);
-        var manager2 = new SourceOwnershipManager(source2Mock.Object);
+        var lifecycleInterceptor = new LifecycleInterceptor();
+        var (_, manager1) = CreateSourceWithManager(lifecycleInterceptor);
+        var (_, manager2) = CreateSourceWithManager(lifecycleInterceptor);
         var property = CreatePropertyReference();
 
         // First source claims property
@@ -230,11 +214,24 @@ public class SourceOwnershipManagerTests
         Assert.Contains(property, manager2.Properties);
     }
 
-    private static Mock<ISubjectSource> CreateSourceMock()
+    private static (LifecycleInterceptor Lifecycle, SourceOwnershipManager Manager) CreateSourceWithManager(
+        LifecycleInterceptor? lifecycleInterceptor = null,
+        Action<PropertyReference>? onReleasing = null,
+        Action<IInterceptorSubject>? onSubjectDetaching = null)
     {
-        var mock = new Mock<ISubjectSource>();
-        mock.Setup(s => s.WriteBatchSize).Returns(0);
-        return mock;
+        lifecycleInterceptor ??= new LifecycleInterceptor();
+
+        var subjectMock = new Mock<IInterceptorSubject>();
+        var contextMock = new Mock<IInterceptorSubjectContext>();
+        contextMock.Setup(c => c.TryGetService<LifecycleInterceptor>()).Returns(lifecycleInterceptor);
+        subjectMock.Setup(s => s.Context).Returns(contextMock.Object);
+
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.RootSubject).Returns(subjectMock.Object);
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
+
+        var manager = new SourceOwnershipManager(sourceMock.Object, onReleasing, onSubjectDetaching);
+        return (lifecycleInterceptor, manager);
     }
 
     private static PropertyReference CreatePropertyReference(string name = "TestProperty")

@@ -136,7 +136,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         property.SetSource(sourceMock.Object);
 
         // Act
-        using (var transaction = await context.BeginExclusiveTransactionAsync())
+        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
         {
             person.FirstName = "John";
             await transaction.CommitAsync(CancellationToken.None);
@@ -163,7 +163,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         property.SetSource(sourceMock.Object);
 
         // Act
-        using (var transaction = await context.BeginExclusiveTransactionAsync())
+        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
         {
             person.FirstName = "John";
 
@@ -222,7 +222,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 source1Writes.Add(changes.Length);
-                return new ValueTask<WriteResult>(WriteResult.Success());
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         var source2Writes = new List<int>();
@@ -232,7 +232,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 source2Writes.Add(changes.Length);
-                return new ValueTask<WriteResult>(WriteResult.Success());
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         var firstNameProp = new PropertyReference(person, nameof(Person.FirstName));
@@ -241,7 +241,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         lastNameProp.SetSource(source2Mock.Object);
 
         // Act
-        using (var transaction = await context.BeginExclusiveTransactionAsync())
+        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
         {
             person.FirstName = "John";
             person.LastName = "Doe";
@@ -265,11 +265,11 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var sourceMock = new Mock<ISubjectSource>();
         sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
         sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>((changes, ct) =>
+            .Returns<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>((_, ct) =>
             {
                 if (ct.IsCancellationRequested)
                     return new ValueTask<WriteResult>(WriteResult.Failure(new OperationCanceledException(ct)));
-                return new ValueTask<WriteResult>(WriteResult.Success());
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
@@ -278,7 +278,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         await cts.CancelAsync();
 
         // Act
-        using (var transaction = await context.BeginExclusiveTransactionAsync())
+        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
         {
             person.FirstName = "John";
 
@@ -310,7 +310,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
                 {
                     capturedChanges.Add(change);
                 }
-                return new ValueTask<WriteResult>(WriteResult.Success());
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         var firstNameProp = new PropertyReference(person, nameof(Person.FirstName));
@@ -319,7 +319,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         lastNameProp.SetSource(sourceMock.Object);
 
         // Act
-        using (var transaction = await context.BeginExclusiveTransactionAsync())
+        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
         {
             person.FirstName = "John";
             person.LastName = "Doe";
@@ -354,7 +354,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 source1Writes.Add(changes.Length);
-                return new ValueTask<WriteResult>(WriteResult.Success());
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         var source2Writes = new List<int>();
@@ -364,7 +364,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 source2Writes.Add(changes.Length);
-                return new ValueTask<WriteResult>(WriteResult.Success());
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         new PropertyReference(person1, nameof(Person.FirstName)).SetSource(source1Mock.Object);
@@ -372,13 +372,13 @@ public class SubjectTransactionSourceTests : TransactionTestBase
 
         // Act
         // Use separate transactions for each context since transactions are now context-bound
-        using (var transaction1 = await context1.BeginExclusiveTransactionAsync())
+        using (var transaction1 = await context1.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
         {
             person1.FirstName = "John";
             await transaction1.CommitAsync(CancellationToken.None);
         }
 
-        using (var transaction2 = await context2.BeginExclusiveTransactionAsync())
+        using (var transaction2 = await context2.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
         {
             person2.FirstName = "Jane";
             await transaction2.CommitAsync(CancellationToken.None);
@@ -423,7 +423,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
                             failedChanges.ToArray(),
                             new InvalidOperationException("FirstName write failed")));
                 }
-                return new ValueTask<WriteResult>(WriteResult.Success());
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
@@ -434,7 +434,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
         // Only FirstName should be in FailedChanges (partial failure)
@@ -478,7 +478,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
                     }
                 }
                 // Subsequent calls (rollback): succeed
-                return new ValueTask<WriteResult>(WriteResult.Success());
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
@@ -489,7 +489,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
         // In Rollback mode, nothing should be applied when there's any failure

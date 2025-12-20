@@ -31,7 +31,7 @@ public static class SubjectSourceExtensions
         var count = changes.Length;
         if (count == 0)
         {
-            return WriteResult.Success();
+            return WriteResult.Success;
         }
 
         // Skip synchronization for sources that handle their own concurrency
@@ -99,7 +99,7 @@ public static class SubjectSourceExtensions
         }
 
         // All batches succeeded (zero allocation)
-        return WriteResult.Success();
+        return WriteResult.Success;
     }
 
     /// <summary>

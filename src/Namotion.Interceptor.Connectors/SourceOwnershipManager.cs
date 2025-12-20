@@ -20,10 +20,9 @@ public class SourceOwnershipManager : IDisposable
     private readonly Action<PropertyReference>? _onReleasing;
     private readonly Action<IInterceptorSubject>? _onSubjectDetaching;
     private readonly HashSet<PropertyReference> _properties = [];
-    private readonly object _lock = new();
-    private readonly ILogger? _logger;
+    private readonly Lock _lock = new();
+    private readonly LifecycleInterceptor _lifecycle;
 
-    private LifecycleInterceptor? _lifecycle;
     private bool _disposed;
 
     /// <summary>
@@ -32,17 +31,26 @@ public class SourceOwnershipManager : IDisposable
     /// <param name="source">The source that owns the properties.</param>
     /// <param name="onReleasing">Optional callback invoked before a property is released.</param>
     /// <param name="onSubjectDetaching">Optional callback invoked before a subject's properties are released due to detachment.</param>
-    /// <param name="logger">Optional logger for diagnostics.</param>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the source's context does not have a <see cref="LifecycleInterceptor"/> configured.
+    /// Call <c>WithLifecycle()</c> on the context to enable lifecycle tracking.
+    /// </exception>
     public SourceOwnershipManager(
         ISubjectSource source,
         Action<PropertyReference>? onReleasing = null,
-        Action<IInterceptorSubject>? onSubjectDetaching = null,
-        ILogger? logger = null)
+        Action<IInterceptorSubject>? onSubjectDetaching = null)
     {
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _onReleasing = onReleasing;
         _onSubjectDetaching = onSubjectDetaching;
-        _logger = logger;
+
+        var context = source.RootSubject.Context;
+        _lifecycle = context.TryGetLifecycleInterceptor()
+            ?? throw new InvalidOperationException(
+                $"LifecycleInterceptor not configured for {source.GetType().Name}. " +
+                "Call WithLifecycle() on the context to enable automatic cleanup when subjects are detached.");
+
+        _lifecycle.SubjectDetached += OnSubjectDetached;
     }
 
     /// <summary>
@@ -57,32 +65,6 @@ public class SourceOwnershipManager : IDisposable
                 return _properties.ToList();
             }
         }
-    }
-
-    /// <summary>
-    /// Subscribes to lifecycle events for automatic cleanup on subject detach.
-    /// </summary>
-    /// <param name="context">The context to subscribe to.</param>
-    /// <remarks>
-    /// If the context does not have a <see cref="LifecycleInterceptor"/> configured,
-    /// a warning is logged and properties will not be automatically cleaned up when
-    /// subjects are detached. Call <c>WithLifecycle()</c> on the context to enable this.
-    /// </remarks>
-    public void SubscribeToLifecycle(IInterceptorSubjectContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        _lifecycle = context.TryGetLifecycleInterceptor();
-        if (_lifecycle is null)
-        {
-            _logger?.LogWarning(
-                "LifecycleInterceptor not configured for {SourceType}. Properties will not be " +
-                "automatically cleaned up when subjects are detached. Call WithLifecycle() on the context.",
-                _source.GetType().Name);
-            return;
-        }
-
-        _lifecycle.SubjectDetached += OnSubjectDetached;
     }
 
     /// <summary>
@@ -152,11 +134,7 @@ public class SourceOwnershipManager : IDisposable
 
         _disposed = true;
 
-        if (_lifecycle is not null)
-        {
-            _lifecycle.SubjectDetached -= OnSubjectDetached;
-            _lifecycle = null;
-        }
+        _lifecycle.SubjectDetached -= OnSubjectDetached;
 
         lock (_lock)
         {

@@ -3,7 +3,7 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors.Transactions;
 
 /// <summary>
-/// Exception thrown when a source fails to write property changes during transaction commit.
+/// Exception thrown when a source fails to write property changes during a transaction commit.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,19 +23,19 @@ public class SourceTransactionWriteException : Exception
     /// Initializes a new instance of the <see cref="SourceTransactionWriteException"/> class.
     /// </summary>
     /// <param name="source">The external data source that failed to write changes.</param>
-    /// <param name="changes">The collection of property changes that failed to write.</param>
+    /// <param name="failedChanges">The collection of property changes that failed to write.</param>
     /// <param name="inner">The exception that caused the write failure.</param>
-    public SourceTransactionWriteException(ISubjectSource source, IReadOnlyList<SubjectPropertyChange> changes, Exception inner)
-        : base($"Failed to write {changes.Count} change(s) to source {source.GetType().Name}. See inner exception for details.", inner)
+    public SourceTransactionWriteException(ISubjectSource source, IReadOnlyList<SubjectPropertyChange> failedChanges, Exception inner)
+        : base($"Failed to write {failedChanges.Count} change(s) to source {source.GetType().Name}. See inner exception for details.", inner)
     {
-        SubjectSource = source;
-        FailedChanges = changes;
+        Source = source;
+        FailedChanges = failedChanges;
     }
 
     /// <summary>
     /// Gets the external data source that failed to write changes.
     /// </summary>
-    public ISubjectSource SubjectSource { get; }
+    public new ISubjectSource Source { get; }
 
     /// <summary>
     /// Gets the collection of property changes that failed to write to the source.

@@ -161,7 +161,7 @@ public class SubjectSourceBenchmark
                 _signal.Set();
             }
 
-            return new ValueTask<WriteResult>(WriteResult.Success());
+            return new ValueTask<WriteResult>(WriteResult.Success);
         }
     }
 }

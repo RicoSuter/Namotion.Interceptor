@@ -342,6 +342,7 @@ public class DatabaseSource : ISubjectSource, IDisposable
     public DatabaseSource(IInterceptorSubject root, ILogger<DatabaseSource> logger)
     {
         _root = root;
+        // SourceOwnershipManager requires WithLifecycle() on context - throws if not configured
         _ownership = new SourceOwnershipManager(
             this,
             onReleasing: property =>
@@ -364,9 +365,6 @@ public class DatabaseSource : ISubjectSource, IDisposable
         SubjectPropertyWriter propertyWriter,
         CancellationToken cancellationToken)
     {
-        // Subscribe to lifecycle events for automatic cleanup
-        _ownership.SubscribeToLifecycle(_root.Context);
-
         var registeredSubject = _root.TryGetRegisteredSubject();
         if (registeredSubject is null) return null;
 
@@ -403,14 +401,13 @@ public class DatabaseSource : ISubjectSource, IDisposable
 | `ClaimSource(property)` | Returns `true` if ownership was claimed, `false` if already owned by another source |
 | `ReleaseSource(property)` | Releases ownership of a single property |
 | `Properties` | Read-only collection of currently owned properties |
-| `SubscribeToLifecycle(context)` | Enables automatic cleanup when subjects are detached |
 | `Dispose()` | Releases all owned properties and unsubscribes from events |
 
 ### Lifecycle Integration
 
-When you call `SubscribeToLifecycle()`, the ownership manager automatically releases properties when their subject is detached from the object graph. This prevents memory leaks and stale subscriptions.
+The `SourceOwnershipManager` constructor automatically subscribes to lifecycle events from the source's context. When subjects are detached from the object graph, owned properties are automatically released. This prevents memory leaks and stale subscriptions.
 
-If the context doesn't have lifecycle tracking configured (no `WithLifecycle()` call), a warning is logged and you must manually release properties when subjects are removed.
+**Requirement:** The context must have lifecycle tracking configured via `WithLifecycle()`. If not configured, the constructor throws `InvalidOperationException`.
 
 ### Low-Level API
 
@@ -419,9 +416,6 @@ For advanced scenarios, you can use the extension methods directly:
 ```csharp
 // Set source ownership (returns false if already owned by different source)
 bool claimed = property.SetSource(mySource);
-
-// Replace source unconditionally (for intentional migration)
-property.ReplaceSource(newSource);
 
 // Remove source (only if it matches expected source)
 bool removed = property.RemoveSource(expectedSource);

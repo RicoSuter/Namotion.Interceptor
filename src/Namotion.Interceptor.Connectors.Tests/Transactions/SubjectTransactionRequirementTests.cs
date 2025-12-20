@@ -29,7 +29,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         Assert.Single(ex.FailedChanges);
         Assert.IsType<InvalidOperationException>(ex.FailedChanges[0].Error);
@@ -64,7 +64,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe"; // 2 changes > batch size of 1
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         Assert.Single(ex.FailedChanges);
         Assert.IsType<InvalidOperationException>(ex.FailedChanges[0].Error);
@@ -93,7 +93,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        await tx.CommitAsync();
+        await tx.CommitAsync(CancellationToken.None);
 
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
@@ -120,7 +120,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        await tx.CommitAsync();
+        await tx.CommitAsync(CancellationToken.None);
 
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
@@ -138,7 +138,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        await tx.CommitAsync();
+        await tx.CommitAsync(CancellationToken.None);
 
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
@@ -159,7 +159,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe"; // No source - always allowed
 
-        await tx.CommitAsync();
+        await tx.CommitAsync(CancellationToken.None);
 
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
@@ -181,11 +181,11 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
 
         using var tx = explicitRequirement
             ? await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback, TransactionRequirement.None)
-            : await context.BeginExclusiveTransactionAsync();
+            : await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        await tx.CommitAsync();
+        await tx.CommitAsync(CancellationToken.None);
 
         Assert.Equal("John", person.FirstName);
         Assert.Equal("Doe", person.LastName);
@@ -211,7 +211,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         Assert.Null(person.FirstName);
         Assert.Null(person.LastName);
@@ -244,7 +244,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.LastName = "Doe";
         person.Father = father; // No source - should be in successful changes
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Validation error should be reported
         Assert.Single(ex.FailedChanges);
@@ -292,7 +292,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.LastName = "Doe"; // 2 changes > batch size of 1
         person.Father = father; // No source
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Validation error for batch size
         Assert.Single(ex.FailedChanges);

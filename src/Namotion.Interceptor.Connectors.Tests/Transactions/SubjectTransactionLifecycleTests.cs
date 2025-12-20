@@ -14,7 +14,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     {
         var context = CreateContext();
 
-        using var transaction = await context.BeginExclusiveTransactionAsync();
+        using var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
 
         Assert.NotNull(transaction);
         Assert.Same(transaction, SubjectTransaction.Current);
@@ -27,7 +27,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
         var person = new Person(context);
 
         SubjectTransaction? capturedTransaction;
-        using (var transaction = await context.BeginExclusiveTransactionAsync())
+        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
         {
             capturedTransaction = transaction;
             person.FirstName = "John";
@@ -45,9 +45,9 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     public async Task BeginTransaction_WhenNested_ThrowsInvalidOperationException()
     {
         var context = CreateContext();
-        using var transaction1 = await context.BeginExclusiveTransactionAsync();
+        using var transaction1 = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () => await context.BeginExclusiveTransactionAsync());
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () => await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort));
         Assert.Contains("Nested transactions are not supported", exception.Message);
     }
 
@@ -55,7 +55,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     public async Task CommitAsync_WithNoChanges_ReturnsImmediately()
     {
         var context = CreateContext();
-        using var transaction = await context.BeginExclusiveTransactionAsync();
+        using var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
 
         await transaction.CommitAsync(CancellationToken.None);
 
@@ -68,7 +68,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
         var context = CreateContext();
         var person = new Person(context);
 
-        using var transaction = await context.BeginExclusiveTransactionAsync();
+        using var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
         person.FirstName = "John";
 
         Assert.Single(transaction.PendingChanges);
@@ -86,7 +86,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
         var person = new Person(context);
         SubjectTransaction capturedTransaction;
 
-        using (var transaction = await context.BeginExclusiveTransactionAsync())
+        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
         {
             capturedTransaction = transaction;
             person.FirstName = "John";
@@ -106,7 +106,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     public async Task CommitAsync_AfterDispose_ThrowsObjectDisposedException()
     {
         var context = CreateContext();
-        var transaction = await context.BeginExclusiveTransactionAsync();
+        var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
         transaction.Dispose();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(
@@ -119,7 +119,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
         var context = CreateContext();
         var person = new Person(context);
 
-        using (var transaction = await context.BeginExclusiveTransactionAsync())
+        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
         {
             person.FirstName = "John";
             await transaction.CommitAsync(CancellationToken.None);
@@ -135,7 +135,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     public async Task Dispose_CalledMultipleTimes_IsIdempotent()
     {
         var context = CreateContext();
-        var transaction = await context.BeginExclusiveTransactionAsync();
+        var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
         Assert.NotNull(SubjectTransaction.Current);
 
         transaction.Dispose();
@@ -149,7 +149,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
     public async Task AsyncLocalBehavior_CurrentClearedAfterUsingBlock()
     {
         var context = CreateContext();
-        using (var transaction = await context.BeginExclusiveTransactionAsync())
+        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
         {
             Assert.NotNull(SubjectTransaction.Current);
 

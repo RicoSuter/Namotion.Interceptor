@@ -43,10 +43,9 @@ public readonly struct WriteResult
     }
 
     /// <summary>
-    /// Creates a successful result where all changes were written (zero allocation).
+    /// Gets a successful result where all changes were written (zero allocation).
     /// </summary>
-    public static WriteResult Success() =>
-        new(ReadOnlyMemory<SubjectPropertyChange>.Empty, null);
+    public static WriteResult Success { get; } = new(ReadOnlyMemory<SubjectPropertyChange>.Empty, null);
 
     /// <summary>
     /// Creates a failure result where all changes failed.
