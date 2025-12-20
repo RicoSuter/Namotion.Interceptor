@@ -172,7 +172,8 @@ public class SubjectTransactionSourceTests : TransactionTestBase
 
             // Assert
             Assert.Single(exception.FailedChanges);
-            Assert.IsType<SourceTransactionWriteException>(exception.FailedChanges[0].Error);
+            Assert.Single(exception.Errors);
+            Assert.IsType<SourceTransactionWriteException>(exception.Errors[0]);
         }
 
         Assert.Null(person.FirstName);
@@ -287,7 +288,8 @@ public class SubjectTransactionSourceTests : TransactionTestBase
 
             // Assert
             Assert.Single(exception.FailedChanges);
-            var sourceWriteException = Assert.IsType<SourceTransactionWriteException>(exception.FailedChanges[0].Error);
+            Assert.Single(exception.Errors);
+            var sourceWriteException = Assert.IsType<SourceTransactionWriteException>(exception.Errors[0]);
             Assert.IsAssignableFrom<OperationCanceledException>(sourceWriteException.InnerException);
         }
     }
@@ -439,7 +441,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         // Assert
         // Only FirstName should be in FailedChanges (partial failure)
         Assert.Single(ex.FailedChanges);
-        Assert.Equal(nameof(Person.FirstName), ex.FailedChanges[0].Change.Property.Metadata.Name);
+        Assert.Equal(nameof(Person.FirstName), ex.FailedChanges[0].Property.Metadata.Name);
 
         // LastName should have been applied (it was in successful changes)
         Assert.Equal("Doe", person.LastName);

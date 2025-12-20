@@ -8,23 +8,30 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 public class TransactionWriteResult
 {
     /// <summary>
-    /// Gets the successful changes.
+    /// Gets the changes that were successfully written.
     /// </summary>
     public IReadOnlyList<SubjectPropertyChange> SuccessfulChanges { get; }
 
     /// <summary>
-    /// Gets the failed write operations with detailed failure information.
+    /// Gets the changes that failed to write.
     /// </summary>
-    public IReadOnlyList<SourceWriteFailure> FailedChanges { get; }
+    public IReadOnlyList<SubjectPropertyChange> FailedChanges { get; }
+
+    /// <summary>
+    /// Gets the errors that occurred during writing, one per source that failed.
+    /// </summary>
+    public IReadOnlyList<Exception> Errors { get; }
 
     public TransactionWriteResult(
         IReadOnlyList<SubjectPropertyChange> successfulChanges,
-        IReadOnlyList<SourceWriteFailure> failedChanges)
+        IReadOnlyList<SubjectPropertyChange> failedChanges,
+        IReadOnlyList<Exception> errors)
     {
         SuccessfulChanges = successfulChanges;
         FailedChanges = failedChanges;
+        Errors = errors;
     }
 
     public static TransactionWriteResult Success(IReadOnlyList<SubjectPropertyChange> changes) =>
-        new(changes, Array.Empty<SourceWriteFailure>());
+        new(changes, [], []);
 }

@@ -35,10 +35,11 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
-        Assert.Single(ex.FailedChanges);
-        Assert.IsType<InvalidOperationException>(ex.FailedChanges[0].Error);
-        Assert.Contains("2 sources", ex.FailedChanges[0].Error.Message);
-        Assert.Contains("only 1 is allowed", ex.FailedChanges[0].Error.Message);
+        Assert.Equal(2, ex.FailedChanges.Count); // Both changes failed (validation error)
+        Assert.Single(ex.Errors);
+        var error = Assert.IsType<InvalidOperationException>(ex.Errors[0]);
+        Assert.Contains("2 sources", error.Message);
+        Assert.Contains("only 1 is allowed", error.Message);
 
         Assert.Null(person.FirstName);
         Assert.Null(person.LastName);
@@ -74,10 +75,11 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
-        Assert.Single(ex.FailedChanges);
-        Assert.IsType<InvalidOperationException>(ex.FailedChanges[0].Error);
-        Assert.Contains("2 changes", ex.FailedChanges[0].Error.Message);
-        Assert.Contains("WriteBatchSize is 1", ex.FailedChanges[0].Error.Message);
+        Assert.Equal(2, ex.FailedChanges.Count); // Both changes failed (validation error)
+        Assert.Single(ex.Errors);
+        var error = Assert.IsType<InvalidOperationException>(ex.Errors[0]);
+        Assert.Contains("2 changes", error.Message);
+        Assert.Contains("WriteBatchSize is 1", error.Message);
 
         source.Verify(s => s.WriteChangesAsync(
             It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
@@ -283,9 +285,11 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
-        // Validation error should be reported
-        Assert.Single(ex.FailedChanges);
-        Assert.Contains("2 sources", ex.FailedChanges[0].Error.Message);
+        // Validation error should be reported - both source-bound changes failed
+        Assert.Equal(2, ex.FailedChanges.Count);
+        Assert.Single(ex.Errors);
+        var error = Assert.IsType<InvalidOperationException>(ex.Errors[0]);
+        Assert.Contains("2 sources", error.Message);
 
         // Father (change without source) should be in successful changes
         Assert.Single(ex.AppliedChanges);
@@ -335,9 +339,11 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
-        // Validation error for batch size
-        Assert.Single(ex.FailedChanges);
-        Assert.Contains("WriteBatchSize is 1", ex.FailedChanges[0].Error.Message);
+        // Validation error for batch size - both source-bound changes failed
+        Assert.Equal(2, ex.FailedChanges.Count);
+        Assert.Single(ex.Errors);
+        var error = Assert.IsType<InvalidOperationException>(ex.Errors[0]);
+        Assert.Contains("WriteBatchSize is 1", error.Message);
 
         // Father should be in successful changes
         Assert.Single(ex.AppliedChanges);
