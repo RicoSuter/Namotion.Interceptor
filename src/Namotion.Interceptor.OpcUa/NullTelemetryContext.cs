@@ -17,7 +17,8 @@ public sealed class NullTelemetryContext : ITelemetryContext
     /// </summary>
     public static readonly NullTelemetryContext Instance = new();
 
-    private static readonly ActivitySource NullActivitySource = new("Namotion.Interceptor.OpcUa.Null");
+    private static readonly ActivitySource NullActivitySource = new("Namotion.Interceptor.OpcUa.NullActivitySource");
+    private static readonly Meter NullMeter = new("Namotion.Interceptor.OpcUa.NullMeter");
 
     private NullTelemetryContext() { }
 
@@ -28,5 +29,5 @@ public sealed class NullTelemetryContext : ITelemetryContext
     public ActivitySource ActivitySource => NullActivitySource;
 
     /// <inheritdoc />
-    public Meter CreateMeter() => new Meter("Namotion.Interceptor.OpcUa.Null");
+    public Meter CreateMeter() => NullMeter;
 }
