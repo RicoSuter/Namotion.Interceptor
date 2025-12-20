@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
     <PropertyGroup>
-        <TargetFramework>net9.0</TargetFramework>
+        <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
     </PropertyGroup>
@@ -9,6 +9,7 @@
     <ItemGroup>
         <Watch Remove="Data/**/*" />
         <PackageReference Include="CodeBeam.MudBlazor.Extensions" Version="8.3.0" />
+        <ProjectReference Include="..\..\Namotion.Devices.Gpio\Namotion.Devices.Gpio.csproj" />
         <ProjectReference Include="..\HomeBlaze.Host\HomeBlaze.Host.csproj" />
         <ProjectReference Include="..\HomeBlaze.Samples\HomeBlaze.Samples.csproj" />
         <ProjectReference Include="..\HomeBlaze.Servers.OpcUa\HomeBlaze.Servers.OpcUa.csproj" />
@@ -20,6 +21,7 @@
     <ItemGroup>
         <Content Update="Data\**\*" CopyToOutputDirectory="PreserveNewest" />
         <Content Update="root.json" CopyToOutputDirectory="PreserveNewest" />
+        <Content Remove="Data\Plans.json" />
     </ItemGroup>
 
 </Project>

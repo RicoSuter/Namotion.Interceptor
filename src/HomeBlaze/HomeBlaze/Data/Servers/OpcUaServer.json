@@ -8,5 +8,6 @@
   "baseAddress": null,
   "cleanCertificateStore": null,
   "bufferTimeMs": null,
-  "retryTimeSeconds": null
+  "retryTimeSeconds": null,
+  "isEnabled": false
 }

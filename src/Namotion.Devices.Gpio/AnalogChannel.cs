@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
 
@@ -7,7 +8,7 @@ namespace Namotion.Devices.Gpio;
 /// Represents an analog input channel from an ADC.
 /// </summary>
 [InterceptorSubject]
-public partial class AnalogChannel
+public partial class AnalogChannel : IHostedSubject
 {
     /// <summary>
     /// The ADC channel number.
@@ -26,10 +27,24 @@ public partial class AnalogChannel
     [State]
     public partial int RawValue { get; set; }
 
+    /// <summary>
+    /// Channel availability status.
+    /// </summary>
+    [State]
+    public partial ServiceStatus Status { get; set; }
+
+    /// <summary>
+    /// Status message for errors or info.
+    /// </summary>
+    [State]
+    public partial string? StatusMessage { get; set; }
+
     public AnalogChannel()
     {
         ChannelNumber = 0;
         Value = 0.0;
         RawValue = 0;
+        Status = ServiceStatus.Stopped;
+        StatusMessage = null;
     }
 }
