@@ -58,6 +58,12 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     public partial TimeSpan PollingInterval { get; set; }
 
     /// <summary>
+    /// Retry interval when initialization fails.
+    /// </summary>
+    [Configuration]
+    public partial TimeSpan RetryInterval { get; set; }
+
+    /// <summary>
     /// Current status of the GPIO controller.
     /// </summary>
     [State]
@@ -80,6 +86,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         Pins = new Dictionary<int, GpioPin>();
         AnalogChannels = new Dictionary<int, AnalogChannel>();
         PollingInterval = TimeSpan.FromSeconds(5);
+        RetryInterval = TimeSpan.FromSeconds(30);
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
     }
@@ -87,104 +94,144 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Retry loop for initialization
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            if (await TryInitializeAsync(stoppingToken))
+            {
+                await RunPollingLoopAsync(stoppingToken);
+                break;
+            }
+
+            // Wait before retry if initialization failed
+            if (!stoppingToken.IsCancellationRequested)
+            {
+                await Task.Delay(RetryInterval, stoppingToken);
+            }
+        }
+
+        Status = ServiceStatus.Stopping;
+        StatusMessage = "Shutting down...";
+    }
+
+    private async Task<bool> TryInitializeAsync(CancellationToken stoppingToken)
+    {
         Status = ServiceStatus.Starting;
         StatusMessage = "Initializing GPIO controller...";
 
-        // Try to create GpioController
+        if (!TryCreateController())
+        {
+            return false;
+        }
+
+        RegisterInterceptors();
+        await DiscoverPinsAsync();
+
+        Status = ServiceStatus.Running;
+        StatusMessage = null;
+        return true;
+    }
+
+    private bool TryCreateController()
+    {
         try
         {
             _controller = new GpioController();
+            return true;
         }
         catch (PlatformNotSupportedException)
         {
-            Status = ServiceStatus.Unavailable;
-            StatusMessage = "GPIO not supported on this platform";
-
-            // Create all pins with Unavailable status
-            // Build dictionary first, then assign to trigger lifecycle attachment
-            var pins = new Dictionary<int, GpioPin>();
-            for (int pinNumber = 0; pinNumber <= 27; pinNumber++)
-            {
-                pins[pinNumber] = new GpioPin()
-                {
-                    PinNumber = pinNumber,
-                    Status = ServiceStatus.Unavailable,
-                    StatusMessage = "GPIO not supported on this platform"
-                };
-            }
-            Pins = pins;
-            return;
+            CreateUnavailablePins("GPIO not supported on this platform");
+            return false;
         }
         catch (Exception exception)
         {
             Status = ServiceStatus.Error;
             StatusMessage = $"Failed to initialize GPIO: {exception.Message}";
-            return;
+            return false;
         }
+    }
 
-        // Register interceptors on this subject's context
+    private void CreateUnavailablePins(string message)
+    {
+        Status = ServiceStatus.Unavailable;
+        StatusMessage = message;
+
+        var pins = new Dictionary<int, GpioPin>();
+        for (int pinNumber = 0; pinNumber <= 27; pinNumber++)
+        {
+            pins[pinNumber] = new GpioPin()
+            {
+                PinNumber = pinNumber,
+                Status = ServiceStatus.Unavailable,
+                StatusMessage = message
+            };
+        }
+        Pins = pins;
+    }
+
+    private void RegisterInterceptors()
+    {
+        if (_controller == null) return;
+
         var subjectContext = ((IInterceptorSubject)this).Context;
         subjectContext.AddService<IWriteInterceptor>(new GpioWriteInterceptor(_controller));
         subjectContext.AddService<IWriteInterceptor>(new GpioModeChangeInterceptor(
             _controller,
             RegisterInterrupt,
             UnregisterInterrupt));
+    }
 
-        // Discover all BCM pins 0-27
-        // Build dictionary first, then assign to trigger lifecycle attachment
+    private async Task DiscoverPinsAsync()
+    {
+        if (_controller == null) return;
+
         var discoveredPins = new Dictionary<int, GpioPin>();
         for (int pinNumber = 0; pinNumber <= 27; pinNumber++)
         {
-            var pin = new GpioPin()
-            {
-                PinNumber = pinNumber,
-                Mode = GpioPinMode.Input
-            };
-
-            try
-            {
-                _controller.OpenPin(pinNumber, PinMode.Input);
-                pin.Value = _controller.Read(pinNumber) == PinValue.High;
-                pin.Status = ServiceStatus.Running;
-                pin.StatusMessage = null;
-
-                // Register interrupt for input pin
-                RegisterInterrupt(pinNumber);
-            }
-            catch (Exception exception)
-            {
-                pin.Status = ServiceStatus.Unavailable;
-                pin.StatusMessage = exception.Message;
-            }
-
+            var pin = CreateAndOpenPin(pinNumber);
             discoveredPins[pinNumber] = pin;
         }
         Pins = discoveredPins;
+        await Task.CompletedTask;
+    }
 
-        Status = ServiceStatus.Running;
-        StatusMessage = null;
+    private GpioPin CreateAndOpenPin(int pinNumber)
+    {
+        if (_controller == null)
+            throw new InvalidOperationException("Controller not initialized");
 
-        // Polling loop for verification and ADC
+        var pin = new GpioPin()
+        {
+            PinNumber = pinNumber,
+            Mode = GpioPinMode.Input
+        };
+
+        try
+        {
+            _controller.OpenPin(pinNumber, PinMode.Input);
+            pin.Value = _controller.Read(pinNumber) == PinValue.High;
+            pin.Status = ServiceStatus.Running;
+            pin.StatusMessage = null;
+            RegisterInterrupt(pinNumber);
+        }
+        catch (Exception exception)
+        {
+            pin.Status = ServiceStatus.Unavailable;
+            pin.StatusMessage = exception.Message;
+        }
+
+        return pin;
+    }
+
+    private async Task RunPollingLoopAsync(CancellationToken stoppingToken)
+    {
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                // Verify/sync all pins
-                foreach (var pin in Pins.Values)
-                {
-                    if (pin.Status != ServiceStatus.Running)
-                        continue;
-
-                    var actualValue = _controller.Read(pin.PinNumber) == PinValue.High;
-                    if (pin.Value != actualValue)
-                    {
-                        pin.Value = actualValue;
-                    }
-                }
-
-                // Poll ADC channels
+                VerifyPins();
                 PollAdcChannels();
-
                 await Task.Delay(PollingInterval, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -198,77 +245,109 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
                 await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
             }
         }
+    }
 
-        Status = ServiceStatus.Stopping;
-        StatusMessage = "Shutting down...";
+    private void VerifyPins()
+    {
+        if (_controller == null) return;
+
+        foreach (var pin in Pins.Values)
+        {
+            if (pin.Status != ServiceStatus.Running)
+                continue;
+
+            var actualValue = _controller.Read(pin.PinNumber) == PinValue.High;
+            if (pin.Value != actualValue)
+            {
+                pin.Value = actualValue;
+            }
+        }
     }
 
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        // Dispose existing ADC
+        DisposeAdcDevices();
+        var channels = InitializeAdcChannels();
+        AnalogChannels = channels;
+        return Task.CompletedTask;
+    }
+
+    private void DisposeAdcDevices()
+    {
         _mcp3008?.Dispose();
         _ads1115?.Dispose();
         _mcp3008 = null;
         _ads1115 = null;
+    }
 
-        // Build dictionary first, then assign to trigger lifecycle attachment
+    private Dictionary<int, AnalogChannel> InitializeAdcChannels()
+    {
         var channels = new Dictionary<int, AnalogChannel>();
 
-        // Initialize MCP3008 if configured
-        if (Mcp3008 != null && _controller != null)
+        if (Mcp3008 != null)
         {
-            try
-            {
-                var spi = new SoftwareSpi(
-                    Mcp3008.ClockPin,
-                    Mcp3008.MisoPin,
-                    Mcp3008.MosiPin,
-                    Mcp3008.ChipSelectPin);
-                _mcp3008 = new Mcp3008(spi);
-
-                for (int i = 0; i < 8; i++)
-                {
-                    channels[i] = new AnalogChannel()
-                    {
-                        ChannelNumber = i,
-                        Status = ServiceStatus.Running
-                    };
-                }
-            }
-            catch (Exception exception)
-            {
-                StatusMessage = $"MCP3008 init failed: {exception.Message}";
-            }
+            InitializeMcp3008(channels);
         }
 
-        // Initialize ADS1115 if configured
         if (Ads1115 != null)
         {
-            try
-            {
-                var i2cDevice = I2cDevice.Create(new I2cConnectionSettings(
-                    Ads1115.I2cBus,
-                    Ads1115.Address));
-                _ads1115 = new Ads1115(i2cDevice);
-
-                for (int i = 0; i < 4; i++)
-                {
-                    channels[i] = new AnalogChannel()
-                    {
-                        ChannelNumber = i,
-                        Status = ServiceStatus.Running
-                    };
-                }
-            }
-            catch (Exception exception)
-            {
-                StatusMessage = $"ADS1115 init failed: {exception.Message}";
-            }
+            InitializeAds1115(channels);
         }
 
-        AnalogChannels = channels;
-        return Task.CompletedTask;
+        return channels;
+    }
+
+    private void InitializeMcp3008(Dictionary<int, AnalogChannel> channels)
+    {
+        if (_controller == null) return;
+
+        try
+        {
+            var spi = new SoftwareSpi(
+                Mcp3008!.ClockPin,
+                Mcp3008.MisoPin,
+                Mcp3008.MosiPin,
+                Mcp3008.ChipSelectPin);
+            _mcp3008 = new Mcp3008(spi);
+
+            for (int i = 0; i < 8; i++)
+            {
+                channels[i] = new AnalogChannel()
+                {
+                    ChannelNumber = i,
+                    Status = ServiceStatus.Running
+                };
+            }
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = $"MCP3008 init failed: {exception.Message}";
+        }
+    }
+
+    private void InitializeAds1115(Dictionary<int, AnalogChannel> channels)
+    {
+        try
+        {
+            var i2cDevice = I2cDevice.Create(new I2cConnectionSettings(
+                Ads1115!.I2cBus,
+                Ads1115.Address));
+            _ads1115 = new Ads1115(i2cDevice);
+
+            for (int i = 0; i < 4; i++)
+            {
+                channels[i] = new AnalogChannel()
+                {
+                    ChannelNumber = i,
+                    Status = ServiceStatus.Running
+                };
+            }
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = $"ADS1115 init failed: {exception.Message}";
+        }
     }
 
     private void RegisterInterrupt(int pinNumber)
