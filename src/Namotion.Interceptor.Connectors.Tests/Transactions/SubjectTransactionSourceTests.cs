@@ -265,10 +265,10 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var sourceMock = new Mock<ISubjectSource>();
         sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
         sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>((_, ct) =>
+            .Returns<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>((changes, ct) =>
             {
                 if (ct.IsCancellationRequested)
-                    return new ValueTask<WriteResult>(WriteResult.Failure(new OperationCanceledException(ct)));
+                    return new ValueTask<WriteResult>(WriteResult.Failure(changes, new OperationCanceledException(ct)));
                 return new ValueTask<WriteResult>(WriteResult.Success);
             });
 

@@ -121,22 +121,13 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken);
         if (result.Error is not null)
         {
-            var failedList = result.FailedChanges.Length > 0
-                ? result.FailedChanges.ToArray()
-                : sourceChanges.ToArray();
+            var failedSet = new HashSet<SubjectPropertyChange>(result.FailedChanges);
+            var failedChanges = result.FailedChanges
+                .Select(c => new SourceWriteFailure(source, c,
+                    new SourceTransactionWriteException(source, [c], result.Error)))
+                .ToList();
 
-            var failedChanges = new List<SourceWriteFailure>();
-            foreach (var failedChange in failedList)
-            {
-                failedChanges.Add(new SourceWriteFailure(
-                    failedChange,
-                    source,
-                    new SourceTransactionWriteException(source, [failedChange], result.Error)));
-            }
-
-            var failedSet = new HashSet<SubjectPropertyChange>(failedList);
             var writtenList = sourceChanges.Where(c => !failedSet.Contains(c)).ToList();
-
             return (writtenList, failedChanges);
         }
 
@@ -181,7 +172,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
 
                 foreach (var change in originalChanges)
                 {
-                    revertFailures.Add(new SourceWriteFailure(change, source, rollbackException));
+                    revertFailures.Add(new SourceWriteFailure(source, change, rollbackException));
                 }
             }
         }
@@ -209,10 +200,8 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             var exception = new InvalidOperationException(
                 $"SingleWrite requirement violated: Transaction spans {sourcesWithChanges.Count} sources ({sourceNames}), but only 1 is allowed.");
 
-            return new SourceWriteFailure(
-                sourcesWithChanges.First().Value.First(),
-                sourcesWithChanges.First().Key,
-                exception);
+            return new SourceWriteFailure(sourcesWithChanges.First().Key,
+                sourcesWithChanges.First().Value.First(), exception);
         }
 
         var (source, sourceChanges) = (sourcesWithChanges[0].Key, sourcesWithChanges[0].Value);
@@ -224,7 +213,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
                 $"SingleWrite requirement violated: Transaction contains {sourceChanges.Count} changes for source '{source.GetType().Name}', " +
                 $"but WriteBatchSize is {batchSize}.");
 
-            return new SourceWriteFailure(sourceChanges.First(), source, exception);
+            return new SourceWriteFailure(source, sourceChanges.First(), exception);
         }
 
         return null;

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking.Change;
@@ -147,13 +148,7 @@ internal sealed class WriteRetryQueue : IDisposable
                 if (result.Error is not null)
                 {
                     _logger.LogWarning(result.Error, "Failed to flush {Count} queued writes to source, re-queuing failed items.", count);
-
-                    // Re-queue the items that failed: If FailedChanges is empty but Error is set, it means complete failure - re-queue all
-                    var failedChanges = result.FailedChanges.Length > 0
-                        ? result.FailedChanges
-                        : memory;
-
-                    RequeueChanges(failedChanges);
+                    RequeueChanges(result.FailedChanges);
                     Array.Clear(_scratchBuffer, 0, count);
                     return false;
                 }
@@ -169,11 +164,11 @@ internal sealed class WriteRetryQueue : IDisposable
         }
     }
 
-    private void RequeueChanges(ReadOnlyMemory<SubjectPropertyChange> changes)
+    private void RequeueChanges(ImmutableArray<SubjectPropertyChange> changes)
     {
         lock (_lock)
         {
-            _pendingWrites.InsertRange(0, changes.ToArray());
+            _pendingWrites.InsertRange(0, changes);
             Volatile.Write(ref _count, _pendingWrites.Count);
         }
     }

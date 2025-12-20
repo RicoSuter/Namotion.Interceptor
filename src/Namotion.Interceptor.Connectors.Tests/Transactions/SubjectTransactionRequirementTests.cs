@@ -229,7 +229,8 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         var source = new Mock<ISubjectSource>();
         source.Setup(s => s.WriteBatchSize).Returns(10);
         source.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(new ValueTask<WriteResult>(WriteResult.Failure(new InvalidOperationException("Write failed"))));
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(changes, new InvalidOperationException("Write failed"))));
 
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source.Object);

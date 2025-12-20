@@ -334,7 +334,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             var session = _sessionManager?.CurrentSession;
             if (session is null || !session.Connected)
             {
-                return WriteResult.Failure(new InvalidOperationException("OPC UA session is not connected."));
+                return WriteResult.Failure(changes, new InvalidOperationException("OPC UA session is not connected."));
             }
 
             var writeValues = CreateWriteValuesCollection(changes);
@@ -348,7 +348,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
         catch (Exception ex)
         {
-            return WriteResult.Failure(ex);
+            return WriteResult.Failure(changes, ex);
         }
     }
 
@@ -420,17 +420,18 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         for (var i = 0; i < span.Length; i++)
         {
             var change = span[i];
+           
+            if (!IsWritableOpcUaProperty(change))
+            {
+                continue;
+            }
+
             if (!change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var v) || v is not NodeId nodeId)
             {
                 continue;
             }
 
             var registeredProperty = change.Property.GetRegisteredProperty();
-            if (!registeredProperty.HasSetter)
-            {
-                continue;
-            }
-
             var value = _configuration.ValueConverter.ConvertToNodeValue(
                 change.GetNewValue<object?>(),
                 registeredProperty);

@@ -37,7 +37,8 @@ public abstract class TransactionTestBase
         mock.Setup(s => s.WriteChangesAsync(
                 It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(),
                 It.IsAny<CancellationToken>()))
-            .Returns(new ValueTask<WriteResult>(WriteResult.Failure(new InvalidOperationException(message))));
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(changes, new InvalidOperationException(message))));
         return mock;
     }
 

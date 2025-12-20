@@ -142,7 +142,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             var client = _client;
             if (client is null || !client.IsConnected)
             {
-                return WriteResult.Failure(new InvalidOperationException("MQTT client is not connected."));
+                return WriteResult.Failure(changes, new InvalidOperationException("MQTT client is not connected."));
             }
 
             var length = changes.Length;
@@ -282,7 +282,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         }
         catch (Exception ex)
         {
-            return WriteResult.Failure(ex);
+            return WriteResult.Failure(changes, ex);
         }
     }
 
