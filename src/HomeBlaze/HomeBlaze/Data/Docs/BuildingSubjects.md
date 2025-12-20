@@ -280,21 +280,21 @@ using Namotion.Interceptor.Registry.Attributes;
 public partial class Server
 {
     [State]
-    public partial ServerStatus Status { get; set; }
+    public partial ServiceStatus Status { get; set; }
 
     [Operation(Title = "Start", Position = 1)]
     public Task StartAsync() { /* ... */ }
 
     [Derived]
     [PropertyAttribute("Start", KnownAttributes.IsEnabled)]
-    public bool Start_IsEnabled => Status == ServerStatus.Stopped || Status == ServerStatus.Error;
+    public bool Start_IsEnabled => Status == ServiceStatus.Stopped || Status == ServiceStatus.Error;
 
     [Operation(Title = "Stop", Position = 2)]
     public Task StopAsync() { /* ... */ }
 
     [Derived]
     [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
-    public bool Stop_IsEnabled => Status == ServerStatus.Running;
+    public bool Stop_IsEnabled => Status == ServiceStatus.Running;
 }
 ```
 

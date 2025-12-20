@@ -1,13 +1,14 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Devices.Gpio;
 
 /// <summary>
-/// Represents a single GPIO pin with mode and value.
+/// Represents a single GPIO pin with mode, value, and availability status.
 /// </summary>
 [InterceptorSubject]
-public partial class GpioPin
+public partial class GpioPin : IHostedSubject
 {
     /// <summary>
     /// The GPIO pin number (BCM numbering).
@@ -26,10 +27,24 @@ public partial class GpioPin
     [State]
     public partial bool Value { get; set; }
 
+    /// <summary>
+    /// Pin availability status.
+    /// </summary>
+    [State]
+    public partial ServiceStatus Status { get; set; }
+
+    /// <summary>
+    /// Status message (e.g., "Reserved for I2C", "Write verification failed").
+    /// </summary>
+    [State]
+    public partial string? StatusMessage { get; set; }
+
     public GpioPin()
     {
         PinNumber = 0;
         Mode = GpioPinMode.Input;
         Value = false;
+        Status = ServiceStatus.Stopped;
+        StatusMessage = null;
     }
 }

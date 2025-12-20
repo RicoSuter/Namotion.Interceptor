@@ -6,6 +6,7 @@ using HomeBlaze.Servers.OpcUa.Blazor;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor.Files;
+using Namotion.Devices.Gpio;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -32,7 +33,8 @@ typeProvider.AddAssemblies(
     typeof(Motor).Assembly,                       // HomeBlaze.Samples
     typeof(OpcUaServer).Assembly,                 // HomeBlaze.Servers.OpcUa
     typeof(OpcUaServerEditComponent).Assembly,    // HomeBlaze.Servers.OpcUa.Blazor
-    typeof(App).Assembly);                        // HomeBlaze UI components
+    typeof(OpcUaServerEditComponent).Assembly,    // HomeBlaze.Servers.OpcUa.Blazor
+    typeof(GpioSubject).Assembly);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

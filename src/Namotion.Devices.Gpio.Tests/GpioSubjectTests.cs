@@ -1,4 +1,4 @@
-using Namotion.Interceptor;
+using HomeBlaze.Abstractions;
 using Xunit;
 
 namespace Namotion.Devices.Gpio.Tests;
@@ -8,11 +8,8 @@ public class GpioSubjectTests
     [Fact]
     public void GpioSubject_InitializesWithEmptyCollections()
     {
-        // Arrange
-        var context = InterceptorSubjectContext.Create();
-
         // Act
-        var subject = new GpioSubject(context);
+        var subject = new GpioSubject();
 
         // Assert
         Assert.NotNull(subject.Pins);
@@ -27,11 +24,79 @@ public class GpioSubjectTests
     public void GpioSubject_TitleAndIcon_ReturnExpectedValues()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create();
-        var subject = new GpioSubject(context);
+        var subject = new GpioSubject();
 
         // Act & Assert
         Assert.Equal("GPIO", subject.Title);
         Assert.Equal("Memory", subject.Icon);
+    }
+
+    [Fact]
+    public void GpioSubject_InitializesWithStoppedStatus()
+    {
+        // Act
+        var subject = new GpioSubject();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, subject.Status);
+        Assert.Null(subject.StatusMessage);
+    }
+
+    [Fact]
+    public void GpioSubject_HasDefaultPollingInterval()
+    {
+        // Act
+        var subject = new GpioSubject();
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(5), subject.PollingInterval);
+    }
+
+    [Fact]
+    public async Task GpioSubject_OnNonRaspberryPi_SetsUnavailableStatus()
+    {
+        // Arrange
+        var subject = new GpioSubject();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+
+        // Act
+        await subject.StartAsync(cts.Token);
+
+        // Assert - On Windows/non-Pi platforms, GPIO is not supported
+        Assert.Equal(ServiceStatus.Unavailable, subject.Status);
+        Assert.Equal("GPIO not supported on this platform", subject.StatusMessage);
+    }
+
+    [Fact]
+    public async Task GpioSubject_OnNonRaspberryPi_CreatesPinsWithUnavailableStatus()
+    {
+        // Arrange
+        var subject = new GpioSubject();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+
+        // Act
+        await subject.StartAsync(cts.Token);
+
+        // Assert - All BCM pins 0-27 should be created with Unavailable status
+        Assert.Equal(28, subject.Pins.Count);
+        foreach (var pin in subject.Pins.Values)
+        {
+            Assert.Equal(ServiceStatus.Unavailable, pin.Status);
+            Assert.Equal("GPIO not supported on this platform", pin.StatusMessage);
+        }
+    }
+
+    [Fact]
+    public void GpioSubject_Dispose_SetsStoppedStatus()
+    {
+        // Arrange
+        var subject = new GpioSubject();
+
+        // Act
+        subject.Dispose();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, subject.Status);
+        Assert.Null(subject.StatusMessage);
     }
 }
