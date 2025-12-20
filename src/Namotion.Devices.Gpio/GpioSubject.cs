@@ -97,13 +97,19 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         // Retry loop for initialization
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (await TryInitializeAsync(stoppingToken))
+            var result = await TryInitializeAsync(stoppingToken);
+            if (result == InitializationResult.Success)
             {
                 await RunPollingLoopAsync(stoppingToken);
                 break;
             }
+            else if (result == InitializationResult.PermanentFailure)
+            {
+                // Don't retry for permanent failures (e.g., platform not supported)
+                break;
+            }
 
-            // Wait before retry if initialization failed
+            // Wait before retry for transient failures
             if (!stoppingToken.IsCancellationRequested)
             {
                 await Task.Delay(RetryInterval, stoppingToken);
@@ -114,14 +120,22 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         StatusMessage = "Shutting down...";
     }
 
-    private async Task<bool> TryInitializeAsync(CancellationToken stoppingToken)
+    private enum InitializationResult
+    {
+        Success,
+        TransientFailure,
+        PermanentFailure
+    }
+
+    private async Task<InitializationResult> TryInitializeAsync(CancellationToken stoppingToken)
     {
         Status = ServiceStatus.Starting;
         StatusMessage = "Initializing GPIO controller...";
 
-        if (!TryCreateController())
+        var controllerResult = TryCreateController();
+        if (controllerResult != InitializationResult.Success)
         {
-            return false;
+            return controllerResult;
         }
 
         RegisterInterceptors();
@@ -129,26 +143,26 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 
         Status = ServiceStatus.Running;
         StatusMessage = null;
-        return true;
+        return InitializationResult.Success;
     }
 
-    private bool TryCreateController()
+    private InitializationResult TryCreateController()
     {
         try
         {
             _controller = new GpioController();
-            return true;
+            return InitializationResult.Success;
         }
         catch (PlatformNotSupportedException)
         {
             CreateUnavailablePins("GPIO not supported on this platform");
-            return false;
+            return InitializationResult.PermanentFailure;
         }
         catch (Exception exception)
         {
             Status = ServiceStatus.Error;
             StatusMessage = $"Failed to initialize GPIO: {exception.Message}";
-            return false;
+            return InitializationResult.TransientFailure;
         }
     }
 
