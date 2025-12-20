@@ -51,7 +51,7 @@ Transactions are designed for zero overhead when not in use:
 ```csharp
 var person = new Person(context);
 
-using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
 {
     person.FirstName = "John";
     person.LastName = "Doe";
@@ -70,7 +70,7 @@ using (var transaction = await context.BeginExclusiveTransactionAsync(Transactio
 Inside a transaction, reading a property returns the pending value:
 
 ```csharp
-using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
 {
     person.FirstName = "John";
 
@@ -86,7 +86,7 @@ using (var transaction = await context.BeginExclusiveTransactionAsync(Transactio
 If a transaction is disposed without committing, changes are discarded:
 
 ```csharp
-using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
 {
     person.FirstName = "John";
 
@@ -101,7 +101,7 @@ Console.WriteLine(person.FirstName); // Output: (original value, not "John")
 You can inspect which changes are pending before committing:
 
 ```csharp
-using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
 {
     person.FirstName = "John";
     person.LastName = "Doe";
@@ -121,7 +121,7 @@ using (var transaction = await context.BeginExclusiveTransactionAsync(Transactio
 If the same property is written multiple times within a transaction, only the final value is committed:
 
 ```csharp
-using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
 {
     person.FirstName = "John";
     person.FirstName = "Jane";
@@ -141,7 +141,7 @@ using (var transaction = await context.BeginExclusiveTransactionAsync(Transactio
 Calling `CommitAsync()` twice throws an exception:
 
 ```csharp
-using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
 {
     person.FirstName = "John";
     await transaction.CommitAsync();
@@ -155,7 +155,7 @@ using (var transaction = await context.BeginExclusiveTransactionAsync(Transactio
 Using a disposed transaction throws an exception:
 
 ```csharp
-var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
 transaction.Dispose();
 
 await transaction.CommitAsync(); // Throws ObjectDisposedException
@@ -166,20 +166,20 @@ await transaction.CommitAsync(); // Throws ObjectDisposedException
 Nested transactions are not supported:
 
 ```csharp
-using (var transaction1 = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+using (var transaction1 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
 {
-    using (var transaction2 = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort)) // Throws InvalidOperationException
+    using (var transaction2 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort)) // Throws InvalidOperationException
     {
     }
 }
 ```
 
-## Transaction Modes
+## Failure Handling
 
-When creating a transaction, you must specify a `TransactionMode` to control how partial failures are handled:
+When creating a transaction, you must specify a `TransactionFailureHandling` to control how partial failures are handled:
 
 ```csharp
-using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
+using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
 ```
 
 Transaction modes are relevant in two scenarios:
@@ -195,7 +195,7 @@ In both cases, the transaction mode determines what happens to successfully writ
 BestEffort mode maximizes the number of successful writes. When some external sources fail, the changes that succeeded are still applied to the in-process model. This is useful when partial progress is acceptable and you want to handle failures gracefully without losing successful updates.
 
 ```csharp
-using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
 device.Temperature = 25.5;  // Bound to Source A
 device.Pressure = 101.3;    // Bound to Source B
 
@@ -219,7 +219,7 @@ Use BestEffort when partial updates are acceptable and you prefer to maximize su
 Rollback mode provides the strongest consistency guarantee. If any external source fails, successfully written sources are **reverted** to their original values (best effort). This minimizes divergence between external sources and the local model.
 
 ```csharp
-using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
+using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
 device.Temperature = 25.5;  // Bound to Source A
 device.Pressure = 101.3;    // Bound to Source B
 
@@ -241,14 +241,75 @@ Use Rollback when consistency is critical and you want to minimize the chance of
 
 > **Performance note**: Rollback mode may perform additional writes on failure (to revert successful sources), making it slower than BestEffort mode in failure scenarios.
 
-## Transaction Requirements
+## Transaction Locking
 
-In addition to the transaction mode, you can specify a `TransactionRequirement` to enforce constraints on the transaction scope. This is particularly useful for industrial protocols like OPC UA where you want to ensure predictable behavior.
+Transactions support two locking modes that control how concurrent transactions are synchronized:
 
 ```csharp
-using var tx = await context.BeginExclusiveTransactionAsync(
-    TransactionMode.Rollback,
-    TransactionRequirement.SingleWrite);
+// Exclusive locking (default) - serializes all transactions
+using var tx = await context.BeginTransactionAsync(
+    TransactionFailureHandling.Rollback,
+    TransactionLocking.Exclusive);
+
+// Optimistic locking - allows concurrent transactions, serializes only at commit
+using var tx = await context.BeginTransactionAsync(
+    TransactionFailureHandling.Rollback,
+    TransactionLocking.Optimistic);
+```
+
+### Exclusive (Default)
+
+Exclusive locking acquires a lock when the transaction begins and holds it until the transaction is disposed. This ensures only one transaction executes at a time per context, preventing any possibility of conflicts.
+
+**Behavior:**
+- Lock acquired at `BeginTransactionAsync`
+- Other transactions wait until this transaction completes
+- No conflict detection needed (transactions are serialized)
+- Best for scenarios where transactions are short-lived
+
+### Optimistic
+
+Optimistic locking allows multiple transactions to run concurrently, acquiring the lock only during the commit phase. This enables higher throughput when transactions rarely conflict.
+
+**Behavior:**
+- No lock at `BeginTransactionAsync` - returns immediately
+- Multiple transactions can capture changes concurrently
+- Lock acquired only during `CommitAsync`
+- Conflicts detected via `TransactionConflictBehavior.FailOnConflict`
+
+**Example with conflict detection:**
+
+```csharp
+using var tx = await context.BeginTransactionAsync(
+    TransactionFailureHandling.Rollback,
+    TransactionLocking.Optimistic,
+    conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+
+device.Temperature = 25.5;
+
+// If another transaction modified Temperature since we started,
+// CommitAsync will throw TransactionConflictException
+await tx.CommitAsync();
+```
+
+### Locking Mode Comparison
+
+| Aspect | Exclusive | Optimistic |
+|--------|-----------|------------|
+| Lock at Begin | Yes (waits if busy) | No (immediate) |
+| During Transaction | Other transactions wait | Multiple transactions run concurrently |
+| Lock at Commit | Already held | Acquires for commit phase |
+| Conflict Detection | N/A (serialized) | Via `FailOnConflict` behavior |
+| Best For | Short transactions, high contention | Long transactions, low contention |
+
+## Transaction Requirements
+
+In addition to failure handling, you can specify a `TransactionRequirement` to enforce constraints on the transaction scope. This is particularly useful for industrial protocols like OPC UA where you want to ensure predictable behavior.
+
+```csharp
+using var tx = await context.BeginTransactionAsync(
+    TransactionFailureHandling.Rollback,
+    requirement: TransactionRequirement.SingleWrite);
 ```
 
 ### None (Default)
@@ -266,8 +327,8 @@ Changes to properties without a source are always allowed and don't count toward
 
 ```csharp
 // OPC UA scenario: maximum safety with single write requirement
-using var tx = await context.BeginExclusiveTransactionAsync(
-    TransactionMode.Rollback,
+using var tx = await context.BeginTransactionAsync(
+    TransactionFailureHandling.Rollback,
     TransactionRequirement.SingleWrite);
 
 device.Temperature = 25.5;  // Bound to OPC UA source
@@ -293,8 +354,8 @@ If the requirements aren't met, `CommitAsync()` throws a `TransactionException` 
 new PropertyReference(device, "Temperature").SetSource(opcUaSource);
 new PropertyReference(device, "Pressure").SetSource(mqttSource);  // Different source!
 
-using var tx = await context.BeginExclusiveTransactionAsync(
-    TransactionMode.Rollback,
+using var tx = await context.BeginTransactionAsync(
+    TransactionFailureHandling.Rollback,
     TransactionRequirement.SingleWrite);
 
 device.Temperature = 25.5;
@@ -325,7 +386,7 @@ With this configuration, `CommitAsync()` will:
 ```csharp
 try
 {
-    using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback))
+    using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
     {
         // These properties are bound to an OPC UA source
         device.Temperature = 25.5;
@@ -375,7 +436,7 @@ public partial class Person
     public string FullName => $"{FirstName} {LastName}";
 }
 
-using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
 {
     person.FirstName = "John";
     person.LastName = "Doe";
@@ -390,7 +451,7 @@ using (var transaction = await context.BeginExclusiveTransactionAsync(Transactio
 
 ## Thread Safety
 
-- `context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort)` uses `AsyncLocal<T>` to store the current transaction, making it safe for async/await patterns
+- `context.BeginTransactionAsync(TransactionFailureHandling.BestEffort)` uses `AsyncLocal<T>` to store the current transaction, making it safe for async/await patterns
 - Exclusive transactions use a per-context semaphore to ensure only one transaction executes at a time
 - Each async execution context has its own transaction scope
 - The transaction is automatically cleared when `Dispose()` is called
@@ -414,7 +475,13 @@ using (var transaction = await context.BeginExclusiveTransactionAsync(Transactio
 
 | Member | Description |
 |--------|-------------|
-| `BeginExclusiveTransactionAsync(mode, requirement, ct)` | Begins a new exclusive transaction with the specified `TransactionMode` (required) and `TransactionRequirement` (default: `None`) |
+| `BeginTransactionAsync(failureHandling, locking, requirement, conflictBehavior, ct)` | Begins a new transaction with the specified options |
+
+**Parameters:**
+- `failureHandling` (required): How to handle partial failures (`BestEffort` or `Rollback`)
+- `locking` (default: `Exclusive`): Concurrency control mode
+- `requirement` (default: `None`): Validation constraints
+- `conflictBehavior` (default: `FailOnConflict`): How to handle value conflicts at commit time
 
 ### SubjectTransaction
 
@@ -423,16 +490,26 @@ using (var transaction = await context.BeginExclusiveTransactionAsync(Transactio
 | `static Current` | Gets the current transaction in the execution context, or `null` |
 | `static HasActiveTransaction` | Fast-path check for any active transaction (single volatile read) |
 | `Context` | Gets the context this transaction is bound to |
+| `Locking` | Gets the locking mode for this transaction |
+| `ConflictBehavior` | Gets the conflict behavior for this transaction |
+| `StartTimestamp` | Gets the timestamp when the transaction started |
 | `GetPendingChanges()` | Returns the list of pending property changes |
-| `CommitAsync(ct)` | Commits all pending changes using the configured mode and requirement |
+| `CommitAsync(ct)` | Commits all pending changes using the configured options |
 | `Dispose()` | Discards uncommitted changes and clears the current transaction |
 
-### TransactionMode
+### TransactionFailureHandling
 
 | Value | Description |
 |-------|-------------|
 | `BestEffort` | Apply successful changes even if some sources fail |
 | `Rollback` | All-or-nothing with best-effort revert of successful source writes |
+
+### TransactionLocking
+
+| Value | Description |
+|-------|-------------|
+| `Exclusive` | Acquires lock at begin, holds until dispose (default) |
+| `Optimistic` | No lock at begin, acquires only during commit phase |
 
 ### TransactionRequirement
 
@@ -441,10 +518,17 @@ using (var transaction = await context.BeginExclusiveTransactionAsync(Transactio
 | `None` | No requirements - multiple sources and batches allowed (default) |
 | `SingleWrite` | Requires single source and changes within `WriteBatchSize` limit |
 
+### TransactionConflictBehavior
+
+| Value | Description |
+|-------|-------------|
+| `FailOnConflict` | Throw `TransactionConflictException` if values changed since transaction started (default) |
+| `Ignore` | Overwrite any concurrent changes without checking |
+
 ### ITransactionWriteHandler
 
 Implement this interface to customize how transaction changes are written to external systems.
 
 | Member | Description |
 |--------|-------------|
-| `WriteChangesAsync(changes, mode, requirement, ct)` | Writes changes to external sources with the specified mode and requirement |
+| `WriteChangesAsync(changes, failureHandling, requirement, ct)` | Writes changes to external sources with the specified options |

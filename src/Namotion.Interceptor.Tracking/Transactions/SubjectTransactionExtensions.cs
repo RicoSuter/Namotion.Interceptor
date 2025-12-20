@@ -5,27 +5,27 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// <summary>
 /// Extension methods for transaction support on IInterceptorSubjectContext.
 /// </summary>
-public static class SubjectExclusiveTransactionExtensions
+public static class SubjectTransactionExtensions
 {
     /// <summary>
-    /// Begins a new exclusive transaction bound to this context.
-    /// Waits if another transaction is active on this context, ensuring only one
-    /// transaction executes at a time per context (exclusive lock).
+    /// Begins a new transaction bound to this context.
     /// </summary>
     /// <param name="context">The context to bind the transaction to.</param>
-    /// <param name="mode">The transaction mode controlling failure handling behavior.</param>
+    /// <param name="failureHandling">The failure handling mode controlling what happens when writes fail.</param>
+    /// <param name="locking">The locking mode. Exclusive (default) acquires lock at begin; Optimistic acquires only during commit.</param>
     /// <param name="requirement">The transaction requirement for validation. Defaults to <see cref="TransactionRequirement.None"/>.</param>
     /// <param name="conflictBehavior">The conflict detection behavior. Defaults to <see cref="TransactionConflictBehavior.FailOnConflict"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A new SubjectTransaction instance.</returns>
-    public static TransactionAwaitable BeginExclusiveTransactionAsync(
+    public static TransactionAwaitable BeginTransactionAsync(
         this IInterceptorSubjectContext context,
-        TransactionMode mode,
+        TransactionFailureHandling failureHandling,
+        TransactionLocking locking = TransactionLocking.Exclusive,
         TransactionRequirement requirement = TransactionRequirement.None,
         TransactionConflictBehavior conflictBehavior = TransactionConflictBehavior.FailOnConflict,
         CancellationToken cancellationToken = default)
     {
-        var task = SubjectTransaction.BeginExclusiveTransactionAsync(context, mode, requirement, conflictBehavior, cancellationToken);
+        var task = SubjectTransaction.BeginTransactionAsync(context, failureHandling, locking, requirement, conflictBehavior, cancellationToken);
         return new TransactionAwaitable(task);
     }
 }

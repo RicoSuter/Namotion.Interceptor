@@ -18,7 +18,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var context = CreateContext();
         var person = new Person(context);
 
-        using var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "John";
 
         Assert.Single(transaction.PendingChanges);
@@ -46,7 +46,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var person = new Person(context);
         string finalValue;
 
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "John";
 
@@ -64,7 +64,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var context = CreateContext();
         var person = new Person(context);
 
-        using var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "John";
         person.LastName = "Doe";
 
@@ -80,7 +80,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var context = CreateContext();
         var person = new Person(context);
 
-        using var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "John";
         person.FirstName = "Jane";
         person.FirstName = "Jack";
@@ -100,7 +100,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var changedTime = DateTime.UtcNow.AddMinutes(-5);
         var receivedTime = DateTime.UtcNow;
 
-        using var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
 
         using (SubjectChangeContext.WithState(mockSource, changedTime, receivedTime))
         {
@@ -120,7 +120,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var person = new Person(context);
         person.FirstName = "Original";
 
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "Pending";
             var readValue = person.FirstName;
@@ -151,7 +151,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var person = new Person(context);
         person.FirstName = "Stored";
 
-        using var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var result = person.FirstName;
 
         Assert.Equal("Stored", result);
@@ -175,7 +175,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
             }
         });
 
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "Pending";
 
@@ -196,7 +196,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var changeObservable = context.GetPropertyChangeObservable(Scheduler.Immediate);
         changeObservable.Subscribe(change => notifications.Add(change));
 
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "John";
             Assert.Empty(notifications);
@@ -220,7 +220,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var changeObservable = context.GetPropertyChangeObservable(Scheduler.Immediate);
         changeObservable.Subscribe(change => notifications.Add(change));
 
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "John";
         }
@@ -235,7 +235,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var person1 = new Person(context);
         var person2 = new Person(context);
 
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person1.FirstName = "John";
             person2.FirstName = "Jane";
@@ -255,7 +255,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         var context = CreateContext();
         var person = new Person(context);
 
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "John";
             person.LastName = "Doe";

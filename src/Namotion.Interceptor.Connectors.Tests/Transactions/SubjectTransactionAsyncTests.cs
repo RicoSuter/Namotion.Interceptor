@@ -8,9 +8,10 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 public class SubjectTransactionAsyncTests
 {
     [Fact]
-    public async Task BeginExclusiveTransactionAsync_SerializesConcurrentTransactions()
+    public async Task BeginTransactionAsync_SerializesConcurrentTransactions()
     {
-        // Test that BeginExclusiveTransactionAsync serializes concurrent transactions
+        // Arrange
+        // Test that BeginTransactionAsync serializes concurrent transactions
         // The lock lives on SubjectTransactionInterceptor (one per context)
         var context = InterceptorSubjectContext
             .Create()
@@ -21,7 +22,8 @@ public class SubjectTransactionAsyncTests
         Task<SubjectTransaction> tx2Task;
         var tx2AcquiredTcs = new TaskCompletionSource<bool>();
 
-        using (await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        // Act
+        using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             // Try to acquire another transaction in the background
             // Use ExecutionContext.SuppressFlow to prevent AsyncLocal inheritance
@@ -29,7 +31,7 @@ public class SubjectTransactionAsyncTests
             {
                 tx2Task = Task.Run(async () =>
                 {
-                    var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+                    var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
                     tx2AcquiredTcs.SetResult(true);
                     return tx;
                 });
@@ -38,6 +40,7 @@ public class SubjectTransactionAsyncTests
             // Wait a bit
             await Task.Delay(100);
 
+            // Assert
             // tx2 should be waiting because tx1 has not been disposed
             Assert.False(tx2AcquiredTcs.Task.IsCompleted, "tx2 should be waiting for lock");
         }
@@ -48,35 +51,42 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task BeginExclusiveTransactionAsync_ReturnsTransaction()
+    public async Task BeginTransactionAsync_ReturnsTransaction()
     {
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
             .WithTransactions()
             .WithFullPropertyTracking();
 
-        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        // Act
+        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
 
+        // Assert
         Assert.NotNull(tx);
         Assert.Same(context, tx.Context);
     }
 
     [Fact]
-    public async Task BeginExclusiveTransactionAsync_SerializesTransactionsPerContext()
+    public async Task BeginTransactionAsync_SerializesTransactionsPerContext()
     {
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
             .WithTransactions()
             .WithFullPropertyTracking();
 
-        using var tx1 = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        // Act
+        using var tx1 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
 
+        // Assert
         // Verify tx1's context matches
         Assert.Same(context, tx1.Context);
         Assert.NotNull(SubjectTransaction.Current); // Verify AsyncLocal is set
 
+        // Arrange
         // Start tx2 - it should wait because tx1 holds the lock
         // Use ExecutionContext.SuppressFlow to prevent AsyncLocal inheritance
         var tx2Started = false;
@@ -87,32 +97,39 @@ public class SubjectTransactionAsyncTests
             tx2Task = Task.Run(async () =>
             {
                 tx2Started = true;
-                var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+                var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
                 tx2Acquired = true;
                 return tx;
             });
         }
 
+        // Act
         // Give tx2 time to start
         while (!tx2Started)
             await Task.Delay(1);
 
         // tx2 should be waiting for lock (not yet completed)
         await Task.Delay(100);
+
+        // Assert
         Assert.False(tx2Acquired, "tx2 should not have acquired lock yet");
         Assert.False(tx2Task.IsCompleted, "tx2 should be waiting for lock held by tx1");
 
+        // Act
         // Dispose tx1 to release lock
         tx1.Dispose();
 
         // Now tx2 should complete
         using var tx2 = await tx2Task;
+
+        // Assert
         Assert.NotNull(tx2);
     }
 
     [Fact]
     public async Task WriteProperty_ToDifferentContext_ThrowsInvalidOperationException()
     {
+        // Arrange
         var context1 = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -128,19 +145,23 @@ public class SubjectTransactionAsyncTests
         var person1 = new Person(context1);
         var person2 = new Person(context2);
 
-        using var tx = await context1.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        using var tx = await context1.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
 
+        // Act
         // Should work - same context
         person1.FirstName = "John";
 
         // Should throw - different context
         var ex = Assert.Throws<InvalidOperationException>(() => person2.FirstName = "Jane");
+
+        // Assert
         Assert.Contains("different context", ex.Message);
     }
 
     [Fact]
     public async Task WriteProperty_ToSameContext_Succeeds()
     {
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -153,22 +174,26 @@ public class SubjectTransactionAsyncTests
         // Note: subject.Context returns InterceptorExecutor, not the original context
         // But they share the same SubjectTransactionInterceptor via fallback context mechanism
 
-        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
 
+        // Assert
         // Verify transaction context is the original context
         Assert.Same(context, tx.Context);
 
+        // Act
         // Should work - same interceptor is accessible from both via fallback resolution
         person1.FirstName = "John";
         person2.FirstName = "Jane";
 
+        // Assert
         var changes = tx.GetPendingChanges();
         Assert.Equal(2, changes.Count);
     }
 
     [Fact]
-    public async Task BeginExclusiveTransactionAsync_StoresStartTimestamp()
+    public async Task BeginTransactionAsync_StoresStartTimestamp()
     {
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -176,49 +201,61 @@ public class SubjectTransactionAsyncTests
             .WithFullPropertyTracking();
 
         var beforeStart = DateTimeOffset.UtcNow;
-        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+
+        // Act
+        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var afterStart = DateTimeOffset.UtcNow;
 
+        // Assert
         Assert.True(tx.StartTimestamp >= beforeStart);
         Assert.True(tx.StartTimestamp <= afterStart);
     }
 
     [Fact]
-    public async Task BeginExclusiveTransactionAsync_WithConflictBehavior_StoresBehavior()
+    public async Task BeginTransactionAsync_WithConflictBehavior_StoresBehavior()
     {
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
             .WithTransactions()
             .WithFullPropertyTracking();
 
-        using var tx = await context.BeginExclusiveTransactionAsync(
-            TransactionMode.BestEffort,
+        // Act
+        using var tx = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
             conflictBehavior: TransactionConflictBehavior.Ignore);
 
+        // Assert
         Assert.Equal(TransactionConflictBehavior.Ignore, tx.ConflictBehavior);
     }
 
     [Fact]
     public async Task DisposeAsync_ReleasesLock_AllowsNewTransaction()
     {
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
             .WithTransactions()
             .WithFullPropertyTracking();
 
-        var tx1 = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        var tx1 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+
+        // Act
         tx1.Dispose();
 
         // Should be able to start new transaction immediately
-        using var tx2 = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        using var tx2 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+
+        // Assert
         Assert.NotNull(tx2);
     }
 
     [Fact]
     public async Task CommitAsync_WithFailOnConflict_ThrowsWhenValueChangedExternally()
     {
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -229,8 +266,8 @@ public class SubjectTransactionAsyncTests
         person.FirstName = "Original";
 
         // Start transaction with FailOnConflict
-        using var tx = await context.BeginExclusiveTransactionAsync(
-            TransactionMode.BestEffort,
+        using var tx = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
 
         // Make a change within the transaction - captures OldValue = "Original"
@@ -255,8 +292,11 @@ public class SubjectTransactionAsyncTests
         }
         await externalTask;
 
+        // Act
         // CommitAsync should throw because current value != captured OldValue
         var ex = await Assert.ThrowsAsync<TransactionConflictException>(() => tx.CommitAsync(CancellationToken.None));
+
+        // Assert
         Assert.Contains(nameof(Person.FirstName), ex.Message);
         Assert.Single(ex.ConflictingProperties);
     }
@@ -264,6 +304,7 @@ public class SubjectTransactionAsyncTests
     [Fact]
     public async Task CommitAsync_WithIgnoreConflict_DoesNotThrowWhenValueChangedExternally()
     {
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -274,8 +315,8 @@ public class SubjectTransactionAsyncTests
         person.FirstName = "Original";
 
         // Start transaction with Ignore behavior
-        using var tx = await context.BeginExclusiveTransactionAsync(
-            TransactionMode.BestEffort,
+        using var tx = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
             conflictBehavior: TransactionConflictBehavior.Ignore);
 
         // Make a change within the transaction
@@ -294,9 +335,11 @@ public class SubjectTransactionAsyncTests
         }
         await externalTask;
 
+        // Act
         // CommitAsync should NOT throw because ConflictBehavior is Ignore
         await tx.CommitAsync(CancellationToken.None);
 
+        // Assert
         // Verify the transaction value was applied (overwrites external change)
         Assert.Equal("TransactionValue", person.FirstName);
     }
@@ -304,6 +347,7 @@ public class SubjectTransactionAsyncTests
     [Fact]
     public async Task CommitAsync_WithFailOnConflict_SucceedsWhenNoConflict()
     {
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -314,16 +358,18 @@ public class SubjectTransactionAsyncTests
         person.FirstName = "Original";
 
         // Start transaction with FailOnConflict
-        using var tx = await context.BeginExclusiveTransactionAsync(
-            TransactionMode.BestEffort,
+        using var tx = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
 
         // Make a change within the transaction
         person.FirstName = "TransactionValue";
 
+        // Act
         // CommitAsync should succeed - no external changes to underlying value
         await tx.CommitAsync(CancellationToken.None);
 
+        // Assert
         // Verify the value was applied
         Assert.Equal("TransactionValue", person.FirstName);
     }
@@ -331,6 +377,7 @@ public class SubjectTransactionAsyncTests
     [Fact]
     public async Task CommitAsync_WithFailOnConflict_SucceedsWhenStartingFromNull()
     {
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -341,16 +388,18 @@ public class SubjectTransactionAsyncTests
         // FirstName starts as null
 
         // Start transaction with FailOnConflict
-        using var tx = await context.BeginExclusiveTransactionAsync(
-            TransactionMode.BestEffort,
+        using var tx = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
 
         // Make a change within the transaction - captures OldValue = null
         person.FirstName = "NewValue";
 
+        // Act
         // CommitAsync should succeed - underlying value is still null
         await tx.CommitAsync();
 
+        // Assert
         // Verify the value was applied
         Assert.Equal("NewValue", person.FirstName);
     }
@@ -358,6 +407,7 @@ public class SubjectTransactionAsyncTests
     [Fact]
     public async Task WriteProperty_CapturesOriginalOldValue_ForConflictDetection()
     {
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -367,16 +417,18 @@ public class SubjectTransactionAsyncTests
         var person = new Person(context);
         person.FirstName = "Original";
 
-        using var tx = await context.BeginExclusiveTransactionAsync(
-            TransactionMode.BestEffort,
+        using var tx = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
 
+        // Act
         // First write captures OldValue = "Original"
         person.FirstName = "First";
 
         // Second write should preserve OldValue = "Original" (not "First")
         person.FirstName = "Second";
 
+        // Assert
         var changes = tx.GetPendingChanges();
         Assert.Single(changes);
         Assert.Equal("Original", changes[0].GetOldValue<string>());

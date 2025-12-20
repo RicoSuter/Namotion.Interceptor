@@ -20,10 +20,10 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     internal static bool HasActiveTransaction => Volatile.Read(ref _activeTransactionCount) > 0;
 
-    private readonly TransactionMode _mode;
+    private readonly TransactionFailureHandling _failureHandling;
+    private readonly TransactionLocking _locking;
     private readonly TransactionRequirement _requirement;
-    private readonly TransactionConflictBehavior _conflictBehavior;
-    private readonly IDisposable _lockReleaser;
+    private readonly IDisposable? _lockReleaser; // null for Optimistic until commit
 
     private volatile bool _isCommitting;
     private volatile bool _isCommitted;
@@ -77,22 +77,29 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Gets the conflict behavior for this transaction.
     /// </summary>
-    public TransactionConflictBehavior ConflictBehavior => _conflictBehavior;
+    public TransactionConflictBehavior ConflictBehavior { get; }
+
+    /// <summary>
+    /// Gets the locking mode for this transaction.
+    /// </summary>
+    public TransactionLocking Locking => _locking;
 
     private SubjectTransaction(
         IInterceptorSubjectContext context,
         SubjectTransactionInterceptor interceptor,
-        TransactionMode mode,
+        TransactionFailureHandling failureHandling,
+        TransactionLocking locking,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
         DateTimeOffset startTimestamp,
-        IDisposable lockReleaser)
+        IDisposable? lockReleaser)
     {
         Context = context;
         Interceptor = interceptor;
-        _mode = mode;
+        _failureHandling = failureHandling;
+        _locking = locking;
         _requirement = requirement;
-        _conflictBehavior = conflictBehavior;
+        ConflictBehavior = conflictBehavior;
         StartTimestamp = startTimestamp;
         _lockReleaser = lockReleaser;
 
@@ -101,20 +108,22 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Begins a new exclusive transaction bound to the specified context.
-    /// Waits if another transaction is active on this context, ensuring only one
-    /// transaction executes at a time per context (exclusive lock).
+    /// Begins a new transaction bound to the specified context.
+    /// For Exclusive locking, waits if another transaction is active on this context.
+    /// For Optimistic locking, returns immediately and acquires lock only during commit.
     /// </summary>
     /// <param name="context">The context to bind the transaction to.</param>
-    /// <param name="mode">The transaction mode controlling failure handling behavior.</param>
+    /// <param name="failureHandling">The failure handling mode controlling what happens when writes fail.</param>
+    /// <param name="locking">The locking mode controlling transaction synchronization.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
     /// <param name="conflictBehavior">The conflict detection behavior.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A new SubjectTransaction instance.</returns>
     /// <exception cref="InvalidOperationException">Thrown when transactions are not enabled or when nested transaction is attempted.</exception>
-    internal static async ValueTask<SubjectTransaction> BeginExclusiveTransactionAsync(
+    internal static async ValueTask<SubjectTransaction> BeginTransactionAsync(
         IInterceptorSubjectContext context,
-        TransactionMode mode,
+        TransactionFailureHandling failureHandling,
+        TransactionLocking locking,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
         CancellationToken cancellationToken)
@@ -129,7 +138,14 @@ public sealed class SubjectTransaction : IDisposable
             ?? throw new InvalidOperationException(
                 "Transactions are not enabled. Call WithTransactions() when creating the context.");
 
-        var transactionLock = await interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
+        IDisposable? transactionLock = null;
+
+        // For Exclusive locking, acquire the lock now
+        // For Optimistic locking, skip the lock - we'll acquire it during commit only
+        if (locking == TransactionLocking.Exclusive)
+        {
+            transactionLock = await interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
+        }
 
         // Don't set CurrentTransaction.Value here because it won't flow to caller's context
         // The caller (extension method) will call SetCurrent after awaiting this
@@ -137,7 +153,8 @@ public sealed class SubjectTransaction : IDisposable
         return new SubjectTransaction(
             context,
             interceptor,
-            mode,
+            failureHandling,
+            locking,
             requirement,
             conflictBehavior,
             DateTimeOffset.UtcNow,
@@ -147,13 +164,13 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Commits all pending changes. If external write handlers are configured on subjects' contexts,
     /// changes are written to external sources first, then applied to the in-process model.
-    /// The behavior on partial failure depends on the <see cref="_mode"/> specified at transaction creation.
+    /// The behavior on partial failure depends on the <see cref="_failureHandling"/> specified at transaction creation.
     /// </summary>
     /// <remarks>
+    /// For Optimistic locking, the lock is acquired at the start of commit and released after completion.
     /// Conflict detection compares captured OldValue with current value at commit time.
     /// This catches changes from other transactions and external sources that occurred
-    /// after the transaction started. However, concurrent non-transactional writes
-    /// during the commit phase are not detected (optimistic concurrency model).
+    /// after the transaction started.
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ObjectDisposedException">Thrown when the transaction has been disposed.</exception>
@@ -172,100 +189,115 @@ public sealed class SubjectTransaction : IDisposable
             return;
         }
 
-        _isCommitting = true;
+        // For Optimistic locking, acquire the lock now (for commit phase only)
+        IDisposable? commitLock = null;
+        if (_locking == TransactionLocking.Optimistic)
+        {
+            commitLock = await Interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
+        }
 
-        var changes = PendingChanges.Values.ToList();
         try
         {
-            if (_conflictBehavior == TransactionConflictBehavior.FailOnConflict)
+            _isCommitting = true;
+
+            var changes = PendingChanges.Values.ToList();
+            try
             {
-                // Check for conflicts at commit time if FailOnConflict behavior is enabled
-                // Value-based conflict detection: Compare captured OldValue with the current actual value
-
-                var conflictingProperties = new List<PropertyReference>();
-                foreach (var change in changes)
+                if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
                 {
-                    var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
-                    var capturedOldValue = change.GetOldValue<object?>();
+                    // Check for conflicts at commit time if FailOnConflict behavior is enabled
+                    // Value-based conflict detection: Compare captured OldValue with the current actual value
 
-                    if (!Equals(currentValue, capturedOldValue))
+                    var conflictingProperties = new List<PropertyReference>();
+                    foreach (var change in changes)
                     {
-                        conflictingProperties.Add(change.Property);
+                        var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
+                        var capturedOldValue = change.GetOldValue<object?>();
+
+                        if (!Equals(currentValue, capturedOldValue))
+                        {
+                            conflictingProperties.Add(change.Property);
+                        }
+                    }
+
+                    if (conflictingProperties.Count > 0)
+                    {
+                        _isCommitting = false;
+                        throw new TransactionConflictException(conflictingProperties);
                     }
                 }
+            }
+            catch
+            {
+                _isCommitting = false;
+                throw;
+            }
 
-                if (conflictingProperties.Count > 0)
+            // 2. Call write handler on the context (single writer - no context grouping needed)
+            var allSuccessfulChanges = new List<SubjectPropertyChange>();
+            var allFailedChanges = new List<SourceWriteFailure>();
+
+            var writeHandler = Context.TryGetService<ITransactionWriter>();
+            if (writeHandler != null)
+            {
+                var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, cancellationToken);
+                allSuccessfulChanges.AddRange(result.SuccessfulChanges);
+                allFailedChanges.AddRange(result.FailedChanges);
+            }
+            else
+            {
+                // No handler configured: All changes are successful
+                allSuccessfulChanges.AddRange(changes);
+            }
+
+            // 3. Handle mode-specific behavior
+            var shouldApplyChanges = _failureHandling switch
+            {
+                // BestEffort: Apply all successful changes even if some failed
+                TransactionFailureHandling.BestEffort => true,
+                // Rollback: Only apply if ALL changes succeeded
+                TransactionFailureHandling.Rollback => allFailedChanges.Count == 0,
+                _ => true
+            };
+
+            // _isCommitting already set to true above (for conflict detection)
+            try
+            {
+                if (shouldApplyChanges)
                 {
-                    _isCommitting = false;
-                    throw new TransactionConflictException(conflictingProperties);
+                    // 4. Apply successful changes to in-process model (full interceptor chain runs)
+                    foreach (var change in allSuccessfulChanges)
+                    {
+                        var metadata = change.Property.Metadata;
+                        metadata.SetValue?.Invoke(change.Property.Subject, change.GetNewValue<object?>());
+                    }
                 }
             }
-        }
-        catch
-        {
-            _isCommitting = false;
-            throw;
-        }
-
-        // 2. Call write handler on the context (single writer - no context grouping needed)
-        var allSuccessfulChanges = new List<SubjectPropertyChange>();
-        var allFailedChanges = new List<SourceWriteFailure>();
-
-        var writeHandler = Context.TryGetService<ITransactionWriter>();
-        if (writeHandler != null)
-        {
-            var result = await writeHandler.WriteChangesAsync(changes, _mode, _requirement, cancellationToken);
-            allSuccessfulChanges.AddRange(result.SuccessfulChanges);
-            allFailedChanges.AddRange(result.FailedChanges);
-        }
-        else
-        {
-            // No handler configured: All changes are successful
-            allSuccessfulChanges.AddRange(changes);
-        }
-
-        // 3. Handle mode-specific behavior
-        var shouldApplyChanges = _mode switch
-        {
-            // BestEffort: Apply all successful changes even if some failed
-            TransactionMode.BestEffort => true,
-            // Rollback: Only apply if ALL changes succeeded
-            TransactionMode.Rollback => allFailedChanges.Count == 0,
-            _ => true
-        };
-
-        // _isCommitting already set to true above (for conflict detection)
-        try
-        {
-            if (shouldApplyChanges)
+            finally
             {
-                // 4. Apply successful changes to in-process model (full interceptor chain runs)
-                foreach (var change in allSuccessfulChanges)
+                // 5. Partial cleanup - clear pending changes but let Dispose handle AsyncLocal
+                // AsyncLocal changes in async context don't propagate back to caller
+                PendingChanges.Clear();
+                _isCommitted = true;
+            }
+
+            // 6. Throw if any external writes failed
+            if (allFailedChanges.Count > 0)
+            {
+                var message = _failureHandling switch
                 {
-                    var metadata = change.Property.Metadata;
-                    metadata.SetValue?.Invoke(change.Property.Subject, change.GetNewValue<object?>());
-                }
+                    TransactionFailureHandling.BestEffort => "One or more external sources failed. Successfully written changes have been applied.",
+                    TransactionFailureHandling.Rollback => "One or more external sources failed. Rollback was attempted. No changes have been applied to the in-process model.",
+                    _ => "One or more external sources failed."
+                };
+
+                throw new TransactionException(message, allSuccessfulChanges, allFailedChanges);
             }
         }
         finally
         {
-            // 5. Partial cleanup - clear pending changes but let Dispose handle AsyncLocal
-            // AsyncLocal changes in async context don't propagate back to caller
-            PendingChanges.Clear();
-            _isCommitted = true;
-        }
-
-        // 6. Throw if any external writes failed
-        if (allFailedChanges.Count > 0)
-        {
-            var message = _mode switch
-            {
-                TransactionMode.BestEffort => "One or more external sources failed. Successfully written changes have been applied.",
-                TransactionMode.Rollback => "One or more external sources failed. Rollback was attempted. No changes have been applied to the in-process model.",
-                _ => "One or more external sources failed."
-            };
-
-            throw new TransactionException(message, allSuccessfulChanges, allFailedChanges);
+            // Release the commit lock for Optimistic transactions
+            commitLock?.Dispose();
         }
     }
 
@@ -279,7 +311,7 @@ public sealed class SubjectTransaction : IDisposable
             Interlocked.Decrement(ref _activeTransactionCount);
             PendingChanges.Clear();
             CurrentTransaction.Value = null;
-            _lockReleaser.Dispose();
+            _lockReleaser?.Dispose(); // May be null for Optimistic transactions
         }
     }
 }

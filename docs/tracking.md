@@ -123,7 +123,7 @@ var context = InterceptorSubjectContext
 
 var person = new Person(context);
 
-using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
 {
     person.FirstName = "John";
     person.LastName = "Doe";
