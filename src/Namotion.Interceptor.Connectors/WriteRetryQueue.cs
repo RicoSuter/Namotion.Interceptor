@@ -144,31 +144,21 @@ internal sealed class WriteRetryQueue : IDisposable
 
                 var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);
                 var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
-
-                // Null out references to allow GC (SubjectPropertyChange contains object refs)
-                for (var i = 0; i < count; i++)
-                {
-                    _scratchBuffer[i] = default;
-                }
-
                 if (result.Error is not null)
                 {
                     _logger.LogWarning(result.Error, "Failed to flush {Count} queued writes to source, re-queuing failed items.", count);
 
-                    // Re-queue the items that failed
-                    // If FailedChanges is empty but Error is set, it means complete failure - re-queue all
+                    // Re-queue the items that failed: If FailedChanges is empty but Error is set, it means complete failure - re-queue all
                     var failedChanges = result.FailedChanges.Length > 0
                         ? result.FailedChanges
                         : memory;
 
-                    lock (_lock)
-                    {
-                        _pendingWrites.InsertRange(0, failedChanges.ToArray());
-                        Volatile.Write(ref _count, _pendingWrites.Count);
-                    }
-
+                    RequeueChanges(failedChanges);
+                    Array.Clear(_scratchBuffer, 0, count);
                     return false;
                 }
+
+                Array.Clear(_scratchBuffer, 0, count);
             }
 
             return true;
@@ -176,6 +166,15 @@ internal sealed class WriteRetryQueue : IDisposable
         finally
         {
             try { _flushSemaphore.Release(); } catch { /* might be disposed already */ }
+        }
+    }
+
+    private void RequeueChanges(ReadOnlyMemory<SubjectPropertyChange> changes)
+    {
+        lock (_lock)
+        {
+            _pendingWrites.InsertRange(0, changes.ToArray());
+            Volatile.Write(ref _count, _pendingWrites.Count);
         }
     }
 
