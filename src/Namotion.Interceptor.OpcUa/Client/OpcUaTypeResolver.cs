@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Dynamic;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -8,7 +9,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 public class OpcUaTypeResolver
 {
     private readonly ILogger _logger;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string NamespaceUri, object Identifier), Type?> _typeCache = new();
+    private readonly ConcurrentDictionary<(string NamespaceUri, object Identifier), Type?> _typeCache = new();
 
     public OpcUaTypeResolver(ILogger logger)
     {
