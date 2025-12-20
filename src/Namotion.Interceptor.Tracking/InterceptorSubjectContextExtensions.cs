@@ -12,7 +12,6 @@ public static class InterceptorSubjectContextExtensions
 {
     /// <summary>
     /// Registers full property tracking including equality checks, context inheritance, derived property change detection, and property changed observable.
-    /// Note: Transactions are opt-in. Call <see cref="WithTransactions"/> before <see cref="WithFullPropertyTracking"/> if needed.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
@@ -28,7 +27,6 @@ public static class InterceptorSubjectContextExtensions
 
     /// <summary>
     /// Enables transaction support for the context.
-    /// Must be called before <see cref="WithFullPropertyTracking"/> to ensure proper interceptor ordering.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>

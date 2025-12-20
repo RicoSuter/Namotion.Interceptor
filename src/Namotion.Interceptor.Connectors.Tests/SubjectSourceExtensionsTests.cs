@@ -17,7 +17,7 @@ public class SubjectSourceExtensionsTests
 
         // Assert
         Assert.Null(result.Error);
-        Assert.Equal(0, result.FailedChanges.Length);
+        Assert.Empty(result.FailedChanges);
         sourceMock.Verify(
             s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -111,7 +111,7 @@ public class SubjectSourceExtensionsTests
                 callCount++;
                 if (callCount == 2) // Second batch fails
                 {
-                    return new ValueTask<WriteResult>(WriteResult.Failure(new Exception("Batch 2 failed")));
+                    return new ValueTask<WriteResult>(WriteResult.Failure(changes, new Exception("Batch 2 failed")));
                 }
                 return new ValueTask<WriteResult>(WriteResult.Success);
             });
@@ -216,7 +216,7 @@ public class SubjectSourceExtensionsTests
 
         // Assert
         Assert.Null(result.Error);
-        Assert.Equal(0, result.FailedChanges.Length);
+        Assert.Empty(result.FailedChanges);
         sourceMock.Verify(
             s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()),
             Times.Exactly(3));
@@ -237,7 +237,7 @@ public class SubjectSourceExtensionsTests
                 callCount++;
                 if (callCount == 1) // First batch completely fails
                 {
-                    return new ValueTask<WriteResult>(WriteResult.Failure(new Exception("Complete batch failure")));
+                    return new ValueTask<WriteResult>(WriteResult.Failure(batchChanges, new Exception("Complete batch failure")));
                 }
                 return new ValueTask<WriteResult>(WriteResult.Success);
             });

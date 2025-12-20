@@ -94,7 +94,8 @@ public class WriteRetryQueueTests
 
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(new ValueTask<WriteResult>(WriteResult.Failure(new Exception("Connection failed"))));
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(changes, new Exception("Connection failed"))));
 
         // Act
         queue.Enqueue(CreateChanges(3));
@@ -114,7 +115,8 @@ public class WriteRetryQueueTests
 
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(new ValueTask<WriteResult>(WriteResult.Failure(new Exception("Connection failed"))));
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(changes, new Exception("Connection failed"))));
 
         // Act
         queue.Enqueue(CreateChanges(5)); // Fill to capacity

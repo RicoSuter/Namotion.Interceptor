@@ -106,13 +106,13 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
         var successThenFailSource = new Mock<ISubjectSource>();
         successThenFailSource.Setup(s => s.WriteBatchSize).Returns(0);
         successThenFailSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 callCount++;
                 if (callCount == 1)
                     return new ValueTask<WriteResult>(WriteResult.Success); // Initial write succeeds
                 else
-                    return new ValueTask<WriteResult>(WriteResult.Failure(new InvalidOperationException("Revert failed"))); // Revert fails
+                    return new ValueTask<WriteResult>(WriteResult.Failure(changes, new InvalidOperationException("Revert failed"))); // Revert fails
             });
 
         var failSource = CreateFailingSource();
