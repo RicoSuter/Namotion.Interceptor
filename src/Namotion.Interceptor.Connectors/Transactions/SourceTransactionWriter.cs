@@ -33,7 +33,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         }
 
         // 3. Write to each source
-        var (successfulChangesBySource, failedChanges) = await WriteToSourcesAsync(changesBySource, cancellationToken);
+        var (successfulChangesBySource, failedChanges) = await WriteChangesToSourcesAsync(changesBySource, cancellationToken);
 
         // 4. Handle rollback mode - attempt to revert successful writes on failure
         if (failureHandling == TransactionFailureHandling.Rollback && failedChanges.Count > 0)
@@ -63,7 +63,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     /// Writes changes to their respective sources in parallel and collects results.
     /// </summary>
     private static async Task<(Dictionary<ISubjectSource, List<SubjectPropertyChange>> Successful, List<SourceWriteFailure> Failed)>
-        WriteToSourcesAsync(
+        WriteChangesToSourcesAsync(
             Dictionary<ISubjectSource, List<SubjectPropertyChange>> changesBySource,
             CancellationToken cancellationToken)
     {
@@ -90,7 +90,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         var writeTasks = realSources.Select(async kvp =>
         {
             var (source, sourceChanges) = (kvp.Key, kvp.Value);
-            var result = await TryWriteToSourceAsync(source, sourceChanges, cancellationToken);
+            var result = await TryWriteChangesToSourceAsync(source, sourceChanges, cancellationToken);
             return (source, result);
         });
 
@@ -111,7 +111,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     /// Attempts to write changes to a single source, returning successful and failed changes.
     /// </summary>
     private static async Task<(List<SubjectPropertyChange> Successful, List<SourceWriteFailure> Failed)>
-        TryWriteToSourceAsync(
+        TryWriteChangesToSourceAsync(
             ISubjectSource source,
             List<SubjectPropertyChange> sourceChanges,
             CancellationToken cancellationToken)
