@@ -22,6 +22,7 @@ public class SubjectTransactionOptimisticLockingTests
     [Fact]
     public async Task OptimisticLocking_ConflictDetection_ThrowsWhenValueChangedExternally()
     {
+        // Arrange
         // Optimistic transaction should detect conflicts when underlying value changes
         var context = CreateContext();
         var person = new Person(context);
@@ -48,6 +49,7 @@ public class SubjectTransactionOptimisticLockingTests
         }
         await externalTask;
 
+        // Act & Assert
         // CommitAsync should throw because current value != captured OldValue
         var ex = await Assert.ThrowsAsync<TransactionConflictException>(() => tx.CommitAsync());
         Assert.Contains(nameof(Person.FirstName), ex.Message);
@@ -56,11 +58,13 @@ public class SubjectTransactionOptimisticLockingTests
     [Fact]
     public async Task OptimisticLocking_AllowsConcurrentTransactionStart()
     {
+        // Arrange
         // Optimistic transactions should not block each other at start time
         var context = CreateContext();
         var startTimes = new List<DateTimeOffset>();
         var tasks = new List<Task>();
 
+        // Act
         // Start 5 optimistic transactions concurrently in separate execution contexts
         for (int i = 0; i < 5; i++)
         {
@@ -87,6 +91,7 @@ public class SubjectTransactionOptimisticLockingTests
 
         await Task.WhenAll(tasks);
 
+        // Assert
         // All transactions should have started within a very short window
         var startRange = startTimes.Max() - startTimes.Min();
         Assert.True(startRange < TimeSpan.FromMilliseconds(200),
@@ -96,6 +101,7 @@ public class SubjectTransactionOptimisticLockingTests
     [Fact]
     public async Task ExclusiveLocking_BlocksOtherExclusiveTransactions()
     {
+        // Arrange
         // Exclusive transactions should serialize (one at a time)
         var context = CreateContext();
         var person = new Person(context);
@@ -138,6 +144,7 @@ public class SubjectTransactionOptimisticLockingTests
             });
         }
 
+        // Act
         // Wait a bit - tx2 should still be waiting
         await Task.Delay(50);
         Assert.False(tx2Task.IsCompleted, "tx2 should wait for tx1 to complete");
@@ -152,6 +159,7 @@ public class SubjectTransactionOptimisticLockingTests
 
         await tx1Task;
 
+        // Assert
         Assert.Equal("Tx1", person.FirstName);
         Assert.Equal("Tx2", person.LastName);
     }
@@ -159,6 +167,7 @@ public class SubjectTransactionOptimisticLockingTests
     [Fact]
     public async Task OptimisticLocking_WithConflictBehaviorIgnore_DoesNotThrowOnConflict()
     {
+        // Arrange
         // Optimistic transaction with Ignore conflict behavior should succeed even with conflicts
         var context = CreateContext();
         var person = new Person(context);
@@ -185,9 +194,11 @@ public class SubjectTransactionOptimisticLockingTests
         }
         await externalTask;
 
+        // Act
         // Should NOT throw because ConflictBehavior is Ignore
         await tx.CommitAsync();
 
+        // Assert
         // Transaction value should overwrite the external change
         Assert.Equal("FromTx", person.FirstName);
     }
@@ -195,45 +206,56 @@ public class SubjectTransactionOptimisticLockingTests
     [Fact]
     public async Task OptimisticLocking_TransactionHasCorrectLockingValue()
     {
+        // Arrange
         var context = CreateContext();
 
+        // Act
         using var tx = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort,
             TransactionLocking.Optimistic);
 
+        // Assert
         Assert.Equal(TransactionLocking.Optimistic, tx.Locking);
     }
 
     [Fact]
     public async Task ExclusiveLocking_TransactionHasCorrectLockingValue()
     {
+        // Arrange
         var context = CreateContext();
 
+        // Act
         using var tx = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort,
             TransactionLocking.Exclusive);
 
+        // Assert
         Assert.Equal(TransactionLocking.Exclusive, tx.Locking);
     }
 
     [Fact]
     public async Task DefaultLocking_IsExclusive()
     {
+        // Arrange
         // The default locking mode should be Exclusive
         var context = CreateContext();
 
+        // Act
         using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
 
+        // Assert
         Assert.Equal(TransactionLocking.Exclusive, tx.Locking);
     }
 
     [Fact]
     public async Task OptimisticLocking_DisposeCleansUpWithoutHoldingLock()
     {
+        // Arrange
         // Optimistic transactions should be disposable even if never committed
         var context = CreateContext();
         var person = new Person(context);
 
+        // Act
         using (var tx = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort,
             TransactionLocking.Optimistic))
@@ -242,6 +264,7 @@ public class SubjectTransactionOptimisticLockingTests
             // Don't commit - just dispose
         }
 
+        // Assert
         // Value should not have been applied
         Assert.Null(person.FirstName);
 
@@ -259,11 +282,13 @@ public class SubjectTransactionOptimisticLockingTests
     [Fact]
     public async Task OptimisticLocking_MultipleOptimisticCanCoexistInDifferentContexts()
     {
+        // Arrange
         // Multiple optimistic transactions in separate contexts should coexist without blocking
         var context = CreateContext();
         var transactionCount = 0;
         var tasks = new List<Task>();
 
+        // Act
         // Start multiple optimistic transactions in different execution contexts
         for (int i = 0; i < 3; i++)
         {
@@ -286,6 +311,7 @@ public class SubjectTransactionOptimisticLockingTests
 
         await Task.WhenAll(tasks);
 
+        // Assert
         // All transactions should have been created
         Assert.Equal(3, transactionCount);
     }
@@ -293,6 +319,7 @@ public class SubjectTransactionOptimisticLockingTests
     [Fact]
     public async Task OptimisticLocking_CommitSerializesWithExclusive()
     {
+        // Arrange
         // When an optimistic transaction commits, it should wait for any exclusive transaction
         var context = CreateContext();
         var person = new Person(context);
@@ -305,6 +332,7 @@ public class SubjectTransactionOptimisticLockingTests
         Task exclusiveTask;
         Task optimisticTask;
 
+        // Act
         // Start exclusive transaction
         using (ExecutionContext.SuppressFlow())
         {
@@ -355,6 +383,7 @@ public class SubjectTransactionOptimisticLockingTests
 
         await Task.WhenAll(exclusiveTask, optimisticTask);
 
+        // Assert
         // Both commits should have succeeded
         Assert.Equal("Exclusive", person.FirstName);
         Assert.Equal("Optimistic", person.LastName);
@@ -363,6 +392,7 @@ public class SubjectTransactionOptimisticLockingTests
     [Fact]
     public async Task ExclusiveLocking_WaitsForOptimisticCommit()
     {
+        // Arrange
         // An exclusive transaction should wait for an optimistic commit that's in progress
         var context = CreateContext();
         var person = new Person(context);
@@ -373,6 +403,7 @@ public class SubjectTransactionOptimisticLockingTests
         Task optimisticTask;
         Task exclusiveTask;
 
+        // Act
         // Start optimistic transaction
         using (ExecutionContext.SuppressFlow())
         {
@@ -417,6 +448,7 @@ public class SubjectTransactionOptimisticLockingTests
 
         await Task.WhenAll(optimisticTask, exclusiveTask);
 
+        // Assert
         Assert.Equal("Optimistic", person.FirstName);
         Assert.Equal("Exclusive", person.LastName);
     }
