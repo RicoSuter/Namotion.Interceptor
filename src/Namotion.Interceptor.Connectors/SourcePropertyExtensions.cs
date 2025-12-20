@@ -39,17 +39,6 @@ public static class SourcePropertyExtensions
     }
 
     /// <summary>
-    /// Replaces the source unconditionally, even if already owned by another source.
-    /// Use for intentional source migration scenarios.
-    /// </summary>
-    /// <param name="property">The property reference to associate with a source.</param>
-    /// <param name="source">The external data source that provides and synchronizes this property's value.</param>
-    public static void ReplaceSource(this PropertyReference property, ISubjectSource source)
-    {
-        property.SetPropertyData(SourceKey, source);
-    }
-
-    /// <summary>
     /// Gets the external data source associated with a property, if any.
     /// </summary>
     /// <param name="property">The property reference to query.</param>
