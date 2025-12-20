@@ -13,13 +13,13 @@ public interface ITransactionWriter
     /// Writes the specified changes to external sources.
     /// </summary>
     /// <param name="changes">The property changes to write.</param>
-    /// <param name="mode">The transaction mode controlling failure handling behavior.</param>
+    /// <param name="failureHandling">The transaction mode controlling failure handling behavior.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The result indicating which changes succeeded and which failed.</returns>
     Task<TransactionWriteResult> WriteChangesAsync(
         IReadOnlyList<SubjectPropertyChange> changes,
-        TransactionMode mode,
+        TransactionFailureHandling failureHandling,
         TransactionRequirement requirement,
         CancellationToken cancellationToken);
 }

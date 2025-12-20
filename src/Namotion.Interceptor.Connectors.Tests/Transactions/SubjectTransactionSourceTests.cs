@@ -136,7 +136,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         property.SetSource(sourceMock.Object);
 
         // Act
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "John";
             await transaction.CommitAsync(CancellationToken.None);
@@ -163,7 +163,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         property.SetSource(sourceMock.Object);
 
         // Act
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "John";
 
@@ -192,7 +192,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
 
         // Act
         // Use BestEffort mode to test partial success (local properties should be applied)
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "John";
             person.LastName = "Doe";
@@ -241,7 +241,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         lastNameProp.SetSource(source2Mock.Object);
 
         // Act
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "John";
             person.LastName = "Doe";
@@ -278,7 +278,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         await cts.CancelAsync();
 
         // Act
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "John";
 
@@ -319,7 +319,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         lastNameProp.SetSource(sourceMock.Object);
 
         // Act
-        using (var transaction = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "John";
             person.LastName = "Doe";
@@ -372,13 +372,13 @@ public class SubjectTransactionSourceTests : TransactionTestBase
 
         // Act
         // Use separate transactions for each context since transactions are now context-bound
-        using (var transaction1 = await context1.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction1 = await context1.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person1.FirstName = "John";
             await transaction1.CommitAsync(CancellationToken.None);
         }
 
-        using (var transaction2 = await context2.BeginExclusiveTransactionAsync(TransactionMode.BestEffort))
+        using (var transaction2 = await context2.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person2.FirstName = "Jane";
             await transaction2.CommitAsync(CancellationToken.None);
@@ -430,7 +430,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceMock.Object);
 
         // Act
-        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "John";
         person.LastName = "Doe";
 
@@ -485,7 +485,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceMock.Object);
 
         // Act
-        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
+        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
         person.FirstName = "John";
         person.LastName = "Doe";
 

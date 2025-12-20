@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 /// <summary>
 /// Tests for transaction modes: BestEffort and Rollback.
 /// </summary>
-public class SubjectTransactionModeTests : TransactionTestBase
+public class SubjectTransactionFailureHandlingTests : TransactionTestBase
 {
     [Fact]
     public async Task BestEffortMode_AppliesSuccessfulChanges_WhenSomeSourcesFail()
@@ -22,7 +22,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(successSource.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
 
-        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "John";
         person.LastName = "Doe";
 
@@ -45,7 +45,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source1.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source2.Object);
 
-        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
+        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
         person.FirstName = "John";
         person.LastName = "Doe";
 
@@ -66,7 +66,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         successSource.Setup(s => s.WriteBatchSize).Returns(0);
         successSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Callback(() => writeCallCount++)
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
                 new ValueTask<WriteResult>(WriteResult.Success));
 
         var failSource = CreateFailingSource();
@@ -74,7 +74,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(successSource.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
 
-        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
+        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
         person.FirstName = "John";
         person.LastName = "Doe";
 
@@ -96,7 +96,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         var successThenFailSource = new Mock<ISubjectSource>();
         successThenFailSource.Setup(s => s.WriteBatchSize).Returns(0);
         successThenFailSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
             {
                 callCount++;
                 if (callCount == 1)
@@ -110,7 +110,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(successThenFailSource.Object);
         new PropertyReference(person, nameof(Person.LastName)).SetSource(failSource.Object);
 
-        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
+        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
         person.FirstName = "John";
         person.LastName = "Doe";
 
@@ -133,7 +133,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         // Only FirstName has a source, LastName has no source
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(failSource.Object);
 
-        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.Rollback);
+        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
         person.FirstName = "John";
         person.LastName = "Doe"; // No source - should be in successful changes
 
@@ -163,7 +163,7 @@ public class SubjectTransactionModeTests : TransactionTestBase
         // Only FirstName has a source
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(failSource.Object);
 
-        using var tx = await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "John";
         person.LastName = "Doe"; // No source
 

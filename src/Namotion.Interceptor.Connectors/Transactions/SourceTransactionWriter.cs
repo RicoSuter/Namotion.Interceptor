@@ -11,7 +11,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
 {
     public async Task<TransactionWriteResult> WriteChangesAsync(
         IReadOnlyList<SubjectPropertyChange> changes,
-        TransactionMode mode,
+        TransactionFailureHandling failureHandling,
         TransactionRequirement requirement,
         CancellationToken cancellationToken)
     {
@@ -36,7 +36,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         var (successfulChangesBySource, failedChanges) = await WriteToSourcesAsync(changesBySource, cancellationToken);
 
         // 4. Handle rollback mode - attempt to revert successful writes on failure
-        if (mode == TransactionMode.Rollback && failedChanges.Count > 0)
+        if (failureHandling == TransactionFailureHandling.Rollback && failedChanges.Count > 0)
         {
             var successfulSourceWrites = successfulChangesBySource
                 .Where(kvp => kvp.Key != NullSource.Instance)

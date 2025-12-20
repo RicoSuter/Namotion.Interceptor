@@ -3,7 +3,7 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// <summary>
 /// Specifies how transaction commit handles partial failures when writing to external sources.
 /// </summary>
-public enum TransactionMode
+public enum TransactionFailureHandling
 {
     /// <summary>
     /// Best-effort mode: Apply all successful changes to the in-process model, even if some sources fail.
@@ -13,7 +13,7 @@ public enum TransactionMode
     BestEffort,
 
     /// <summary>
-    /// Rollback mode (default): Attempt to revert successful source writes on failure.
+    /// Rollback mode: Attempt to revert successful source writes on failure.
     /// If any source write fails, attempts to write the original values back to sources that succeeded.
     /// If revert also fails, both the original failure and revert failures are reported.
     /// No changes are applied to the in-process model on failure.

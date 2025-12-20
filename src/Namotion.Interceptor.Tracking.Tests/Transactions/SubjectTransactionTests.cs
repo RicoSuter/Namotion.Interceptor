@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 public class SubjectTransactionTests
 {
     [Fact]
-    public async Task BeginExclusiveTransactionAsync_ThrowsWhenTransactionsNotEnabled()
+    public async Task BeginTransactionAsync_ThrowsWhenTransactionsNotEnabled()
     {
         // Arrange - context WITHOUT WithTransactions()
         var context = InterceptorSubjectContext.Create()
@@ -14,7 +14,7 @@ public class SubjectTransactionTests
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await context.BeginExclusiveTransactionAsync(TransactionMode.BestEffort);
+            await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         });
 
         Assert.Contains("WithTransactions()", exception.Message);
