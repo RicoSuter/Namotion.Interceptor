@@ -69,12 +69,13 @@ public class SubjectTransactionOptimisticLockingTests
             {
                 task = Task.Run(async () =>
                 {
+                    var startTime = DateTimeOffset.UtcNow;
                     var tx = await context.BeginTransactionAsync(
                         TransactionFailureHandling.BestEffort,
                         TransactionLocking.Optimistic);
                     lock (startTimes)
                     {
-                        startTimes.Add(tx.StartTimestamp);
+                        startTimes.Add(startTime);
                     }
                     // Hold briefly then dispose
                     await Task.Delay(50);

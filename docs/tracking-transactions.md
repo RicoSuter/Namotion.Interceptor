@@ -477,7 +477,6 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 | `Context` | Gets the context this transaction is bound to |
 | `Locking` | Gets the locking mode for this transaction |
 | `ConflictBehavior` | Gets the conflict behavior for this transaction |
-| `StartTimestamp` | Gets the timestamp when the transaction started |
 | `GetPendingChanges()` | Returns the list of pending property changes |
 | `CommitAsync(ct)` | Commits all pending changes using the configured options |
 | `Dispose()` | Discards uncommitted changes and clears the current transaction |

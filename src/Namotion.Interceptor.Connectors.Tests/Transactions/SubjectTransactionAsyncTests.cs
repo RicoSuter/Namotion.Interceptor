@@ -191,27 +191,6 @@ public class SubjectTransactionAsyncTests
     }
 
     [Fact]
-    public async Task BeginTransactionAsync_StoresStartTimestamp()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithTransactions()
-            .WithFullPropertyTracking();
-
-        var beforeStart = DateTimeOffset.UtcNow;
-
-        // Act
-        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        var afterStart = DateTimeOffset.UtcNow;
-
-        // Assert
-        Assert.True(tx.StartTimestamp >= beforeStart);
-        Assert.True(tx.StartTimestamp <= afterStart);
-    }
-
-    [Fact]
     public async Task BeginTransactionAsync_WithConflictBehavior_StoresBehavior()
     {
         // Arrange

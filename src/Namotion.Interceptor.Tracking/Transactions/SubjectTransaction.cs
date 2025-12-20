@@ -70,11 +70,6 @@ public sealed class SubjectTransaction : IDisposable
     public IInterceptorSubjectContext Context { get; }
 
     /// <summary>
-    /// Gets the timestamp when the transaction started.
-    /// </summary>
-    public DateTimeOffset StartTimestamp { get; }
-
-    /// <summary>
     /// Gets the conflict behavior for this transaction.
     /// </summary>
     public TransactionConflictBehavior ConflictBehavior { get; }
@@ -91,7 +86,6 @@ public sealed class SubjectTransaction : IDisposable
         TransactionLocking locking,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
-        DateTimeOffset startTimestamp,
         IDisposable? lockReleaser)
     {
         Context = context;
@@ -100,7 +94,6 @@ public sealed class SubjectTransaction : IDisposable
         _locking = locking;
         _requirement = requirement;
         ConflictBehavior = conflictBehavior;
-        StartTimestamp = startTimestamp;
         _lockReleaser = lockReleaser;
 
         // Increment in constructor ensures counter is always paired with Dispose
@@ -157,7 +150,6 @@ public sealed class SubjectTransaction : IDisposable
             locking,
             requirement,
             conflictBehavior,
-            DateTimeOffset.UtcNow,
             transactionLock);
     }
 

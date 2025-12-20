@@ -132,7 +132,7 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
     // Reading returns pending values (read-your-writes)
     Console.WriteLine(person.FullName); // Output: John Doe
 
-    await transaction.CommitAsync();
+    await transaction.CommitAsync(cancellationToken);
     // All changes applied, notifications fired
 }
 ```
