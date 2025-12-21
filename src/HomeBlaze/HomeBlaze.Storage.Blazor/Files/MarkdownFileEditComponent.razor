@@ -299,8 +299,8 @@ else
         if (File == null || _editor == null)
             return;
 
-        // Open the CreateSubjectWizard
-        var result = await CreateSubjectWizard.ShowAsync(DialogService);
+        // Open the SubjectSetupDialog
+        var result = await SubjectSetupDialog.ShowAsync(DialogService);
         if (result == null)
             return;
 

@@ -1,11 +1,12 @@
 using HomeBlaze.Components;
+using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Storage.Abstractions;
 using MudBlazor;
 
 namespace HomeBlaze.Storage.Blazor;
 
 /// <summary>
-/// Blazor implementation of ISubjectCreator that opens the CreateSubjectWizard dialog.
+/// Blazor implementation of ISubjectCreator that opens the SubjectSetupDialog dialog.
 /// </summary>
 public class BlazorSubjectCreator : ISubjectCreator
 {
@@ -18,6 +19,6 @@ public class BlazorSubjectCreator : ISubjectCreator
 
     public Task<CreateSubjectResult?> CreateAsync(CancellationToken cancellationToken)
     {
-        return CreateSubjectWizard.ShowAsync(_dialogService);
+        return SubjectSetupDialog.ShowAsync(_dialogService);
     }
 }
