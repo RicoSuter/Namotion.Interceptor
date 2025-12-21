@@ -1,3 +1,10 @@
+using HomeBlaze.Components;
+using HomeBlaze.Samples;
+using HomeBlaze.Servers.OpcUa;
+using HomeBlaze.Servers.OpcUa.Blazor;
+using HomeBlaze.Services;
+using HomeBlaze.Storage;
+using HomeBlaze.Storage.Blazor.Files;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -57,6 +64,13 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
 
         // Build and start the Kestrel host
         _kestrelHost = builder.Build();
+
+        // Configure TypeProvider with essential assemblies for E2E tests
+        var typeProvider = _kestrelHost.Services.GetRequiredService<TypeProvider>();
+        typeProvider.AddAssemblies(
+            typeof(FluentStorageContainer).Assembly,      // HomeBlaze.Storage
+            typeof(Motor).Assembly);                      // HomeBlaze.Samples (for test subjects)
+
         _kestrelHost.Start();
 
         // Get the address from Kestrel

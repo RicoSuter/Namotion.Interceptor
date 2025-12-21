@@ -20,7 +20,8 @@ public abstract class SubjectPathResolverTestBase
         var mockServiceProvider = new Mock<IServiceProvider>();
         var typeProvider = new TypeProvider();
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
-        var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
+        var subjectFactory = new SubjectFactory(mockServiceProvider.Object);
+        var serializer = new ConfigurableSubjectSerializer(typeRegistry, subjectFactory);
 
         Context = InterceptorSubjectContext
             .Create()

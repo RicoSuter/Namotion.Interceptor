@@ -1,6 +1,10 @@
+using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Components;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
+using MudBlazor;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
@@ -67,4 +71,36 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// </summary>
     public Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
         => Storage.DeleteBlobAsync(path, cancellationToken);
+
+    /// <summary>
+    /// Adds a subject to this folder.
+    /// </summary>
+    public Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
+    {
+        var fullPath = string.IsNullOrEmpty(RelativePath)
+            ? path
+            : Path.Combine(RelativePath, path);
+
+        return Storage.AddSubjectAsync(fullPath, subject, cancellationToken);
+    }
+
+    /// <summary>
+    /// Deletes a subject from this folder.
+    /// </summary>
+    public Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+        => Storage.DeleteSubjectAsync(subject, cancellationToken);
+
+    /// <summary>
+    /// Opens the create subject wizard to add a new subject to this folder.
+    /// </summary>
+    [Operation(Title = "Create", Icon = "Add", Position = 1)]
+    public async Task CreateAsync(IDialogService dialogService)
+    {
+        var result = await CreateSubjectWizard.ShowAsync(dialogService);
+        if (result == null)
+            return;
+
+        var fileName = $"{result.Name}.json";
+        await AddSubjectAsync(fileName, result.Subject, CancellationToken.None);
+    }
 }

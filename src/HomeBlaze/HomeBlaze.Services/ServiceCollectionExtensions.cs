@@ -22,10 +22,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(typeRegistry);
         services.AddSingleton(context);
 
+        services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
         services.AddSingleton<SubjectPathResolver>();
-        services.AddSingleton<ISubjectMethodInvoker, SubjectMethodInvoker>();
+        services.AddScoped<ISubjectMethodInvoker, SubjectMethodInvoker>();
         services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
 
         return services;

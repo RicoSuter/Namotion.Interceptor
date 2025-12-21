@@ -1,3 +1,5 @@
+using Namotion.Interceptor;
+
 namespace HomeBlaze.Storage.Abstractions;
 
 /// <summary>
@@ -34,4 +36,22 @@ public interface IStorageContainer
     /// Deletes a blob from storage.
     /// </summary>
     Task DeleteBlobAsync(string path, CancellationToken cancellationToken);
+    
+    // TODO: Update and align all xml docs in this interface
+
+    /// <summary>
+    /// Adds a new subject to storage. Serializes the subject, writes the file, and updates the hierarchy.
+    /// </summary>
+    /// <param name="path">The file name (e.g., "mysubject.json")</param>
+    /// <param name="subject">The subject to add</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Deletes a subject from storage. Removes the file and updates the hierarchy.
+    /// </summary>
+    /// <param name="subject">The subject to delete</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken);
+    // TODO: Do we need to add path here as well for symmetry with AddSubjectAsync? will this help delete? or not necessary?
 }

@@ -5,7 +5,6 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Abstractions.Attributes;
-using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Services;
@@ -20,13 +19,13 @@ public class ConfigurableSubjectSerializer
     private const string TypeDiscriminator = "type";
 
     private readonly SubjectTypeRegistry _typeRegistry;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly SubjectFactory _subjectFactory;
     private readonly JsonSerializerOptions _jsonOptions;
 
-    public ConfigurableSubjectSerializer(SubjectTypeRegistry typeRegistry, IServiceProvider serviceProvider)
+    public ConfigurableSubjectSerializer(SubjectTypeRegistry typeRegistry, SubjectFactory subjectFactory)
     {
         _typeRegistry = typeRegistry;
-        _serviceProvider = serviceProvider;
+        _subjectFactory = subjectFactory;
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -149,16 +148,9 @@ public class ConfigurableSubjectSerializer
         writer.WriteEndObject();
     }
 
-    private IInterceptorSubject? CreateInstance(Type type)
+    private IInterceptorSubject CreateInstance(Type type)
     {
-        var instance = ActivatorUtilities.CreateInstance(_serviceProvider, type);
-        if (instance is IInterceptorSubject subject)
-        {
-            return subject;
-        }
-
-        throw new InvalidOperationException(
-            $"Type {type.FullName} must implement IInterceptorSubject.");
+        return _subjectFactory.CreateSubject(type);
     }
 
     private void PopulateProperties(IInterceptorSubject subject, JsonElement element)

@@ -1,12 +1,15 @@
+using System.Text;
 using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Components;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using MudBlazor;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
@@ -243,12 +246,8 @@ public partial class FluentStorageContainer :
                 catch { /* Ignore */ }
             }
 
-            _pathRegistry.Register(subject, relativePath);
-
-            var context = ((IInterceptorSubject)this).Context;
-            var children = new Dictionary<string, IInterceptorSubject>(Children);
-            _hierarchyManager.PlaceInHierarchy(relativePath, subject, children, context, this);
-            Children = children;
+            // Use reusable helper to add to hierarchy
+            AddToHierarchy(relativePath, subject);
 
             _logger?.LogInformation("Added file from external: {Path}", relativePath);
         }
@@ -287,11 +286,8 @@ public partial class FluentStorageContainer :
             return Task.CompletedTask;
         }
 
-        _pathRegistry.Unregister(relativePath);
-
-        var children = new Dictionary<string, IInterceptorSubject>(Children);
-        _hierarchyManager.RemoveFromHierarchy(relativePath, subject, children);
-        Children = children;
+        // Use reusable helper to remove from hierarchy
+        RemoveFromHierarchy(relativePath, subject);
 
         _logger?.LogInformation("Removed deleted file: {Path}", relativePath);
         return Task.CompletedTask;
@@ -342,6 +338,17 @@ public partial class FluentStorageContainer :
 
         await _client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
 
+        // Update hierarchy - extracted to reusable method
+        AddToHierarchy(path, subject);
+
+        _logger?.LogInformation("Added subject to storage: {Path}", path);
+    }
+
+    /// <summary>
+    /// Adds a subject to the hierarchy. Reusable helper for AddSubjectAsync and file watcher events.
+    /// </summary>
+    private void AddToHierarchy(string path, IInterceptorSubject subject)
+    {
         var context = ((IInterceptorSubject)this).Context;
         var children = new Dictionary<string, IInterceptorSubject>(Children);
 
@@ -349,25 +356,19 @@ public partial class FluentStorageContainer :
         _hierarchyManager.PlaceInHierarchy(path, subject, children, context, this);
 
         Children = children;
-
-        _logger?.LogInformation("Added subject to storage: {Path}", path);
     }
 
     /// <summary>
-    /// Deletes a subject from storage.
+    /// Removes a subject from the hierarchy. Reusable helper for delete operations and file watcher events.
     /// </summary>
-    public async Task DeleteSubjectAsync(string path, CancellationToken cancellationToken)
+    private void RemoveFromHierarchy(string path, IInterceptorSubject subject)
     {
-        if (_client == null)
-            throw new InvalidOperationException("Storage not connected");
-
-        var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
-        _fileWatcher?.MarkAsOwnWrite(fullPath);
-
-        await _client.DeleteAsync(path, cancellationToken: cancellationToken);
         _pathRegistry.Unregister(path);
 
-        _logger?.LogInformation("Deleted from storage: {Path}", path);
+        var children = new Dictionary<string, IInterceptorSubject>(Children);
+        _hierarchyManager.RemoveFromHierarchy(path, subject, children);
+
+        Children = children;
     }
 
     /// <summary>
@@ -430,22 +431,50 @@ public partial class FluentStorageContainer :
         if (_client == null)
             throw new InvalidOperationException("Storage not connected");
 
+        // Get subject BEFORE deleting (needed for hierarchy removal)
+        if (!_pathRegistry.TryGetSubject(path, out var subject))
+        {
+            _logger?.LogWarning("Cannot delete blob - subject not found in registry: {Path}", path);
+            return;
+        }
+
         var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         await _client.DeleteAsync(path, cancellationToken: cancellationToken);
 
-        // Remove from hierarchy directly (don't rely on FileWatcher)
-        if (_pathRegistry.TryGetSubject(path, out var subject))
-        {
-            _pathRegistry.Unregister(path);
-            var children = new Dictionary<string, IInterceptorSubject>(Children);
-            _hierarchyManager.RemoveFromHierarchy(path, subject, children);
-            Children = children;
-        }
+        // Remove from hierarchy - uses reusable helper
+        RemoveFromHierarchy(path, subject);
 
         _logger?.LogDebug("Deleted blob from storage: {Path}", path);
     }
+
+    /// <summary>
+    /// Opens the create subject wizard to add a new subject to this storage.
+    /// </summary>
+    [Operation(Title = "Create", Icon = "Add", Position = 1)]
+    public async Task CreateAsync(IDialogService dialogService)
+    {
+        var result = await CreateSubjectWizard.ShowAsync(dialogService);
+        if (result == null)
+            return;
+
+        var fileName = $"{result.Name}.json";
+        await AddSubjectAsync(fileName, result.Subject, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// IStorageContainer - Deletes a subject by finding its path in the registry.
+    /// </summary>
+    public async Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+    {
+        if (!_pathRegistry.TryGetPath(subject, out var path))
+            throw new InvalidOperationException("Subject not found in storage registry");
+
+        // Delegate to DeleteBlobAsync which handles file deletion and hierarchy removal
+        await DeleteBlobAsync(path, cancellationToken);
+    }
+
 
     public override void Dispose()
     {

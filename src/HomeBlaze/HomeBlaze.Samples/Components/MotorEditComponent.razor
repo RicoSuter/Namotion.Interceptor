@@ -37,6 +37,9 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
+    [Parameter]
+    public bool IsCreating { get; set; }
+
     private Motor? MotorSubject => Subject as Motor;
 
     private string _name = string.Empty;

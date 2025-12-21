@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Hosting;
@@ -9,6 +10,8 @@ namespace HomeBlaze.Samples;
 /// <summary>
 /// Sample motor subject with configuration and simulated sensor values.
 /// </summary>
+[Category("Samples")]
+[Description("Simulated motor with speed control and temperature monitoring")]
 [InterceptorSubject]
 public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProvider, IIconProvider
 {

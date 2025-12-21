@@ -90,6 +90,9 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
+    [Parameter]
+    public bool IsCreating { get; set; }
+
     private OpcUaServer? ServerSubject => Subject as OpcUaServer;
 
     private string _name = string.Empty;

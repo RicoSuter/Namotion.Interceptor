@@ -25,6 +25,9 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
+    [Parameter]
+    public bool IsCreating { get; set; }
+
     private bool _isLoaded;
     private JsonFile? File => Subject as JsonFile;
     private StandaloneCodeEditor? _editor;
