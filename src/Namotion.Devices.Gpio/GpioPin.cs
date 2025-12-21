@@ -11,9 +11,9 @@ namespace Namotion.Devices.Gpio;
 [InterceptorSubject]
 public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider
 {
-    internal GpioController? Controller { get; set; }
-    internal Action<int>? RegisterInterrupt { get; set; }
-    internal Action<int>? UnregisterInterrupt { get; set; }
+    internal GpioController? Controller { get; init; }
+    internal Action<int>? RegisterInterrupt { get; init; }
+    internal Action<int>? UnregisterInterrupt { get; init; }
 
     /// <summary>
     /// The GPIO pin number (BCM numbering).
