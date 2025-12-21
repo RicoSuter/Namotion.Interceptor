@@ -7,6 +7,5 @@
   "parallelizeAssembly": false,
   "parallelizeTestCollections": false,
   "maxParallelThreads": 1,
-  "preEnumerateTheories": false,
-  "longRunningTestSeconds": 60
+  "preEnumerateTheories": false
 }
