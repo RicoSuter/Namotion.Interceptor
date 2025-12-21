@@ -7,6 +7,7 @@ namespace HomeBlaze.E2E.Tests;
 /// E2E tests for navigation functionality.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
+[Trait("Category", "E2E")]
 public class NavigationTests
 {
     private readonly PlaywrightFixture _fixture;

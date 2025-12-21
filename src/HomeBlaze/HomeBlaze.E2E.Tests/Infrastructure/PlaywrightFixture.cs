@@ -25,17 +25,26 @@ public class PlaywrightFixture : IAsyncLifetime
         var address = _factory.ServerAddress;
         Console.WriteLine($"Test server started at: {address}");
 
-        // Initialize Playwright and launch browser
-        _playwright = await Playwright.CreateAsync();
-        _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        // Initialize Playwright and launch browser with timeout
+        try
         {
-            #if DEBUG
-            Headless = true,
-            #else
-            Headless = true,
-            #endif
-            SlowMo = 500 // Slow down actions by 500ms for visibility
-        });
+            _playwright = await Playwright.CreateAsync();
+            
+            // Use a CancellationTokenSource to timeout browser launch
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true,
+                SlowMo = 0, // Remove slow-mo to speed up tests
+                Timeout = 30000 // 30 second timeout for browser launch
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to initialize Playwright: {ex.Message}");
+            Console.WriteLine("Playwright browsers may not be installed. Run: pwsh bin/Debug/net9.0/playwright.ps1 install");
+            throw new InvalidOperationException("Playwright initialization failed. Ensure browsers are installed.", ex);
+        }
     }
 
     public async Task DisposeAsync()
