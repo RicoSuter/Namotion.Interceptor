@@ -250,45 +250,6 @@ public partial class Sensor
 }
 ```
 
-## InlinePaths Attribute
-
-The `[InlinePaths]` attribute simplifies paths for subjects with child dictionaries.
-
-### Before vs After
-
-| Without Attribute | With `[InlinePaths]` |
-|-------------------|----------------------|
-| `Root.Children[Documents].Children[Report]` | `Root.Documents.Report` |
-
-### Usage
-
-```csharp
-[InterceptorSubject]
-public partial class Folder
-{
-    [InlinePaths]
-    public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
-}
-```
-
-### Resolution Rules
-
-1. **Properties win** - If both property "Foo" and child key "Foo" exist, the property resolves first
-2. **One per type** - Only one `[InlinePaths]` property per class
-3. **Backward compatible** - Explicit `Children[key]` syntax still works
-4. **Any property name** - The property doesn't have to be named "Children"
-
-## Summary
-
-1. **Mark all stored properties `partial`** - Tracking everything is safer
-2. **Initialize in constructors** - No field initializers on partial properties
-3. **Replace collections, don't mutate** - `arr = newArray`, not `arr[0] = x`
-4. **Use `[Derived]`** for computed properties
-5. **Explicit interfaces don't work** - Use implicit implementation
-6. **Abstract doesn't work** - Use `virtual` instead
-
-Most other C# patterns (nullable, required, init, virtual, override, data annotations) work naturally.
-
 ## OnSet* and OnGet* Partial Methods
 
 The source generator creates optional partial method hooks for each partial property, allowing you to execute custom logic before or after interceptors run.
@@ -339,4 +300,15 @@ public partial class GpioPin
 - Logic applies to many properties/classes
 - You need cross-cutting concerns (logging, validation)
 - Logic should be configurable at runtime
+
+## Summary
+
+1. **Mark all stored properties `partial`** - Tracking everything is safer
+2. **Initialize in constructors** - No field initializers on partial properties
+3. **Replace collections, don't mutate** - `arr = newArray`, not `arr[0] = x`
+4. **Use `[Derived]`** for computed properties
+5. **Explicit interfaces don't work** - Use implicit implementation
+6. **Abstract doesn't work** - Use `virtual` instead
+
+Most other C# patterns (nullable, required, init, virtual, override, data annotations) work naturally.
 
