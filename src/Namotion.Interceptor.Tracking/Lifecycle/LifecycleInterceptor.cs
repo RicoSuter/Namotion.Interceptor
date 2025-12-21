@@ -79,10 +79,18 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         PropertyReference? property, object? index)
     {
         var firstAttach = _attachedSubjects.TryAdd(subject, []);
-        if (_attachedSubjects[subject].Add(property))
+        var added = _attachedSubjects[subject].Add(property);
+        if (added)
         {
-            var count = subject.IncrementReferenceCount();
-            var change = new SubjectLifecycleChange(subject, property, index, count);
+            // Only increment reference count for actual property references, not context-only attachments
+            var count = property != null ? subject.IncrementReferenceCount() : subject.GetReferenceCount();
+            var change = new SubjectLifecycleChange(
+                subject,
+                property,
+                index,
+                count,
+                firstAttach,
+                IsFinalDetach: false);
 
             var properties = subject.Properties.Keys;
 
@@ -111,9 +119,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private void DetachFrom(IInterceptorSubject subject, IInterceptorSubjectContext context,
         PropertyReference? property, object? index)
     {
-        if (_attachedSubjects.TryGetValue(subject, out var set) && set.Remove(property))
+        var isAlreadyAttached = _attachedSubjects.TryGetValue(subject, out var set);
+        var canRemove = isAlreadyAttached && set!.Remove(property);
+        if (canRemove)
         {
-            if (set.Count == 0)
+            var isFinalDetach = (set?.Count == 0);
+            if (isFinalDetach)
             {
                 _attachedSubjects.Remove(subject);
 
@@ -123,9 +134,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
             }
 
-            var count = subject.DecrementReferenceCount();
+            var change = new SubjectLifecycleChange(
+                subject,
+                property,
+                index,
+                ReferenceCount: property != null ? subject.DecrementReferenceCount() : subject.GetReferenceCount(),
+                IsFirstAttach: false,
+                isFinalDetach);
 
-            var change = new SubjectLifecycleChange(subject, property, index, count);
             if (subject is ILifecycleHandler lifecycleHandler)
             {
                 lifecycleHandler.DetachSubject(change);
