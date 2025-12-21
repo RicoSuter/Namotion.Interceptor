@@ -411,7 +411,7 @@ The `SourceOwnershipManager` constructor automatically subscribes to lifecycle e
 
 ### Low-Level API
 
-For advanced scenarios, you can use the extension methods directly:
+For advanced scenarios, you can use the extension methods directly. These operations are thread-safe and atomic:
 
 ```csharp
 // Set source ownership (returns false if already owned by different source)
