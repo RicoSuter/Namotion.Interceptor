@@ -8,7 +8,7 @@ namespace Namotion.Devices.Gpio;
 /// Represents a single GPIO pin with mode, value, and availability status.
 /// </summary>
 [InterceptorSubject]
-public partial class GpioPin : IHostedSubject
+public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider
 {
     /// <summary>
     /// The GPIO pin number (BCM numbering).
@@ -38,6 +38,12 @@ public partial class GpioPin : IHostedSubject
     /// </summary>
     [State]
     public partial string? StatusMessage { get; set; }
+
+    /// <inheritdoc />
+    public string? Title => $"Pin {PinNumber}";
+
+    /// <inheritdoc />
+    public string? Icon => "Settings";
 
     public GpioPin()
     {
