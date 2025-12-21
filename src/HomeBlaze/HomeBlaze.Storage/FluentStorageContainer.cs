@@ -1,15 +1,12 @@
-using System.Text;
 using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Components;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using MudBlazor;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
@@ -453,9 +450,9 @@ public partial class FluentStorageContainer :
     /// Opens the create subject wizard to add a new subject to this storage.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
-    public async Task CreateAsync(IDialogService dialogService)
+    public async Task CreateAsync(ISubjectCreator subjectCreator)
     {
-        var result = await CreateSubjectWizard.ShowAsync(dialogService);
+        var result = await subjectCreator.CreateAsync(CancellationToken.None);
         if (result == null)
             return;
 
