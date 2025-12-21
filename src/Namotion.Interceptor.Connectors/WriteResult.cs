@@ -41,14 +41,20 @@ public readonly struct WriteResult
     /// </summary>
     /// <param name="failedChanges">The changes that failed to write.</param>
     /// <param name="error">The error that occurred.</param>
-    public static WriteResult Failure(ReadOnlyMemory<SubjectPropertyChange> failedChanges, Exception error) =>
-        new([..failedChanges.Span], error);
+    public static WriteResult Failure(ReadOnlyMemory<SubjectPropertyChange> failedChanges, Exception error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        return new([..failedChanges.Span], error);
+    }
 
     /// <summary>
     /// Creates a partial failure result with the specific changes that failed.
     /// </summary>
     /// <param name="failedChanges">The changes that failed to write.</param>
     /// <param name="error">The error that occurred.</param>
-    public static WriteResult PartialFailure(ReadOnlyMemory<SubjectPropertyChange> failedChanges, Exception error) =>
-        new([..failedChanges.Span], error);
+    public static WriteResult PartialFailure(ReadOnlyMemory<SubjectPropertyChange> failedChanges, Exception error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        return new([..failedChanges.Span], error);
+    }
 }

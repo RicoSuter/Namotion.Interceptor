@@ -29,13 +29,8 @@ public static class SourcePropertyExtensions
     /// </returns>
     public static bool SetSource(this PropertyReference property, ISubjectSource source)
     {
-        if (property.TryGetSource(out var existing))
-        {
-            return ReferenceEquals(existing, source);
-        }
-
-        property.SetPropertyData(SourceKey, source);
-        return true;
+        var existingOrNew = property.GetOrSetPropertyData(SourceKey, source);
+        return ReferenceEquals(existingOrNew, source);
     }
 
     /// <summary>
@@ -68,11 +63,6 @@ public static class SourcePropertyExtensions
     /// <returns><c>true</c> if the source was removed; <c>false</c> if the property had no source or a different source.</returns>
     public static bool RemoveSource(this PropertyReference property, ISubjectSource expectedSource)
     {
-        if (property.TryGetSource(out var current) && ReferenceEquals(current, expectedSource))
-        {
-            property.RemovePropertyData(SourceKey);
-            return true;
-        }
-        return false;
+        return property.TryRemovePropertyData(SourceKey, expectedSource);
     }
 }

@@ -491,3 +491,32 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 |-------|-------------|
 | `FailOnConflict` | Throw `TransactionConflictException` if values changed since transaction started (default) |
 | `Ignore` | Overwrite any concurrent changes without checking |
+
+## Limitations
+
+### Optimistic Concurrency - ABA Problem
+
+The `TransactionConflictBehavior.FailOnConflict` option uses value-based conflict detection.
+This means if a property value changes from A → B → A between transaction start and commit,
+no conflict will be detected (the "ABA problem").
+
+For most use cases, this is acceptable since the final state matches the expected state.
+If strict version-based conflict detection is required, consider implementing external
+versioning at the application level.
+
+### Multi-Source Transactions - Eventual Consistency
+
+When a transaction writes to multiple external sources (e.g., OPC UA server and MQTT broker),
+true atomicity is not guaranteed. Writes are performed in parallel for performance, but if
+one source fails:
+
+1. Successfully written sources will be rolled back (best effort)
+2. During the rollback window, sources may temporarily have inconsistent values
+3. If rollback fails, the system logs the error but cannot guarantee consistency
+
+For use cases requiring strict atomicity across sources, consider:
+- Using a single source per transaction
+- Implementing application-level compensation logic
+- Using sources that support distributed transactions (2PC)
+
+This limitation is inherent to distributed systems without two-phase commit protocols.

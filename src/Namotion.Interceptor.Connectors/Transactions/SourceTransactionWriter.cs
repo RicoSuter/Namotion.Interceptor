@@ -167,8 +167,8 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
                 .Select(c => SubjectPropertyChange.Create(
                     c.Property,
                     source: c.Source,
-                    changedTimestamp: DateTimeOffset.UtcNow,
-                    receivedTimestamp: null,
+                    changedTimestamp: c.ChangedTimestamp,
+                    receivedTimestamp: c.ReceivedTimestamp,
                     c.GetNewValue<object?>(),
                     c.GetOldValue<object?>()))
                 .ToArray();

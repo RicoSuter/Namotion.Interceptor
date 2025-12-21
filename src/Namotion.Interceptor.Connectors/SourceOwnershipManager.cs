@@ -62,7 +62,7 @@ public class SourceOwnershipManager : IDisposable
         {
             lock (_lock)
             {
-                return _properties.ToList();
+                return _properties.ToArray();
             }
         }
     }

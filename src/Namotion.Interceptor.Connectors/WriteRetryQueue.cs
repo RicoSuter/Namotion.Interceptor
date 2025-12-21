@@ -103,8 +103,9 @@ internal sealed class WriteRetryQueue : IDisposable
         {
             return false;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Error acquiring flush semaphore");
             return false;
         }
 
