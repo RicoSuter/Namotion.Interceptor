@@ -304,18 +304,30 @@ These methods are optional - you only need to implement them if you need the hoo
 
 ### Execution Order
 
+The `OnSet*` and `OnGet*` methods integrate with the interceptor pipeline (see [interceptor.md](interceptor.md) for details on how interceptors work):
+
 ```
 Property Write:
-1. OnSetPropertyName(ref value)  ← Your hook (can modify value by reference)
-2. Interceptor chain executes
-3. Backing field is updated
+1. OnSetPropertyName(ref value)     ← Your hook (runs before interceptors)
+2. ┌─ Interceptor chain wraps ────┐
+3. │  Interceptor1 → Interceptor2  │
+4. │  → ... → Backing field update │
+5. └──────────────────────────────┘
 
 Property Read:
-1. Value read from backing field
-2. Interceptor chain executes
-3. OnGetPropertyName(ref value)  ← Your hook (can modify value by reference)
-4. Value returned to caller
+1. ┌─ Interceptor chain wraps ────┐
+2. │  Backing field read →         │
+3. │  Interceptor1 → Interceptor2  │
+4. └──────────────────────────────┘
+5. OnGetPropertyName(ref value)     ← Your hook (runs after interceptors)
+6. Value returned to caller
 ```
+
+**Key points:**
+- `OnSet*` executes **before** the interceptor chain, allowing you to transform input values
+- `OnGet*` executes **after** the interceptor chain, allowing you to post-process output values
+- Interceptors wrap the field access (see [Interceptor Pipeline](interceptor.md#interceptor-pipeline))
+- Each interceptor can call `next()` to continue the chain or skip it to block the operation
 
 ### Example: Hardware Synchronization
 
