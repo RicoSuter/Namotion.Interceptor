@@ -30,8 +30,6 @@ public class PlaywrightFixture : IAsyncLifetime
         {
             _playwright = await Playwright.CreateAsync();
             
-            // Use a CancellationTokenSource to timeout browser launch
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
                 Headless = true,
