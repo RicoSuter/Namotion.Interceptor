@@ -355,27 +355,8 @@
     {
         if (Subject == null) return;
 
-        var parameters = new DialogParameters<SubjectEditDialog>
-        {
-            { x => x.Subject, Subject }
-        };
-
-        // Check if custom edit component exists to determine dialog size
-        var editRegistration = ComponentRegistry.GetComponent(
-            Subject.GetType(),
-            SubjectComponentType.Edit);
-
-        var maxWidth = editRegistration != null ? MaxWidth.Large : MaxWidth.Small;
-
-        var options = new DialogOptions
-        {
-            MaxWidth = maxWidth,
-            FullWidth = true,
-            CloseButton = true
-        };
-
         var title = GetSubjectTitle();
-        await DialogService.ShowAsync<SubjectEditDialog>($"Edit {title}", parameters, options);
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
     }
 
     private IReadOnlyList<SubjectMethodInfo> GetMethods() =>

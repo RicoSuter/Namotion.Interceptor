@@ -26,6 +26,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
         services.AddSingleton<SubjectPathResolver>();
+        services.AddSingleton<DeveloperModeService>();
         services.AddScoped<ISubjectMethodInvoker, SubjectMethodInvoker>();
         services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
 

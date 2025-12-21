@@ -23,7 +23,6 @@ public static class ServiceCollectionExtensions
         // UI-specific services
         services.AddSingleton<SubjectComponentRegistry>();
         services.AddSingleton<NavigationItemResolver>();
-        services.AddSingleton<DeveloperModeService>();
 
         return services;
     }

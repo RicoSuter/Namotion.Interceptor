@@ -16,8 +16,7 @@
         <MudTabs @bind-ActivePanelIndex="_activeStep"
                  Elevation="0"
                  Rounded="true"
-                 ApplyEffectsToContainer="true"
-                 PanelClass="pa-6">
+                 ApplyEffectsToContainer="true">
             <MudTabPanel Text="Select Type">
                 <MudStack Spacing="3">
                     <MudTextField @bind-Value="_subjectName"
@@ -28,7 +27,7 @@
                                   Immediate="true"
                                   data-testid="create-name-input" />
 
-                    <div style="max-height: calc(100vh - 600px); overflow-y: auto;">
+                    <div style="max-height: calc(100vh - 500px); overflow-y: auto;">
                         @foreach (var category in GetGroupedTypes())
                         {
                             <div class="mb-3" data-testid="@($"category-panel-{category.Key.ToLowerInvariant()}")">
