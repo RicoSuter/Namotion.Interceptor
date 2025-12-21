@@ -257,7 +257,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task CommitAsync_WhenCancelled_PropagatesCancellation()
+    public async Task CommitAsync_UserCancellationIsIgnored_CommitSucceeds()
     {
         // Arrange
         var context = CreateContext();
@@ -266,25 +266,61 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         var sourceMock = new Mock<ISubjectSource>();
         sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
         sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>((changes, ct) =>
-            {
-                if (ct.IsCancellationRequested)
-                    return new ValueTask<WriteResult>(WriteResult.Failure(changes, new OperationCanceledException(ct)));
-                return new ValueTask<WriteResult>(WriteResult.Success);
-            });
+            .Returns(new ValueTask<WriteResult>(WriteResult.Success));
 
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
 
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
-        // Act
+        // Act - User cancellation is ignored during commit (only timeout matters)
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "John";
 
+            // Commit should succeed even with cancelled token
+            await transaction.CommitAsync(cts.Token);
+
+            // Assert
+            Assert.Equal("John", person.FirstName);
+        }
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithCommitTimeout_TimesOutAndFails()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
+        sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken>(async (changes, ct) =>
+            {
+                // Simulate slow write that will be cancelled by timeout
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(10), ct);
+                    return WriteResult.Success;
+                }
+                catch (OperationCanceledException)
+                {
+                    return WriteResult.Failure(changes, new OperationCanceledException(ct));
+                }
+            });
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
+
+        // Act - Use a very short timeout
+        using (var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            commitTimeout: TimeSpan.FromMilliseconds(50)))
+        {
+            person.FirstName = "John";
+
             var exception = await Assert.ThrowsAsync<TransactionException>(
-                () => transaction.CommitAsync(cts.Token));
+                () => transaction.CommitAsync());
 
             // Assert
             Assert.Single(exception.FailedChanges);
