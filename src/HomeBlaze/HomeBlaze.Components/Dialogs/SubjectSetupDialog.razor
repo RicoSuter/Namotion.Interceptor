@@ -204,7 +204,7 @@
             CloseOnEscapeKey = true
         };
 
-        var dialog = await dialogService.ShowAsync<CreateSubjectWizard>("Create Subject", options);
+        var dialog = await dialogService.ShowAsync<SubjectSetupDialog>("Create Subject", options);
         var result = await dialog.Result;
 
         if (result?.Canceled != false)

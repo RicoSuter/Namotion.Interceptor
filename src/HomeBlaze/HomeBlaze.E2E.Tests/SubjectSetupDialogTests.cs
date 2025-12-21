@@ -5,15 +5,15 @@ using Microsoft.Playwright;
 namespace HomeBlaze.E2E.Tests;
 
 /// <summary>
-/// E2E tests for CreateSubjectWizard functionality.
+/// E2E tests for SubjectSetupDialog functionality.
 /// Tests type selection, name input, wizard navigation, and subject creation.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
-public class CreateSubjectWizardTests
+public class SubjectSetupDialogTests
 {
     private readonly PlaywrightFixture _fixture;
 
-    public CreateSubjectWizardTests(PlaywrightFixture fixture)
+    public SubjectSetupDialogTests(PlaywrightFixture fixture)
     {
         _fixture = fixture;
     }
