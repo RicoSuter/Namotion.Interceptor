@@ -1,3 +1,4 @@
+@using System.Text.RegularExpressions
 @using BlazorMonaco.Editor
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Components.Abstractions
@@ -6,10 +7,10 @@
 @using HomeBlaze.Storage.Blazor.Models
 @using HomeBlaze.Storage.Files
 @using HomeBlaze.Storage.Internal
+@using Microsoft.AspNetCore.Components.Sections
+@using Microsoft.JSInterop
 @using MudBlazor
 @using Namotion.Interceptor
-@using Microsoft.JSInterop
-@using System.Text.RegularExpressions
 
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
@@ -20,39 +21,37 @@
 
 @if (_isLoading)
 {
-    <MudProgressCircular Indeterminate="true" />
+    <MudProgressCircular Indeterminate="true"/>
 }
 else
 {
-    <div style="position: relative;">
-        <StandaloneCodeEditor @ref="_editor"
-            Id="markdown-editor"
-            CssClass="monaco-editor-container"
-            ConstructionOptions="GetEditorOptions"
-            OnDidInit="OnEditorInit"
-            OnDidChangeModelContent="OnContentChanged"
-            OnDidChangeCursorPosition="OnCursorPositionChanged" />
-
+    <SectionContent SectionName="EditActions">
         @if (_activeRegion != null)
         {
-            <div class="edit-button-overlay">
-                <MudButton Variant="Variant.Filled"
-                           Color="Color.Primary"
-                           Size="Size.Small"
-                           StartIcon="@Icons.Material.Filled.Edit"
-                           OnClick="OnEditButtonClick"
-                           data-testid="@(_activeRegion.Type == DecorationRegionType.SubjectBlock ? "edit-subject-button" : "edit-expression-button")">
-                    @(_activeRegion.Type == DecorationRegionType.SubjectBlock ? $"Edit {_activeRegion.Name}" : "Edit Expression")
-                </MudButton>
-            </div>
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Edit"
+                       OnClick="OnEditButtonClick"
+                       data-testid="@(_activeRegion.Type == DecorationRegionType.SubjectBlock ? "edit-subject-button" : "edit-expression-button")">
+                @(_activeRegion.Type == DecorationRegionType.SubjectBlock ? $"Edit {_activeRegion.Name}" : "Edit Expression")
+            </MudButton>
         }
-    </div>
+    </SectionContent>
+
+    <StandaloneCodeEditor @ref="_editor"
+                          Id="markdown-editor"
+                          CssClass="monaco-editor-container"
+                          ConstructionOptions="GetEditorOptions"
+                          OnDidInit="OnEditorInit"
+                          OnDidChangeModelContent="OnContentChanged"
+                          OnDidChangeCursorPosition="OnCursorPositionChanged"/>
 }
 
 <style>
     .monaco-editor-container {
-        min-height: 500px;
-        height: 60vh;
+        height: calc(100vh - 200px);
+        width: 100%;
     }
 
     /* Decoration styles for subject blocks and expressions */
@@ -65,19 +64,10 @@ else
         background-color: rgba(65, 105, 225, 0.25); /* Royal blue, works in light/dark modes */
         border-radius: 3px;
     }
-
-    /* Edit button overlay */
-    .edit-button-overlay {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        z-index: 100;
-    }
 </style>
 
 @code {
-    [Parameter]
-    public IInterceptorSubject? Subject { get; set; }
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
 
     [CascadingParameter(Name = "IsDarkMode")]
     public bool IsDarkMode { get; set; } = true;
@@ -102,6 +92,7 @@ else
         add { }
         remove { }
     }
+
     public event Action<bool>? IsDirtyChanged;
 
     private StandaloneEditorConstructionOptions GetEditorOptions(StandaloneCodeEditor editor)
@@ -137,8 +128,8 @@ else
     private void OnCursorPositionChanged(CursorPositionChangedEvent e)
     {
         // Find if cursor is inside any decoration region
-        var cursorLine = (int)e.Position.LineNumber;
-        var cursorColumn = (int)e.Position.Column;
+        var cursorLine = e.Position.LineNumber;
+        var cursorColumn = e.Position.Column;
 
         var previousRegion = _activeRegion;
         _activeRegion = _decorationRegions.FirstOrDefault(r => r.ContainsPosition(cursorLine, cursorColumn));
@@ -373,13 +364,14 @@ else
         if (File == null || _editor == null) return;
 
         var content = await _editor.GetValue();
-        
+
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
         await File.WriteAsync(stream, cancellationToken);
 
         _originalContent = content;
         _currentContent = content;
-        
+
         IsDirtyChanged?.Invoke(false);
     }
+
 }

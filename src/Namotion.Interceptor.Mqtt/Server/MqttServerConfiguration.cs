@@ -1,6 +1,6 @@
 using System;
 using MQTTnet.Protocol;
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mqtt.Server;
 
@@ -32,9 +32,9 @@ public class MqttServerConfiguration
     public string? TopicPrefix { get; init; }
 
     /// <summary>
-    /// Gets or sets the source path provider for property-to-topic mapping.
+    /// Gets or sets the path provider for property-to-topic mapping.
     /// </summary>
-    public required ISourcePathProvider PathProvider { get; init; }
+    public required PathProviderBase PathProvider { get; init; }
 
     /// <summary>
     /// Gets or sets the default QoS level. Default is AtLeastOnce (1) for guaranteed delivery.

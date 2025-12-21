@@ -63,9 +63,9 @@ Expressions resolve relative to the current page's embedded subjects first, then
 | Path | Resolution |
 |------|------------|
 | `mymotor.Speed` | Inline subject named `mymotor` embedded in current page |
-| `Root.Children[demo].Children[Conveyor.json].CurrentSpeed` | Absolute path from root |
+| `Root.Demo.Conveyor.CurrentSpeed` | Absolute path from root |
 
-See [Configuration Guide - Path Syntax](Configuration.md#path-syntax) for full path documentation including `this.`, `../`, and more.
+See [Configuration Guide - Path Syntax](Configuration.md#path-syntax) for full path documentation including `this.`, `../`, brackets for keys with dots, and more.
 
 ### Expression Features
 
@@ -130,7 +130,7 @@ Links between markdown pages use relative paths that HomeBlaze converts to prope
 ```markdown
 See the [Architecture Guide](Architecture.md) for details.
 
-Check the [demo setup](../demo/Setup.md) for examples.
+Check the [demo setup](../Demo/Setup.md) for examples.
 ```
 
 ### Link Resolution
@@ -206,4 +206,4 @@ For more details, see [Motor Setup Guide](../samples/MotorSetup.md).
 
 - [Building Custom Subjects](BuildingSubjects.md) - Create subject types for embedding
 - [Configuration Guide](Configuration.md) - Configure storage and subjects
-- [Demo Setup Guide](../demo/Setup.md) - See embedded subjects in action
+- [Demo Setup Guide](../Demo/Setup.md) - See embedded subjects in action

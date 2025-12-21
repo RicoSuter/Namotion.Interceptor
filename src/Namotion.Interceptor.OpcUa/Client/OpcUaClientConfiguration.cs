@@ -1,4 +1,4 @@
-﻿using Namotion.Interceptor.Sources.Paths;
+﻿using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 

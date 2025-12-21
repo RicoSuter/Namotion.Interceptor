@@ -1,4 +1,4 @@
-﻿using Namotion.Interceptor.Sources.Paths;
+﻿using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 using Opc.Ua.Export;
@@ -24,7 +24,7 @@ public class OpcUaServerConfiguration : OpcUaConfigurationBase
     /// Default is "http://namotion.com/Interceptor/".
     /// </summary>
     public string NamespaceUri { get; init; } = "http://namotion.com/Interceptor/";
-    
+
     /// <summary>
     /// Gets or sets a value indicating whether to clean up old certificates from the
     /// application certificate store on connect. Defaults to true.
