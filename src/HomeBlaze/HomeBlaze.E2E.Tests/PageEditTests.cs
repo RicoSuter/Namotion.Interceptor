@@ -7,6 +7,7 @@ namespace HomeBlaze.E2E.Tests;
 /// E2E tests for page editing functionality (split-view editor).
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
+[Trait("Category", "E2E")]
 public class PageEditTests
 {
     private readonly PlaywrightFixture _fixture;
