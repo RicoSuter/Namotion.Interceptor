@@ -23,6 +23,7 @@ public sealed class SubjectTransaction : IDisposable
     private readonly TransactionFailureHandling _failureHandling;
     private readonly TransactionLocking _locking;
     private readonly TransactionRequirement _requirement;
+    private readonly TimeSpan _commitTimeout;
     private readonly IDisposable? _lockReleaser; // null for Optimistic until commit
 
     private volatile bool _isCommitting;
@@ -86,6 +87,7 @@ public sealed class SubjectTransaction : IDisposable
         TransactionLocking locking,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
+        TimeSpan commitTimeout,
         IDisposable? lockReleaser)
     {
         Context = context;
@@ -94,6 +96,7 @@ public sealed class SubjectTransaction : IDisposable
         _locking = locking;
         _requirement = requirement;
         ConflictBehavior = conflictBehavior;
+        _commitTimeout = commitTimeout;
         _lockReleaser = lockReleaser;
 
         // Increment in constructor ensures counter is always paired with Dispose
@@ -110,7 +113,8 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="locking">The locking mode controlling transaction synchronization.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
     /// <param name="conflictBehavior">The conflict detection behavior.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <param name="commitTimeout">Timeout for commit operations. User cancellation is ignored during commit and only timeout-based cancellation is used. Use <see cref="Timeout.InfiniteTimeSpan"/> to disable timeout.</param>
+    /// <param name="cancellationToken">The cancellation token (used before commit starts, ignored during commit).</param>
     /// <returns>A new SubjectTransaction instance.</returns>
     /// <exception cref="InvalidOperationException">Thrown when transactions are not enabled or when nested transaction is attempted.</exception>
     internal static async ValueTask<SubjectTransaction> BeginTransactionAsync(
@@ -119,6 +123,7 @@ public sealed class SubjectTransaction : IDisposable
         TransactionLocking locking,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
+        TimeSpan commitTimeout,
         CancellationToken cancellationToken)
     {
         // Check for nested transactions BEFORE acquiring lock (prevents deadlock)
@@ -150,6 +155,7 @@ public sealed class SubjectTransaction : IDisposable
             locking,
             requirement,
             conflictBehavior,
+            commitTimeout,
             transactionLock);
     }
 
@@ -225,7 +231,14 @@ public sealed class SubjectTransaction : IDisposable
                 throw;
             }
 
-            // 2. Call write handler on the context (single writer - no context grouping needed)
+            // 2. Create timeout-only token, ignoring user cancellation during commit
+            // Use Timeout.InfiniteTimeSpan to disable timeout entirely
+            using var timeoutCts = _commitTimeout == Timeout.InfiniteTimeSpan
+                ? null
+                : new CancellationTokenSource(_commitTimeout);
+            var commitToken = timeoutCts?.Token ?? CancellationToken.None;
+
+            // 3. Call write handler on the context (single writer - no context grouping needed)
             var allSuccessfulChanges = new List<SubjectPropertyChange>();
             var allFailedChanges = new List<SubjectPropertyChange>();
             var allErrors = new List<Exception>();
@@ -233,7 +246,7 @@ public sealed class SubjectTransaction : IDisposable
             var writeHandler = Context.TryGetService<ITransactionWriter>();
             if (writeHandler != null)
             {
-                var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, cancellationToken);
+                var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, commitToken);
                 allSuccessfulChanges.AddRange(result.SuccessfulChanges);
                 allFailedChanges.AddRange(result.FailedChanges);
                 allErrors.AddRange(result.Errors);
@@ -244,7 +257,7 @@ public sealed class SubjectTransaction : IDisposable
                 allSuccessfulChanges.AddRange(changes);
             }
 
-            // 3. Handle mode-specific behavior
+            // 4. Handle mode-specific behavior
             var shouldApplyChanges = _failureHandling switch
             {
                 // BestEffort: Apply all successful changes even if some failed

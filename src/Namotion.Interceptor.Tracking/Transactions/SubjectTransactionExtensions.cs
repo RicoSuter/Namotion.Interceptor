@@ -8,6 +8,11 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 public static class SubjectTransactionExtensions
 {
     /// <summary>
+    /// Default commit timeout of 30 seconds. Use <see cref="Timeout.InfiniteTimeSpan"/> to disable timeout.
+    /// </summary>
+    public static readonly TimeSpan DefaultCommitTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Begins a new transaction bound to this context.
     /// </summary>
     /// <param name="context">The context to bind the transaction to.</param>
@@ -15,7 +20,11 @@ public static class SubjectTransactionExtensions
     /// <param name="locking">The locking mode. Exclusive (default) acquires lock at begin; Optimistic acquires only during commit.</param>
     /// <param name="requirement">The transaction requirement for validation. Defaults to <see cref="TransactionRequirement.None"/>.</param>
     /// <param name="conflictBehavior">The conflict detection behavior. Defaults to <see cref="TransactionConflictBehavior.FailOnConflict"/>.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <param name="commitTimeout">
+    /// Timeout for commit operations. Defaults to 30 seconds. User cancellation is ignored during commit;
+    /// only the timeout can cancel the commit operation. Use <see cref="Timeout.InfiniteTimeSpan"/> to disable timeout.
+    /// </param>
+    /// <param name="cancellationToken">The cancellation token (used before commit starts, ignored during commit).</param>
     /// <returns>A new SubjectTransaction instance.</returns>
     public static TransactionAwaitable BeginTransactionAsync(
         this IInterceptorSubjectContext context,
@@ -23,9 +32,11 @@ public static class SubjectTransactionExtensions
         TransactionLocking locking = TransactionLocking.Exclusive,
         TransactionRequirement requirement = TransactionRequirement.None,
         TransactionConflictBehavior conflictBehavior = TransactionConflictBehavior.FailOnConflict,
+        TimeSpan? commitTimeout = null,
         CancellationToken cancellationToken = default)
     {
-        var task = SubjectTransaction.BeginTransactionAsync(context, failureHandling, locking, requirement, conflictBehavior, cancellationToken);
+        var effectiveTimeout = commitTimeout ?? DefaultCommitTimeout;
+        var task = SubjectTransaction.BeginTransactionAsync(context, failureHandling, locking, requirement, conflictBehavior, effectiveTimeout, cancellationToken);
         return new TransactionAwaitable(task);
     }
 }
