@@ -119,6 +119,25 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 }
 ```
 
+## Commit Timeout and Cancellation
+
+**Default: 30-second timeout** for all commits. Throws `TaskCanceledException` if exceeded.
+
+```csharp
+// Default 30s timeout
+await transaction.CommitAsync(cancellationToken);
+
+// Custom timeout or disable
+using var tx = await context.BeginTransactionAsync(
+    TransactionFailureHandling.Rollback,
+    commitTimeout: TimeSpan.FromSeconds(60)); // Custom
+    // or: commitTimeout: Timeout.InfiniteTimeSpan); // Disable
+```
+
+**Important:** The `cancellationToken` is **ignored during commit** - only the timeout can cancel. This prevents partial commits leaving sources inconsistent (mid-commit cancellation → some sources updated, others not, failed rollbacks).
+
+Timeout protects against hung operations while ensuring commits complete atomically.
+
 ## Exception Handling
 
 ### Already Committed
@@ -161,47 +180,7 @@ using (var transaction1 = await context.BeginTransactionAsync(TransactionFailure
 
 ## Failure Handling
 
-When creating a transaction, you must specify a `TransactionFailureHandling` to control how partial failures are handled:
-
-```csharp
-using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
-```
-
-Transaction modes are relevant in two scenarios:
-
-1. **Multiple sources**: When properties in the transaction are bound to different external sources, some sources may succeed while others fail.
-
-2. **Source batching**: When a source has a `WriteBatchSize` configured, changes are written in batches. If an early batch succeeds but a later batch fails, the source is considered failed but some changes were already written.
-
-In both cases, the transaction mode determines what happens to successfully written changes when a failure occurs.
-
-### BestEffort
-
-BestEffort mode maximizes the number of successful writes. When some external sources fail, the changes that succeeded are still applied to the in-process model. This is useful when partial progress is acceptable and you want to handle failures gracefully without losing successful updates.
-
-```csharp
-using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-device.Temperature = 25.5;  // Bound to Source A
-device.Pressure = 101.3;    // Bound to Source B
-
-await tx.CommitAsync(cancellationToken);
-```
-
-**When all sources succeed:**
-- All changes are applied to the in-process model
-- No exception is thrown
-
-**When Source A succeeds but Source B fails:**
-- Source A has the new Temperature value (25.5)
-- Source B was not updated (Pressure write failed)
-- In-process model: Temperature is updated to 25.5, Pressure unchanged
-- `TransactionException` is thrown containing the Source B failure
-
-Use BestEffort when partial updates are acceptable and you prefer to maximize successful writes rather than failing entirely.
-
-### Rollback
-
-Rollback mode provides the strongest consistency guarantee. If any external source fails, successfully written sources are **reverted** to their original values (best effort). This minimizes divergence between external sources and the local model.
+When creating a transaction, specify a `TransactionFailureHandling` mode to control partial failure behavior:
 
 ```csharp
 using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
@@ -211,81 +190,55 @@ device.Pressure = 101.3;    // Bound to Source B
 await tx.CommitAsync(cancellationToken);
 ```
 
-**When all sources succeed:**
-- All changes are applied to the in-process model
-- No exception is thrown
+Failure modes matter when:
+- Properties are bound to **different external sources** (one may succeed, another fail)
+- A source has `WriteBatchSize` configured (early batches succeed, later batches fail)
 
-**When Source A succeeds but Source B fails:**
-- Source A is **reverted**: Temperature written back to original value
-- Source B was not updated (Pressure write failed)
-- In-process model: **Unchanged** (both keep old values)
-- `TransactionException` is thrown (may include revert failures if revert also failed)
-- **Consistency**: All sources and local model should have the same (old) values
+### Behavior Comparison
 
-Use Rollback when consistency is critical and you want to minimize the chance of external sources having different values than the local model. Note that rollback is best-effort - if the revert write also fails, you'll receive both the original failure and the revert failure in the exception.
+| Scenario | BestEffort | Rollback |
+|----------|------------|----------|
+| **All sources succeed** | All changes applied to model<br>No exception thrown | All changes applied to model<br>No exception thrown |
+| **Source A succeeds,<br>Source B fails** | Source A: keeps new value (25.5)<br>Source B: not updated<br>Model: Temperature=25.5, Pressure=unchanged<br>`TransactionException` thrown | Source A: **reverted** to original<br>Source B: not updated<br>Model: **unchanged** (both old values)<br>`TransactionException` thrown |
+| **Consistency** | Partial updates accepted | All-or-nothing (best effort) |
+| **Performance on failure** | Faster (no revert writes) | Slower (reverts successful sources) |
+| **Use when** | Partial progress acceptable,<br>maximize successful writes | Consistency critical,<br>minimize source divergence |
 
-> **Performance note**: Rollback mode may perform additional writes on failure (to revert successful sources), making it slower than BestEffort mode in failure scenarios.
+**Notes:**
+- Rollback revert is best-effort. If revert also fails, the exception includes both failures.
+- `TransactionException.FailedChanges` contains details of all failures.
 
 ## Transaction Locking
 
-Transactions support two locking modes that control how concurrent transactions are synchronized:
+Control how concurrent transactions are synchronized:
 
 ```csharp
-// Exclusive locking (default) - serializes all transactions
+// Exclusive (default) - lock at begin, serializes all transactions
 using var tx = await context.BeginTransactionAsync(
     TransactionFailureHandling.Rollback,
     TransactionLocking.Exclusive);
 
-// Optimistic locking - allows concurrent transactions, serializes only at commit
-using var tx = await context.BeginTransactionAsync(
-    TransactionFailureHandling.Rollback,
-    TransactionLocking.Optimistic);
-```
-
-### Exclusive (Default)
-
-Exclusive locking acquires a lock when the transaction begins and holds it until the transaction is disposed. This ensures only one transaction executes at a time per context, preventing any possibility of conflicts.
-
-**Behavior:**
-- Lock acquired at `BeginTransactionAsync`
-- Other transactions wait until this transaction completes
-- No conflict detection needed (transactions are serialized)
-- Best for scenarios where transactions are short-lived
-
-### Optimistic
-
-Optimistic locking allows multiple transactions to run concurrently, acquiring the lock only during the commit phase. This enables higher throughput when transactions rarely conflict.
-
-**Behavior:**
-- No lock at `BeginTransactionAsync` - returns immediately
-- Multiple transactions can capture changes concurrently
-- Lock acquired only during `CommitAsync`
-- Conflicts detected via `TransactionConflictBehavior.FailOnConflict`
-
-**Example with conflict detection:**
-
-```csharp
+// Optimistic - lock only at commit, allows concurrent capture
 using var tx = await context.BeginTransactionAsync(
     TransactionFailureHandling.Rollback,
     TransactionLocking.Optimistic,
     conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+```
 
-device.Temperature = 25.5;
+| Aspect | Exclusive (Default) | Optimistic |
+|--------|---------------------|------------|
+| Lock at Begin | Yes (waits if busy) | No (returns immediately) |
+| During Transaction | Other transactions wait | Multiple transactions run concurrently |
+| Lock at Commit | Already held | Acquires for commit phase |
+| Conflict Detection | N/A (serialized) | Via `FailOnConflict` - throws on concurrent changes |
+| Best For | Short transactions, high contention | Long transactions, low contention |
 
+**Optimistic conflict example:**
+```csharp
 // If another transaction modified Temperature since we started,
 // CommitAsync will throw TransactionConflictException
 await tx.CommitAsync(cancellationToken);
 ```
-
-### Locking Mode Comparison
-
-| Aspect | Exclusive | Optimistic |
-|--------|-----------|------------|
-| Lock at Begin | Yes (waits if busy) | No (immediate) |
-| During Transaction | Other transactions wait | Multiple transactions run concurrently |
-| Lock at Commit | Already held | Acquires for commit phase |
-| Conflict Detection | N/A (serialized) | Via `FailOnConflict` behavior |
-| Best For | Short transactions, high contention | Long transactions, low contention |
 
 ## Transaction Requirements
 
@@ -352,7 +305,7 @@ await tx.CommitAsync(cancellationToken);
 
 ## External Source Integration
 
-When integrating with external data sources (OPC UA, MQTT, databases), use `WithSourceTransactions()` from the `Namotion.Interceptor.Sources` package:
+Enable external source writes with `WithSourceTransactions()`:
 
 ```csharp
 var context = InterceptorSubjectContext
@@ -361,12 +314,7 @@ var context = InterceptorSubjectContext
     .WithSourceTransactions(); // Enables external source writes
 ```
 
-With this configuration, `CommitAsync()` will:
-
-1. **Write to external sources first**: Changes are grouped by their associated source and written in batches
-2. **Handle failures per mode**: BestEffort applies successes, Rollback requires all to succeed
-3. **Apply to in-process model**: After external writes complete (and pass mode checks), changes are applied
-4. **Report failures**: A `TransactionException` is thrown containing all source write failures
+`CommitAsync()` writes to external sources first (grouped by source, written in batches), then applies to the in-process model. Failures are handled per the `TransactionFailureHandling` mode.
 
 ```csharp
 try
@@ -456,13 +404,15 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 
 | Member | Description |
 |--------|-------------|
-| `BeginTransactionAsync(failureHandling, locking, requirement, conflictBehavior, ct)` | Begins a new transaction with the specified options |
+| `BeginTransactionAsync(failureHandling, locking, requirement, conflictBehavior, commitTimeout, ct)` | Begins a new transaction with the specified options |
 
 **Parameters:**
 - `failureHandling` (required): How to handle partial failures (`BestEffort` or `Rollback`)
 - `locking` (default: `Exclusive`): Concurrency control mode
 - `requirement` (default: `None`): Validation constraints
 - `conflictBehavior` (default: `FailOnConflict`): How to handle value conflicts at commit time
+- `commitTimeout` (default: 30 seconds): Maximum time for commit operation. Use `Timeout.InfiniteTimeSpan` to disable
+- `cancellationToken` (default: `default`): Used before commit starts, ignored during commit phase
 
 ### TransactionFailureHandling
 
