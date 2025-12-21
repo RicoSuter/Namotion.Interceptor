@@ -73,40 +73,49 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider
         if (oldMode == newMode)
             return;
 
-        // Determine if old mode was input-like
-        var wasInput = oldMode is GpioPinMode.Input or GpioPinMode.InputPullUp or GpioPinMode.InputPullDown;
-        var isInput = newMode is GpioPinMode.Input or GpioPinMode.InputPullUp or GpioPinMode.InputPullDown;
-
-        // Unregister interrupt if switching from input to output
-        if (wasInput && !isInput)
+        try
         {
-            UnregisterInterrupt?.Invoke(PinNumber);
-        }
+            // Determine if old mode was input-like
+            var wasInput = oldMode is GpioPinMode.Input or GpioPinMode.InputPullUp or GpioPinMode.InputPullDown;
+            var isInput = newMode is GpioPinMode.Input or GpioPinMode.InputPullUp or GpioPinMode.InputPullDown;
 
-        // Set hardware pin mode
-        var hardwareMode = newMode switch
-        {
-            GpioPinMode.Input => PinMode.Input,
-            GpioPinMode.InputPullUp => PinMode.InputPullUp,
-            GpioPinMode.InputPullDown => PinMode.InputPullDown,
-            GpioPinMode.Output => PinMode.Output,
-            _ => PinMode.Input
-        };
-        Controller.SetPinMode(PinNumber, hardwareMode);
-
-        if (isInput)
-        {
-            // Read current value and register interrupt
-            Value = Controller.Read(PinNumber) == PinValue.High;
-            if (!wasInput)
+            // Unregister interrupt if switching from input to output
+            if (wasInput && !isInput)
             {
-                RegisterInterrupt?.Invoke(PinNumber);
+                UnregisterInterrupt?.Invoke(PinNumber);
+            }
+
+            // Set hardware pin mode
+            var hardwareMode = newMode switch
+            {
+                GpioPinMode.Input => PinMode.Input,
+                GpioPinMode.InputPullUp => PinMode.InputPullUp,
+                GpioPinMode.InputPullDown => PinMode.InputPullDown,
+                GpioPinMode.Output => PinMode.Output,
+                _ => PinMode.Input
+            };
+            Controller.SetPinMode(PinNumber, hardwareMode);
+
+            if (isInput)
+            {
+                // Read current value and register interrupt
+                Value = Controller.Read(PinNumber) == PinValue.High;
+                if (!wasInput)
+                {
+                    RegisterInterrupt?.Invoke(PinNumber);
+                }
+            }
+            else
+            {
+                // Write current Value to hardware for output mode
+                Controller.Write(PinNumber, Value ? PinValue.High : PinValue.Low);
             }
         }
-        else
+        catch (Exception ex)
         {
-            // Write current Value to hardware for output mode
-            Controller.Write(PinNumber, Value ? PinValue.High : PinValue.Low);
+            Status = ServiceStatus.Error;
+            StatusMessage = $"Failed to change GPIO pin {PinNumber} mode to {newMode}: {ex.Message}";
+            throw new InvalidOperationException($"Failed to change GPIO pin {PinNumber} mode to {newMode}", ex);
         }
     }
 
@@ -118,17 +127,26 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider
         if (Controller == null || Mode != GpioPinMode.Output || Status != ServiceStatus.Running)
             return;
 
-        // Write to hardware
-        var pinValue = value ? PinValue.High : PinValue.Low;
-        Controller.Write(PinNumber, pinValue);
-
-        // Read-back verification
-        var actualValue = Controller.Read(PinNumber) == PinValue.High;
-        if (actualValue != value)
+        try
         {
-            // Set status first to prevent recursion (status check above will exit early)
+            // Write to hardware
+            var pinValue = value ? PinValue.High : PinValue.Low;
+            Controller.Write(PinNumber, pinValue);
+
+            // Read-back verification
+            var actualValue = Controller.Read(PinNumber) == PinValue.High;
+            if (actualValue != value)
+            {
+                // Set status first to prevent recursion (status check above will exit early)
+                Status = ServiceStatus.Error;
+                StatusMessage = "Write verification failed - possible short circuit or external driver";
+            }
+        }
+        catch (Exception ex)
+        {
             Status = ServiceStatus.Error;
-            StatusMessage = "Write verification failed - possible short circuit or external driver";
+            StatusMessage = $"Failed to write to GPIO pin {PinNumber}: {ex.Message}";
+            throw new InvalidOperationException($"Failed to write to GPIO pin {PinNumber}", ex);
         }
     }
 }
