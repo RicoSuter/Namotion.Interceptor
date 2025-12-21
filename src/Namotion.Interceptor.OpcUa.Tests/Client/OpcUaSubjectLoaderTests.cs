@@ -5,8 +5,9 @@ using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Paths;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -24,7 +25,7 @@ public class OpcUaSubjectLoaderTests
         _baseConfiguration = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedSourcePathProvider("opc", "."),
+            PathProvider = new AttributeBasedPathProvider("opc", '.'),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaSubjectClientSource>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(new DefaultSubjectFactory()),

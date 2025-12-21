@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 

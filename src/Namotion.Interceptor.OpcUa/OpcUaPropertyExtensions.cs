@@ -1,12 +1,13 @@
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Connectors.Paths;
+using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.OpcUa;
 
 internal static class OpcUaPropertyExtensions
 {
-    public static string? ResolvePropertyName(this RegisteredSubjectProperty property, ISourcePathProvider pathProvider)
+    public static string? ResolvePropertyName(this RegisteredSubjectProperty property, IPathProvider pathProvider)
     {
         if (property.IsAttribute)
         {

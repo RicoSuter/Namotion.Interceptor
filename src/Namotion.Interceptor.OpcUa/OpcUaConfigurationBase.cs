@@ -1,4 +1,5 @@
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Connectors.Paths;
+using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa;
@@ -13,7 +14,7 @@ public abstract class OpcUaConfigurationBase
     /// Gets the source path provider used to map between OPC UA node browse names and C# property names.
     /// This provider determines which properties are included and how their names are translated.
     /// </summary>
-    public required ISourcePathProvider PathProvider { get; init; }
+    public required IPathProvider PathProvider { get; init; }
 
     /// <summary>
     /// Gets the value converter used to convert between OPC UA node values and C# property values.

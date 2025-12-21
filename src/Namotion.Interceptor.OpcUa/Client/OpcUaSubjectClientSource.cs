@@ -5,7 +5,7 @@ using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.OpcUa.Sync;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
@@ -39,6 +39,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private IReadOnlyList<MonitoredItem>? _initialMonitoredItems;
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
+
+    public IInterceptorSubject RootSubject => _subject;
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
     {

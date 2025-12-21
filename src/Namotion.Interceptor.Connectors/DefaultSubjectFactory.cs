@@ -1,7 +1,7 @@
 using System.Collections;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Namotion.Interceptor.Sources;
+namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
 /// Uses reflection and optional <see cref="IServiceProvider"/> to create subjects and subject collections.
@@ -47,5 +47,35 @@ public class DefaultSubjectFactory : ISubjectFactory
         }
 
         return (IEnumerable<IInterceptorSubject?>)collection;
+    }
+
+    /// <summary>
+    /// Creates a dictionary of subjects from a list of key-value pairs.
+    /// </summary>
+    /// <param name="propertyType">The dictionary type (e.g., Dictionary&lt;string, TSubject&gt;).</param>
+    /// <param name="children">The key-subject pairs to add to the dictionary.</param>
+    /// <returns>The created dictionary.</returns>
+    public object CreateSubjectDictionary(Type propertyType, IEnumerable<(string key, IInterceptorSubject subject)> children)
+    {
+        // Find the dictionary interface to get key and value types
+        var dictionaryInterface = propertyType.GetInterfaces()
+            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IDictionary<,>));
+
+        if (dictionaryInterface is null)
+        {
+            throw new InvalidOperationException($"Type '{propertyType.Name}' is not a dictionary type.");
+        }
+
+        var keyType = dictionaryInterface.GenericTypeArguments[0];
+        var valueType = dictionaryInterface.GenericTypeArguments[1];
+        var dictionaryType = typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
+
+        var dictionary = (IDictionary)Activator.CreateInstance(dictionaryType)!;
+        foreach (var (key, subject) in children)
+        {
+            dictionary.Add(key, subject);
+        }
+
+        return dictionary;
     }
 }
