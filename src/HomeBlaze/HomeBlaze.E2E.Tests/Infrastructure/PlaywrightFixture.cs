@@ -40,7 +40,7 @@ public class PlaywrightFixture : IAsyncLifetime
         catch (Exception ex)
         {
             Console.WriteLine($"Failed to initialize Playwright: {ex.Message}");
-            Console.WriteLine("Playwright browsers may not be installed. Run: pwsh bin/Debug/net9.0/playwright.ps1 install");
+            Console.WriteLine("Playwright browsers may not be installed. Run 'playwright.ps1 install' from the test output directory.");
             throw new InvalidOperationException("Playwright initialization failed. Ensure browsers are installed.", ex);
         }
     }
