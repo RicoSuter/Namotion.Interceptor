@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Sync;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Sources;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;

@@ -1,8 +1,8 @@
-﻿using Namotion.Interceptor.Sources.Paths.Attributes;
+﻿using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.OpcUa.Attributes;
 
-public class OpcUaNodeAttribute : SourcePathAttribute
+public class OpcUaNodeAttribute : PathAttribute
 {
     public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri, string? sourceName = null)
         : base(sourceName ?? "opc", browseName)

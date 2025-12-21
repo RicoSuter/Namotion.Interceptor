@@ -5,8 +5,9 @@ using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Sync;
 using Namotion.Interceptor.OpcUa.Tests.Integration;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Paths;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
@@ -412,7 +413,7 @@ public class OpcUaSyncStrategyUnitTests
         return new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedSourcePathProvider("opc", "."),
+            PathProvider = new AttributeBasedPathProvider("opc", '.'),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaSubjectClientSource>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(new DefaultSubjectFactory()),
