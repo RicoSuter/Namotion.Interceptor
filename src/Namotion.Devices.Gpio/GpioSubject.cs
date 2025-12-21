@@ -8,10 +8,8 @@ using Iot.Device.Ads1115;
 using Iot.Device.Spi;
 using Microsoft.Extensions.Hosting;
 using Namotion.Devices.Gpio.Configuration;
-using Namotion.Devices.Gpio.Interceptors;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Devices.Gpio;
 
@@ -138,7 +136,6 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
             return controllerResult;
         }
 
-        RegisterInterceptors();
         await DiscoverPinsAsync();
 
         Status = ServiceStatus.Running;
@@ -184,17 +181,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         Pins = pins;
     }
 
-    private void RegisterInterceptors()
-    {
-        if (_controller == null) return;
 
-        var subjectContext = ((IInterceptorSubject)this).Context;
-        subjectContext.AddService<IWriteInterceptor>(new GpioWriteInterceptor(_controller));
-        subjectContext.AddService<IWriteInterceptor>(new GpioModeChangeInterceptor(
-            _controller,
-            RegisterInterrupt,
-            UnregisterInterrupt));
-    }
 
     private async Task DiscoverPinsAsync()
     {
@@ -218,7 +205,10 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         var pin = new GpioPin()
         {
             PinNumber = pinNumber,
-            Mode = GpioPinMode.Input
+            Mode = GpioPinMode.Input,
+            Controller = _controller,
+            RegisterInterrupt = RegisterInterrupt,
+            UnregisterInterrupt = UnregisterInterrupt
         };
 
         try
