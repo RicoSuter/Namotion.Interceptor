@@ -291,143 +291,52 @@ Most other C# patterns (nullable, required, init, virtual, override, data annota
 
 ## OnSet* and OnGet* Partial Methods
 
-The source generator creates optional partial method hooks for each partial property, allowing you to execute custom logic **before** interceptors run.
+The source generator creates optional partial method hooks for each partial property, allowing you to execute custom logic before or after interceptors run.
 
-### Generated Partial Methods
+### Generated Methods
 
-For each partial property named `PropertyName`, the generator creates:
-
-- `partial void OnGetPropertyName(ref TProperty value)` - Called before the getter returns
-- `partial void OnSetPropertyName(ref TProperty value)` - Called before the setter executes (before interceptors)
-
-These methods are optional - you only need to implement them if you need the hooks.
+For each partial property, the generator creates:
+- `partial void OnSetPropertyName(ref TProperty value)` - Called before setter runs (before interceptors)
+- `partial void OnGetPropertyName(ref TProperty value)` - Called after getter runs (after interceptors, before return)
 
 ### Execution Order
 
-The `OnSet*` and `OnGet*` methods integrate with the interceptor pipeline (see [interceptor.md](interceptor.md) for details on how interceptors work):
-
 ```
-Property Write:
-1. OnSetPropertyName(ref value)     ← Your hook (runs before interceptors)
-2. ┌─ Interceptor chain wraps ────┐
-3. │  Interceptor1 → Interceptor2  │
-4. │  → ... → Backing field update │
-5. └──────────────────────────────┘
-
-Property Read:
-1. ┌─ Interceptor chain wraps ────┐
-2. │  Backing field read →         │
-3. │  Interceptor1 → Interceptor2  │
-4. └──────────────────────────────┘
-5. OnGetPropertyName(ref value)     ← Your hook (runs after interceptors)
-6. Value returned to caller
+Setter: OnSet* → Interceptors → Field Update
+Getter: Field Read → Interceptors → OnGet* → Return
 ```
 
-**Key points:**
-- `OnSet*` executes **before** the interceptor chain, allowing you to transform input values
-- `OnGet*` executes **after** the interceptor chain, allowing you to post-process output values
-- Interceptors wrap the field access (see [Interceptor Pipeline](interceptor.md#interceptor-pipeline))
-- Each interceptor can call `next()` to continue the chain or skip it to block the operation
+See [Interceptor Pipeline](interceptor.md#interceptor-pipeline) for how interceptors work.
 
-### Example: Hardware Synchronization
-
-This example shows using `OnSet*` methods to write property changes directly to hardware:
+### Example
 
 ```csharp
 [InterceptorSubject]
 public partial class GpioPin
 {
-    internal GpioController? Controller { get; set; }
-    
-    public partial int PinNumber { get; set; }
+    internal GpioController? Controller { get; init; }
     public partial GpioPinMode Mode { get; set; }
-    public partial bool Value { get; set; }
     
-    /// <summary>
-    /// Called before Mode is set. Reconfigures hardware pin mode.
-    /// </summary>
     partial void OnSetMode(ref GpioPinMode value)
     {
         if (Controller == null) return;
-        
-        var hardwareMode = value switch
+        Controller.SetPinMode(PinNumber, value switch
         {
             GpioPinMode.Input => PinMode.Input,
             GpioPinMode.Output => PinMode.Output,
             _ => PinMode.Input
-        };
-        
-        Controller.SetPinMode(PinNumber, hardwareMode);
-    }
-    
-    /// <summary>
-    /// Called before Value is set. Writes to hardware in output mode.
-    /// </summary>
-    partial void OnSetValue(ref bool value)
-    {
-        if (Controller == null || Mode != GpioPinMode.Output) 
-            return;
-            
-        Controller.Write(PinNumber, value ? PinValue.High : PinValue.Low);
+        });
     }
 }
 ```
 
-### Example: Value Clamping
-
-```csharp
-[InterceptorSubject]
-public partial class Temperature
-{
-    public partial double Celsius { get; set; }
-    
-    /// <summary>
-    /// Clamp temperature to valid range before setting.
-    /// </summary>
-    partial void OnSetCelsius(ref double value)
-    {
-        value = Math.Clamp(value, -273.15, 1000.0);
-    }
-}
-```
-
-### Example: Value Transformation
-
-```csharp
-[InterceptorSubject]
-public partial class User
-{
-    public partial string Email { get; set; }
-    
-    /// <summary>
-    /// Normalize email to lowercase before storing.
-    /// </summary>
-    partial void OnSetEmail(ref string value)
-    {
-        value = value?.ToLowerInvariant() ?? string.Empty;
-    }
-}
-```
-
-### When to Use OnSet*/OnGet* vs Interceptors
-
-**Use OnSet*/OnGet* methods when:**
-- Logic is specific to a single property on a single class
-- You need access to instance members or state
-- You want to transform the value before any interceptors see it
-- The logic doesn't need to be reusable across multiple subjects
+**Use OnSet*/OnGet* when:**
+- Logic is specific to a single property
+- You need access to instance members
+- You want to transform values before/after interceptors
 
 **Use Interceptors when:**
-- Logic should apply to many properties or classes
-- You need cross-cutting concerns (logging, validation, tracking)
-- The logic should be configurable at runtime
-- You want separation of concerns from the subject class
-
-### Notes
-
-- Methods execute synchronously - don't perform long-running operations
-- Modifying `value` by reference affects what interceptors see (OnSet*) or what the caller receives (OnGet*)
-- Methods are called even if the value hasn't changed (unless an earlier OnSet* prevents the call)
-- `OnGet*` runs after interceptors but before the value is returned
-- `OnSet*` runs before interceptors, allowing you to transform input
+- Logic applies to many properties/classes
+- You need cross-cutting concerns (logging, validation)
+- Logic should be configurable at runtime
 
