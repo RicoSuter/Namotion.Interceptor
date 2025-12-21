@@ -4,7 +4,9 @@
 @using HomeBlaze.Components
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
+@using HomeBlaze.Components.Dialogs
 @using HomeBlaze.Services
+@using HomeBlaze.Services.Components
 @using HomeBlaze.Storage.Blazor.Models
 @using HomeBlaze.Storage.Files
 @using HomeBlaze.Storage.Internal
@@ -16,6 +18,7 @@
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
 @inject ConfigurableSubjectSerializer Serializer
+@inject SubjectComponentRegistry ComponentRegistry
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(MarkdownFile))]
 @implements ISubjectEditComponent
@@ -177,25 +180,8 @@ else
         if (!File.Children.TryGetValue(region.Name, out var subject))
             return;
 
-        // Open the SubjectEditDialog
-        // Note: SubjectEditDialog is in HomeBlaze.Host, so we use a dynamic type name
-        var parameters = new DialogParameters<object>
-        {
-            { "Subject", subject }
-        };
-
-        var options = new DialogOptions
-        {
-            MaxWidth = MaxWidth.Small,
-            FullWidth = true
-        };
-
-        // Use dynamic type lookup for SubjectEditDialog since it's in HomeBlaze.Host
-        var dialogType = Type.GetType("HomeBlaze.Host.Components.Dialogs.SubjectEditDialog, HomeBlaze.Host");
-        if (dialogType == null)
-            return;
-
-        var dialog = await DialogService.ShowAsync(dialogType, $"Edit {region.Name}", parameters, options);
+        // Open the SubjectEditDialog using the static ShowAsync method
+        var dialog = await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, subject, $"Edit {region.Name}");
         var result = await dialog.Result;
 
         if (result?.Canceled != false)

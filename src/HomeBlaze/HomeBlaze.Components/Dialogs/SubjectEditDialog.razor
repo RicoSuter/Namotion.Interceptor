@@ -1,0 +1,68 @@
+@using HomeBlaze.Components.Editors
+@using HomeBlaze.Services
+@using HomeBlaze.Components.Abstractions
+@using Namotion.Interceptor
+
+<MudDialog>
+    <DialogContent>
+        <SubjectEditPanel @ref="_editPanel" Subject="@Subject" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   OnClick="OnSaveClicked"
+                   Disabled="@(!(_editPanel?.IsValid ?? true))">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    private SubjectEditPanel? _editPanel;
+
+    public MaxWidth GetPreferredDialogSize()
+    {
+        return MaxWidth.Small;
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+
+    private async Task OnSaveClicked()
+    {
+        if (_editPanel != null)
+        {
+            await _editPanel.SaveAsync();
+            MudDialog?.Close(DialogResult.Ok(true));
+        }
+    }
+
+    public static Task<IDialogReference> ShowAsync(
+        IDialogService dialogService,
+        SubjectComponentRegistry componentRegistry,
+        IInterceptorSubject subject,
+        string? title = null)
+    {
+        var parameters = new DialogParameters<SubjectEditDialog>
+        {
+            { x => x.Subject, subject }
+        };
+
+        // Check if custom edit component exists to determine dialog size
+        var editRegistration = componentRegistry.GetComponent(
+            subject.GetType(),
+            SubjectComponentType.Edit);
+
+        var maxWidth = editRegistration != null ? MaxWidth.Large : MaxWidth.Small;
+
+        var options = new DialogOptions
+        {
+            MaxWidth = maxWidth,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        return dialogService.ShowAsync<SubjectEditDialog>(title ?? "Edit Subject", parameters, options);
+    }
+}
