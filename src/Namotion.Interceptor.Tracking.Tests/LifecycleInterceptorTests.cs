@@ -281,4 +281,116 @@ public class LifecycleInterceptorTests
             .WithService(() => propertyHandlerMock.Object, _ => false);
         return context;
     }
+
+    [Fact]
+    public void WhenSubjectAttachedViaContextOnly_ThenReferenceCountShouldBeZero()
+    {
+        // Arrange - context-only attachment (property=null) should NOT increment reference count
+        var events = new List<string>();
+
+        var handler = new TestLifecyleHandler(events);
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler);
+
+        // Act - create subject and attach via AddFallbackContext (no property assignment)
+        var person = new Person { FirstName = "John" };
+        ((IInterceptorSubject)person).Context.AddFallbackContext(context);
+
+        // Assert - the attach event should show reference count of 0 (context-only)
+        var attachEvent = events.Single(e => e.StartsWith("Attached:"));
+        Assert.Contains("count: 0", attachEvent);
+    }
+
+    [Fact]
+    public void WhenSubjectAddedToDictionary_ThenReferenceCountShouldBeOne()
+    {
+        // Arrange
+        var events = new List<string>();
+
+        var handler = new TestLifecyleHandler(events);
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler);
+
+        var container = new Container(context) { Name = "Test" };
+        var child = new Person { FirstName = "Child" };
+
+        // Act - add child to dictionary
+        container.Children = new Dictionary<string, Person> { { "key1", child } };
+
+        // Assert - child should be attached with reference count 1
+        var childAttachEvent = events.Single(e => e.Contains("{Child }") && e.StartsWith("Attached:"));
+        Assert.Contains("count: 1", childAttachEvent);
+    }
+
+    [Fact]
+    public void WhenSubjectRemovedFromDictionary_ThenReferenceCountShouldBeZero()
+    {
+        // Arrange
+        var events = new List<string>();
+
+        var handler = new TestLifecyleHandler(events);
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler);
+
+        var container = new Container(context) { Name = "Test" };
+        var child = new Person { FirstName = "Child" };
+
+        container.Children = new Dictionary<string, Person> { { "key1", child } };
+        events.Clear(); // Clear events to focus on detach
+
+        // Act - remove child by assigning empty dictionary
+        container.Children = new Dictionary<string, Person>();
+
+        // Assert - child should be detached with reference count 0
+        var childDetachEvent = events.Single(e => e.Contains("{Child }") && e.StartsWith("Detached:"));
+        Assert.Contains("count: 0", childDetachEvent);
+    }
+
+    [Fact]
+    public void WhenSubjectWithContextRemovedFromDictionary_ThenReferenceCountShouldBeZero()
+    {
+        // This is the exact scenario that was failing in HomeBlaze:
+        // 1. Subject created and given context via AddFallbackContext
+        // 2. Subject added to a Dictionary property
+        // 3. Subject removed from Dictionary
+        // The reference count should be 0 after step 3, not 1
+
+        // Arrange
+        var events = new List<string>();
+
+        var handler = new TestLifecyleHandler(events);
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler);
+
+        var container = new Container(context) { Name = "Test" };
+
+        // Create child and attach via context BEFORE adding to dictionary
+        var child = new Person { FirstName = "Child" };
+        ((IInterceptorSubject)child).Context.AddFallbackContext(context);
+
+        events.Clear(); // Clear context attachment events
+
+        // Add to dictionary - should increment count to 1
+        container.Children = new Dictionary<string, Person> { { "key1", child } };
+
+        var attachEvent = events.Single(e => e.Contains("{Child }") && e.StartsWith("Attached:"));
+        Assert.Contains("count: 1", attachEvent);
+
+        events.Clear();
+
+        // Act - remove from dictionary - should decrement count to 0
+        container.Children = new Dictionary<string, Person>();
+
+        // Assert - reference count should be 0, not 1!
+        var detachEvent = events.Single(e => e.Contains("{Child }") && e.StartsWith("Detached:"));
+        Assert.Contains("count: 0", detachEvent);
+    }
 }

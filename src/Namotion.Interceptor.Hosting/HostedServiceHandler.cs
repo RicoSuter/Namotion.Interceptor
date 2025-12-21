@@ -24,8 +24,8 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     public void AttachSubject(SubjectLifecycleChange change)
     {
         _logger ??= _loggerResolver();
-        
-        if (change.ReferenceCount == 1)
+
+        if (change.IsFirstAttach)
         {
             if (change.Subject is IHostedService hostedService)
             {
@@ -43,15 +43,17 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     {
         _logger ??= _loggerResolver();
 
-        if (change.ReferenceCount == 0)
+        if (change.IsFinalDetach)
         {
             if (change.Subject is IHostedService hostedService)
             {
                 DetachHostedService(hostedService);
+                change.Subject.DetachHostedService(hostedService);
             }
 
-            foreach (var attachedHostedService in change.Subject.GetAttachedHostedServices())
+            foreach (var attachedHostedService in change.Subject.GetAttachedHostedServices().ToList())
             {
+                DetachHostedService(attachedHostedService);
                 change.Subject.DetachHostedService(attachedHostedService);
             }
         }
@@ -140,7 +142,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     
     internal void AttachHostedService(IHostedService hostedService)
     {
-        lock (hostedService)
+        lock (_hostedServices)
         {
             if (_hostedServices.Add(hostedService))
             {
