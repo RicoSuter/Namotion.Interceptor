@@ -1,9 +1,6 @@
 using System.Device.Gpio;
 using HomeBlaze.Abstractions;
-using Namotion.Devices.Gpio.Interceptors;
 using Namotion.Devices.Gpio.Tests.Mocks;
-using Namotion.Interceptor;
-using Namotion.Interceptor.Interceptors;
 using Xunit;
 
 namespace Namotion.Devices.Gpio.Tests.Interceptors;
@@ -21,17 +18,15 @@ public class GpioModeChangeInterceptorTests
         var unregisteredPins = new List<int>();
         var registeredPins = new List<int>();
 
-        var context = InterceptorSubjectContext.Create();
-        context.AddService<IWriteInterceptor>(new GpioModeChangeInterceptor(
-            controller,
-            pin => registeredPins.Add(pin),
-            pin => unregisteredPins.Add(pin)));
-
-        var pin = new GpioPin();
-        ((IInterceptorSubject)pin).Context.AddFallbackContext(context);
-        pin.PinNumber = 17;
-        pin.Mode = GpioPinMode.Input;
-        pin.Status = ServiceStatus.Running;
+        var pin = new GpioPin
+        {
+            Controller = controller,
+            RegisterInterrupt = pin => registeredPins.Add(pin),
+            UnregisterInterrupt = pin => unregisteredPins.Add(pin),
+            PinNumber = 17,
+            Mode = GpioPinMode.Input,
+            Status = ServiceStatus.Running
+        };
 
         // Act
         pin.Mode = GpioPinMode.Output;
@@ -53,18 +48,16 @@ public class GpioModeChangeInterceptorTests
         var unregisteredPins = new List<int>();
         var registeredPins = new List<int>();
 
-        var context = InterceptorSubjectContext.Create();
-        context.AddService<IWriteInterceptor>(new GpioModeChangeInterceptor(
-            controller,
-            pin => registeredPins.Add(pin),
-            pin => unregisteredPins.Add(pin)));
-
-        var pin = new GpioPin();
-        ((IInterceptorSubject)pin).Context.AddFallbackContext(context);
-        pin.PinNumber = 17;
-        pin.Mode = GpioPinMode.Output;
-        pin.Status = ServiceStatus.Running;
-        pin.Value = false;
+        var pin = new GpioPin
+        {
+            Controller = controller,
+            RegisterInterrupt = pin => registeredPins.Add(pin),
+            UnregisterInterrupt = pin => unregisteredPins.Add(pin),
+            PinNumber = 17,
+            Mode = GpioPinMode.Output,
+            Status = ServiceStatus.Running,
+            Value = false
+        };
 
         // Act
         pin.Mode = GpioPinMode.Input;
@@ -86,17 +79,15 @@ public class GpioModeChangeInterceptorTests
         var unregisteredPins = new List<int>();
         var registeredPins = new List<int>();
 
-        var context = InterceptorSubjectContext.Create();
-        context.AddService<IWriteInterceptor>(new GpioModeChangeInterceptor(
-            controller,
-            pin => registeredPins.Add(pin),
-            pin => unregisteredPins.Add(pin)));
-
-        var pin = new GpioPin();
-        ((IInterceptorSubject)pin).Context.AddFallbackContext(context);
-        pin.PinNumber = 17;
-        pin.Mode = GpioPinMode.Input;
-        pin.Status = ServiceStatus.Running;
+        var pin = new GpioPin
+        {
+            Controller = controller,
+            RegisterInterrupt = pin => registeredPins.Add(pin),
+            UnregisterInterrupt = pin => unregisteredPins.Add(pin),
+            PinNumber = 17,
+            Mode = GpioPinMode.Input,
+            Status = ServiceStatus.Running
+        };
 
         // Act
         pin.Mode = GpioPinMode.InputPullUp;
@@ -115,17 +106,15 @@ public class GpioModeChangeInterceptorTests
         using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
         controller.OpenPin(17, PinMode.Input);
 
-        var context = InterceptorSubjectContext.Create();
-        context.AddService<IWriteInterceptor>(new GpioModeChangeInterceptor(
-            controller,
-            _ => { },
-            _ => { }));
-
-        var pin = new GpioPin();
-        ((IInterceptorSubject)pin).Context.AddFallbackContext(context);
-        pin.PinNumber = 17;
-        pin.Mode = GpioPinMode.Input;
-        pin.Status = ServiceStatus.Running;
+        var pin = new GpioPin
+        {
+            Controller = controller,
+            RegisterInterrupt = _ => { },
+            UnregisterInterrupt = _ => { },
+            PinNumber = 17,
+            Mode = GpioPinMode.Input,
+            Status = ServiceStatus.Running
+        };
 
         // Act
         pin.Mode = GpioPinMode.InputPullDown;
@@ -142,18 +131,16 @@ public class GpioModeChangeInterceptorTests
         using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
         controller.OpenPin(17, PinMode.Input);
 
-        var context = InterceptorSubjectContext.Create();
-        context.AddService<IWriteInterceptor>(new GpioModeChangeInterceptor(
-            controller,
-            _ => { },
-            _ => { }));
-
-        var pin = new GpioPin();
-        ((IInterceptorSubject)pin).Context.AddFallbackContext(context);
-        pin.PinNumber = 17;
-        pin.Mode = GpioPinMode.Input;
-        pin.Status = ServiceStatus.Running;
-        pin.Value = true; // Set value before mode change
+        var pin = new GpioPin
+        {
+            Controller = controller,
+            RegisterInterrupt = _ => { },
+            UnregisterInterrupt = _ => { },
+            PinNumber = 17,
+            Mode = GpioPinMode.Input,
+            Status = ServiceStatus.Running,
+            Value = true // Set value before mode change
+        };
 
         // Act
         pin.Mode = GpioPinMode.Output;
@@ -172,17 +159,15 @@ public class GpioModeChangeInterceptorTests
 
         var interruptCalled = false;
 
-        var context = InterceptorSubjectContext.Create();
-        context.AddService<IWriteInterceptor>(new GpioModeChangeInterceptor(
-            controller,
-            _ => interruptCalled = true,
-            _ => interruptCalled = true));
-
-        var pin = new GpioPin();
-        ((IInterceptorSubject)pin).Context.AddFallbackContext(context);
-        pin.PinNumber = 17;
-        pin.Mode = GpioPinMode.Input;
-        pin.Status = ServiceStatus.Unavailable; // Not running
+        var pin = new GpioPin
+        {
+            Controller = controller,
+            RegisterInterrupt = _ => interruptCalled = true,
+            UnregisterInterrupt = _ => interruptCalled = true,
+            PinNumber = 17,
+            Mode = GpioPinMode.Input,
+            Status = ServiceStatus.Unavailable // Not running
+        };
 
         // Act
         pin.Mode = GpioPinMode.Output;
@@ -202,17 +187,15 @@ public class GpioModeChangeInterceptorTests
 
         var interactionCount = 0;
 
-        var context = InterceptorSubjectContext.Create();
-        context.AddService<IWriteInterceptor>(new GpioModeChangeInterceptor(
-            controller,
-            _ => interactionCount++,
-            _ => interactionCount++));
-
-        var pin = new GpioPin();
-        ((IInterceptorSubject)pin).Context.AddFallbackContext(context);
-        pin.PinNumber = 17;
-        pin.Mode = GpioPinMode.Input;
-        pin.Status = ServiceStatus.Running;
+        var pin = new GpioPin
+        {
+            Controller = controller,
+            RegisterInterrupt = _ => interactionCount++,
+            UnregisterInterrupt = _ => interactionCount++,
+            PinNumber = 17,
+            Mode = GpioPinMode.Input,
+            Status = ServiceStatus.Running
+        };
 
         var initialModeCount = mockDriver.PinModes.Count;
 
