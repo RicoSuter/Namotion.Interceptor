@@ -8,7 +8,7 @@ namespace Namotion.Devices.Gpio;
 /// Represents an analog input channel from an ADC.
 /// </summary>
 [InterceptorSubject]
-public partial class AnalogChannel : IHostedSubject
+public partial class AnalogChannel : IHostedSubject, ITitleProvider, IIconProvider
 {
     /// <summary>
     /// The ADC channel number.
@@ -38,6 +38,12 @@ public partial class AnalogChannel : IHostedSubject
     /// </summary>
     [State]
     public partial string? StatusMessage { get; set; }
+
+    /// <inheritdoc />
+    public string? Title => $"Channel {ChannelNumber}";
+
+    /// <inheritdoc />
+    public string? Icon => "ShowChart";
 
     public AnalogChannel()
     {
