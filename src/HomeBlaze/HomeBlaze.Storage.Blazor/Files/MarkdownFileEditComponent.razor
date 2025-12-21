@@ -23,7 +23,7 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(MarkdownFile))]
 @implements ISubjectEditComponent
 
-@if (_isLoading)
+@if (string.IsNullOrEmpty(_originalContent))
 {
     <MudProgressCircular Indeterminate="true"/>
 }
@@ -195,6 +195,7 @@ else
         var replacement = $"```subject({region.Name})\n{newJson}\n```";
         _currentContent = Regex.Replace(_currentContent, pattern, replacement);
 
+        // TODO: Code below is repeated 3x (extract to method)
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);
 
@@ -204,6 +205,9 @@ else
         // Save the file
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
+
+        // Reload the file to update Children dictionary with new parsed content
+        await File.OnFileChangedAsync(CancellationToken.None);
 
         // Apply configuration if needed
         if (subject is IConfigurableSubject configurable)
@@ -289,6 +293,9 @@ else
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
 
+        // Reload the file to update Children dictionary with new parsed content
+        await File.OnFileChangedAsync(CancellationToken.None);
+
         // Update dirty state
         _originalContent = _currentContent;
         IsDirtyChanged?.Invoke(false);
@@ -345,6 +352,9 @@ else
         // Save the file
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
+
+        // Reload the file to update Children dictionary with new parsed content
+        await File.OnFileChangedAsync(CancellationToken.None);
 
         // Update dirty state
         _originalContent = _currentContent;

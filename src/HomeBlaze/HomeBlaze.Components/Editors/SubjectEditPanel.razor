@@ -72,7 +72,7 @@
 
     private void OnIsDirtyChanged(bool isDirty) => InvokeAsync(StateHasChanged);
 
-    public async Task SaveAsync()
+    public async Task SaveAsync(CancellationToken cancellationToken)
     {
         var subject = Subject;
         if (subject == null) return;
@@ -86,7 +86,7 @@
                     return;
                 }
 
-                await _editComponent.SaveAsync(CancellationToken.None);
+                await _editComponent.SaveAsync(cancellationToken);
             }
             else
             {
@@ -101,17 +101,17 @@
             if (subject is IConfigurableSubject)
             {
                 var configurationWriter = FindNearestConfigurationWriter(subject);
-                await configurationWriter.WriteConfigurationAsync(subject, CancellationToken.None);
+                await configurationWriter.WriteConfigurationAsync(subject, cancellationToken);
             }
 
             if (subject is IStorageFile storageFile)
             {
-                await storageFile.OnFileChangedAsync(CancellationToken.None);
+                await storageFile.OnFileChangedAsync(cancellationToken);
             }
 
             if (subject is IConfigurableSubject configurableSubject)
             {
-                await configurableSubject.ApplyConfigurationAsync(CancellationToken.None);
+                await configurableSubject.ApplyConfigurationAsync(cancellationToken);
             }
 
             Snackbar.Add("Configuration saved.", Severity.Info);
