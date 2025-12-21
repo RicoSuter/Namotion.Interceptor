@@ -14,7 +14,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
 {
     public void AttachSubject(SubjectLifecycleChange change)
     {
-        if (change.ReferenceCount == 1)
+        if (change.IsFirstAttach)
         {
             var registeredSubject = change.Subject.TryGetRegisteredSubject()
                                     ?? throw new InvalidOperationException("Subject not registered");

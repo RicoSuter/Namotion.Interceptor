@@ -33,7 +33,7 @@
     {
         if (_editPanel != null)
         {
-            await _editPanel.SaveAsync();
+            await _editPanel.SaveAsync(CancellationToken.None);
             MudDialog?.Close(DialogResult.Ok(true));
         }
     }
@@ -49,16 +49,13 @@
             { x => x.Subject, subject }
         };
 
-        // Check if custom edit component exists to determine dialog size
         var editRegistration = componentRegistry.GetComponent(
             subject.GetType(),
             SubjectComponentType.Edit);
-
-        var maxWidth = editRegistration != null ? MaxWidth.Large : MaxWidth.Small;
-
+        
         var options = new DialogOptions
         {
-            MaxWidth = maxWidth,
+            MaxWidth = editRegistration != null ? MaxWidth.Large : MaxWidth.Small,
             FullWidth = true,
             CloseButton = true
         };
