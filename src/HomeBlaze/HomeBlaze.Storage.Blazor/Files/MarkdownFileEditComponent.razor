@@ -91,7 +91,6 @@ else
     private StandaloneCodeEditor? _editor;
     private string _originalContent = string.Empty;
     private string _currentContent = string.Empty;
-    private bool _isLoading = true;
     private bool _previousDarkMode = true;
     private List<DecorationRegion> _decorationRegions = new();
     private string[] _currentDecorationIds = Array.Empty<string>();
@@ -390,15 +389,14 @@ else
         _currentDecorationIds = await _editor.DeltaDecorations(_currentDecorationIds, decorations);
     }
 
-    protected override async Task OnParametersSetAsync()
+    protected override async Task OnInitializedAsync()
     {
-        if (File != null && _isLoading)
+        if (File != null)
         {
             await using var stream = await File.ReadAsync(CancellationToken.None);
             using var reader = new StreamReader(stream);
             _originalContent = await reader.ReadToEndAsync();
             _currentContent = _originalContent;
-            _isLoading = false;
         }
     }
 

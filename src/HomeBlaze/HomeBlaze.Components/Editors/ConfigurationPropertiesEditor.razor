@@ -50,10 +50,8 @@ else
 
     public bool HasErrors => _errors.Any();
     
-    protected override void OnParametersSet()
+    protected override void OnInitialized()
     {
-        base.OnParametersSet();
-
         _changeSubscription?.Dispose();
         _changeSubscription = null;
 

@@ -52,7 +52,7 @@
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
 
-    protected override void OnParametersSet()
+    protected override void OnInitialized()
     {
         if (WidgetSubject != null)
         {
