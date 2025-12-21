@@ -1,0 +1,8 @@
+using Namotion.Interceptor;
+
+namespace HomeBlaze.Components;
+
+/// <summary>
+/// Result from the CreateSubjectWizard containing the created subject and chosen name.
+/// </summary>
+public record CreateSubjectResult(IInterceptorSubject Subject, string Name);

@@ -1,0 +1,40 @@
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(IConfigurableSubject))]
+@implements ISubjectEditComponent
+
+<ConfigurationPropertiesEditor @ref="_editor" Subject="Subject" />
+
+@code {
+    private ConfigurationPropertiesEditor? _editor;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    public bool IsValid => _editor?.IsValid ?? true;
+    public bool IsDirty { get; private set; }
+
+    public event Action<bool>? IsValidChanged
+    {
+        add { }
+        remove { }
+    }
+
+    public event Action<bool>? IsDirtyChanged;
+
+    public string PreferredDialogSize => "Small";
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        _editor?.ApplyChanges();
+        IsDirty = false;
+        IsDirtyChanged?.Invoke(false);
+        return Task.CompletedTask;
+    }
+}

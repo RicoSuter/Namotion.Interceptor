@@ -1,6 +1,7 @@
 @using System.Text.RegularExpressions
 @using BlazorMonaco.Editor
 @using HomeBlaze.Abstractions
+@using HomeBlaze.Components
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Services
@@ -26,6 +27,14 @@
 else
 {
     <SectionContent SectionName="EditActions">
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OnCreateClick"
+                   data-testid="create-subject-button">
+            Create
+        </MudButton>
         @if (_activeRegion != null)
         {
             <MudButton Variant="Variant.Filled"
@@ -68,6 +77,9 @@ else
 
 @code {
     [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
 
     [CascadingParameter(Name = "IsDarkMode")]
     public bool IsDarkMode { get; set; } = true;
@@ -280,6 +292,63 @@ else
         }
 
         _currentContent = string.Join('\n', lines);
+
+        // Update the Monaco editor
+        await _editor.SetValue(_currentContent);
+
+        // Refresh decorations
+        await RefreshDecorationsAsync();
+
+        // Save the file
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
+        await File.WriteAsync(stream, CancellationToken.None);
+
+        // Update dirty state
+        _originalContent = _currentContent;
+        IsDirtyChanged?.Invoke(false);
+    }
+
+    private async Task OnCreateClick()
+    {
+        if (File == null || _editor == null)
+            return;
+
+        // Open the CreateSubjectWizard
+        var result = await CreateSubjectWizard.ShowAsync(DialogService);
+        if (result == null)
+            return;
+
+        // Serialize the new subject
+        var json = Serializer.Serialize(result.Subject);
+
+        // Create the subject block
+        var subjectBlock = $"```subject({result.Name})\n{json}\n```";
+
+        // Get cursor position to insert at
+        var position = await _editor.GetPosition();
+        var lines = _currentContent.Split('\n');
+
+        // Insert at cursor line (or end if no cursor)
+        var insertLine = position?.LineNumber ?? lines.Length;
+        var newLines = new List<string>(lines);
+
+        // Add a blank line before if not at start
+        if (insertLine > 1 && !string.IsNullOrWhiteSpace(lines[insertLine - 2]))
+        {
+            newLines.Insert(insertLine - 1, "");
+            insertLine++;
+        }
+
+        // Insert the subject block
+        newLines.InsertRange(insertLine - 1, subjectBlock.Split('\n'));
+
+        // Add a blank line after
+        if (insertLine + 2 < newLines.Count && !string.IsNullOrWhiteSpace(newLines[insertLine + 2]))
+        {
+            newLines.Insert(insertLine + 2, "");
+        }
+
+        _currentContent = string.Join('\n', newLines);
 
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);

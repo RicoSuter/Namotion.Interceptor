@@ -1,0 +1,98 @@
+@using HomeBlaze.Abstractions
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
+@using MudBlazor
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(IConfigurableSubject))]
+@implements ISubjectEditComponent
+
+<MudStack Spacing="3">
+    @foreach (var property in GetConfigurationProperties())
+    {
+        <div>
+            @if (property.Type == typeof(string))
+            {
+                <MudTextField T="string"
+                              Label="@property.Name"
+                              Value="@((string?)property.GetValue())"
+                              ValueChanged="@(v => { property.SetValue(v); OnPropertyChanged(); })"
+                              Immediate="true"
+                              data-testid="@($"config-field-{property.Name.ToLowerInvariant()}")" />
+            }
+            else if (property.Type == typeof(int))
+            {
+                <MudNumericField T="int"
+                                 Label="@property.Name"
+                                 Value="@((int)(property.GetValue() ?? 0))"
+                                 ValueChanged="@(v => { property.SetValue(v); OnPropertyChanged(); })"
+                                 Immediate="true"
+                                 data-testid="@($"config-field-{property.Name.ToLowerInvariant()}")" />
+            }
+            else if (property.Type == typeof(bool))
+            {
+                <MudSwitch T="bool"
+                           Label="@property.Name"
+                           Value="@((bool)(property.GetValue() ?? false))"
+                           ValueChanged="@(v => { property.SetValue(v); OnPropertyChanged(); })"
+                           data-testid="@($"config-field-{property.Name.ToLowerInvariant()}")" />
+            }
+            else if (property.Type == typeof(TimeSpan))
+            {
+                <MudTextField T="string"
+                              Label="@property.Name"
+                              Value="@((property.GetValue() as TimeSpan?)?.ToString() ?? "")"
+                              ValueChanged="@(v => { if (TimeSpan.TryParse(v, out var ts)) property.SetValue(ts); OnPropertyChanged(); })"
+                              Immediate="true"
+                              HelperText="Format: hh:mm:ss"
+                              data-testid="@($"config-field-{property.Name.ToLowerInvariant()}")" />
+            }
+            else
+            {
+                <MudTextField T="string"
+                              Label="@($"{property.Name} ({property.Type.Name})")"
+                              Value="@(property.GetValue()?.ToString() ?? "")"
+                              Disabled="true"
+                              HelperText="Unsupported type for generic editor"
+                              data-testid="@($"config-field-{property.Name.ToLowerInvariant()}")" />
+            }
+        </div>
+    }
+</MudStack>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    public bool IsValid => true;
+    public bool IsDirty { get; private set; }
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    public string PreferredDialogSize => "Small";
+
+    private IEnumerable<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> GetConfigurationProperties()
+    {
+        if (Subject == null)
+            return Enumerable.Empty<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty>();
+
+        return Subject.GetConfigurationProperties();
+    }
+
+    private void OnPropertyChanged()
+    {
+        IsDirty = true;
+        IsDirtyChanged?.Invoke(true);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        IsDirty = false;
+        IsDirtyChanged?.Invoke(false);
+        return Task.CompletedTask;
+    }
+}

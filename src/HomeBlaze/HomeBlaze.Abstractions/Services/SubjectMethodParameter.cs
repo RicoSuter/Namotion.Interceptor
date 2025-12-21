@@ -18,20 +18,14 @@ public sealed class SubjectMethodParameter
     public Type Type { get; }
 
     /// <summary>
-    /// Whether this parameter type is supported for UI input (primitives, enums, nullable wrappers).
-    /// </summary>
-    public bool IsSupported { get; }
-
-    /// <summary>
     /// The underlying ParameterInfo from reflection.
     /// </summary>
     public ParameterInfo ParameterInfo { get; }
 
-    public SubjectMethodParameter(ParameterInfo parameterInfo, bool isSupported)
+    public SubjectMethodParameter(ParameterInfo parameterInfo)
     {
         ParameterInfo = parameterInfo;
         Name = parameterInfo.Name ?? $"arg{parameterInfo.Position}";
         Type = parameterInfo.ParameterType;
-        IsSupported = isSupported;
     }
 }

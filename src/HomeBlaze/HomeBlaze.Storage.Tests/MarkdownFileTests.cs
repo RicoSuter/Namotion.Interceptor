@@ -303,6 +303,7 @@ public class MarkdownFileTests
         services.AddSingleton(typeProvider);
         services.AddSingleton(typeRegistry);
         services.AddSingleton<IInterceptorSubjectContext>(context);
+        services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
         services.AddSingleton<SubjectPathResolver>();

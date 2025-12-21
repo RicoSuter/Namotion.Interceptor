@@ -18,10 +18,34 @@ public class SubjectComponentRegistry
 
     /// <summary>
     /// Gets a specific component registration for a subject type and component type.
+    /// Supports inheritance and interface fallback for generic components.
     /// </summary>
     public SubjectComponentRegistration? GetComponent(Type subjectType, SubjectComponentType type, string? name = null)
     {
-        return _components.Value.GetValueOrDefault((subjectType, type, name));
+        // Try exact match first
+        var exact = _components.Value.GetValueOrDefault((subjectType, type, name));
+        if (exact != null)
+            return exact;
+
+        // Try base classes
+        var baseType = subjectType.BaseType;
+        while (baseType != null && baseType != typeof(object))
+        {
+            var baseMatch = _components.Value.GetValueOrDefault((baseType, type, name));
+            if (baseMatch != null)
+                return baseMatch;
+            baseType = baseType.BaseType;
+        }
+
+        // Try interfaces (for IConfigurableSubject fallback)
+        foreach (var iface in subjectType.GetInterfaces())
+        {
+            var ifaceMatch = _components.Value.GetValueOrDefault((iface, type, name));
+            if (ifaceMatch != null)
+                return ifaceMatch;
+        }
+
+        return null;
     }
 
     /// <summary>
