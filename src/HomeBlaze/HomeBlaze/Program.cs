@@ -5,6 +5,7 @@ using HomeBlaze.Servers.OpcUa;
 using HomeBlaze.Servers.OpcUa.Blazor;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Blazor;
 using HomeBlaze.Storage.Blazor.Files;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
 

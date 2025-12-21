@@ -291,8 +291,10 @@ public class CreateSubjectWizardTests
     {
         // Arrange
         // Use unique name with timestamp to avoid conflicts with previous test runs
-        var testName = $"E2ETestMotor_{DateTime.Now:HHmmssff}";
-        var testFileName = $"{testName}.json";
+        var timestamp = DateTime.Now.ToString("HHmmssff");
+        var subjectName = $"E2ETestMotor_{timestamp}";  // Wizard subject name (becomes filename)
+        var motorDisplayName = $"TestMotor_{timestamp}";  // Motor's Name property (displayed in UI)
+        var testFileName = $"{subjectName}.json";
 
         var page = await _fixture.CreatePageAsync();
 
@@ -308,9 +310,9 @@ public class CreateSubjectWizardTests
 
             await OpenCreateWizardAsync(page);
 
-            // Enter name
+            // Enter subject name (used for filename)
             var nameInput = page.GetByLabel("Name");
-            await nameInput.FillAsync(testName);
+            await nameInput.FillAsync(subjectName);
             await page.WaitForTimeoutAsync(300);
 
             // Select Motor type
@@ -318,9 +320,9 @@ public class CreateSubjectWizardTests
             await motorTypeCard.ClickAsync();
             await page.WaitForTimeoutAsync(500);
 
-            // Should be on step 2 - configure motor
+            // Should be on step 2 - configure motor name (displayed in UI)
             var motorNameInput = page.GetByLabel("Name", new() { Exact = false }).Last;
-            await motorNameInput.FillAsync("Test Motor E2E");
+            await motorNameInput.FillAsync(motorDisplayName);
             await page.WaitForTimeoutAsync(300);
 
             // Act: Click Create
@@ -331,19 +333,20 @@ public class CreateSubjectWizardTests
             var wizard = page.Locator("[data-testid='create-subject-wizard']");
             await Assertions.Expect(wizard).Not.ToBeVisibleAsync(new() { Timeout = 5000 });
 
-            // Give time for hierarchy update and file write
-            await page.WaitForTimeoutAsync(2000);
+            // Wait for Blazor SignalR to propagate changes
+            await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 15000 });
+            await page.WaitForTimeoutAsync(3000); // Extra time for Blazor Server rendering
 
             // First verify the JSON file was created with correct content
             var testFilePath = Path.Combine("TestData", testFileName); // Root level, not in demo folder
             Assert.True(File.Exists(testFilePath), "JSON file should be created");
 
             var jsonContent = await File.ReadAllTextAsync(testFilePath);
-            Assert.Contains("Test Motor E2E", jsonContent); // Motor name should be in JSON
+            Assert.Contains(motorDisplayName, jsonContent); // Motor name should be in JSON
 
-            // Now check if subject appears in the browser
-            var createdSubject = page.GetByText(testName);
-            await Assertions.Expect(createdSubject).ToBeVisibleAsync(new() { Timeout = 10000 });
+            // Now check if subject appears in the browser - search for the motor's display name
+            var createdSubject = page.GetByText(motorDisplayName);
+            await Assertions.Expect(createdSubject).ToBeVisibleAsync(new() { Timeout = 15000 });
         }
         finally
         {

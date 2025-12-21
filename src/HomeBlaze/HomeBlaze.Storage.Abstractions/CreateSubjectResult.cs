@@ -1,6 +1,6 @@
 using Namotion.Interceptor;
 
-namespace HomeBlaze.Components;
+namespace HomeBlaze.Storage.Abstractions;
 
 /// <summary>
 /// Result from the CreateSubjectWizard containing the created subject and chosen name.

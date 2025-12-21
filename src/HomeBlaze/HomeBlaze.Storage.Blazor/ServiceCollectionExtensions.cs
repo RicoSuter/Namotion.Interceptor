@@ -1,7 +1,8 @@
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace HomeBlaze.Storage;
+namespace HomeBlaze.Storage.Blazor;
 
 /// <summary>
 /// Extension methods for registering HomeBlaze.Storage services in dependency injection.
@@ -14,6 +15,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddHomeBlazeStorage(this IServiceCollection services)
     {
         services.AddSingleton<MarkdownContentParser>();
+        services.AddScoped<ISubjectCreator, BlazorSubjectCreator>();
         return services;
     }
 }

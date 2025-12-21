@@ -1,10 +1,6 @@
-using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Components;
-using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
-using MudBlazor;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
@@ -94,9 +90,9 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// Opens the create subject wizard to add a new subject to this folder.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
-    public async Task CreateAsync(IDialogService dialogService)
+    public async Task CreateAsync(ISubjectCreator subjectCreator)
     {
-        var result = await CreateSubjectWizard.ShowAsync(dialogService);
+        var result = await subjectCreator.CreateAsync(CancellationToken.None);
         if (result == null)
             return;
 

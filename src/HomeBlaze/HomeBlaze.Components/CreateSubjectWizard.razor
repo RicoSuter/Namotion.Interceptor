@@ -2,6 +2,7 @@
 @using System.Reflection
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Services
+@using HomeBlaze.Storage.Abstractions
 
 @inject SubjectTypeRegistry TypeRegistry
 @inject SubjectComponentRegistry ComponentRegistry
@@ -109,23 +110,7 @@
     [CascadingParameter]
     private IMudDialogInstance? MudDialog { get; set; }
 
-    private int _activeStepValue = 0;
-    private int _activeStep
-    {
-        get => _activeStepValue;
-        set
-        {
-            // TODO: Just use a field and call StateHasChanged manually? => not in setter
-            if (_activeStepValue != value)
-            {
-                _activeStepValue = value;
-                StateHasChanged();
-                // MudDialog TitleContent doesn't auto-update - force it
-                // See: https://github.com/MudBlazor/MudBlazor/issues/7201
-                MudDialog?.StateHasChanged();
-            }
-        }
-    }
+    private int _activeStep = 0;
 
     private Type? _selectedType;
     private IInterceptorSubject? _createdSubject;
@@ -167,6 +152,8 @@
         if (!string.IsNullOrWhiteSpace(_subjectName))
         {
             _activeStep = 1;
+            StateHasChanged();
+            MudDialog?.StateHasChanged();
         }
     }
 
@@ -175,12 +162,16 @@
         if (_selectedType != null && !string.IsNullOrWhiteSpace(_subjectName))
         {
             _activeStep = 1;
+            StateHasChanged();
+            MudDialog?.StateHasChanged();
         }
     }
 
     private void GoBack()
     {
         _activeStep = 0;
+        StateHasChanged();
+        MudDialog?.StateHasChanged();
     }
 
     private void Cancel()
