@@ -48,10 +48,20 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider
     public partial string? StatusMessage { get; set; }
 
     /// <inheritdoc />
-    public string Title => $"Pin {PinNumber}";
+    [Derived]
+    public string Title => $"Pin {PinNumber}: {Status} ({Mode}) {Value}";
 
     /// <inheritdoc />
     public string Icon => "Settings";
+
+    /// <inheritdoc />
+    [Derived]
+    public string? IconColor => Status switch
+    {
+        ServiceStatus.Running => Value ? "Success" : "Default",
+        ServiceStatus.Error => "Error",
+        _ => "Warning"
+    };
 
     public GpioPin()
     {

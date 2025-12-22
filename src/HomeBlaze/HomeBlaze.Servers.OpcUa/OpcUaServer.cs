@@ -138,6 +138,14 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
 
     public string? Icon => "Dns";
 
+    [Derived]
+    public string? IconColor => Status switch
+    {
+        ServiceStatus.Running => "Success",
+        ServiceStatus.Error => "Error",
+        _ => "Warning"
+    };
+
     public OpcUaServer(
         RootManager rootManager,
         SubjectPathResolver pathResolver,

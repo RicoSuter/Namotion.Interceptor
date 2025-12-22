@@ -23,7 +23,7 @@
         }
 
         <h1 style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0;">
-            <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" Class="mr-2" Style="vertical-align: middle;" />
+            <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" Color="@GetSubjectIconColor(Subject)" Class="mr-2" Style="vertical-align: middle;" />
             @GetSubjectTitle()
         </h1>
     </MudListSubheader>
@@ -106,7 +106,7 @@
                     <MudListItem Value="@child.Subject"
                                  OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
                                  Icon="@GetSubjectIcon(child.Subject)"
-                                 IconColor="@(isSelected ? Color.Primary : Color.Default)"
+                                 IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
                                  Class="@(isSelected ? "mud-primary-text" : "")">
                         @if (isSelected)
                         {
@@ -140,7 +140,7 @@
                                 <MudListItem Value="@child.Subject"
                                              OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
                                              Icon="@GetSubjectIcon(child.Subject)"
-                                             IconColor="@(isSelected ? Color.Primary : Color.Default)"
+                                             IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
                                              Class="@(isSelected ? "mud-primary-text" : "")">
                                     @if (isSelected)
                                     {
@@ -236,6 +236,14 @@
             return Icons.Material.Filled.QuestionMark;
 
         return SubjectIconExtensions.ResolveMudBlazorIcon(subject.GetIcon());
+    }
+
+    private Color GetSubjectIconColor(IInterceptorSubject? subject)
+    {
+        if (subject == null)
+            return Color.Default;
+
+        return SubjectIconExtensions.ResolveMudBlazorColor(subject.GetIconColor());
     }
 
     private string GetObjectPath()

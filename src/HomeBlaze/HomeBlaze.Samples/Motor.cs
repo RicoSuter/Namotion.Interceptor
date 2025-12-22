@@ -24,6 +24,14 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
 
     public string? Icon => "Settings";
 
+    [Derived]
+    public string? IconColor => Status switch
+    {
+        MotorStatus.Running => "Success",
+        MotorStatus.Error => "Error",
+        _ => "Warning"
+    };
+
     /// <summary>
     /// Target speed in RPM.
     /// </summary>
