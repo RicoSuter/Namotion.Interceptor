@@ -3,9 +3,9 @@ using HomeBlaze.Abstractions;
 using Namotion.Devices.Gpio.Tests.Mocks;
 using Xunit;
 
-namespace Namotion.Devices.Gpio.Tests.Interceptors;
+namespace Namotion.Devices.Gpio.Tests;
 
-public class GpioWriteInterceptorTests
+public class GpioWriteTests
 {
     [Fact]
     public void WriteProperty_OutputPin_WritesToHardware()

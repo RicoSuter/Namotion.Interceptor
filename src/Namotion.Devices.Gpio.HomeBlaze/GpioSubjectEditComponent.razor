@@ -115,13 +115,11 @@
 
     private void OnMcp3008EnabledChanged(bool enabled)
     {
-        if (GpioSubject == null) return;
-        GpioSubject.Mcp3008 = enabled ? new Mcp3008Configuration() : null;
+        GpioSubject?.Mcp3008 = enabled ? new Mcp3008Configuration() : null;
     }
 
     private void OnAds1115EnabledChanged(bool enabled)
     {
-        if (GpioSubject == null) return;
-        GpioSubject.Ads1115 = enabled ? new Ads1115Configuration() : null;
+        GpioSubject?.Ads1115 = enabled ? new Ads1115Configuration() : null;
     }
 }

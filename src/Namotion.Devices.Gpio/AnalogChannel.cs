@@ -40,10 +40,10 @@ public partial class AnalogChannel : IHostedSubject, ITitleProvider, IIconProvid
     public partial string? StatusMessage { get; set; }
 
     /// <inheritdoc />
-    public string? Title => $"Channel {ChannelNumber}";
+    public string Title => $"Channel {ChannelNumber}";
 
     /// <inheritdoc />
-    public string? Icon => "ShowChart";
+    public string Icon => "ShowChart";
 
     public AnalogChannel()
     {
