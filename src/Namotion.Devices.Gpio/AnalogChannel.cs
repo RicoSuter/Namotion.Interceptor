@@ -45,6 +45,15 @@ public partial class AnalogChannel : IHostedSubject, ITitleProvider, IIconProvid
     /// <inheritdoc />
     public string Icon => "ShowChart";
 
+    /// <inheritdoc />
+    [Derived]
+    public string? IconColor => Status switch
+    {
+        ServiceStatus.Running => "Success",
+        ServiceStatus.Error => "Error",
+        _ => "Warning"
+    };
+
     public AnalogChannel()
     {
         ChannelNumber = 0;

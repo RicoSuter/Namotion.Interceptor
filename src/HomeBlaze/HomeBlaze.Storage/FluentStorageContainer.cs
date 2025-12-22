@@ -76,6 +76,14 @@ public partial class FluentStorageContainer :
 
     public string Icon => "Storage";
 
+    [Derived]
+    public string? IconColor => Status switch
+    {
+        StorageStatus.Connected => "Success",
+        StorageStatus.Error => "Error",
+        _ => "Warning"
+    };
+
     public FluentStorageContainer(
         SubjectTypeRegistry typeRegistry,
         ConfigurableSubjectSerializer serializer,

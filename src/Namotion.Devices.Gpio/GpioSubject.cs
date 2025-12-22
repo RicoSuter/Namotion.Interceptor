@@ -82,6 +82,15 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     /// <inheritdoc />
     public string Icon => "Memory";
 
+    /// <inheritdoc />
+    [Derived]
+    public string? IconColor => Status switch
+    {
+        ServiceStatus.Running => "Success",
+        ServiceStatus.Error => "Error",
+        _ => "Warning"
+    };
+
     public GpioSubject()
     {
         PollingInterval = TimeSpan.FromSeconds(5);
