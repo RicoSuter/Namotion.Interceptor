@@ -55,6 +55,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     /// Auto-discovered GPIO pins indexed by pin number.
     /// </summary>
     [State]
+    [Configuration]
     public partial Dictionary<int, GpioPin> Pins { get; set; }
 
     /// <summary>
