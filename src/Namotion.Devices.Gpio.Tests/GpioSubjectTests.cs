@@ -77,13 +77,9 @@ public class GpioSubjectTests
         // Act
         await subject.StartAsync(cts.Token);
 
-        // Assert - All BCM pins 0-27 should be created with Unavailable status
-        Assert.Equal(28, subject.Pins.Count);
-        foreach (var pin in subject.Pins.Values)
-        {
-            Assert.Equal(ServiceStatus.Unavailable, pin.Status);
-            Assert.Equal("GPIO not supported on this platform", pin.StatusMessage);
-        }
+        // Assert - Pins dictionary should be empty when GPIO is not supported
+        // (pin count is dynamic based on platform, no pins available when unsupported)
+        Assert.Empty(subject.Pins);
     }
 
     [Fact]

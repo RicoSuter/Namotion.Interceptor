@@ -5,7 +5,7 @@ icon: Memory
 
 # GPIO (General Purpose Input/Output)
 
-The GPIO device provides access to Raspberry Pi GPIO pins and optional analog-to-digital converters (ADC).
+The GPIO device provides access to GPIO pins on various Linux-based single-board computers and optional analog-to-digital converters (ADC).
 
 ## Requirements
 
@@ -22,9 +22,13 @@ On older distributions, the package may be named `libgpiod2`.
 
 ### Supported Platforms
 
-- **Raspberry Pi 3/4/5** - Full GPIO support with 28 BCM pins (0-27)
-- **Other Linux with GPIO** - Requires libgpiod
-- **Windows/macOS** - Pins created with `Unavailable` status for development/testing
+- **Raspberry Pi 3/4/5** - Full GPIO support (pin count detected automatically)
+- **Orange Pi** - Supported via libgpiod
+- **BeagleBone** - Supported via libgpiod
+- **ODROID** - Supported via libgpiod
+- **Other Linux with GPIO** - Any board exposing `/dev/gpiochip*` via libgpiod
+- **Windows IoT Core** - Native support
+- **Windows/macOS** - No pins available (empty pins dictionary) for development/testing
 
 ## Pin Configuration
 
@@ -121,9 +125,16 @@ sudo apt install libgpiod3
 ### Pin shows "Unavailable" status
 
 Common causes:
-- Pin reserved for I2C (GPIO 2, 3) or SPI (GPIO 7-11)
+- Pin reserved for I2C (GPIO 2, 3) or SPI (GPIO 7-11) on Raspberry Pi
 - Pin in use by another process
-- Platform does not support GPIO
+- Hardware-specific pin reservation
+
+### No pins available (empty Pins dictionary)
+
+This occurs when:
+- Platform does not support GPIO (Windows/macOS without IoT support)
+- libgpiod is not installed on Linux
+- No GPIO chip detected on the system
 
 ### Write verification failed
 
@@ -134,7 +145,9 @@ The pin's `StatusMessage` will indicate "Write verification failed". This means:
 
 Check your wiring and ensure no external device is conflicting with the output.
 
-## BCM Pin Reference
+## BCM Pin Reference (Raspberry Pi)
+
+The pin count is detected automatically from the hardware. On Raspberry Pi, the following BCM pins are typically available:
 
 | BCM | Common Use |
 |-----|------------|

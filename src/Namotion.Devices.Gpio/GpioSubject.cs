@@ -8,22 +8,24 @@ using Iot.Device.Ads1115;
 using Iot.Device.Spi;
 using Microsoft.Extensions.Hosting;
 using Namotion.Devices.Gpio.Configuration;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Devices.Gpio;
 
 /// <summary>
-/// Represents a Raspberry Pi GPIO controller with auto-discovered pins
-/// and optional ADC support.
+/// Represents a GPIO controller with auto-discovered pins
+/// and optional ADC support. Supports Raspberry Pi, Orange Pi, BeagleBone,
+/// and other Linux-based boards via System.Device.Gpio.
 /// </summary>
 [InterceptorSubject]
 public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHostedSubject, ITitleProvider, IIconProvider
 {
+    private readonly GpioDriver? _driver;
+    private readonly ConcurrentDictionary<int, PinChangeEventHandler> _interruptHandlers = new();
+
     private GpioController? _controller;
     private Mcp3008? _mcp3008;
     private Ads1115? _ads1115;
-    private readonly ConcurrentDictionary<int, PinChangeEventHandler> _interruptHandlers = new();
 
     /// <summary>
     /// Auto-discovered GPIO pins indexed by pin number.
@@ -89,6 +91,16 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         StatusMessage = null;
     }
 
+    /// <summary>
+    /// Creates a GpioSubject with a custom GPIO driver.
+    /// Use this constructor for code-based usage with custom drivers or for testing.
+    /// </summary>
+    /// <param name="driver">The GPIO driver to use.</param>
+    public GpioSubject(GpioDriver driver) : this()
+    {
+        _driver = driver;
+    }
+
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -147,7 +159,9 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     {
         try
         {
-            _controller = new GpioController();
+            _controller = _driver != null 
+                ? new GpioController(PinNumberingScheme.Logical, _driver) 
+                : new GpioController();
             return InitializationResult.Success;
         }
         catch (PlatformNotSupportedException)
@@ -167,19 +181,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     {
         Status = ServiceStatus.Unavailable;
         StatusMessage = message;
-
-        var pins = new Dictionary<int, GpioPin>();
-        for (var pinNumber = 0; pinNumber <= 27; pinNumber++)
-        {
-            pins[pinNumber] = new GpioPin()
-            {
-                PinNumber = pinNumber,
-                Status = ServiceStatus.Unavailable,
-                StatusMessage = message
-            };
-        }
-
-        Pins = pins;
+        Pins = new Dictionary<int, GpioPin>();
     }
 
     private void DiscoverPins()
@@ -187,7 +189,9 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         if (_controller == null) return;
 
         var discoveredPins = new Dictionary<int, GpioPin>();
-        for (var pinNumber = 0; pinNumber <= 27; pinNumber++)
+        var pinCount = _controller.PinCount;
+        
+        for (var pinNumber = 0; pinNumber < pinCount; pinNumber++)
         {
             var pin = CreateAndOpenPin(pinNumber);
             discoveredPins[pinNumber] = pin;
