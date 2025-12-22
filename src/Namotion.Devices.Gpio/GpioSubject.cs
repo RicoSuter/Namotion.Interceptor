@@ -74,10 +74,10 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     public partial string? StatusMessage { get; set; }
 
     /// <inheritdoc />
-    public string? Title => "GPIO";
+    public string Title => "GPIO";
 
     /// <inheritdoc />
-    public string? Icon => "Memory";
+    public string Icon => "Memory";
 
     public GpioSubject()
     {
@@ -95,19 +95,19 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         // Retry loop for initialization
         while (!stoppingToken.IsCancellationRequested)
         {
-            var result = await TryInitializeAsync(stoppingToken);
+            var result = TryInitialize();
             if (result == InitializationResult.Success)
             {
                 await RunPollingLoopAsync(stoppingToken);
                 break;
             }
-            else if (result == InitializationResult.PermanentFailure)
+
+            if (result == InitializationResult.PermanentFailure)
             {
                 // Don't retry for permanent failures (e.g., platform not supported)
-                break;
+                return;
             }
 
-            // Wait before retry for transient failures
             if (!stoppingToken.IsCancellationRequested)
             {
                 await Task.Delay(RetryInterval, stoppingToken);
@@ -125,7 +125,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         PermanentFailure
     }
 
-    private async Task<InitializationResult> TryInitializeAsync(CancellationToken stoppingToken)
+    private InitializationResult TryInitialize()
     {
         Status = ServiceStatus.Starting;
         StatusMessage = "Initializing GPIO controller...";
@@ -136,10 +136,10 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
             return controllerResult;
         }
 
-        await DiscoverPinsAsync();
-
+        DiscoverPins();
         Status = ServiceStatus.Running;
         StatusMessage = null;
+
         return InitializationResult.Success;
     }
 
@@ -169,7 +169,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         StatusMessage = message;
 
         var pins = new Dictionary<int, GpioPin>();
-        for (int pinNumber = 0; pinNumber <= 27; pinNumber++)
+        for (var pinNumber = 0; pinNumber <= 27; pinNumber++)
         {
             pins[pinNumber] = new GpioPin()
             {
@@ -178,23 +178,22 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
                 StatusMessage = message
             };
         }
+
         Pins = pins;
     }
 
-
-
-    private async Task DiscoverPinsAsync()
+    private void DiscoverPins()
     {
         if (_controller == null) return;
 
         var discoveredPins = new Dictionary<int, GpioPin>();
-        for (int pinNumber = 0; pinNumber <= 27; pinNumber++)
+        for (var pinNumber = 0; pinNumber <= 27; pinNumber++)
         {
             var pin = CreateAndOpenPin(pinNumber);
             discoveredPins[pinNumber] = pin;
         }
+
         Pins = discoveredPins;
-        await Task.CompletedTask;
     }
 
     private GpioPin CreateAndOpenPin(int pinNumber)
@@ -334,12 +333,12 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     {
         try
         {
-            var i2cDevice = I2cDevice.Create(new I2cConnectionSettings(
+            var i2CDevice = I2cDevice.Create(new I2cConnectionSettings(
                 Ads1115!.I2cBus,
                 Ads1115.Address));
-            _ads1115 = new Ads1115(i2cDevice);
 
-            for (int i = 0; i < 4; i++)
+            _ads1115 = new Ads1115(i2CDevice);
+            for (var i = 0; i < 4; i++)
             {
                 channels[i] = new AnalogChannel()
                 {
@@ -358,7 +357,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     {
         if (_controller == null) return;
 
-        PinChangeEventHandler handler = (sender, arguments) =>
+        PinChangeEventHandler handler = (_, arguments) =>
         {
             if (Pins.TryGetValue(arguments.PinNumber, out var pin) && pin.Status == ServiceStatus.Running)
             {

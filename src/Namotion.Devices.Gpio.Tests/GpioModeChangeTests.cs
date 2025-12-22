@@ -3,9 +3,9 @@ using HomeBlaze.Abstractions;
 using Namotion.Devices.Gpio.Tests.Mocks;
 using Xunit;
 
-namespace Namotion.Devices.Gpio.Tests.Interceptors;
+namespace Namotion.Devices.Gpio.Tests;
 
-public class GpioModeChangeInterceptorTests
+public class GpioModeChangeTests
 {
     [Fact]
     public void ModeChange_InputToOutput_UnregistersInterruptAndSetsMode()
@@ -16,12 +16,9 @@ public class GpioModeChangeInterceptorTests
         controller.OpenPin(17, PinMode.Input);
 
         var unregisteredPins = new List<int>();
-        var registeredPins = new List<int>();
-
         var pin = new GpioPin
         {
             Controller = controller,
-            RegisterInterrupt = pin => registeredPins.Add(pin),
             UnregisterInterrupt = pin => unregisteredPins.Add(pin),
             PinNumber = 17,
             Mode = GpioPinMode.Input,
@@ -43,21 +40,19 @@ public class GpioModeChangeInterceptorTests
         var mockDriver = new MockGpioDriver();
         using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
         controller.OpenPin(17, PinMode.Output);
-        mockDriver.SimulatePinValueChange(17, PinValue.High); // Set initial high value
-
-        var unregisteredPins = new List<int>();
         var registeredPins = new List<int>();
 
         var pin = new GpioPin
         {
             Controller = controller,
             RegisterInterrupt = pin => registeredPins.Add(pin),
-            UnregisterInterrupt = pin => unregisteredPins.Add(pin),
             PinNumber = 17,
             Mode = GpioPinMode.Output,
             Status = ServiceStatus.Running,
             Value = false
         };
+
+        mockDriver.SimulatePinValueChange(17, PinValue.High); // Set initial high value
 
         // Act
         pin.Mode = GpioPinMode.Input;
@@ -196,8 +191,6 @@ public class GpioModeChangeInterceptorTests
             Mode = GpioPinMode.Input,
             Status = ServiceStatus.Running
         };
-
-        var initialModeCount = mockDriver.PinModes.Count;
 
         // Act - Set to same mode
         pin.Mode = GpioPinMode.Input;

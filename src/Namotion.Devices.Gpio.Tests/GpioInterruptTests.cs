@@ -3,7 +3,7 @@ using HomeBlaze.Abstractions;
 using Namotion.Devices.Gpio.Tests.Mocks;
 using Xunit;
 
-namespace Namotion.Devices.Gpio.Tests.Integration;
+namespace Namotion.Devices.Gpio.Tests;
 
 /// <summary>
 /// Integration tests for GPIO interrupt handling and value synchronization.
@@ -29,16 +29,14 @@ public class GpioInterruptTests
             Value = false
         };
         pins[17] = pin;
-
-        // Register interrupt handler like GpioSubject does
-        PinChangeEventHandler handler = (sender, args) =>
+        
+        controller.RegisterCallbackForPinValueChangedEvent(17, PinEventTypes.Rising | PinEventTypes.Falling, (_, args) =>
         {
             if (pins.TryGetValue(args.PinNumber, out var p) && p.Status == ServiceStatus.Running)
             {
                 p.Value = args.ChangeType == PinEventTypes.Rising;
             }
-        };
-        controller.RegisterCallbackForPinValueChangedEvent(17, PinEventTypes.Rising | PinEventTypes.Falling, handler);
+        });
 
         // Act - Simulate hardware pin going high
         mockDriver.SimulatePinValueChange(17, PinValue.High);
@@ -66,14 +64,13 @@ public class GpioInterruptTests
         };
         pins[17] = pin;
 
-        PinChangeEventHandler handler = (sender, args) =>
+        controller.RegisterCallbackForPinValueChangedEvent(17, PinEventTypes.Rising | PinEventTypes.Falling, (_, args) =>
         {
             if (pins.TryGetValue(args.PinNumber, out var p) && p.Status == ServiceStatus.Running)
             {
                 p.Value = args.ChangeType == PinEventTypes.Rising;
             }
-        };
-        controller.RegisterCallbackForPinValueChangedEvent(17, PinEventTypes.Rising | PinEventTypes.Falling, handler);
+        });
 
         // Act - Simulate hardware pin going low
         mockDriver.SimulatePinValueChange(17, PinValue.Low);
@@ -101,14 +98,13 @@ public class GpioInterruptTests
         };
         pins[17] = pin;
 
-        PinChangeEventHandler handler = (sender, args) =>
+        controller.RegisterCallbackForPinValueChangedEvent(17, PinEventTypes.Rising | PinEventTypes.Falling, (_, args) =>
         {
             if (pins.TryGetValue(args.PinNumber, out var p) && p.Status == ServiceStatus.Running)
             {
                 p.Value = args.ChangeType == PinEventTypes.Rising;
             }
-        };
-        controller.RegisterCallbackForPinValueChangedEvent(17, PinEventTypes.Rising | PinEventTypes.Falling, handler);
+        });
 
         // Act
         mockDriver.SimulatePinValueChange(17, PinValue.High);
