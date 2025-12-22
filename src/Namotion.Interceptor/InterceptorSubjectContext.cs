@@ -235,9 +235,21 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private TInterface[] GetServicesWithoutCache<TInterface>()
     {
-        var services = _services
+        return GetServicesWithoutCache(typeof(TInterface), [])
             .OfType<TInterface>()
-            .Concat(_fallbackContexts.SelectMany(c => c.GetServices<TInterface>()))
+            .ToArray();
+    }
+
+    private IEnumerable<object> GetServicesWithoutCache(Type type, HashSet<InterceptorSubjectContext> visited)
+    {
+        if (!visited.Add(this))
+        {
+            return [];
+        }
+
+        var services = _services
+            .Where(type.IsInstanceOfType)
+            .Concat(_fallbackContexts.SelectMany(c => c.GetServicesWithoutCache(type, visited)))
             .Distinct()
             .ToArray();
 
@@ -247,17 +259,27 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void OnContextChanged()
     {
+        OnContextChanged([]);
+    }
+
+    private void OnContextChanged(HashSet<InterceptorSubjectContext> visited)
+    {
+        if (!visited.Add(this))
+        {
+            return;
+        }
+
         _serviceCache?.Clear();
         _readInterceptorFunction?.Clear();
         _writeInterceptorFunction?.Clear();
         _methodInvocationFunction = null;
 
-        _noServicesSingleFallbackContext = _services.Count == 0 && _fallbackContexts.Count == 1 
+        _noServicesSingleFallbackContext = _services.Count == 0 && _fallbackContexts.Count == 1
             ? _fallbackContexts.Single() : null;
 
         foreach (var parent in _usedByContexts)
         {
-            parent.OnContextChanged();
+            parent.OnContextChanged(visited);
         }
     }
 }

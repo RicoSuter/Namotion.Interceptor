@@ -123,7 +123,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         var canRemove = isAlreadyAttached && set!.Remove(property);
         if (canRemove)
         {
-            var isFinalDetach = (set?.Count == 0);
+            // Compute reference count first (decrement if property detachment)
+            var referenceCount = property != null ? subject.DecrementReferenceCount() : subject.GetReferenceCount();
+
+            // Final detach when: set is empty OR subject has no more property references
+            var isFinalDetach = (set?.Count == 0) || (property != null && referenceCount == 0);
             if (isFinalDetach)
             {
                 _attachedSubjects.Remove(subject);
@@ -138,7 +142,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 subject,
                 property,
                 index,
-                ReferenceCount: property != null ? subject.DecrementReferenceCount() : subject.GetReferenceCount(),
+                ReferenceCount: referenceCount,
                 IsFirstAttach: false,
                 isFinalDetach);
 

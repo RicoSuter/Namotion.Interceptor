@@ -1,4 +1,7 @@
-﻿namespace Namotion.Interceptor.Tracking.Parent;
+﻿using System.Collections.Immutable;
+using Namotion.Interceptor.Tracking.Lifecycle;
+
+namespace Namotion.Interceptor.Tracking.Parent;
 
 public static class ParentsHandlerExtensions
 {
@@ -6,20 +9,26 @@ public static class ParentsHandlerExtensions
 
     internal static void AddParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
     {
-        var parents = subject.GetParents();
-        parents.Add(new SubjectParent(parent, index));
+        subject.Data.AddOrUpdate(
+            (null, ParentsKey),
+            _ => ImmutableHashSet.Create(new SubjectParent(parent, index)),
+            (_, existing) => ((ImmutableHashSet<SubjectParent>)existing!).Add(new SubjectParent(parent, index)));
     }
 
     internal static void RemoveParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
     {
-        var parents = subject.GetParents();
-        parents.Remove(new SubjectParent(parent, index));
+        subject.Data.AddOrUpdate(
+            (null, ParentsKey),
+            _ => ImmutableHashSet<SubjectParent>.Empty,
+            (_, existing) => ((ImmutableHashSet<SubjectParent>)existing!).Remove(new SubjectParent(parent, index)));
     }
     
-    public static HashSet<SubjectParent> GetParents(this IInterceptorSubject subject)
+    public static IReadOnlyCollection<SubjectParent> GetParents(this IInterceptorSubject subject)
     {
-        // TODO: Make thread safe!
-        
-        return (HashSet<SubjectParent>)subject.Data.GetOrAdd((null, ParentsKey), (_) => new HashSet<SubjectParent>())!;
+        if (subject.Data.TryGetValue((null, ParentsKey), out var parents))
+        {
+            return (ImmutableHashSet<SubjectParent>)parents!;
+        }
+        return ImmutableHashSet<SubjectParent>.Empty;
     }
 }

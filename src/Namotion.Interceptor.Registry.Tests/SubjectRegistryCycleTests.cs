@@ -146,12 +146,8 @@ public class SubjectRegistryCycleTests
         // Act - Remove self-reference
         person.Father = null;
 
-        // Assert - Subject should still exist (root reference from variable)
-        Assert.Single(registry.KnownSubjects);
-
-        var registered = registry.TryGetRegisteredSubject(person)!;
-        var fatherProperty = registered.TryGetProperty(nameof(Person.Father))!;
-        Assert.Empty(fatherProperty.Children);
+        // Assert - Subject is removed (ReferenceCount = 0 means final detach)
+        Assert.Empty(registry.KnownSubjects);
     }
 
     [Fact]
@@ -186,17 +182,9 @@ public class SubjectRegistryCycleTests
         // Act - Break the cycle by removing person1.Mother
         person1.Mother = null;
 
-        // Assert - Both subjects remain in registry (they have ROOT attachments from context)
-        // But the Children collections should be updated to reflect the broken cycle
-        Assert.Equal(2, registry.KnownSubjects.Count);
-        Assert.Contains(person1, registry.KnownSubjects.Keys);
-        Assert.Contains(person2, registry.KnownSubjects.Keys);
-
-        // person1.Mother.Children should now be empty (no longer points to person2)
-        Assert.Empty(person1Mother.Children);
-        // person2.Mother.Children should still contain person1
-        Assert.Single(person2Mother.Children);
-        Assert.Equal(person1, person2Mother.Children.First().Subject);
+        // Assert - Both removed: person2's ref=0 triggers cascade that also removes person1
+        // (When person2 is removed, its properties including person2.Mother→person1 are detached)
+        Assert.Empty(registry.KnownSubjects);
     }
 
     [Fact]
@@ -351,26 +339,18 @@ public class SubjectRegistryCycleTests
         person1.Mother = person2;
         person2.Mother = person1;
 
-        Assert.Equal(3, registry.KnownSubjects.Count);
-
-        var person1Mother = person1.TryGetRegisteredProperty(nameof(Person.Mother))!;
-        var person2Mother = person2.TryGetRegisteredProperty(nameof(Person.Mother))!;
-
-        // Verify cycle is established
-        Assert.Equal(person2, person1Mother.Children.First().Subject);
-        Assert.Equal(person1, person2Mother.Children.First().Subject);
+        // After cycle: person1 (ref=1), person2 (ref=1), person3 (ref=0, still in registry - not detached yet)
+        var subjectsAfterCycle = string.Join(", ", registry.KnownSubjects.Keys.Select(s => ((Person)s).FirstName));
+        Assert.True(registry.KnownSubjects.Count == 3, $"After cycle: Expected 3 but found {registry.KnownSubjects.Count}. Actual: {subjectsAfterCycle}");
 
         // Act - Replace person1.Mother with person3 (breaking cycle)
         person1.Mother = person3;
 
-        // Assert - All three subjects remain in registry (they all have ROOT attachments)
-        Assert.Equal(3, registry.KnownSubjects.Count);
+        // Assert - person2 removed (ref=0). person1 and person3 remain.
+        // (person1 gets re-added when person3 is attached as parent)
+        var actualSubjects = string.Join(", ", registry.KnownSubjects.Keys.Select(s => ((Person)s).FirstName));
+        Assert.True(registry.KnownSubjects.Count == 2, $"Expected 2 subjects but found {registry.KnownSubjects.Count}. Actual: {actualSubjects}");
         Assert.Contains(person1, registry.KnownSubjects.Keys);
-        Assert.Contains(person2, registry.KnownSubjects.Keys);
         Assert.Contains(person3, registry.KnownSubjects.Keys);
-
-        // But the Children collections should reflect the new state
-        Assert.Equal(person3, person1Mother.Children.First().Subject); // person1.Mother now points to person3
-        Assert.Equal(person1, person2Mother.Children.First().Subject); // person2.Mother still points to person1
     }
 }
