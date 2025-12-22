@@ -87,4 +87,33 @@ public class GpioPinTests
         Assert.Equal("Pin 17", pin.Title);
         Assert.Equal("Settings", pin.Icon);
     }
+
+    [Fact]
+    public void SetValue_ChangesValue()
+    {
+        // Arrange
+        var pin = new GpioPin();
+        Assert.False(pin.Value);
+
+        // Act
+        pin.SetValue(true);
+
+        // Assert
+        Assert.True(pin.Value);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SetValue_SupportsBothValues(bool value)
+    {
+        // Arrange
+        var pin = new GpioPin();
+
+        // Act
+        pin.SetValue(value);
+
+        // Assert
+        Assert.Equal(value, pin.Value);
+    }
 }

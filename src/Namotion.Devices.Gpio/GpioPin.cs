@@ -25,6 +25,7 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider
     /// <summary>
     /// The pin operating mode.
     /// </summary>
+    [State]
     [Configuration]
     public partial GpioPinMode Mode { get; set; }
 
@@ -59,6 +60,16 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider
         Value = false;
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
+    }
+
+    /// <summary>
+    /// Sets the pin value (only effective in output mode).
+    /// </summary>
+    /// <param name="value">True for high, false for low.</param>
+    [Operation(Title = "Set Value", Icon = "ToggleOn", Position = 1)]
+    public void SetValue(bool value)
+    {
+        Value = value;
     }
 
     /// <summary>
