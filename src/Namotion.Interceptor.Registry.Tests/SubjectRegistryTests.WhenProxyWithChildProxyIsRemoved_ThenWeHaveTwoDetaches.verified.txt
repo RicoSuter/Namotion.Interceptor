@@ -1,5 +1,5 @@
 ﻿[
-  Attached:   at  with index , count: 1,
+  Attached:   at  with index , count: 0,
   Attached: Grandmother  at Mother with index , count: 1,
   Attached: Mother  at Mother with index , count: 1,
   Detached: Grandmother  at Mother with index , count: 0,

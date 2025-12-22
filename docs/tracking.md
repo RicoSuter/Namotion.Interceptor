@@ -266,32 +266,74 @@ lifecycleInterceptor.SubjectDetached += async change =>
 
 ### Reference Counting
 
-Each subject tracks how many parent references point to it via `GetReferenceCount()`:
+Each subject tracks how many **property references** point to it via `GetReferenceCount()`:
 
 ```csharp
 var referenceCount = subject.GetReferenceCount();
 // Returns the number of properties referencing this subject
-// Returns 0 if not attached or lifecycle tracking is disabled
+// Context-only attachments do NOT increment this count
+// Returns 0 for subjects created with context but not assigned to any property
 ```
 
 The reference count is managed internally by the library:
-- `SubjectAttached` fires on **every** attachment (after count is incremented)
-- `SubjectDetached` fires on **every** detachment (after count is decremented)
+- `SubjectAttached` fires on **every** attachment (context-only and property attachments)
+- `SubjectDetached` fires on **every** detachment
+- **Only property attachments** increment/decrement the reference count
+- **Context-only attachments** (when subject is created with a context) do NOT affect the count
 
-The `SubjectLifecycleChange` record includes `ReferenceCount` with the updated count after the increment/decrement. Handlers can check this to determine if this is a first attachment (count == 1) or last detachment (count == 0):
+The `SubjectLifecycleChange` record includes both `ReferenceCount` and semantic flags:
 
 ```csharp
+public record struct SubjectLifecycleChange(
+    IInterceptorSubject Subject,
+    PropertyReference? Property,      // null for context-only attachments
+    object? Index,
+    int ReferenceCount,                // Number of property references (0 for context-only)
+    bool IsFirstAttach,                // True when subject first enters lifecycle
+    bool IsFinalDetach                 // True when ReferenceCount reaches 0 during property detachment
+);
+```
+
+**IsFinalDetach** is `true` when:
+- The lifecycle set is completely empty, OR
+- A property is detached AND `ReferenceCount` becomes 0
+
+This means subjects are considered "finally detached" when they have no more property references, even if a context-only attachment remains.
+
+**Using semantic flags (recommended):**
+
+```csharp
+lifecycleInterceptor.SubjectAttached += change =>
+{
+    if (change.IsFirstAttach)
+    {
+        // Subject entered lifecycle - initialize resources
+        InitializeResources(change.Subject);
+    }
+};
+
 lifecycleInterceptor.SubjectDetached += change =>
 {
-    if (change.ReferenceCount == 0)
+    if (change.IsFinalDetach)
     {
-        // Fully detached - safe to clean up
+        // Subject fully detached - safe to clean up
         CleanupResources(change.Subject);
     }
 };
 ```
 
-This enables proper cleanup when subjects are removed from all parent references, even when referenced by multiple properties or collections.
+**Using reference count (for specific scenarios):**
+
+```csharp
+// Example: Context inheritance only for first property attachment
+if (change is { ReferenceCount: 1, Property: not null })
+{
+    // This is the first property referencing this subject
+    var property = change.Property;
+}
+```
+
+This enables proper cleanup when subjects are removed from all references, even when referenced by multiple properties or collections.
 
 ## Parent-Child Relationship Tracking
 
@@ -337,6 +379,8 @@ var accessedProperties = scope.GetPropertiesAndDispose();
 This is primarily used internally by the derived property change detection system but can also be used for custom scenarios.
 
 ## Thread Safety and Synchronization
+
+**Parent Tracking**: `GetParents()` is thread-safe and returns an immutable snapshot (`IReadOnlyCollection<SubjectParent>`) of the parent references.
 
 **Observable**: Thread-safe through `Subject.Synchronize()`, but observers may receive events on different threads.
 

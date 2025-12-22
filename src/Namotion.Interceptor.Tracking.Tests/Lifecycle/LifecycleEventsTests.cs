@@ -676,21 +676,11 @@ public class LifecycleEventsTests
         // Step 3: Property detachment
         parent.Father = null;
 
-        // Assert Step 3 - Two detachment events in cascade
-        var propertyDetachEvents = detachedEvents.Where(e => e.Subject == child).ToList();
-
-        // First event: property detachment (Property != null)
-        var propertyDetach = propertyDetachEvents.First(e => e.Property != null);
+        // Assert Step 3 - Single detachment event with IsFinalDetach=true when ReferenceCount hits 0
+        var propertyDetach = detachedEvents.First(e => e.Subject == child);
         Assert.False(propertyDetach.IsFirstAttach);
-        Assert.False(propertyDetach.IsFinalDetach); // Context still attached
+        Assert.True(propertyDetach.IsFinalDetach); // Final when ReferenceCount = 0
         Assert.Equal(0, propertyDetach.ReferenceCount);
         Assert.Equal("Father", propertyDetach.Property?.Name);
-
-        // Second event: context detachment (Property == null) - via cascade
-        var contextDetach = propertyDetachEvents.First(e => e.Property == null);
-        Assert.False(contextDetach.IsFirstAttach);
-        Assert.True(contextDetach.IsFinalDetach); // Final detachment
-        Assert.Equal(0, contextDetach.ReferenceCount);
-        Assert.Null(contextDetach.Property);
     }
 }
