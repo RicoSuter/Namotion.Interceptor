@@ -28,12 +28,6 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     private Ads1115? _ads1115;
 
     /// <summary>
-    /// Auto-discovered GPIO pins indexed by pin number.
-    /// </summary>
-    [State]
-    public partial Dictionary<int, GpioPin> Pins { get; set; }
-
-    /// <summary>
     /// Optional MCP3008 ADC configuration.
     /// </summary>
     [Configuration]
@@ -46,12 +40,6 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     public partial Ads1115Configuration? Ads1115 { get; set; }
 
     /// <summary>
-    /// Analog channels from configured ADC (empty if no ADC configured).
-    /// </summary>
-    [State]
-    public partial Dictionary<int, AnalogChannel> AnalogChannels { get; set; }
-
-    /// <summary>
     /// Polling interval for GPIO verification and ADC reading.
     /// </summary>
     [Configuration]
@@ -62,6 +50,18 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     /// </summary>
     [Configuration]
     public partial TimeSpan RetryInterval { get; set; }
+
+    /// <summary>
+    /// Auto-discovered GPIO pins indexed by pin number.
+    /// </summary>
+    [State]
+    public partial Dictionary<int, GpioPin> Pins { get; set; }
+
+    /// <summary>
+    /// Analog channels from configured ADC (empty if no ADC configured).
+    /// </summary>
+    [State]
+    public partial Dictionary<int, AnalogChannel> AnalogChannels { get; set; }
 
     /// <summary>
     /// Current status of the GPIO controller.
@@ -83,10 +83,12 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 
     public GpioSubject()
     {
-        Pins = new Dictionary<int, GpioPin>();
-        AnalogChannels = new Dictionary<int, AnalogChannel>();
         PollingInterval = TimeSpan.FromSeconds(5);
         RetryInterval = TimeSpan.FromSeconds(30);
+
+        Pins = new Dictionary<int, GpioPin>();
+        AnalogChannels = new Dictionary<int, AnalogChannel>();
+
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
     }
