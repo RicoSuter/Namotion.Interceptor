@@ -6,48 +6,7 @@
 <MudStack Spacing="4">
     <MudText Typo="Typo.h6">GPIO Configuration</MudText>
 
-    @* Pin Configuration Section *@
     <MudExpansionPanels>
-        <MudExpansionPanel Text="Digital Pins" Expanded="true">
-            @if (GpioSubject?.Pins.Count > 0)
-            {
-                <MudTable Items="@GpioSubject.Pins.Values.OrderBy(p => p.PinNumber)" Dense="true">
-                    <HeaderContent>
-                        <MudTh>Pin</MudTh>
-                        <MudTh>Mode</MudTh>
-                        <MudTh>Value</MudTh>
-                    </HeaderContent>
-                    <RowTemplate>
-                        <MudTd>@context.PinNumber</MudTd>
-                        <MudTd>
-                            <MudSelect T="GpioPinMode" Value="@context.Mode" ValueChanged="@(v => OnModeChanged(context, v))" Dense="true">
-                                @foreach (var mode in Enum.GetValues<GpioPinMode>())
-                                {
-                                    <MudSelectItem Value="@mode">@mode</MudSelectItem>
-                                }
-                            </MudSelect>
-                        </MudTd>
-                        <MudTd>
-                            @if (context.Mode == GpioPinMode.Output)
-                            {
-                                <MudSwitch T="bool" Value="@context.Value" ValueChanged="@(v => OnValueChanged(context, v))" Color="Color.Primary" />
-                            }
-                            else
-                            {
-                                <MudChip T="string" Color="@(context.Value ? Color.Success : Color.Default)" Size="Size.Small">
-                                    @(context.Value ? "HIGH" : "LOW")
-                                </MudChip>
-                            }
-                        </MudTd>
-                    </RowTemplate>
-                </MudTable>
-            }
-            else
-            {
-                <MudAlert Severity="Severity.Info">No GPIO pins detected. Running on non-Pi hardware?</MudAlert>
-            }
-        </MudExpansionPanel>
-
         @* MCP3008 ADC Section *@
         <MudExpansionPanel Text="MCP3008 ADC (SPI)">
             <MudStack Spacing="2">
@@ -75,26 +34,22 @@
                 }
             </MudStack>
         </MudExpansionPanel>
-
-        @* Analog Channels Section *@
-        @if (GpioSubject?.AnalogChannels.Count > 0)
-        {
-            <MudExpansionPanel Text="Analog Channels">
-                <MudTable Items="@GpioSubject.AnalogChannels.Values.OrderBy(c => c.ChannelNumber)" Dense="true">
-                    <HeaderContent>
-                        <MudTh>Channel</MudTh>
-                        <MudTh>Value</MudTh>
-                        <MudTh>Raw</MudTh>
-                    </HeaderContent>
-                    <RowTemplate>
-                        <MudTd>@context.ChannelNumber</MudTd>
-                        <MudTd>@context.Value.ToString("P1")</MudTd>
-                        <MudTd>@context.RawValue</MudTd>
-                    </RowTemplate>
-                </MudTable>
-            </MudExpansionPanel>
-        }
     </MudExpansionPanels>
+
+    <MudAlert Severity="Severity.Info" Class="mt-2">
+        Digital pins and analog channels are managed through the browser panel.
+    </MudAlert>
+
+    <MudDivider Class="my-4" />
+
+    <MudSwitch T="bool"
+        Value="@(GpioSubject?.UseSimulation ?? false)"
+        ValueChanged="@OnSimulationChanged"
+        Label="Use Simulation Mode"
+        Color="Color.Secondary" />
+    <MudText Typo="Typo.caption" Class="ml-12 mt-n2">
+        Creates 28 simulated GPIO pins for testing on non-Pi hardware.
+    </MudText>
 </MudStack>
 
 @code {
@@ -102,16 +57,6 @@
     public IInterceptorSubject? Subject { get; set; }
 
     private GpioSubject? GpioSubject => Subject as GpioSubject;
-
-    private void OnModeChanged(GpioPin pin, GpioPinMode mode)
-    {
-        pin.Mode = mode;
-    }
-
-    private void OnValueChanged(GpioPin pin, bool value)
-    {
-        pin.Value = value;
-    }
 
     private void OnMcp3008EnabledChanged(bool enabled)
     {
@@ -121,5 +66,10 @@
     private void OnAds1115EnabledChanged(bool enabled)
     {
         GpioSubject?.Ads1115 = enabled ? new Ads1115Configuration() : null;
+    }
+
+    private void OnSimulationChanged(bool enabled)
+    {
+        GpioSubject?.UseSimulation = enabled;
     }
 }

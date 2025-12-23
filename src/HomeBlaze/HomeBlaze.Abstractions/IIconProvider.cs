@@ -6,9 +6,9 @@ namespace HomeBlaze.Abstractions;
 public interface IIconProvider
 {
     /// <summary>
-    /// Gets the icon string for this subject (typically a MudBlazor icon constant).
+    /// Gets the icon name for this subject (e.g., "Folder", "Settings").
     /// </summary>
-    string? Icon { get; }
+    string? IconName { get; }
 
     /// <summary>
     /// Gets the icon color for this subject.

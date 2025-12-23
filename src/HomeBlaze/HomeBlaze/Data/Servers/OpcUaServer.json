@@ -1,5 +1,5 @@
 {
-  "type": "HomeBlaze.Servers.OpcUa.OpcUaServer",
+  "$type": "HomeBlaze.Servers.OpcUa.OpcUaServer",
   "name": "My OPC UA Server",
   "path": "Root",
   "applicationName": null,

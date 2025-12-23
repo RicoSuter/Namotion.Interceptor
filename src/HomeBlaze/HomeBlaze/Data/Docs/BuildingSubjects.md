@@ -558,14 +558,14 @@ Subjects are configured via JSON files. The Motor would be saved as:
 
 ```json
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "Name": "Pump Motor",
   "TargetSpeed": 1500,
   "SimulationInterval": "00:00:01"
 }
 ```
 
-Only `[Configuration]` properties are persisted. The `type` field enables polymorphic deserialization.
+Only `[Configuration]` properties are persisted. The `$type` field enables polymorphic deserialization.
 
 ## Summary
 

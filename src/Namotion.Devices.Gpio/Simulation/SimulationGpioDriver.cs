@@ -1,11 +1,12 @@
 using System.Device.Gpio;
 
-namespace Namotion.Devices.Gpio.Tests.Mocks;
+namespace Namotion.Devices.Gpio.Simulation;
 
 /// <summary>
-/// Mock GPIO driver for testing GPIO functionality without real hardware.
+/// Simulation GPIO driver for testing GPIO functionality without real hardware.
+/// Simulates 28 GPIO pins (BCM 0-27) with in-memory state tracking.
 /// </summary>
-public class MockGpioDriver : GpioDriver
+public class SimulationGpioDriver : GpioDriver
 {
     private readonly int _pinCount;
     private readonly Dictionary<int, PinValue> _pinValues = new();
@@ -13,17 +14,17 @@ public class MockGpioDriver : GpioDriver
     private readonly Dictionary<int, List<PinChangeEventHandler>> _eventHandlers = new();
 
     /// <summary>
-    /// Creates a MockGpioDriver with the default pin count (28 pins, BCM 0-27).
+    /// Creates a SimulationGpioDriver with the default pin count (28 pins, BCM 0-27).
     /// </summary>
-    public MockGpioDriver() : this(28)
+    public SimulationGpioDriver() : this(28)
     {
     }
 
     /// <summary>
-    /// Creates a MockGpioDriver with a custom pin count.
+    /// Creates a SimulationGpioDriver with a custom pin count.
     /// </summary>
     /// <param name="pinCount">The number of GPIO pins to simulate.</param>
-    public MockGpioDriver(int pinCount)
+    public SimulationGpioDriver(int pinCount)
     {
         _pinCount = pinCount;
     }

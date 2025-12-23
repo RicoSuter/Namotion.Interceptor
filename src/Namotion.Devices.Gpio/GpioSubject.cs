@@ -8,6 +8,7 @@ using Iot.Device.Ads1115;
 using Iot.Device.Spi;
 using Microsoft.Extensions.Hosting;
 using Namotion.Devices.Gpio.Configuration;
+using Namotion.Devices.Gpio.Simulation;
 using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Devices.Gpio;
@@ -24,8 +25,13 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     private readonly ConcurrentDictionary<int, PinChangeEventHandler> _interruptHandlers = new();
 
     private GpioController? _controller;
+    private bool _currentlyUsingSimulation;
     private Mcp3008? _mcp3008;
     private Ads1115? _ads1115;
+
+    // Track applied ADC configurations to avoid unnecessary recreation
+    private Mcp3008Configuration? _appliedMcp3008Config;
+    private Ads1115Configuration? _appliedAds1115Config;
 
     /// <summary>
     /// Optional MCP3008 ADC configuration.
@@ -50,6 +56,13 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     /// </summary>
     [Configuration]
     public partial TimeSpan RetryInterval { get; set; }
+
+    /// <summary>
+    /// When true, uses a simulation driver instead of real hardware.
+    /// Enables GPIO functionality on non-Pi platforms for testing/development.
+    /// </summary>
+    [Configuration]
+    public partial bool UseSimulation { get; set; }
 
     /// <summary>
     /// Auto-discovered GPIO pins indexed by pin number.
@@ -80,11 +93,11 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     public string Title => "GPIO";
 
     /// <inheritdoc />
-    public string Icon => "Memory";
+    public string IconName => "Memory";
 
     /// <inheritdoc />
     [Derived]
-    public string? IconColor => Status switch
+    public string IconColor => Status switch
     {
         ServiceStatus.Running => "Success",
         ServiceStatus.Error => "Error",
@@ -111,6 +124,44 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     public GpioSubject(GpioDriver driver) : this()
     {
         _driver = driver;
+    }
+
+    /// <summary>
+    /// Sets friendly names for Raspberry Pi GPIO pins based on their common functions.
+    /// </summary>
+    [Operation(Title = "Set Raspberry Pi Pin Names")]
+    public void SetRaspberryPiPinNames()
+    {
+        var pinNames = new Dictionary<int, string>
+        {
+            [2] = "I2C1 SDA",
+            [3] = "I2C1 SCL",
+            [4] = "GPCLK0",
+            [7] = "SPI0 CE1",
+            [8] = "SPI0 CE0",
+            [9] = "SPI0 MISO",
+            [10] = "SPI0 MOSI",
+            [11] = "SPI0 SCLK",
+            [12] = "PWM0",
+            [13] = "PWM1",
+            [14] = "UART TX",
+            [15] = "UART RX",
+            [17] = "GPIO17",
+            [18] = "PCM CLK / PWM0",
+            [22] = "GPIO22",
+            [23] = "GPIO23",
+            [24] = "GPIO24",
+            [25] = "GPIO25",
+            [27] = "GPIO27"
+        };
+
+        foreach (var (pinNumber, name) in pinNames)
+        {
+            if (Pins.TryGetValue(pinNumber, out var pin))
+            {
+                pin.Name = name;
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -171,9 +222,24 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     {
         try
         {
-            _controller = _driver != null 
-                ? new GpioController(PinNumberingScheme.Logical, _driver) 
-                : new GpioController();
+            if (_driver != null)
+            {
+                // Use injected driver (for testing)
+                _controller = new GpioController(PinNumberingScheme.Logical, _driver);
+                _currentlyUsingSimulation = false;
+            }
+            else if (UseSimulation)
+            {
+                // Use simulation driver (28 pins like Raspberry Pi)
+                _controller = new GpioController(PinNumberingScheme.Logical, new SimulationGpioDriver());
+                _currentlyUsingSimulation = true;
+            }
+            else
+            {
+                // Use real hardware
+                _controller = new GpioController();
+                _currentlyUsingSimulation = false;
+            }
             return InitializationResult.Success;
         }
         catch (PlatformNotSupportedException)
@@ -200,13 +266,23 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     {
         if (_controller == null) return;
 
+        var existingPins = Pins;
         var discoveredPins = new Dictionary<int, GpioPin>();
         var pinCount = _controller.PinCount;
-        
+
         for (var pinNumber = 0; pinNumber < pinCount; pinNumber++)
         {
-            var pin = CreateAndOpenPin(pinNumber);
-            discoveredPins[pinNumber] = pin;
+            if (existingPins.TryGetValue(pinNumber, out var existingPin))
+            {
+                // Reuse existing pin with its persisted mode
+                InitializePin(existingPin);
+                discoveredPins[pinNumber] = existingPin;
+            }
+            else
+            {
+                // Create new pin with default mode
+                discoveredPins[pinNumber] = CreateAndOpenPin(pinNumber);
+            }
         }
 
         Pins = discoveredPins;
@@ -214,33 +290,52 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 
     private GpioPin CreateAndOpenPin(int pinNumber)
     {
+        var pin = new GpioPin
+        {
+            PinNumber = pinNumber,
+            Mode = GpioPinMode.Input
+        };
+
+        InitializePin(pin);
+        return pin;
+    }
+
+    private void InitializePin(GpioPin pin)
+    {
         if (_controller == null)
             throw new InvalidOperationException("Controller not initialized");
 
-        var pin = new GpioPin()
-        {
-            PinNumber = pinNumber,
-            Mode = GpioPinMode.Input,
-            Controller = _controller,
-            RegisterInterrupt = RegisterInterrupt,
-            UnregisterInterrupt = UnregisterInterrupt
-        };
+        pin.Controller = _controller;
+        pin.RegisterInterrupt = RegisterInterrupt;
+        pin.UnregisterInterrupt = UnregisterInterrupt;
 
         try
         {
-            _controller.OpenPin(pinNumber, PinMode.Input);
-            pin.Value = _controller.Read(pinNumber) == PinValue.High;
+            var pinMode = pin.Mode switch
+            {
+                GpioPinMode.Input => PinMode.Input,
+                GpioPinMode.InputPullUp => PinMode.InputPullUp,
+                GpioPinMode.InputPullDown => PinMode.InputPullDown,
+                GpioPinMode.Output => PinMode.Output,
+                _ => PinMode.Input
+            };
+            _controller.OpenPin(pin.PinNumber, pinMode);
+
+            pin.Value = _controller.Read(pin.PinNumber) == PinValue.High;
             pin.Status = ServiceStatus.Running;
             pin.StatusMessage = null;
-            RegisterInterrupt(pinNumber);
+
+            // Only register interrupt for input pins
+            if (pin.Mode != GpioPinMode.Output)
+            {
+                RegisterInterrupt(pin.PinNumber);
+            }
         }
         catch (Exception exception)
         {
             pin.Status = ServiceStatus.Unavailable;
             pin.StatusMessage = exception.Message;
         }
-
-        return pin;
     }
 
     private async Task RunPollingLoopAsync(CancellationToken stoppingToken)
@@ -286,18 +381,57 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        DisposeAdcDevices();
-        var channels = InitializeAdcChannels();
-        AnalogChannels = channels;
-        return Task.CompletedTask;
-    }
+        // Handle simulation mode change (only when no injected driver)
+        if (_driver == null && UseSimulation != _currentlyUsingSimulation)
+        {
+            if (_controller != null)
+            {
+                // Unregister all interrupts
+                foreach (var pinNumber in _interruptHandlers.Keys.ToList())
+                {
+                    UnregisterInterrupt(pinNumber);
+                }
 
-    private void DisposeAdcDevices()
-    {
-        _mcp3008?.Dispose();
-        _ads1115?.Dispose();
-        _mcp3008 = null;
-        _ads1115 = null;
+                // Dispose old controller
+                _controller.Dispose();
+                _controller = null;
+            }
+
+            // Recreate controller with new driver
+            var result = TryCreateController();
+            if (result == InitializationResult.Success)
+            {
+                DiscoverPins();
+                Status = ServiceStatus.Running;
+                StatusMessage = null;
+            }
+        }
+
+        // Handle ADC changes only when configuration actually changed (records have value equality)
+        var mcp3008Changed = Mcp3008 != _appliedMcp3008Config;
+        var ads1115Changed = Ads1115 != _appliedAds1115Config;
+
+        if (mcp3008Changed || ads1115Changed)
+        {
+            // Only dispose and reinitialize the ADC that changed
+            if (mcp3008Changed)
+            {
+                _mcp3008?.Dispose();
+                _mcp3008 = null;
+                _appliedMcp3008Config = Mcp3008 is not null ? Mcp3008 with { } : null;
+            }
+
+            if (ads1115Changed)
+            {
+                _ads1115?.Dispose();
+                _ads1115 = null;
+                _appliedAds1115Config = Ads1115 is not null ? Ads1115 with { } : null;
+            }
+
+            AnalogChannels = InitializeAdcChannels();
+        }
+
+        return Task.CompletedTask;
     }
 
     private Dictionary<int, AnalogChannel> InitializeAdcChannels()
@@ -334,6 +468,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
             {
                 channels[i] = new AnalogChannel()
                 {
+                    Source = AdcSource.Mcp3008,
                     ChannelNumber = i,
                     Status = ServiceStatus.Running
                 };
@@ -356,8 +491,9 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
             _ads1115 = new Ads1115(i2CDevice);
             for (var i = 0; i < 4; i++)
             {
-                channels[i] = new AnalogChannel()
+                channels[8 + i] = new AnalogChannel()
                 {
+                    Source = AdcSource.Ads1115,
                     ChannelNumber = i,
                     Status = ServiceStatus.Running
                 };
@@ -400,44 +536,30 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 
     private void PollAdcChannels()
     {
-        if (_mcp3008 != null)
+        foreach (var channel in AnalogChannels.Values)
         {
-            foreach (var channel in AnalogChannels.Values)
-            {
-                if (channel.Status != ServiceStatus.Running) continue;
+            if (channel.Status != ServiceStatus.Running) continue;
 
-                try
+            try
+            {
+                if (channel.Source == AdcSource.Mcp3008 && _mcp3008 != null)
                 {
                     var raw = _mcp3008.Read(channel.ChannelNumber);
                     channel.RawValue = raw;
                     channel.Value = raw / 1023.0;
                 }
-                catch (Exception exception)
-                {
-                    channel.Status = ServiceStatus.Error;
-                    channel.StatusMessage = exception.Message;
-                }
-            }
-        }
-
-        if (_ads1115 != null)
-        {
-            foreach (var channel in AnalogChannels.Values)
-            {
-                if (channel.Status != ServiceStatus.Running) continue;
-
-                try
+                else if (channel.Source == AdcSource.Ads1115 && _ads1115 != null)
                 {
                     var inputMultiplexer = (InputMultiplexer)channel.ChannelNumber;
                     var raw = _ads1115.ReadRaw(inputMultiplexer);
                     channel.RawValue = raw;
                     channel.Value = raw / 32767.0;
                 }
-                catch (Exception exception)
-                {
-                    channel.Status = ServiceStatus.Error;
-                    channel.StatusMessage = exception.Message;
-                }
+            }
+            catch (Exception exception)
+            {
+                channel.Status = ServiceStatus.Error;
+                channel.StatusMessage = exception.Message;
             }
         }
     }

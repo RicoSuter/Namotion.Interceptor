@@ -5,11 +5,28 @@ using Namotion.Interceptor.Attributes;
 namespace Namotion.Devices.Gpio;
 
 /// <summary>
+/// Identifies the ADC hardware source.
+/// </summary>
+public enum AdcSource
+{
+    /// <summary>MCP3008 10-bit SPI ADC (8 channels).</summary>
+    Mcp3008,
+
+    /// <summary>ADS1115 16-bit I2C ADC (4 channels).</summary>
+    Ads1115
+}
+
+/// <summary>
 /// Represents an analog input channel from an ADC.
 /// </summary>
 [InterceptorSubject]
 public partial class AnalogChannel : IHostedSubject, ITitleProvider, IIconProvider
 {
+    /// <summary>
+    /// The ADC hardware source.
+    /// </summary>
+    public partial AdcSource Source { get; set; }
+
     /// <summary>
     /// The ADC channel number.
     /// </summary>
@@ -43,7 +60,7 @@ public partial class AnalogChannel : IHostedSubject, ITitleProvider, IIconProvid
     public string Title => $"Channel {ChannelNumber}";
 
     /// <inheritdoc />
-    public string Icon => "ShowChart";
+    public string IconName => "ShowChart";
 
     /// <inheritdoc />
     [Derived]
@@ -56,6 +73,7 @@ public partial class AnalogChannel : IHostedSubject, ITitleProvider, IIconProvid
 
     public AnalogChannel()
     {
+        Source = AdcSource.Mcp3008;
         ChannelNumber = 0;
         Value = 0.0;
         RawValue = 0;

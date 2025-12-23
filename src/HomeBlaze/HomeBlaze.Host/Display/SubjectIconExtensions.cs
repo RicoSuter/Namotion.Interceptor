@@ -21,8 +21,8 @@ public static class SubjectIconExtensions
     /// </summary>
     public static string GetIcon(this IInterceptorSubject subject)
     {
-        if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.Icon))
-            return iconProvider.Icon;
+        if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.IconName))
+            return iconProvider.IconName;
 
         return DefaultIconName;
     }

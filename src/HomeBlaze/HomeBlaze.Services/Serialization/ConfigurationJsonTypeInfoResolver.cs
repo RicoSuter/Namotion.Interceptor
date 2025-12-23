@@ -1,23 +1,52 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using Namotion.Interceptor;
 
 namespace HomeBlaze.Services.Serialization;
 
 /// <summary>
-/// JSON type info resolver that filters properties based on serialization rules:
-/// - IInterceptorSubject types: only [Configuration] properties
-/// - Plain objects (value objects): all properties
+/// JSON type info resolver that:
+/// - Sets up polymorphism for IConfigurableSubject with $type discriminator
+/// - Filters properties to only [Configuration] for IConfigurableSubject types
+/// - Allows all properties for plain value objects
 /// </summary>
 public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 {
+    private readonly TypeProvider _typeProvider;
+
+    public ConfigurationJsonTypeInfoResolver(TypeProvider typeProvider)
+    {
+        _typeProvider = typeProvider;
+    }
+
     public override JsonTypeInfo GetTypeInfo(Type type, JsonSerializerOptions options)
     {
         var typeInfo = base.GetTypeInfo(type, options);
 
-        if (typeof(IInterceptorSubject).IsAssignableFrom(type) &&
-            typeInfo.Kind == JsonTypeInfoKind.Object)
+        // Set up polymorphism on IConfigurableSubject base type
+        if (type == typeof(IConfigurableSubject))
+        {
+            typeInfo.PolymorphismOptions = new JsonPolymorphismOptions
+            {
+                TypeDiscriminatorPropertyName = "$type",
+                IgnoreUnrecognizedTypeDiscriminators = false,
+                UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization
+            };
+
+            // Register all IConfigurableSubject implementations from TypeProvider
+            foreach (var derivedType in _typeProvider.Types
+                .Where(t => typeof(IConfigurableSubject).IsAssignableFrom(t)
+                            && t is { IsAbstract: false, IsInterface: false }))
+            {
+                typeInfo.PolymorphismOptions.DerivedTypes.Add(
+                    new JsonDerivedType(derivedType, derivedType.FullName!));
+            }
+        }
+
+        // Filter [Configuration] properties for all object types
+        if (typeInfo.Kind == JsonTypeInfoKind.Object)
         {
             foreach (var property in typeInfo.Properties)
             {

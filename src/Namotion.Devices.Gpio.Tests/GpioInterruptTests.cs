@@ -1,6 +1,6 @@
 using System.Device.Gpio;
 using HomeBlaze.Abstractions;
-using Namotion.Devices.Gpio.Tests.Mocks;
+using Namotion.Devices.Gpio.Simulation;
 using Xunit;
 
 namespace Namotion.Devices.Gpio.Tests;
@@ -14,8 +14,8 @@ public class GpioInterruptTests
     public void InterruptHandler_RisingEdge_UpdatesPinValue()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var pins = new Dictionary<int, GpioPin>();
@@ -39,7 +39,7 @@ public class GpioInterruptTests
         });
 
         // Act - Simulate hardware pin going high
-        mockDriver.SimulatePinValueChange(17, PinValue.High);
+        simulationDriver.SimulatePinValueChange(17, PinValue.High);
 
         // Assert
         Assert.True(pin.Value);
@@ -49,8 +49,8 @@ public class GpioInterruptTests
     public void InterruptHandler_FallingEdge_UpdatesPinValue()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var pins = new Dictionary<int, GpioPin>();
@@ -73,7 +73,7 @@ public class GpioInterruptTests
         });
 
         // Act - Simulate hardware pin going low
-        mockDriver.SimulatePinValueChange(17, PinValue.Low);
+        simulationDriver.SimulatePinValueChange(17, PinValue.Low);
 
         // Assert
         Assert.False(pin.Value);
@@ -83,8 +83,8 @@ public class GpioInterruptTests
     public void InterruptHandler_NotRunningPin_DoesNotUpdateValue()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var pins = new Dictionary<int, GpioPin>();
@@ -107,7 +107,7 @@ public class GpioInterruptTests
         });
 
         // Act
-        mockDriver.SimulatePinValueChange(17, PinValue.High);
+        simulationDriver.SimulatePinValueChange(17, PinValue.High);
 
         // Assert - Value should not change
         Assert.False(pin.Value);
@@ -117,8 +117,8 @@ public class GpioInterruptTests
     public void PollingVerification_DetectsDrift_UpdatesPinValue()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var pin = new GpioPin
@@ -130,7 +130,7 @@ public class GpioInterruptTests
         };
 
         // Simulate hardware value changing without interrupt (drift scenario)
-        mockDriver.SimulatePinValueChange(17, PinValue.High);
+        simulationDriver.SimulatePinValueChange(17, PinValue.High);
 
         // Act - Polling verification like GpioSubject does
         var actualValue = controller.Read(17) == PinValue.High;
@@ -147,8 +147,8 @@ public class GpioInterruptTests
     public void FullWorkflow_OutputWrite_ReadBack_Verify()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -163,14 +163,14 @@ public class GpioInterruptTests
         pin.Value = true;
 
         // Assert
-        Assert.Equal(PinValue.High, mockDriver.PinValues[17]);
+        Assert.Equal(PinValue.High, simulationDriver.PinValues[17]);
         Assert.Equal(ServiceStatus.Running, pin.Status); // No error
 
         // Act - Write low
         pin.Value = false;
 
         // Assert
-        Assert.Equal(PinValue.Low, mockDriver.PinValues[17]);
+        Assert.Equal(PinValue.Low, simulationDriver.PinValues[17]);
         Assert.Equal(ServiceStatus.Running, pin.Status);
     }
 
@@ -178,8 +178,8 @@ public class GpioInterruptTests
     public void FullWorkflow_ModeChange_InterruptManagement()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var registeredInterrupts = new HashSet<int>();
@@ -202,22 +202,22 @@ public class GpioInterruptTests
 
         // Assert - Interrupt should be unregistered
         Assert.DoesNotContain(17, registeredInterrupts);
-        Assert.Equal(PinMode.Output, mockDriver.PinModes[17]);
+        Assert.Equal(PinMode.Output, simulationDriver.PinModes[17]);
 
         // Act - Change back to input
         pin.Mode = GpioPinMode.Input;
 
         // Assert - Interrupt should be registered again
         Assert.Contains(17, registeredInterrupts);
-        Assert.Equal(PinMode.Input, mockDriver.PinModes[17]);
+        Assert.Equal(PinMode.Input, simulationDriver.PinModes[17]);
     }
 
     [Fact]
     public void MultiplePins_IndependentOperation()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
 
         var pins = new List<GpioPin>();
         for (int i = 17; i <= 20; i++)
@@ -240,9 +240,9 @@ public class GpioInterruptTests
         pins[3].Value = false; // Pin 20
 
         // Assert - Each pin has independent value
-        Assert.Equal(PinValue.High, mockDriver.PinValues[17]);
-        Assert.Equal(PinValue.Low, mockDriver.PinValues[18]);
-        Assert.Equal(PinValue.High, mockDriver.PinValues[19]);
-        Assert.Equal(PinValue.Low, mockDriver.PinValues[20]);
+        Assert.Equal(PinValue.High, simulationDriver.PinValues[17]);
+        Assert.Equal(PinValue.Low, simulationDriver.PinValues[18]);
+        Assert.Equal(PinValue.High, simulationDriver.PinValues[19]);
+        Assert.Equal(PinValue.Low, simulationDriver.PinValues[20]);
     }
 }

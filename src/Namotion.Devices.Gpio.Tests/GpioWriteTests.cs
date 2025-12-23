@@ -1,6 +1,6 @@
 using System.Device.Gpio;
 using HomeBlaze.Abstractions;
-using Namotion.Devices.Gpio.Tests.Mocks;
+using Namotion.Devices.Gpio.Simulation;
 using Xunit;
 
 namespace Namotion.Devices.Gpio.Tests;
@@ -11,8 +11,8 @@ public class GpioWriteTests
     public void WriteProperty_OutputPin_WritesToHardware()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -27,17 +27,17 @@ public class GpioWriteTests
         pin.Value = true;
 
         // Assert
-        Assert.Contains(mockDriver.WriteHistory, w => w.PinNumber == 17 && w.Value == PinValue.High);
+        Assert.Contains(simulationDriver.WriteHistory, w => w.PinNumber == 17 && w.Value == PinValue.High);
     }
 
     [Fact]
     public void WriteProperty_OutputPin_WritesLowValue()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Output);
-        mockDriver.SimulatePinValueChange(17, PinValue.High); // Start high
+        simulationDriver.SimulatePinValueChange(17, PinValue.High); // Start high
 
         var pin = new GpioPin
         {
@@ -52,15 +52,15 @@ public class GpioWriteTests
         pin.Value = false;
 
         // Assert
-        Assert.Contains(mockDriver.WriteHistory, w => w.PinNumber == 17 && w.Value == PinValue.Low);
+        Assert.Contains(simulationDriver.WriteHistory, w => w.PinNumber == 17 && w.Value == PinValue.Low);
     }
 
     [Fact]
     public void WriteProperty_InputPin_DoesNotWriteToHardware()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var pin = new GpioPin
@@ -75,15 +75,15 @@ public class GpioWriteTests
         pin.Value = true;
 
         // Assert - No writes should have happened for input pin
-        Assert.DoesNotContain(mockDriver.WriteHistory, w => w.PinNumber == 17);
+        Assert.DoesNotContain(simulationDriver.WriteHistory, w => w.PinNumber == 17);
     }
 
     [Fact]
     public void WriteProperty_NotRunningStatus_DoesNotWriteToHardware()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -98,15 +98,15 @@ public class GpioWriteTests
         pin.Value = true;
 
         // Assert - No writes should happen when status is not Running
-        Assert.DoesNotContain(mockDriver.WriteHistory, w => w.PinNumber == 17);
+        Assert.DoesNotContain(simulationDriver.WriteHistory, w => w.PinNumber == 17);
     }
 
     [Fact]
     public void WriteProperty_NonValueProperty_DoesNotWriteToHardware()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -121,15 +121,15 @@ public class GpioWriteTests
         pin.StatusMessage = "Test message";
 
         // Assert - No writes should happen for non-Value properties
-        Assert.Empty(mockDriver.WriteHistory);
+        Assert.Empty(simulationDriver.WriteHistory);
     }
 
     [Fact]
     public void WriteProperty_VerificationFails_SetsErrorStatus()
     {
         // Arrange
-        var mockDriver = new MockGpioDriverWithVerificationFailure();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriverWithVerificationFailure();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -153,7 +153,7 @@ public class GpioWriteTests
     /// Mock driver that simulates read-back verification failure.
     /// Always returns opposite of written value on read.
     /// </summary>
-    private class MockGpioDriverWithVerificationFailure : MockGpioDriver
+    private class SimulationGpioDriverWithVerificationFailure : SimulationGpioDriver
     {
         protected override PinValue Read(int pinNumber)
         {

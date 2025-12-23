@@ -32,7 +32,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
 
     public string? Title => Path.GetFileName(RelativePath.TrimEnd('/'));
 
-    public string Icon => "Folder";
+    public string IconName => "Folder";
 
     public StorageStatus Status => Storage.Status;
 

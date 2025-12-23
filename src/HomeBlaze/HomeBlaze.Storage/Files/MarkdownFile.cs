@@ -28,7 +28,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public string? Title => Frontmatter?.Title ?? FormatFilename(Name);
 
     [Derived]
-    public string? Icon => Frontmatter?.Icon ?? "Article";
+    public string? IconName => Frontmatter?.Icon ?? "Article";
 
     [Derived]
     public string? NavigationTitle => Frontmatter?.NavTitle;

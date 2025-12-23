@@ -24,7 +24,7 @@ public sealed class SubjectMethodInfo
     public string? Description { get; }
 
     /// <summary>
-    /// Icon name (e.g., "PlayArrow"), same convention as IIconProvider.Icon.
+    /// Icon name (e.g., "PlayArrow"), same convention as IIconProvider.IconName.
     /// </summary>
     public string? Icon { get; }
 

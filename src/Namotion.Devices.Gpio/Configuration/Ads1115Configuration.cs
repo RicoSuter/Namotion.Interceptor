@@ -3,7 +3,7 @@ namespace Namotion.Devices.Gpio.Configuration;
 /// <summary>
 /// Configuration for ADS1115 16-bit I2C ADC.
 /// </summary>
-public class Ads1115Configuration
+public record Ads1115Configuration
 {
     /// <summary>
     /// I2C bus number.

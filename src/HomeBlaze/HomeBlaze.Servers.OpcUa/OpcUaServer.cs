@@ -136,7 +136,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
 
     public string? Title => Name;
 
-    public string? Icon => "Dns";
+    public string? IconName => "Dns";
 
     [Derived]
     public string? IconColor => Status switch

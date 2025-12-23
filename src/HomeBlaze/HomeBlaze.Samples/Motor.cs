@@ -22,7 +22,7 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
 
     public string? Title => Name;
 
-    public string? Icon => "Settings";
+    public string? IconName => "Settings";
 
     [Derived]
     public string? IconColor => Status switch
