@@ -312,3 +312,70 @@ public partial class GpioPin
 
 Most other C# patterns (nullable, required, init, virtual, override, data annotations) work naturally.
 
+## Implementing Hosted Subjects for DI
+
+When creating a subject library that extends `BackgroundService`, provide a DI extension method using `AddHostedSubject<T>` from `Namotion.Interceptor.Hosting`.
+
+### DI Extension Method
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
+
+namespace MyLibrary;
+
+public static class MySubjectServiceCollectionExtensions
+{
+    /// <summary>
+    /// Adds MySubject as a hosted service.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">Optional callback to configure the subject.</param>
+    /// <param name="contextResolver">
+    /// Optional context resolver. Only used if subject has a constructor accepting IInterceptorSubjectContext.
+    /// </param>
+    public static IServiceCollection AddMySubject(
+        this IServiceCollection services,
+        Action<MySubject>? configure = null,
+        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
+        => services.AddHostedSubject(configure, contextResolver);
+}
+```
+
+### Required Project References
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.*" />
+  <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.*" />
+  <ProjectReference Include="..\Namotion.Interceptor.Hosting\Namotion.Interceptor.Hosting.csproj" />
+</ItemGroup>
+```
+
+### Usage
+
+```csharp
+// Minimal
+services.AddMySubject();
+
+// With configuration
+services.AddMySubject(subject =>
+{
+    subject.Name = "Sensor 1";
+    subject.PollingInterval = TimeSpan.FromSeconds(5);
+});
+```
+
+### Context Support (Optional)
+
+If your subject needs access to the `IInterceptorSubjectContext`, add an optional parameter to the constructor. `AddHostedSubject` will automatically detect and use it:
+
+```csharp
+public MySubject(IInterceptorSubjectContext? context = null, IMyDriver? driver = null)
+{
+    // Context is automatically passed if:
+    // 1. Subject has this constructor parameter, AND
+    // 2. Context is registered in DI or provided via contextResolver
+}
+```
