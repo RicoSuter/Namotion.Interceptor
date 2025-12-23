@@ -58,7 +58,7 @@ Edit `root.json` to point to your data folder:
 
 ```json
 {
-    "type": "HomeBlaze.Storage.FluentStorageContainer",
+    "$type": "HomeBlaze.Storage.FluentStorageContainer",
     "storageType": "disk",
     "connectionString": "./Data"
 }
@@ -66,11 +66,11 @@ Edit `root.json` to point to your data folder:
 
 ### Step 2: Add Subjects
 
-Create JSON files with a `type` discriminator:
+Create JSON files with a `$type` discriminator:
 
 ```json
 {
-    "type": "HomeBlaze.Samples.Motor",
+    "$type": "HomeBlaze.Samples.Motor",
     "name": "Cooling Fan",
     "targetSpeed": 1500
 }
@@ -86,7 +86,7 @@ Create markdown files anywhere in the data folder. They'll appear in the navigat
 
 | Extension | Subject Type | Description |
 |-----------|--------------|-------------|
-| `.json` | *Polymorphic* | Deserialized via `type` property |
+| `.json` | *Polymorphic* | Deserialized via `$type` property |
 | `.md` | `MarkdownFile` | Rendered markdown with frontmatter |
 | `.markdown` | `MarkdownFile` | Alternative extension |
 | *folder* | `VirtualFolder` | Container for nested subjects |

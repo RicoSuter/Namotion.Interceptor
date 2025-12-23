@@ -3,96 +3,132 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Storage.Abstractions;
-using HomeBlaze.Storage.Abstractions.Attributes;
+using HomeBlaze.Services.Serialization;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Services;
 
 /// <summary>
 /// Serializes and deserializes IConfigurableSubject instances to/from JSON.
-/// Uses "type" discriminator for polymorphic deserialization.
+/// Uses "$type" discriminator for polymorphic serialization via System.Text.Json.
 /// Only serializes properties marked with [Configuration].
+/// Uses ActivatorUtilities for DI-aware construction during deserialization.
 /// </summary>
 public class ConfigurableSubjectSerializer
 {
-    private const string TypeDiscriminator = "type";
+    private readonly TypeProvider _typeProvider;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly JsonSerializerOptions _options;
 
-    private readonly SubjectTypeRegistry _typeRegistry;
-    private readonly SubjectFactory _subjectFactory;
-    private readonly JsonSerializerOptions _jsonOptions;
-
-    public ConfigurableSubjectSerializer(SubjectTypeRegistry typeRegistry, SubjectFactory subjectFactory)
+    public ConfigurableSubjectSerializer(TypeProvider typeProvider, IServiceProvider serviceProvider)
     {
-        _typeRegistry = typeRegistry;
-        _subjectFactory = subjectFactory;
-        _jsonOptions = new JsonSerializerOptions
+        _typeProvider = typeProvider;
+        _serviceProvider = serviceProvider;
+        _options = new JsonSerializerOptions
         {
+            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider),
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = true,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            Converters = { new JsonStringEnumConverter() }
         };
     }
 
     /// <summary>
-    /// Deserializes a JSON string to an InterceptorSubject.
+    /// Serializes an IConfigurableSubject to JSON with $type discriminator.
     /// </summary>
-    public IInterceptorSubject? Deserialize(string json)
+    public string Serialize(IInterceptorSubject subject)
     {
-        using var document = JsonDocument.Parse(json);
-        return DeserializeElement(document.RootElement);
+        if (subject is not IConfigurableSubject configurableSubject)
+        {
+            throw new ArgumentException(
+                $"Subject must implement IConfigurableSubject. Type: {subject.GetType().FullName}",
+                nameof(subject));
+        }
+
+        return JsonSerializer.Serialize(configurableSubject, typeof(IConfigurableSubject), _options);
     }
 
     /// <summary>
-    /// Deserializes a JSON element to an InterceptorSubject.
+    /// Deserializes JSON to an IConfigurableSubject using $type discriminator.
+    /// Uses ActivatorUtilities for DI-aware construction.
     /// </summary>
-    public IInterceptorSubject? DeserializeElement(JsonElement element)
+    public IConfigurableSubject? Deserialize(string json)
     {
-        if (element.ValueKind != JsonValueKind.Object)
-            return null;
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
 
-        if (!element.TryGetProperty(TypeDiscriminator, out var typeElement))
+        // Extract $type discriminator
+        if (!root.TryGetProperty("$type", out var typeElement))
         {
             return null;
         }
 
         var typeName = typeElement.GetString();
-
-        if (string.IsNullOrWhiteSpace(typeName))
+        if (string.IsNullOrEmpty(typeName))
+        {
             return null;
+        }
 
-        var type = _typeRegistry.ResolveType(typeName);
+        // Find the type in registered types
+        var type = _typeProvider.Types.FirstOrDefault(t => t.FullName == typeName);
         if (type == null)
-            throw new InvalidOperationException($"Unknown type: {typeName}. Make sure it's registered in SubjectTypeRegistry.");
-
-        if (!typeof(IConfigurableSubject).IsAssignableFrom(type))
+        {
             return null;
+        }
 
-        var subject = CreateInstance(type);
+        // Create instance using ActivatorUtilities for DI-aware construction
+        var subject = ActivatorUtilities.CreateInstance(_serviceProvider, type) as IConfigurableSubject;
         if (subject == null)
+        {
             return null;
+        }
 
-        PopulateProperties(subject, element);
-
+        // Populate configuration properties from JSON using reflection
+        // (can't use UpdateConfiguration because subject isn't registered in a context yet)
+        PopulateConfigurationProperties(subject, type, root);
         return subject;
     }
 
     /// <summary>
-    /// Serializes an InterceptorSubject to JSON.
+    /// Populates [Configuration] properties on a newly created subject using reflection.
+    /// Used during deserialization before subject is registered in a context.
     /// </summary>
-    public string Serialize(IInterceptorSubject subject)
+    private void PopulateConfigurationProperties(IConfigurableSubject subject, Type type, JsonElement root)
     {
-        using var stream = new MemoryStream();
-        using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+        foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            // Check if property has [Configuration] attribute
+            // Use GetCustomAttributes for better compatibility with partial properties
+            var hasConfigAttribute = property.GetCustomAttributes(typeof(ConfigurationAttribute), true).Length > 0;
+            if (!hasConfigAttribute)
+                continue;
 
-        SerializeSubject(writer, subject);
+            // Skip read-only properties
+            if (!property.CanWrite)
+                continue;
 
-        writer.Flush();
-        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+            var jsonName = JsonNamingPolicy.CamelCase.ConvertName(property.Name);
+            if (root.TryGetProperty(jsonName, out var jsonValue))
+            {
+                try
+                {
+                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.PropertyType, _options);
+                    property.SetValue(subject, value);
+                }
+                catch
+                {
+                    // Skip properties that can't be deserialized
+                }
+            }
+        }
     }
 
     /// <summary>
     /// Updates a subject's configuration properties from JSON.
+    /// Uses same options as Serialize/Deserialize for consistent property handling.
+    /// Note: STJ doesn't support populating existing objects, so we deserialize each property individually.
     /// </summary>
     public void UpdateConfiguration(IInterceptorSubject subject, string json)
     {
@@ -106,87 +142,13 @@ public class ConfigurableSubjectSerializer
             {
                 try
                 {
-                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type);
+                    // Use same _options for consistent deserialization behavior
+                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, _options);
                     property.SetValue(value);
                 }
                 catch
                 {
                     // Skip properties that can't be deserialized
-                }
-            }
-        }
-    }
-
-    private void SerializeSubject(Utf8JsonWriter writer, IInterceptorSubject subject)
-    {
-        var type = subject.GetType();
-
-        writer.WriteStartObject();
-        writer.WriteString(TypeDiscriminator, type.FullName);
-
-        foreach (var registeredProperty in subject.GetConfigurationProperties())
-        {
-            var value = registeredProperty.GetValue();
-            var propertyName = JsonNamingPolicy.CamelCase.ConvertName(registeredProperty.Name);
-
-            if (value == null)
-            {
-                writer.WriteNull(propertyName);
-            }
-            else if (value is IInterceptorSubject nestedSubject)
-            {
-                writer.WritePropertyName(propertyName);
-                SerializeSubject(writer, nestedSubject);
-            }
-            else
-            {
-                writer.WritePropertyName(propertyName);
-                JsonSerializer.Serialize(writer, value, value.GetType(), _jsonOptions);
-            }
-        }
-
-        writer.WriteEndObject();
-    }
-
-    private IInterceptorSubject CreateInstance(Type type)
-    {
-        return _subjectFactory.CreateSubject(type);
-    }
-
-    private void PopulateProperties(IInterceptorSubject subject, JsonElement element)
-    {
-        var subjectType = subject.GetType();
-        var properties = subjectType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
-        foreach (var jsonProperty in element.EnumerateObject())
-        {
-            if (jsonProperty.Name == TypeDiscriminator)
-                continue;
-
-            var propertyInfo = properties
-                .FirstOrDefault(p => JsonNamingPolicy.CamelCase.ConvertName(p.Name) == jsonProperty.Name &&
-                                     p.GetCustomAttribute<ConfigurationAttribute>() is not null);
-
-            if (propertyInfo != null && propertyInfo.CanWrite)
-            {
-                try
-                {
-                    object? value;
-
-                    if (typeof(IInterceptorSubject).IsAssignableFrom(propertyInfo.PropertyType))
-                    {
-                        value = DeserializeElement(jsonProperty.Value);
-                    }
-                    else
-                    {
-                        value = JsonSerializer.Deserialize(jsonProperty.Value.GetRawText(), propertyInfo.PropertyType, _jsonOptions);
-                    }
-
-                    propertyInfo.SetValue(subject, value);
-                }
-                catch
-                {
-                    // Skip properties that can't be set
                 }
             }
         }

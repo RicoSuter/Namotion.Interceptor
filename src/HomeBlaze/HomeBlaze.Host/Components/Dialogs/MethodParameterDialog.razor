@@ -1,3 +1,4 @@
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Services
 @using HomeBlaze.Services
 
@@ -53,6 +54,7 @@
                         }
                         else
                         {
+                            var unitSuffix = GetUnitSuffix(parameter.Unit);
                             <MudTextField T="string"
                                           Label="@GetParameterLabel(parameter)"
                                           Value="@GetStringValue(parameter.Name)"
@@ -60,7 +62,9 @@
                                           Error="@HasError(parameter.Name)"
                                           ErrorText="@GetError(parameter.Name)"
                                           Required="@IsRequired(parameter)"
-                                          Immediate="true" />
+                                          Immediate="true"
+                                          Adornment="@(unitSuffix != null ? Adornment.End : Adornment.None)"
+                                          AdornmentText="@unitSuffix" />
                         }
                     </div>
                 }
@@ -129,12 +133,13 @@
         return isNullable ? label : $"{label} *";
     }
 
+    private static string? GetUnitSuffix(StateUnit? unit) =>
+        unit.HasValue ? StateUnitExtensions.GetUnitSuffix(unit.Value) : null;
+
     private string? GetDefaultValue(SubjectMethodParameter parameter)
     {
         if (parameter.Type == typeof(bool))
             return "false";
-        if (parameter.Type == typeof(bool?))
-            return null;
         return null;
     }
 

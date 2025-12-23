@@ -98,10 +98,15 @@
                 _propertiesEditor?.ApplyChanges();
             }
 
+            if (subject is not IConfigurableSubject)
+            {
+                subject = FindNearest<IConfigurableSubject>(subject) as IInterceptorSubject;
+            }
+
             if (subject is IConfigurableSubject)
             {
-                var configurationWriter = FindNearestConfigurationWriter(subject);
-                await configurationWriter.WriteConfigurationAsync(subject, cancellationToken);
+                var configurationWriter = FindNearest<IConfigurationWriter>(subject) ?? RootManager;
+                await configurationWriter.WriteConfigurationAsync(subject, CancellationToken.None);
             }
 
             if (subject is IStorageFile storageFile)
@@ -133,10 +138,12 @@
         await Task.CompletedTask;
     }
 
-    private IConfigurationWriter FindNearestConfigurationWriter(IInterceptorSubject subject)
+    private T FindNearest<T>(IInterceptorSubject subject)
     {
+        // TODO: Replace with BFS when available in Namotion.Interceptor.Tracking
+
         // Check if the subject itself is a writer
-        if (subject is IConfigurationWriter writer)
+        if (subject is T writer)
         {
             return writer;
         }
@@ -160,7 +167,7 @@
 
             // Get the first parent's subject
             var parentSubject = parents.First().Property.Subject;
-            if (parentSubject is IConfigurationWriter parentWriter)
+            if (parentSubject is T parentWriter)
             {
                 return parentWriter;
             }
@@ -168,6 +175,6 @@
             current = parentSubject;
         }
 
-        return RootManager;
+        return default!;
     }
 }

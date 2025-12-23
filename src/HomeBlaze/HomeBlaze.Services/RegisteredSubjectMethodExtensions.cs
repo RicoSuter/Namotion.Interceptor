@@ -77,7 +77,7 @@ public static class RegisteredSubjectMethodExtensions
                 continue;
 
             var parameters = method.GetParameters()
-                .Select(p => new SubjectMethodParameter(p))
+                .Select(p => new SubjectMethodParameter(p, ParameterConverter.IsSupported(p.ParameterType)))
                 .ToArray();
 
             var resultType = GetUnwrappedResultType(method.ReturnType);

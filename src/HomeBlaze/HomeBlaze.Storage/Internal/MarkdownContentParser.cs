@@ -280,7 +280,8 @@ public sealed partial class MarkdownContentParser
                         var newSubject = _serializer.Deserialize(subj.Json);
                         if (newSubject != null)
                         {
-                            newChildren[subj.Name] = newSubject;
+                            // All IConfigurableSubject implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
+                            newChildren[subj.Name] = (IInterceptorSubject)newSubject;
                         }
                     }
                     break;
