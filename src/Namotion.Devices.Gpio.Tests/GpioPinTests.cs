@@ -131,31 +131,30 @@ public class GpioPinTests
     }
 
     [Fact]
-    public void SetValue_ChangesValue()
+    public async Task TurnOnAsync_ChangesValueToTrue()
     {
         // Arrange
         var pin = new GpioPin();
         Assert.False(pin.Value);
 
         // Act
-        pin.SetValue(true);
+        await pin.TurnOnAsync(CancellationToken.None);
 
         // Assert
         Assert.True(pin.Value);
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void SetValue_SupportsBothValues(bool value)
+    [Fact]
+    public async Task TurnOffAsync_ChangesValueToFalse()
     {
         // Arrange
-        var pin = new GpioPin();
+        var pin = new GpioPin { Value = true };
+        Assert.True(pin.Value);
 
         // Act
-        pin.SetValue(value);
+        await pin.TurnOffAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(value, pin.Value);
+        Assert.False(pin.Value);
     }
 }
