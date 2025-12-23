@@ -105,8 +105,14 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         _ => "Warning"
     };
 
-    public GpioSubject()
+    /// <summary>
+    /// Creates a GpioSubject with optional context and GPIO driver.
+    /// </summary>
+    /// <param name="driver">Optional GPIO driver. If null, uses system default or simulation based on UseSimulation.</param>
+    public GpioSubject(GpioDriver? driver = null)
     {
+        _driver = driver;
+
         PollingInterval = TimeSpan.FromSeconds(5);
         RetryInterval = TimeSpan.FromSeconds(30);
 
@@ -115,16 +121,6 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
-    }
-
-    /// <summary>
-    /// Creates a GpioSubject with a custom GPIO driver.
-    /// Use this constructor for code-based usage with custom drivers or for testing.
-    /// </summary>
-    /// <param name="driver">The GPIO driver to use.</param>
-    public GpioSubject(GpioDriver driver) : this()
-    {
-        _driver = driver;
     }
 
     /// <summary>
