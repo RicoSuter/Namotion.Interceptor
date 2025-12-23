@@ -1,6 +1,6 @@
 using System.Device.Gpio;
 using HomeBlaze.Abstractions;
-using Namotion.Devices.Gpio.Tests.Mocks;
+using Namotion.Devices.Gpio.Simulation;
 using Xunit;
 
 namespace Namotion.Devices.Gpio.Tests;
@@ -11,8 +11,8 @@ public class GpioModeChangeTests
     public void ModeChange_InputToOutput_UnregistersInterruptAndSetsMode()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var unregisteredPins = new List<int>();
@@ -30,15 +30,15 @@ public class GpioModeChangeTests
 
         // Assert
         Assert.Contains(17, unregisteredPins);
-        Assert.Equal(PinMode.Output, mockDriver.PinModes[17]);
+        Assert.Equal(PinMode.Output, simulationDriver.PinModes[17]);
     }
 
     [Fact]
     public void ModeChange_OutputToInput_RegistersInterruptAndReadsValue()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Output);
         var registeredPins = new List<int>();
 
@@ -52,14 +52,14 @@ public class GpioModeChangeTests
             Value = false
         };
 
-        mockDriver.SimulatePinValueChange(17, PinValue.High); // Set initial high value
+        simulationDriver.SimulatePinValueChange(17, PinValue.High); // Set initial high value
 
         // Act
         pin.Mode = GpioPinMode.Input;
 
         // Assert
         Assert.Contains(17, registeredPins);
-        Assert.Equal(PinMode.Input, mockDriver.PinModes[17]);
+        Assert.Equal(PinMode.Input, simulationDriver.PinModes[17]);
         Assert.True(pin.Value); // Should have read the high value from hardware
     }
 
@@ -67,8 +67,8 @@ public class GpioModeChangeTests
     public void ModeChange_InputToInputPullUp_SetsHardwareMode()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var unregisteredPins = new List<int>();
@@ -90,15 +90,15 @@ public class GpioModeChangeTests
         // Assert - Should not register/unregister since both are input modes
         Assert.Empty(unregisteredPins);
         Assert.Empty(registeredPins);
-        Assert.Equal(PinMode.InputPullUp, mockDriver.PinModes[17]);
+        Assert.Equal(PinMode.InputPullUp, simulationDriver.PinModes[17]);
     }
 
     [Fact]
     public void ModeChange_InputToInputPullDown_SetsHardwareMode()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var pin = new GpioPin
@@ -115,15 +115,15 @@ public class GpioModeChangeTests
         pin.Mode = GpioPinMode.InputPullDown;
 
         // Assert
-        Assert.Equal(PinMode.InputPullDown, mockDriver.PinModes[17]);
+        Assert.Equal(PinMode.InputPullDown, simulationDriver.PinModes[17]);
     }
 
     [Fact]
     public void ModeChange_ToOutput_WritesCurrentValueToHardware()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var pin = new GpioPin
@@ -141,15 +141,15 @@ public class GpioModeChangeTests
         pin.Mode = GpioPinMode.Output;
 
         // Assert - Should write the current value (true/High) to hardware
-        Assert.Contains(mockDriver.WriteHistory, w => w.PinNumber == 17 && w.Value == PinValue.High);
+        Assert.Contains(simulationDriver.WriteHistory, w => w.PinNumber == 17 && w.Value == PinValue.High);
     }
 
     [Fact]
     public void ModeChange_NotRunningStatus_DoesNothing()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var interruptCalled = false;
@@ -176,8 +176,8 @@ public class GpioModeChangeTests
     public void ModeChange_SameMode_DoesNothing()
     {
         // Arrange
-        var mockDriver = new MockGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, mockDriver);
+        var simulationDriver = new SimulationGpioDriver();
+        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var interactionCount = 0;

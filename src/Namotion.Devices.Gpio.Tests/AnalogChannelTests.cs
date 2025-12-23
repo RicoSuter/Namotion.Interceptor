@@ -68,6 +68,6 @@ public class AnalogChannelTests
 
         // Act & Assert
         Assert.Equal("Channel 5", channel.Title);
-        Assert.Equal("ShowChart", channel.Icon);
+        Assert.Equal("ShowChart", channel.IconName);
     }
 }

@@ -1,6 +1,7 @@
 using System.Device.Gpio;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Devices;
 using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Devices.Gpio;
@@ -9,11 +10,11 @@ namespace Namotion.Devices.Gpio;
 /// Represents a single GPIO pin with mode, value, and availability status.
 /// </summary>
 [InterceptorSubject]
-public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider
+public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider, ISwitchDevice
 {
-    internal GpioController? Controller { get; init; }
-    internal Action<int>? RegisterInterrupt { get; init; }
-    internal Action<int>? UnregisterInterrupt { get; init; }
+    internal GpioController? Controller { get; set; }
+    internal Action<int>? RegisterInterrupt { get; set; }
+    internal Action<int>? UnregisterInterrupt { get; set; }
 
     private readonly Lock _lock = new();
 
@@ -21,6 +22,12 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider
     /// The GPIO pin number (BCM numbering).
     /// </summary>
     public partial int PinNumber { get; set; }
+
+    /// <summary>
+    /// Optional friendly name for the pin.
+    /// </summary>
+    [Configuration]
+    public partial string? Name { get; set; }
 
     /// <summary>
     /// The pin operating mode.
@@ -49,10 +56,19 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider
 
     /// <inheritdoc />
     [Derived]
-    public string Title => $"Pin {PinNumber}: {Status} ({Mode}) {Value}";
+    public string Title => string.IsNullOrEmpty(Name)
+        ? $"Pin {PinNumber}"
+        : $"{Name} (Pin {PinNumber})";
 
     /// <inheritdoc />
-    public string Icon => "Settings";
+    [Derived]
+    public string IconName => Status switch
+    {
+        ServiceStatus.Running => Value ? "ToggleOn" : "ToggleOff",
+        ServiceStatus.Error => "Error",
+        ServiceStatus.Unavailable => "Block",
+        _ => "Warning"
+    };
 
     /// <inheritdoc />
     [Derived]
@@ -60,12 +76,18 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider
     {
         ServiceStatus.Running => Value ? "Success" : "Default",
         ServiceStatus.Error => "Error",
+        ServiceStatus.Unavailable => "Default",
         _ => "Warning"
     };
+
+    /// <inheritdoc />
+    [Derived]
+    public bool? IsOn => Mode == GpioPinMode.Output ? Value : null;
 
     public GpioPin()
     {
         PinNumber = 0;
+        Name = null;
         Mode = GpioPinMode.Input;
         Value = false;
         Status = ServiceStatus.Stopped;
@@ -80,6 +102,22 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider
     public void SetValue(bool value)
     {
         Value = value;
+    }
+
+    /// <inheritdoc />
+    [Operation(Title = "Turn On", Icon = "ToggleOn", Position = 2)]
+    public Task TurnOnAsync(CancellationToken cancellationToken)
+    {
+        Value = true;
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    [Operation(Title = "Turn Off", Icon = "ToggleOff", Position = 3)]
+    public Task TurnOffAsync(CancellationToken cancellationToken)
+    {
+        Value = false;
+        return Task.CompletedTask;
     }
 
     /// <summary>

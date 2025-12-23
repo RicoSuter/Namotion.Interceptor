@@ -48,6 +48,6 @@ public class JsonFileTests
         var file = new HomeBlaze.Storage.Files.JsonFile(storage, "test.json");
 
         // Assert
-        Assert.Equal("DataObject", file.Icon);
+        Assert.Equal("DataObject", file.IconName);
     }
 }

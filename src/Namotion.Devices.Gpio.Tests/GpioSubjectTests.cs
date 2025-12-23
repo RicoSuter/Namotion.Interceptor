@@ -28,7 +28,7 @@ public class GpioSubjectTests
 
         // Act & Assert
         Assert.Equal("GPIO", subject.Title);
-        Assert.Equal("Memory", subject.Icon);
+        Assert.Equal("Memory", subject.IconName);
     }
 
     [Fact]

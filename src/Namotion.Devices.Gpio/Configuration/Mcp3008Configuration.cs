@@ -3,7 +3,7 @@ namespace Namotion.Devices.Gpio.Configuration;
 /// <summary>
 /// Configuration for MCP3008 10-bit SPI ADC.
 /// </summary>
-public class Mcp3008Configuration
+public record Mcp3008Configuration
 {
     /// <summary>
     /// SPI clock pin (BCM numbering).

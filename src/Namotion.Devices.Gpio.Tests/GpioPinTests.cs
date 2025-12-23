@@ -78,14 +78,56 @@ public class GpioPinTests
     }
 
     [Fact]
-    public void GpioPin_TitleAndIcon_ReturnExpectedValues()
+    public void GpioPin_Title_WithoutName_ReturnsDefaultTitle()
     {
         // Arrange
         var pin = new GpioPin { PinNumber = 17 };
 
         // Act & Assert
         Assert.Equal("Pin 17", pin.Title);
-        Assert.Equal("Settings", pin.Icon);
+    }
+
+    [Fact]
+    public void GpioPin_Title_WithName_ReturnsNamedTitle()
+    {
+        // Arrange
+        var pin = new GpioPin { PinNumber = 17, Name = "LED" };
+
+        // Act & Assert
+        Assert.Equal("LED (Pin 17)", pin.Title);
+    }
+
+    [Fact]
+    public void GpioPin_IconName_ReturnsExpectedValues()
+    {
+        // Arrange
+        var pin = new GpioPin { PinNumber = 17 };
+
+        // Act & Assert - Stopped status returns "Warning"
+        Assert.Equal("Warning", pin.IconName);
+    }
+
+    [Fact]
+    public void GpioPin_Name_InitializesAsNull()
+    {
+        // Act
+        var pin = new GpioPin();
+
+        // Assert
+        Assert.Null(pin.Name);
+    }
+
+    [Fact]
+    public void GpioPin_Name_CanBeSet()
+    {
+        // Arrange
+        var pin = new GpioPin();
+
+        // Act
+        pin.Name = "Status LED";
+
+        // Assert
+        Assert.Equal("Status LED", pin.Name);
     }
 
     [Fact]

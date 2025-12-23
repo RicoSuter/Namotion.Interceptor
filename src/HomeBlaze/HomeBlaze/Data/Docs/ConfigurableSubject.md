@@ -50,7 +50,7 @@ public class Mcp3008Configuration  // Value object - all saved
 
 ```json
 {
-    "type": "Namotion.Devices.Gpio.GpioSubject",
+    "$type": "Namotion.Devices.Gpio.GpioSubject",
     "mcp3008": {
         "clockPin": 11,
         "mosiPin": 10,

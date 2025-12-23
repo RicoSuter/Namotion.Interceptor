@@ -117,7 +117,7 @@ public class FluentStorageContainerTests
         var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
 
         // Act
-        var icon = storage.Icon;
+        var icon = storage.IconName;
 
         // Assert
         Assert.Equal("Storage", icon);
