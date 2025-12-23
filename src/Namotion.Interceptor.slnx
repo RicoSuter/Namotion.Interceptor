@@ -33,7 +33,6 @@
     <Project Path="HomeBlaze/HomeBlaze.Servers.OpcUa/HomeBlaze.Servers.OpcUa.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Servers.OpcUa.Blazor/HomeBlaze.Servers.OpcUa.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Services/HomeBlaze.Services.csproj" />
-    <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor.Tests/HomeBlaze.Storage.Blazor.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor/HomeBlaze.Storage.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage/HomeBlaze.Storage.csproj" />
     <Project Path="HomeBlaze/HomeBlaze/HomeBlaze.csproj" />
@@ -43,10 +42,16 @@
     <Project Path="HomeBlaze/HomeBlaze.Components.Abstractions/HomeBlaze.Components.Abstractions.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Abstractions/HomeBlaze.Storage.Abstractions.csproj" />
   </Folder>
+  <Folder Name="/HomeBlaze/Devices/">
+    <Project Path="Namotion.Devices.Gpio.HomeBlaze/Namotion.Devices.Gpio.HomeBlaze.csproj" />
+    <Project Path="Namotion.Devices.Gpio.Tests/Namotion.Devices.Gpio.Tests.csproj" />
+    <Project Path="Namotion.Devices.Gpio/Namotion.Devices.Gpio.csproj" />
+  </Folder>
   <Folder Name="/HomeBlaze/Tests/">
     <Project Path="HomeBlaze/HomeBlaze.E2E.Tests/HomeBlaze.E2E.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services.Tests/HomeBlaze.Host.Services.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Services.Tests/HomeBlaze.Services.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor.Tests/HomeBlaze.Storage.Blazor.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Tests/HomeBlaze.Storage.Tests.csproj" />
   </Folder>
   <Folder Name="/Samples/">

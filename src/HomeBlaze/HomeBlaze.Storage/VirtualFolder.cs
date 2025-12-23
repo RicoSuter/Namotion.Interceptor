@@ -30,9 +30,9 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     [State]
     public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 
-    public string? Title => Path.GetFileName(RelativePath.TrimEnd('/'));
+    public string Title => Path.GetFileName(RelativePath.TrimEnd('/'));
 
-    public string Icon => "Folder";
+    public string IconName => "Folder";
 
     public StorageStatus Status => Storage.Status;
 
