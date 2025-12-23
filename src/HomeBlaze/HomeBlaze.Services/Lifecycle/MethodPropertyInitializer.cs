@@ -14,7 +14,9 @@ public class MethodPropertyInitializer : ILifecycleHandler
 {
     public void AttachSubject(SubjectLifecycleChange change)
     {
-        if (change.IsFirstAttach)
+        // TODO: Replace with change.IsFirstAttach once PR #132 is merged
+        // https://github.com/RicoSuter/Namotion.Interceptor/pull/132
+        if (change.ReferenceCount == 1)
         {
             var registeredSubject = change.Subject.TryGetRegisteredSubject()
                                     ?? throw new InvalidOperationException("Subject not registered");

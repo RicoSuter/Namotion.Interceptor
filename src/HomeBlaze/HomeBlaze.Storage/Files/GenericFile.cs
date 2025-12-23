@@ -13,7 +13,7 @@ public partial class GenericFile : IStorageFile, ITitleProvider, IIconProvider
 {
     public string? Title => Name;
 
-    public string Icon => "InsertDriveFile";
+    public string IconName => "InsertDriveFile";
 
     public IStorageContainer Storage { get; }
     

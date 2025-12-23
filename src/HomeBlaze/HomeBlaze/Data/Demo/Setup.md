@@ -115,7 +115,7 @@ To add a new motor to the demo:
 1. Create a new JSON file in the `demo` folder:
 ```json
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "My Custom Motor",
   "targetSpeed": 2000,
   "simulationInterval": "00:00:01"

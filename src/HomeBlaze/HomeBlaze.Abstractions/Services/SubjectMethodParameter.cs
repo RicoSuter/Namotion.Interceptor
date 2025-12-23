@@ -1,4 +1,5 @@
 using System.Reflection;
+using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Services;
 
@@ -22,10 +23,24 @@ public sealed class SubjectMethodParameter
     /// </summary>
     public ParameterInfo ParameterInfo { get; }
 
-    public SubjectMethodParameter(ParameterInfo parameterInfo)
+    /// <summary>
+    /// Whether the parameter type is supported for UI rendering.
+    /// </summary>
+    public bool IsSupported { get; }
+
+    /// <summary>
+    /// The unit of the parameter value (from OperationParameterAttribute), or null if not specified.
+    /// </summary>
+    public StateUnit? Unit { get; }
+
+    public SubjectMethodParameter(ParameterInfo parameterInfo, bool isSupported)
     {
         ParameterInfo = parameterInfo;
         Name = parameterInfo.Name ?? $"arg{parameterInfo.Position}";
         Type = parameterInfo.ParameterType;
+        IsSupported = isSupported;
+
+        var attribute = parameterInfo.GetCustomAttribute<OperationParameterAttribute>();
+        Unit = attribute?.Unit;
     }
 }

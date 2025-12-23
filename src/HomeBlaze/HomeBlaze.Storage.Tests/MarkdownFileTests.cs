@@ -250,7 +250,7 @@ public class MarkdownFileTests
         var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
-        Assert.Equal("mdi-custom", markdown.Icon);
+        Assert.Equal("mdi-custom", markdown.IconName);
     }
 
     [Fact]
@@ -262,7 +262,7 @@ public class MarkdownFileTests
         var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
-        Assert.Equal("Article", markdown.Icon);
+        Assert.Equal("Article", markdown.IconName);
     }
 
     [Fact]

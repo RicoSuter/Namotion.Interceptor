@@ -1,0 +1,75 @@
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(GpioSubject))]
+@implements ISubjectComponent
+
+<MudStack Spacing="4">
+    <MudText Typo="Typo.h6">GPIO Configuration</MudText>
+
+    <MudExpansionPanels>
+        @* MCP3008 ADC Section *@
+        <MudExpansionPanel Text="MCP3008 ADC (SPI)">
+            <MudStack Spacing="2">
+                <MudSwitch T="bool" Value="@(GpioSubject?.Mcp3008 != null)" ValueChanged="@OnMcp3008EnabledChanged" Label="Enable MCP3008" Color="Color.Primary" />
+
+                @if (GpioSubject?.Mcp3008 != null)
+                {
+                    <MudNumericField T="int" @bind-Value="GpioSubject.Mcp3008.ClockPin" Label="Clock Pin" />
+                    <MudNumericField T="int" @bind-Value="GpioSubject.Mcp3008.MosiPin" Label="MOSI Pin" />
+                    <MudNumericField T="int" @bind-Value="GpioSubject.Mcp3008.MisoPin" Label="MISO Pin" />
+                    <MudNumericField T="int" @bind-Value="GpioSubject.Mcp3008.ChipSelectPin" Label="Chip Select Pin" />
+                }
+            </MudStack>
+        </MudExpansionPanel>
+
+        @* ADS1115 ADC Section *@
+        <MudExpansionPanel Text="ADS1115 ADC (I2C)">
+            <MudStack Spacing="2">
+                <MudSwitch T="bool" Value="@(GpioSubject?.Ads1115 != null)" ValueChanged="@OnAds1115EnabledChanged" Label="Enable ADS1115" Color="Color.Primary" />
+
+                @if (GpioSubject?.Ads1115 != null)
+                {
+                    <MudNumericField T="int" @bind-Value="GpioSubject.Ads1115.I2cBus" Label="I2C Bus" />
+                    <MudNumericField T="int" @bind-Value="GpioSubject.Ads1115.Address" Label="I2C Address" />
+                }
+            </MudStack>
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+
+    <MudAlert Severity="Severity.Info" Class="mt-2">
+        Digital pins and analog channels are managed through the browser panel.
+    </MudAlert>
+
+    <MudDivider Class="my-4" />
+
+    <MudSwitch T="bool"
+        Value="@(GpioSubject?.UseSimulation ?? false)"
+        ValueChanged="@OnSimulationChanged"
+        Label="Use Simulation Mode"
+        Color="Color.Secondary" />
+    <MudText Typo="Typo.caption" Class="ml-12 mt-n2">
+        Creates 28 simulated GPIO pins for testing on non-Pi hardware.
+    </MudText>
+</MudStack>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private GpioSubject? GpioSubject => Subject as GpioSubject;
+
+    private void OnMcp3008EnabledChanged(bool enabled)
+    {
+        GpioSubject?.Mcp3008 = enabled ? new Mcp3008Configuration() : null;
+    }
+
+    private void OnAds1115EnabledChanged(bool enabled)
+    {
+        GpioSubject?.Ads1115 = enabled ? new Ads1115Configuration() : null;
+    }
+
+    private void OnSimulationChanged(bool enabled)
+    {
+        GpioSubject?.UseSimulation = enabled;
+    }
+}

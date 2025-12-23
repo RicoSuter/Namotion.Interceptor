@@ -1,5 +1,5 @@
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "simulationInterval": "00:00:02",
   "targetSpeed": 600,
   "name": "Conveyor Belt"

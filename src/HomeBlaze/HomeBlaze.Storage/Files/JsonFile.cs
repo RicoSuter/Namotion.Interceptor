@@ -13,7 +13,7 @@ public partial class JsonFile : IStorageFile, ITitleProvider, IIconProvider
 {
     public string? Title => Path.GetFileNameWithoutExtension(FullPath);
 
-    public string Icon => "DataObject";
+    public string IconName => "DataObject";
     
     public IStorageContainer Storage { get; }
     
