@@ -60,11 +60,6 @@ public class Mcp3008Configuration  // Value object - all saved
 }
 ```
 
-## Nested Subjects
-
-If a `[Configuration]` property contains another `IInterceptorSubject`,
-the same rules apply recursively - only its `[Configuration]` properties are saved.
-
 ## Implementation
 
 Uses `System.Text.Json` with custom `ConfigurationJsonTypeInfoResolver`:
