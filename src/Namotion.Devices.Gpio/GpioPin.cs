@@ -94,18 +94,8 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider, IS
         StatusMessage = null;
     }
 
-    /// <summary>
-    /// Sets the pin value (only effective in output mode).
-    /// </summary>
-    /// <param name="value">True for high, false for low.</param>
-    [Operation(Title = "Set Value", Icon = "ToggleOn", Position = 1)]
-    public void SetValue(bool value)
-    {
-        Value = value;
-    }
-
     /// <inheritdoc />
-    [Operation(Title = "Turn On", Icon = "ToggleOn", Position = 2)]
+    [Operation(Title = "Turn On", Icon = "ToggleOn", Position = 1)]
     public Task TurnOnAsync(CancellationToken cancellationToken)
     {
         Value = true;
@@ -113,7 +103,7 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider, IS
     }
 
     /// <inheritdoc />
-    [Operation(Title = "Turn Off", Icon = "ToggleOff", Position = 3)]
+    [Operation(Title = "Turn Off", Icon = "ToggleOff", Position = 2)]
     public Task TurnOffAsync(CancellationToken cancellationToken)
     {
         Value = false;
