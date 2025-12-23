@@ -8,7 +8,7 @@ namespace HomeBlaze.Abstractions.Sensors;
 public interface ISoilSensor
 {
     /// <summary>
-    /// The current soil moisture level (0-100%).
+    /// The current soil moisture level (0..1).
     /// </summary>
     [State(Unit = StateUnit.Percent)]
     decimal? SoilMoisture { get; }

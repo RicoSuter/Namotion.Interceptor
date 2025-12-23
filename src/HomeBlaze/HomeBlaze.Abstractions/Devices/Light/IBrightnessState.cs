@@ -8,7 +8,7 @@ namespace HomeBlaze.Abstractions.Devices.Light;
 public interface IBrightnessState
 {
     /// <summary>
-    /// The current brightness level (0-100%).
+    /// The current brightness level (0..1).
     /// </summary>
     [State(Unit = StateUnit.Percent)]
     decimal? Brightness { get; }

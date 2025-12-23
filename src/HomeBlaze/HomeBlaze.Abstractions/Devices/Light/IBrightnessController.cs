@@ -10,7 +10,7 @@ public interface IBrightnessController
     /// <summary>
     /// Sets the brightness level.
     /// </summary>
-    /// <param name="brightness">Brightness level (0-100%).</param>
+    /// <param name="brightness">Brightness level (0..1).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Operation]
     Task SetBrightnessAsync(

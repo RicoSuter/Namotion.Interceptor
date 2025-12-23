@@ -14,10 +14,10 @@
 
                 @if (GpioSubject?.Mcp3008 != null)
                 {
-                    <MudNumericField T="int" Value="@GpioSubject.Mcp3008.ClockPin" ValueChanged="@(v => GpioSubject.Mcp3008.ClockPin = v)" Label="Clock Pin" />
-                    <MudNumericField T="int" Value="@GpioSubject.Mcp3008.MosiPin" ValueChanged="@(v => GpioSubject.Mcp3008.MosiPin = v)" Label="MOSI Pin" />
-                    <MudNumericField T="int" Value="@GpioSubject.Mcp3008.MisoPin" ValueChanged="@(v => GpioSubject.Mcp3008.MisoPin = v)" Label="MISO Pin" />
-                    <MudNumericField T="int" Value="@GpioSubject.Mcp3008.ChipSelectPin" ValueChanged="@(v => GpioSubject.Mcp3008.ChipSelectPin = v)" Label="Chip Select Pin" />
+                    <MudNumericField T="int" @bind-Value="GpioSubject.Mcp3008.ClockPin" Label="Clock Pin" />
+                    <MudNumericField T="int" @bind-Value="GpioSubject.Mcp3008.MosiPin" Label="MOSI Pin" />
+                    <MudNumericField T="int" @bind-Value="GpioSubject.Mcp3008.MisoPin" Label="MISO Pin" />
+                    <MudNumericField T="int" @bind-Value="GpioSubject.Mcp3008.ChipSelectPin" Label="Chip Select Pin" />
                 }
             </MudStack>
         </MudExpansionPanel>
@@ -29,8 +29,8 @@
 
                 @if (GpioSubject?.Ads1115 != null)
                 {
-                    <MudNumericField T="int" Value="@GpioSubject.Ads1115.I2cBus" ValueChanged="@(v => GpioSubject.Ads1115.I2cBus = v)" Label="I2C Bus" />
-                    <MudNumericField T="int" Value="@GpioSubject.Ads1115.Address" ValueChanged="@(v => GpioSubject.Ads1115.Address = v)" Label="I2C Address" />
+                    <MudNumericField T="int" @bind-Value="GpioSubject.Ads1115.I2cBus" Label="I2C Bus" />
+                    <MudNumericField T="int" @bind-Value="GpioSubject.Ads1115.Address" Label="I2C Address" />
                 }
             </MudStack>
         </MudExpansionPanel>

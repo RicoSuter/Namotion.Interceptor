@@ -8,7 +8,7 @@ namespace HomeBlaze.Abstractions.Media;
 public interface IVolumeState
 {
     /// <summary>
-    /// The current volume level (0-100%).
+    /// The current volume level (0..1).
     /// </summary>
     [State(Unit = StateUnit.Percent)]
     decimal? Volume { get; }

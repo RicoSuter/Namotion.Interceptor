@@ -8,7 +8,7 @@ namespace HomeBlaze.Abstractions.Sensors;
 public interface IHumiditySensor
 {
     /// <summary>
-    /// The current relative humidity (0-100%).
+    /// The current relative humidity (0..1).
     /// </summary>
     [State(Unit = StateUnit.Percent)]
     decimal? Humidity { get; }

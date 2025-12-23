@@ -8,7 +8,7 @@ namespace HomeBlaze.Abstractions.Devices.Energy;
 public interface IVehicleCharger : IEnergyCharger
 {
     /// <summary>
-    /// The current charge level of the connected vehicle (0-100%).
+    /// The current charge level of the connected vehicle (0..1).
     /// </summary>
     [State(Unit = StateUnit.Percent)]
     decimal? ChargeLevel { get; }

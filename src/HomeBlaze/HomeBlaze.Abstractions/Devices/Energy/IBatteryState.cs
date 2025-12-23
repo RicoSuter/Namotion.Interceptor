@@ -8,7 +8,7 @@ namespace HomeBlaze.Abstractions.Devices.Energy;
 public interface IBatteryState
 {
     /// <summary>
-    /// The current battery level (0-100%).
+    /// The current battery level (0..1).
     /// </summary>
     [State(Unit = StateUnit.Percent)]
     decimal? BatteryLevel { get; }
