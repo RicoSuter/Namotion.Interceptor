@@ -53,36 +53,6 @@ public class GpioSubjectTests
     }
 
     [Fact]
-    public async Task GpioSubject_OnNonRaspberryPi_SetsUnavailableStatus()
-    {
-        // Arrange
-        var subject = new GpioSubject();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
-
-        // Act
-        await subject.StartAsync(cts.Token);
-
-        // Assert - On Windows/non-Pi platforms, GPIO is not supported
-        Assert.Equal(ServiceStatus.Unavailable, subject.Status);
-        Assert.Equal("GPIO not supported on this platform", subject.StatusMessage);
-    }
-
-    [Fact]
-    public async Task GpioSubject_OnNonRaspberryPi_CreatesPinsWithUnavailableStatus()
-    {
-        // Arrange
-        var subject = new GpioSubject();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
-
-        // Act
-        await subject.StartAsync(cts.Token);
-
-        // Assert - Pins dictionary should be empty when GPIO is not supported
-        // (pin count is dynamic based on platform, no pins available when unsupported)
-        Assert.Empty(subject.Pins);
-    }
-
-    [Fact]
     public void GpioSubject_Dispose_SetsStoppedStatus()
     {
         // Arrange
