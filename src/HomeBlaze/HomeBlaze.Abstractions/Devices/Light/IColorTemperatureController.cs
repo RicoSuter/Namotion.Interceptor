@@ -10,7 +10,7 @@ public interface IColorTemperatureController
     /// <summary>
     /// Sets the color temperature.
     /// </summary>
-    /// <param name="colorTemperature">Color temperature (0% = warm, 100% = cool).</param>
+    /// <param name="colorTemperature">Color temperature (0 = warm, 1 = cool).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Operation]
     Task SetColorTemperatureAsync(

@@ -10,7 +10,7 @@ public interface IVolumeController
     /// <summary>
     /// Sets the volume level.
     /// </summary>
-    /// <param name="volume">Volume level (0-100%).</param>
+    /// <param name="volume">Volume level (0..1).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Operation]
     Task SetVolumeAsync(
