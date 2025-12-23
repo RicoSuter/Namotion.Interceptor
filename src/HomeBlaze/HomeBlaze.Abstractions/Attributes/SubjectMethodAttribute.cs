@@ -17,7 +17,7 @@ public abstract class SubjectMethodAttribute : Attribute
 
     /// <summary>
     /// Icon name, e.g., "PlayArrow", "Stop" (resolved via ResolveMudBlazorIcon).
-    /// Same naming convention as IIconProvider.Icon.
+    /// Same naming convention as IIconProvider.IconName.
     /// </summary>
     public string? Icon { get; set; }
 

@@ -1,5 +1,5 @@
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "Water Pump",
   "targetSpeed": 2400,
   "simulationInterval": "00:00:01"

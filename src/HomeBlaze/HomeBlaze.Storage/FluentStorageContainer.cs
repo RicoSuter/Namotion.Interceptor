@@ -27,11 +27,12 @@ public partial class FluentStorageContainer :
     private readonly StoragePathRegistry _pathRegistry = new();
     private readonly FileSubjectFactory _subjectFactory;
     private readonly StorageHierarchyManager _hierarchyManager;
+    private readonly ILogger<FluentStorageContainer>? _logger;
+
     private readonly ConfigurableSubjectSerializer _serializer;
+
     private StorageFileWatcher? _fileWatcher;
     private JsonSubjectSynchronizer? _jsonSyncHelper;
-
-    private readonly ILogger<FluentStorageContainer>? _logger;
 
     /// <summary>
     /// Storage type identifier (e.g., "disk", "azure-blob").
@@ -74,7 +75,15 @@ public partial class FluentStorageContainer :
         ? "Storage"
         : Path.GetFileName(ConnectionString.TrimEnd('/', '\\'));
 
-    public string Icon => "Storage";
+    public string IconName => "Storage";
+
+    [Derived]
+    public string IconColor => Status switch
+    {
+        StorageStatus.Connected => "Success",
+        StorageStatus.Error => "Error",
+        _ => "Warning"
+    };
 
     public FluentStorageContainer(
         SubjectTypeRegistry typeRegistry,
@@ -113,14 +122,14 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task ConnectAsync(CancellationToken cancellationToken)
     {
-        var isInMemory = StorageType.ToLowerInvariant() == "inmemory";
+        var isInMemory = StorageType == "inmemory";
         if (!isInMemory && string.IsNullOrWhiteSpace(ConnectionString))
             throw new InvalidOperationException("ConnectionString is not configured");
 
         Status = StorageStatus.Initializing;
         try
         {
-            _client = StorageType.ToLowerInvariant() switch
+            _client = StorageType switch
             {
                 "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(
                     Path.GetFullPath(ConnectionString)),

@@ -71,6 +71,6 @@ public class VirtualFolderTests
         var folder = new VirtualFolder(storage, "test/");
 
         // Assert
-        Assert.Equal("Folder", folder.Icon);
+        Assert.Equal("Folder", folder.IconName);
     }
 }
