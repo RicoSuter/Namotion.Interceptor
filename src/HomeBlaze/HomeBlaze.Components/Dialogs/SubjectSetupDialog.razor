@@ -132,8 +132,7 @@
     {
         return TypeRegistry.RegisteredTypes
             .Where(t => typeof(IConfigurableSubject).IsAssignableFrom(t))
-            .Where(t => t.GetCustomAttribute<System.ComponentModel.CategoryAttribute>() != null)
-            .GroupBy(t => t.GetCustomAttribute<System.ComponentModel.CategoryAttribute>()!.Category)
+            .GroupBy(t => t.GetCustomAttribute<System.ComponentModel.CategoryAttribute>()?.Category ?? "Uncategorized")
             .ToDictionary(g => g.Key, g => g.ToList());
     }
 
