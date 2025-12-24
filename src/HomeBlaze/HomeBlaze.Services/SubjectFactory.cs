@@ -3,6 +3,8 @@ using Namotion.Interceptor;
 
 namespace HomeBlaze.Services;
 
+// TODO: Add unit tests for SubjectFactory - CreateSubject with valid/invalid types, dependency injection scenarios
+
 /// <summary>
 /// Factory for creating subject instances using dependency injection.
 /// </summary>

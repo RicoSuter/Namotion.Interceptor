@@ -404,6 +404,7 @@ else
     {
         // Content changed, we'll get the actual value on save
         // For now, mark as potentially dirty
+        // TODO: Add try-catch for ObjectDisposedException/JSDisconnectedException - component may be disposed during async operation
         Task.Run(async () =>
         {
             if (_editor != null)
