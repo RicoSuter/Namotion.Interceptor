@@ -356,6 +356,7 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Adds a subject to the hierarchy. Reusable helper for AddSubjectAsync and file watcher events.
     /// </summary>
+    // TODO: Consider adding synchronization (lock) for thread safety if AddSubjectAsync/DeleteSubjectAsync can be called concurrently
     private void AddToHierarchy(string path, IInterceptorSubject subject)
     {
         var context = ((IInterceptorSubject)this).Context;
