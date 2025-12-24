@@ -1,4 +1,5 @@
 using System.Reflection;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Services;
 using Namotion.Interceptor;
 
@@ -66,18 +67,21 @@ public class SubjectMethodInvoker : ISubjectMethodInvoker
 
         for (var i = 0; i < parameterInfos.Length; i++)
         {
-            var parameterType = parameterInfos[i].ParameterType;
+            var parameterInfo = parameterInfos[i];
+            var parameterType = parameterInfo.ParameterType;
+
             if (parameterType == typeof(CancellationToken))
             {
                 resolvedParameters[i] = cancellationToken;
                 continue;
             }
 
-            // Try to resolve from DI first (ActivatorUtilities semantics)
-            var service = _serviceProvider.GetService(parameterType);
-            if (service != null)
+            // Only resolve from DI if explicitly marked with [FromServices]
+            if (parameterInfo.GetCustomAttribute<FromServicesAttribute>() != null)
             {
-                resolvedParameters[i] = service;
+                resolvedParameters[i] = _serviceProvider.GetService(parameterType)
+                    ?? throw new InvalidOperationException(
+                        $"Service '{parameterType.Name}' not found for parameter '{parameterInfo.Name}'");
             }
             else
             {

@@ -6,7 +6,7 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(IConfigurableSubject))]
 @implements ISubjectEditComponent
 
-<ConfigurationPropertiesEditor @ref="_editor" Subject="Subject" />
+<ConfigurationPropertiesEditor @ref="_editor" Subject="Subject" IsValidChanged="OnEditorValidChanged" />
 
 @code {
     private ConfigurationPropertiesEditor? _editor;
@@ -20,13 +20,13 @@
     public bool IsValid => _editor?.IsValid ?? true;
     public bool IsDirty { get; private set; }
 
-    public event Action<bool>? IsValidChanged
-    {
-        add { }
-        remove { }
-    }
-
+    public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
+
+    private void OnEditorValidChanged(bool isValid)
+    {
+        IsValidChanged?.Invoke(isValid);
+    }
 
     public string PreferredDialogSize => "Small";
 

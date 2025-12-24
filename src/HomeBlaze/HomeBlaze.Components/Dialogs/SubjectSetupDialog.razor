@@ -1,12 +1,10 @@
 @using System.ComponentModel
 @using System.Reflection
-@using HomeBlaze.Abstractions
-@using HomeBlaze.Services
-@using HomeBlaze.Storage.Abstractions
 
 @inject SubjectTypeRegistry TypeRegistry
 @inject SubjectComponentRegistry ComponentRegistry
 @inject SubjectFactory SubjectFactory
+@inject ISnackbar Snackbar
 
 <MudDialog data-testid="create-subject-wizard" Style="height: calc(100vh - 200px);">
     <TitleContent>
@@ -115,11 +113,14 @@
     private IInterceptorSubject? _createdSubject;
     private Type? _editComponentType;
     private DynamicComponent? _editComponentRef;
+    private ISubjectEditComponent? _editComponent;
     private string _subjectName = "";
+    private bool _isEditValid = true;
 
     private bool CanCreate => _activeStep == 1
         && !string.IsNullOrWhiteSpace(_subjectName)
-        && _createdSubject != null;
+        && _createdSubject != null
+        && _isEditValid;
 
     private string GetTitle()
     {
@@ -150,8 +151,7 @@
         if (!string.IsNullOrWhiteSpace(_subjectName))
         {
             _activeStep = 1;
-            StateHasChanged();
-            MudDialog?.StateHasChanged();
+            RefreshDialog();
         }
     }
 
@@ -160,14 +160,18 @@
         if (_selectedType != null && !string.IsNullOrWhiteSpace(_subjectName))
         {
             _activeStep = 1;
-            StateHasChanged();
-            MudDialog?.StateHasChanged();
+            RefreshDialog();
         }
     }
 
     private void GoBack()
     {
         _activeStep = 0;
+        RefreshDialog();
+    }
+
+    private void RefreshDialog()
+    {
         StateHasChanged();
         MudDialog?.StateHasChanged();
     }
@@ -181,13 +185,20 @@
     {
         if (_createdSubject != null && !string.IsNullOrWhiteSpace(_subjectName))
         {
-            // Save the edit component changes before creating
-            if (_editComponentRef?.Instance is ISubjectEditComponent editComponent)
+            try
             {
-                await editComponent.SaveAsync(CancellationToken.None);
-            }
+                // Save the edit component changes before creating
+                if (_editComponentRef?.Instance is ISubjectEditComponent editComponent)
+                {
+                    await editComponent.SaveAsync(CancellationToken.None);
+                }
 
-            MudDialog?.Close(DialogResult.Ok(new CreateSubjectResult(_createdSubject, _subjectName)));
+                MudDialog?.Close(DialogResult.Ok(new CreateSubjectResult(_createdSubject, _subjectName)));
+            }
+            catch (Exception exception)
+            {
+                Snackbar.Add($"Failed to create subject: {exception.Message}", Severity.Error);
+            }
         }
     }
 

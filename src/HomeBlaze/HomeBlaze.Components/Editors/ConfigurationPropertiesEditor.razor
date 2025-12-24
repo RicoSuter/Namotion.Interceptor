@@ -23,7 +23,7 @@ else
         </MudAlert>
     }
 
-    <MudForm @bind-IsValid="@_isFormValid">
+    <MudForm IsValid="@_isFormValid" IsValidChanged="OnFormValidChanged">
         @foreach (var prop in _configurationProperties)
         {
             <PropertyEditor Property="@prop"
@@ -46,7 +46,16 @@ else
     [Parameter, EditorRequired]
     public IInterceptorSubject? Subject { get; set; }
 
+    [Parameter]
+    public EventCallback<bool> IsValidChanged { get; set; }
+
     public bool IsValid => _isFormValid || !_configurationProperties.Any();
+
+    private async Task OnFormValidChanged(bool isFormValid)
+    {
+        _isFormValid = isFormValid;
+        await IsValidChanged.InvokeAsync(IsValid);
+    }
 
     public bool HasErrors => _errors.Any();
     

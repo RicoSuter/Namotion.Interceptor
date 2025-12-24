@@ -1,4 +1,3 @@
-using HomeBlaze.Components;
 using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Storage.Abstractions;
 using MudBlazor;
@@ -6,18 +5,18 @@ using MudBlazor;
 namespace HomeBlaze.Storage.Blazor;
 
 /// <summary>
-/// Blazor implementation of ISubjectCreator that opens the SubjectSetupDialog dialog.
+/// Blazor implementation of ISubjectSetupService that opens the SubjectSetupDialog dialog.
 /// </summary>
-public class BlazorSubjectCreator : ISubjectCreator
+public class BlazorSubjectSetupService : ISubjectSetupService
 {
     private readonly IDialogService _dialogService;
 
-    public BlazorSubjectCreator(IDialogService dialogService)
+    public BlazorSubjectSetupService(IDialogService dialogService)
     {
         _dialogService = dialogService;
     }
 
-    public Task<CreateSubjectResult?> CreateAsync(CancellationToken cancellationToken)
+    public Task<CreateSubjectResult?> CreateSubjectAsync(CancellationToken cancellationToken)
     {
         return SubjectSetupDialog.ShowAsync(_dialogService);
     }

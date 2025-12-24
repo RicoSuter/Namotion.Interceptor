@@ -28,11 +28,17 @@ public sealed class SubjectMethodParameter
     /// </summary>
     public StateUnit? Unit { get; }
 
+    /// <summary>
+    /// Whether this parameter should be resolved from dependency injection.
+    /// </summary>
+    public bool IsFromServices { get; }
+
     public SubjectMethodParameter(ParameterInfo parameterInfo)
     {
         ParameterInfo = parameterInfo;
         Name = parameterInfo.Name ?? $"arg{parameterInfo.Position}";
         Type = parameterInfo.ParameterType;
+        IsFromServices = parameterInfo.GetCustomAttribute<FromServicesAttribute>() != null;
 
         var attribute = parameterInfo.GetCustomAttribute<OperationParameterAttribute>();
         Unit = attribute?.Unit;
