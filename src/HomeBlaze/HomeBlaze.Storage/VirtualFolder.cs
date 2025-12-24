@@ -90,13 +90,6 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// Opens the create subject wizard to add a new subject to this folder.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
-    public async Task CreateAsync(ISubjectCreator subjectCreator)
-    {
-        var result = await subjectCreator.CreateAsync(CancellationToken.None);
-        if (result == null)
-            return;
-
-        var fileName = $"{result.Name}.json";
-        await AddSubjectAsync(fileName, result.Subject, CancellationToken.None);
-    }
+    public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
+        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 }

@@ -41,7 +41,7 @@ internal sealed class FileSubjectFactory
         CancellationToken cancellationToken)
     {
         var extension = Path.GetExtension(blob.FullPath).ToLowerInvariant();
-        if (extension == ".json")
+        if (extension == FileExtensions.Json)
         {
             return await CreateFromJsonBlobAsync(client, storage, blob, cancellationToken);
         }

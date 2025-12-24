@@ -15,7 +15,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddHomeBlazeStorage(this IServiceCollection services)
     {
         services.AddSingleton<MarkdownContentParser>();
-        services.AddScoped<ISubjectCreator, BlazorSubjectCreator>();
+        services.AddScoped<ISubjectSetupService, BlazorSubjectSetupService>();
         return services;
     }
 }

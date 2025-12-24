@@ -379,7 +379,7 @@
         {
             object?[]? parameters = null;
 
-            // Pre-resolve DI and auto-injected parameters
+            // Pre-resolve auto-injected and [FromServices] parameters
             var resolvedParameters = new Dictionary<string, object?>();
             foreach (var parameter in operation.Parameters)
             {
@@ -389,10 +389,9 @@
                     continue;
                 }
 
-                var diValue = ServiceProvider.GetService(parameter.Type);
-                if (diValue != null)
+                if (parameter.IsFromServices)
                 {
-                    resolvedParameters[parameter.Name] = diValue;
+                    resolvedParameters[parameter.Name] = ServiceProvider.GetService(parameter.Type);
                 }
             }
 
