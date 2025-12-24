@@ -16,15 +16,24 @@ public class SubjectMethodInvoker : ISubjectMethodInvoker
         _serviceProvider = serviceProvider;
     }
 
+    /// <summary>
+    /// Returns true if the parameter type is automatically injected by the invoker
+    /// (e.g., CancellationToken). These parameters don't need UI input or DI registration.
+    /// </summary>
+    public static bool IsAutoInjectedParameter(Type parameterType)
+    {
+        return parameterType == typeof(CancellationToken);
+    }
+
     public async Task<MethodInvocationResult> InvokeAsync(
         IInterceptorSubject subject,
         SubjectMethodInfo method,
         object?[] userParameters,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         try
         {
-            var parameters = ResolveParameters(method, userParameters);
+            var parameters = ResolveParameters(method, userParameters, cancellationToken);
 
             var result = method.MethodInfo.Invoke(subject, parameters);
             if (method.IsAsync && result is Task task)
@@ -49,7 +58,7 @@ public class SubjectMethodInvoker : ISubjectMethodInvoker
         }
     }
 
-    private object?[] ResolveParameters(SubjectMethodInfo method, object?[] userParameters)
+    private object?[] ResolveParameters(SubjectMethodInfo method, object?[] userParameters, CancellationToken cancellationToken)
     {
         var parameterInfos = method.MethodInfo.GetParameters();
         var resolvedParameters = new object?[parameterInfos.Length];
@@ -58,6 +67,11 @@ public class SubjectMethodInvoker : ISubjectMethodInvoker
         for (var i = 0; i < parameterInfos.Length; i++)
         {
             var parameterType = parameterInfos[i].ParameterType;
+            if (parameterType == typeof(CancellationToken))
+            {
+                resolvedParameters[i] = cancellationToken;
+                continue;
+            }
 
             // Try to resolve from DI first (ActivatorUtilities semantics)
             var service = _serviceProvider.GetService(parameterType);

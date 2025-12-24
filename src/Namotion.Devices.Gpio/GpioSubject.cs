@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Device.Gpio;
 using System.Device.I2c;
 using HomeBlaze.Abstractions;
@@ -18,6 +19,8 @@ namespace Namotion.Devices.Gpio;
 /// and optional ADC support. Supports Raspberry Pi, Orange Pi, BeagleBone,
 /// and other Linux-based boards via System.Device.Gpio.
 /// </summary>
+[Category("Devices")]
+[Description("GPIO pins and analog channels for Raspberry Pi and other Linux boards")]
 [InterceptorSubject]
 public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHostedSubject, ITitleProvider, IIconProvider
 {
@@ -168,22 +171,36 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Retry loop for initialization
         while (!stoppingToken.IsCancellationRequested)
         {
             var result = TryInitialize();
             if (result == InitializationResult.Success)
             {
                 await RunPollingLoopAsync(stoppingToken);
-                break;
+                // If polling loop exits (e.g., due to config change), continue outer loop
+                continue;
             }
 
             if (result == InitializationResult.PermanentFailure)
             {
-                // Don't retry for permanent failures (e.g., platform not supported)
-                return;
+                // TODO: Add signal instead of active waits t
+                
+                // Wait for configuration change (UseSimulation might be enabled)
+                while (!stoppingToken.IsCancellationRequested &&
+                       Status == ServiceStatus.Unavailable)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+
+                    // Check if simulation was enabled
+                    if (UseSimulation && !_currentlyUsingSimulation)
+                    {
+                        break; // Retry initialization
+                    }
+                }
+                continue;
             }
 
+            // TransientFailure - retry after delay
             if (!stoppingToken.IsCancellationRequested)
             {
                 await Task.Delay(RetryInterval, stoppingToken);
@@ -268,25 +285,26 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         if (_controller == null) return;
 
         var existingPins = Pins;
-        var discoveredPins = new Dictionary<int, GpioPin>();
         var pinCount = _controller.PinCount;
 
+        // Build new dictionary, reusing existing pins
+        var newPins = new Dictionary<int, GpioPin>(pinCount);
         for (var pinNumber = 0; pinNumber < pinCount; pinNumber++)
         {
-            if (existingPins.TryGetValue(pinNumber, out var existingPin))
-            {
-                // Reuse existing pin with its persisted mode
-                InitializePin(existingPin);
-                discoveredPins[pinNumber] = existingPin;
-            }
-            else
-            {
-                // Create new pin with default mode
-                discoveredPins[pinNumber] = CreateAndOpenPin(pinNumber);
-            }
+            var pin = existingPins.TryGetValue(pinNumber, out var existing)
+                ? existing
+                : new GpioPin { Mode = GpioPinMode.Input };
+
+            pin.PinNumber = pinNumber;
+            InitializePin(pin);
+            newPins[pinNumber] = pin;
         }
 
-        Pins = discoveredPins;
+        // Only reassign if structure changed
+        if (existingPins.Count != pinCount || existingPins.Keys.Any(k => !newPins.ContainsKey(k)))
+        {
+            Pins = newPins;
+        }
     }
 
     private GpioPin CreateAndOpenPin(int pinNumber)

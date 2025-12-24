@@ -379,10 +379,16 @@
         {
             object?[]? parameters = null;
 
-            // Pre-resolve DI parameters
+            // Pre-resolve DI and auto-injected parameters
             var resolvedParameters = new Dictionary<string, object?>();
             foreach (var parameter in operation.Parameters)
             {
+                if (SubjectMethodInvoker.IsAutoInjectedParameter(parameter.Type))
+                {
+                    resolvedParameters[parameter.Name] = null; // Placeholder, invoker will provide actual value
+                    continue;
+                }
+
                 var diValue = ServiceProvider.GetService(parameter.Type);
                 if (diValue != null)
                 {
