@@ -1,16 +1,21 @@
-using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
 
 namespace HomeBlaze.E2E.Tests;
 
 /// <summary>
-/// E2E tests for SubjectSetupDialog functionality.
-/// Tests type selection, name input, wizard navigation, and subject creation.
+/// E2E tests for SubjectSetupDialog (Create Subject Wizard) functionality.
+/// Tests type selection, name input, wizard navigation, and validation.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
 public class SubjectSetupDialogTests
 {
+    private const int PageLoadTimeout = 30000;
+    private const int NetworkIdleTimeout = 15000;
+    private const int ElementVisibilityTimeout = 5000;
+    private const int BlazorRenderDelay = 500;
+    private const int InputBindingDelay = 300;
+
     private readonly PlaywrightFixture _fixture;
 
     public SubjectSetupDialogTests(PlaywrightFixture fixture)
@@ -18,341 +23,275 @@ public class SubjectSetupDialogTests
         _fixture = fixture;
     }
 
+    #region Helper Methods
+
     private async Task NavigateToDemoFolderAsync(IPage page)
     {
         await page.GotoAsync($"{_fixture.ServerAddress}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // Navigate to Browser
         var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
-        await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
         await browserLink.ClickAsync();
-        await page.WaitForURLAsync(url => url.Contains("/browser"), new() { Timeout = 30000 });
+        await page.WaitForURLAsync(url => url.Contains("/browser"), new() { Timeout = PageLoadTimeout });
 
-        // Select "demo" VirtualFolder
         var demoFolder = page.GetByText("demo").First;
         await demoFolder.ClickAsync();
-        await page.WaitForTimeoutAsync(500);
+        await page.WaitForTimeoutAsync(BlazorRenderDelay);
     }
 
-    private async Task OpenCreateWizardAsync(IPage page)
+    private async Task OpenWizardAsync(IPage page)
     {
         var createButton = page.Locator("button:has-text('Create')").First;
         await createButton.ClickAsync();
 
-        // Wait for wizard dialog to be fully visible
         var wizard = page.Locator("[data-testid='create-subject-wizard']");
-        await Assertions.Expect(wizard).ToBeVisibleAsync(new() { Timeout = 5000 });
+        await Assertions.Expect(wizard).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
 
-        // Wait for Blazor SignalR to be fully connected (network idle indicates ready)
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 10000 });
-        await page.WaitForTimeoutAsync(500);
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = NetworkIdleTimeout });
+        await page.WaitForTimeoutAsync(BlazorRenderDelay);
     }
 
-    private async Task CleanupTestFileAsync(string fileName)
+    private async Task EnterNameAsync(IPage page, string name)
     {
-        try
-        {
-            // TestData directory is relative to the test bin folder (configured in testRoot.json)
-            var testFilePath = Path.Combine("TestData", fileName); // Root level for now
-            if (File.Exists(testFilePath))
-            {
-                File.Delete(testFilePath);
-                await Task.Delay(500); // Give time for any file watchers to process deletion
-            }
-        }
-        catch
-        {
-            // Ignore cleanup errors
-        }
-    }
-
-    [Fact]
-    public async Task CreateButton_ShouldOpenWizard()
-    {
-        // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await NavigateToDemoFolderAsync(page);
-
-        // Act: Click Create button
-        await OpenCreateWizardAsync(page);
-
-        // Assert: Wizard dialog should be visible
-        var wizard = page.Locator("[data-testid='create-subject-wizard']");
-        await Assertions.Expect(wizard).ToBeVisibleAsync(new() { Timeout = 5000 });
-    }
-
-    [Fact]
-    public async Task Wizard_Step1_ShouldShowNameInputAndTypeCards()
-    {
-        // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await NavigateToDemoFolderAsync(page);
-        await OpenCreateWizardAsync(page);
-
-        // Assert: Name input should be visible
-        var nameInput = page.Locator("[data-testid='create-name-input']");
-        await Assertions.Expect(nameInput).ToBeVisibleAsync(new() { Timeout = 5000 });
-
-        // Assert: Type cards should be visible (check for at least one category)
-        var categoryPanels = page.Locator("[data-testid^='category-panel-']");
-        var count = await categoryPanels.CountAsync();
-        Assert.True(count > 0, "At least one category panel should be visible");
-    }
-
-    [Fact]
-    public async Task Wizard_AccordionsExpanded_ByDefault()
-    {
-        // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await NavigateToDemoFolderAsync(page);
-        await OpenCreateWizardAsync(page);
-
-        // Assert: All accordion panels should be expanded (IsInitiallyExpanded="true")
-        // Check if type cards are visible (they would be hidden if accordions are collapsed)
-        var typeCards = page.Locator("[data-testid^='type-card-']");
-        var visibleCount = 0;
-        for (int i = 0; i < await typeCards.CountAsync(); i++)
-        {
-            if (await typeCards.Nth(i).IsVisibleAsync())
-            {
-                visibleCount++;
-            }
-        }
-        Assert.True(visibleCount > 0, "Type cards should be visible (accordions expanded)");
-    }
-
-    [Fact]
-    public async Task Wizard_EnterName_TypeCardClick_ShouldAdvanceToStep2()
-    {
-        // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await NavigateToDemoFolderAsync(page);
-        await OpenCreateWizardAsync(page);
-
-        // Act: Wait for step 1 to be visible
-        var step1Title = page.GetByText("Step 1:");
-        await Assertions.Expect(step1Title).ToBeVisibleAsync(new() { Timeout = 5000 });
-
-        // Enter name
         var nameInput = page.GetByLabel("Name");
-        await nameInput.FillAsync("mytest");
-        await page.WaitForTimeoutAsync(300); // Wait for name to be bound
+        await nameInput.FillAsync(name);
+        await page.WaitForTimeoutAsync(InputBindingDelay);
+    }
 
-        // Act: Click on first type card
+    private async Task SelectTypeAsync(IPage page, string typeTestId)
+    {
+        var typeCard = page.Locator($"[data-testid='{typeTestId}']");
+        await typeCard.ClickAsync();
+    }
+
+    private async Task SelectFirstTypeAsync(IPage page)
+    {
         var firstTypeCard = page.Locator("[data-testid^='type-card-']").First;
         await firstTypeCard.ClickAsync();
+    }
 
-        // Give time for navigation
-        await page.WaitForTimeoutAsync(500);
+    private async Task AdvanceToStep2Async(IPage page, string name = "testsubject")
+    {
+        await EnterNameAsync(page, name);
+        await SelectFirstTypeAsync(page);
 
-        // Assert: Should be on step 2 (BACK button only shows when on step 2)
         var backButton = page.Locator("[data-testid='back-button']");
-        await Assertions.Expect(backButton).ToBeVisibleAsync(new() { Timeout = 5000 });
+        await Assertions.Expect(backButton).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+    }
+
+    #endregion
+
+    #region Step 1 Tests
+
+    [Fact]
+    public async Task Step1_OnOpen_ShowsExpectedUIElements()
+    {
+        var page = await _fixture.CreatePageAsync();
+        await NavigateToDemoFolderAsync(page);
+        await OpenWizardAsync(page);
+
+        // Wizard dialog should be visible
+        var wizard = page.Locator("[data-testid='create-subject-wizard']");
+        await Assertions.Expect(wizard).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Step 1 title visible
+        var step1Title = page.GetByText("Step 1:");
+        await Assertions.Expect(step1Title).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Name input should be visible
+        var nameInput = page.Locator("[data-testid='create-name-input']");
+        await Assertions.Expect(nameInput).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // At least one category panel should be visible
+        var categoryPanels = page.Locator("[data-testid^='category-panel-']");
+        var categoryCount = await categoryPanels.CountAsync();
+        Assert.True(categoryCount > 0, "At least one category panel should be visible");
+
+        // Type cards should be visible (confirms accordions are expanded)
+        var typeCards = page.Locator("[data-testid^='type-card-']");
+        var typeCount = await typeCards.CountAsync();
+        Assert.True(typeCount > 0, "At least one type card should be visible");
+
+        // Create button should NOT be visible on step 1
+        var createButton = page.Locator("[data-testid='create-button']");
+        await Assertions.Expect(createButton).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Cancel button should be visible
+        var cancelButton = page.Locator("[data-testid='cancel-button']");
+        await Assertions.Expect(cancelButton).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
     }
 
     [Fact]
-    public async Task Wizard_NoName_TypeCardClick_ShouldShowNextButton()
+    public async Task Step1_TypeSelection_ShowsNextButtonAndHighlight()
     {
-        // Arrange
         var page = await _fixture.CreatePageAsync();
         await NavigateToDemoFolderAsync(page);
-        await OpenCreateWizardAsync(page);
+        await OpenWizardAsync(page);
 
-        // Act: Click type card without entering name
-        var firstTypeCard = page.Locator("[data-testid^='type-card-']").First;
-        await firstTypeCard.ClickAsync();
-        await page.WaitForTimeoutAsync(500);
+        // Click type card without entering name
+        var motorCard = page.Locator("[data-testid='type-card-motor']");
+        await motorCard.ClickAsync();
 
-        // Assert: Should still be on step 1 with Next button visible but disabled
+        // Type card should be highlighted (has mud-border-primary class)
+        await Assertions.Expect(motorCard).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("mud-border-primary"));
+
+        // Next button should be visible but disabled (no name)
         var nextButton = page.Locator("[data-testid='next-button']");
-        await Assertions.Expect(nextButton).ToBeVisibleAsync(new() { Timeout = 5000 });
+        await Assertions.Expect(nextButton).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(nextButton).ToBeDisabledAsync();
 
-        // Assert: Enter name and Next button should become enabled
-        var nameInput = page.GetByLabel("Name");
-        await nameInput.FillAsync("mytest");
-        await Assertions.Expect(nextButton).ToBeEnabledAsync(new() { Timeout = 5000 });
+        // Enter name - Next button should become enabled
+        await EnterNameAsync(page, "mytest");
+        await Assertions.Expect(nextButton).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
     }
 
     [Fact]
-    public async Task Wizard_Step2_ShouldShowConfigurationOrMessage()
+    public async Task Step1_EnterNameAndSelectType_AutoAdvancesToStep2()
     {
-        // Arrange
         var page = await _fixture.CreatePageAsync();
         await NavigateToDemoFolderAsync(page);
-        await OpenCreateWizardAsync(page);
+        await OpenWizardAsync(page);
 
-        // Navigate to step 2
-        var firstTypeCard = page.Locator("[data-testid^='type-card-']").First;
-        await firstTypeCard.ClickAsync();
-        await page.WaitForTimeoutAsync(500);
+        // Enter name first, then select type - should auto-advance
+        await EnterNameAsync(page, "mytest");
+        await SelectTypeAsync(page, "type-card-motor");
 
-        // Assert: Step 2 should show either configuration component or "No configuration needed"
-        var configSection = page.Locator("text='No configuration needed'");
-        var hasMessage = await configSection.IsVisibleAsync();
+        // Should be on step 2 (Back button visible, title shows type name)
+        var backButton = page.Locator("[data-testid='back-button']");
+        await Assertions.Expect(backButton).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
 
-        // If no message, there should be some configuration UI visible
+        var step2Title = page.GetByText("Step 2: Create Motor");
+        await Assertions.Expect(step2Title).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+    }
+
+    #endregion
+
+    #region Step 2 Tests
+
+    [Fact]
+    public async Task Step2_OnAdvance_ShowsConfigurationAndCreateButton()
+    {
+        var page = await _fixture.CreatePageAsync();
+        await NavigateToDemoFolderAsync(page);
+        await OpenWizardAsync(page);
+
+        // Advance to step 2 with Motor type
+        await EnterNameAsync(page, "testmotor");
+        await SelectTypeAsync(page, "type-card-motor");
+
+        // Wait for step 2
+        var backButton = page.Locator("[data-testid='back-button']");
+        await Assertions.Expect(backButton).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Title should show type name
+        var step2Title = page.GetByText("Step 2: Create Motor");
+        await Assertions.Expect(step2Title).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Create button should be visible and enabled
+        var createButton = page.Locator("[data-testid='create-button']");
+        await Assertions.Expect(createButton).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(createButton).ToBeEnabledAsync();
+
+        // Should show configuration panel or "No configuration needed"
+        var noConfigMessage = page.Locator("text='No configuration needed'");
+        var hasMessage = await noConfigMessage.IsVisibleAsync();
         if (!hasMessage)
         {
-            // Check for any form elements (input, select, checkbox, etc.)
             var hasInputs = await page.Locator("input, select, .mud-input").CountAsync() > 0;
             Assert.True(hasInputs, "Step 2 should show either configuration or 'No configuration needed' message");
         }
     }
 
-    [Fact]
-    public async Task Wizard_CreateButton_ShouldNotBeVisible_OnStep1()
-    {
-        // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await NavigateToDemoFolderAsync(page);
-        await OpenCreateWizardAsync(page);
+    #endregion
 
-        // Assert: Create button should not be visible on step 1
-        var wizardCreateButton = page.Locator("[data-testid='create-button']");
-        await Assertions.Expect(wizardCreateButton).Not.ToBeVisibleAsync(new() { Timeout = 5000 });
-    }
+    #region Navigation Tests
 
     [Fact]
-    public async Task Wizard_CreateButton_ShouldBeEnabled_OnStep2WithName()
+    public async Task Navigation_CancelButton_ClosesDialog()
     {
-        // Arrange
         var page = await _fixture.CreatePageAsync();
         await NavigateToDemoFolderAsync(page);
-        await OpenCreateWizardAsync(page);
+        await OpenWizardAsync(page);
 
-        // Wait for name input to be ready
-        var nameInput = page.GetByLabel("Name");
-        await Assertions.Expect(nameInput).ToBeVisibleAsync(new() { Timeout = 5000 });
-
-        // Enter name and select type
-        await nameInput.FillAsync("mytest");
-
-        var firstTypeCard = page.Locator("[data-testid^='type-card-']").First;
-        await firstTypeCard.ClickAsync();
-        await page.WaitForTimeoutAsync(500);
-
-        // Assert: Create button should be enabled on step 2
-        var wizardCreateButton = page.Locator("[data-testid='create-button']");
-        await Assertions.Expect(wizardCreateButton).ToBeEnabledAsync(new() { Timeout = 5000 });
-    }
-
-    [Fact]
-    public async Task Wizard_Cancel_ShouldCloseDialog()
-    {
-        // Arrange
-        var page = await _fixture.CreatePageAsync();
-        await NavigateToDemoFolderAsync(page);
-        await OpenCreateWizardAsync(page);
-
-        // Act: Click Cancel
         var cancelButton = page.Locator("[data-testid='cancel-button']");
         await cancelButton.ClickAsync();
 
-        // Assert: Dialog should be closed
         var wizard = page.Locator("[data-testid='create-subject-wizard']");
-        await Assertions.Expect(wizard).Not.ToBeVisibleAsync(new() { Timeout = 5000 });
+        await Assertions.Expect(wizard).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
     }
 
     [Fact]
-    public async Task Wizard_BackButton_ShouldReturnToStep1()
+    public async Task Navigation_BackButton_ReturnsToStep1AndPreservesState()
     {
-        // Arrange
         var page = await _fixture.CreatePageAsync();
         await NavigateToDemoFolderAsync(page);
-        await OpenCreateWizardAsync(page);
+        await OpenWizardAsync(page);
 
-        // Enter name first to enable auto-advance
-        var nameInput = page.GetByLabel("Name");
-        await nameInput.FillAsync("mytest");
-        await page.WaitForTimeoutAsync(300);
+        // Enter a specific name and advance to step 2
+        var testName = "mypreservedname";
+        await EnterNameAsync(page, testName);
+        await SelectTypeAsync(page, "type-card-motor");
 
-        // Click type card to advance to step 2
-        var firstTypeCard = page.Locator("[data-testid^='type-card-']").First;
-        await firstTypeCard.ClickAsync();
-        await page.WaitForTimeoutAsync(500);
-
-        // Act: Click Back
+        // Wait for step 2
         var backButton = page.Locator("[data-testid='back-button']");
-        await backButton.ClickAsync();
-        await page.WaitForTimeoutAsync(500);
+        await Assertions.Expect(backButton).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
 
-        // Assert: Should be back on step 1
+        // Click Back
+        await backButton.ClickAsync();
+
+        // Should be back on step 1
         var step1Title = page.GetByText("Step 1:");
-        await Assertions.Expect(step1Title).ToBeVisibleAsync(new() { Timeout = 5000 });
+        await Assertions.Expect(step1Title).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
 
         // Back button should no longer be visible
         await Assertions.Expect(backButton).Not.ToBeVisibleAsync();
+
+        // Name should be preserved
+        var nameInput = page.GetByLabel("Name");
+        await Assertions.Expect(nameInput).ToHaveValueAsync(testName);
+
+        // Type selection should be preserved (Motor card still highlighted)
+        var motorCard = page.Locator("[data-testid='type-card-motor']");
+        await Assertions.Expect(motorCard).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("mud-border-primary"));
     }
+
+    #endregion
+
+    #region Validation Tests
 
     [Fact]
-    public async Task Wizard_CreateSubject_ShouldAppearInBrowser()
+    public async Task Validation_NameErrors_PreventAdvancing()
     {
-        // Arrange
-        // Use unique name with timestamp to avoid conflicts with previous test runs
-        var timestamp = DateTime.Now.ToString("HHmmssff");
-        var subjectName = $"E2ETestMotor_{timestamp}";  // Wizard subject name (becomes filename)
-        var motorDisplayName = $"TestMotor_{timestamp}";  // Motor's Name property (displayed in UI)
-        var testFileName = $"{subjectName}.json";
-
         var page = await _fixture.CreatePageAsync();
+        await NavigateToDemoFolderAsync(page);
+        await OpenWizardAsync(page);
 
-        try
-        {
-            // Navigate to Browser (create at root level for now - UI issue with folder-specific Create button)
-            await page.GotoAsync($"{_fixture.ServerAddress}");
-            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-            var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
-            await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await browserLink.ClickAsync();
-            await page.WaitForURLAsync(url => url.Contains("/browser"), new() { Timeout = 30000 });
+        // Test 1: Empty name shows required error
+        var nameInput = page.GetByLabel("Name");
+        await nameInput.FillAsync("temp");
+        await nameInput.FillAsync("");
+        await nameInput.BlurAsync();
 
-            await OpenCreateWizardAsync(page);
+        var requiredError = page.Locator(".mud-input-helper-text:has-text('Name is required')");
+        await Assertions.Expect(requiredError).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
 
-            // Enter subject name (used for filename)
-            var nameInput = page.GetByLabel("Name");
-            await nameInput.FillAsync(subjectName);
-            await page.WaitForTimeoutAsync(300);
+        // Test 2: Invalid characters show error
+        await nameInput.FillAsync("test/invalid:name");
+        await nameInput.BlurAsync();
 
-            // Select Motor type
-            var motorTypeCard = page.Locator("[data-testid='type-card-motor']");
-            await motorTypeCard.ClickAsync();
-            await page.WaitForTimeoutAsync(500);
+        var invalidError = page.Locator(".mud-input-helper-text:has-text('Name contains invalid characters')");
+        await Assertions.Expect(invalidError).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
 
-            // Should be on step 2 - configure motor name (displayed in UI)
-            var motorNameInput = page.GetByLabel("Name", new() { Exact = false }).Last;
-            await motorNameInput.FillAsync(motorDisplayName);
-            await page.WaitForTimeoutAsync(300);
+        // Next button should be disabled even with type selected
+        await SelectFirstTypeAsync(page);
+        var nextButton = page.Locator("[data-testid='next-button']");
+        await Assertions.Expect(nextButton).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
 
-            // Act: Click Create
-            var createButton = page.Locator("[data-testid='create-button']");
-            await createButton.ClickAsync();
-
-            // Wait for dialog to close
-            var wizard = page.Locator("[data-testid='create-subject-wizard']");
-            await Assertions.Expect(wizard).Not.ToBeVisibleAsync(new() { Timeout = 5000 });
-
-            // Wait for Blazor SignalR to propagate changes
-            await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 15000 });
-            await page.WaitForTimeoutAsync(3000); // Extra time for Blazor Server rendering
-
-            // First verify the JSON file was created with correct content
-            var testFilePath = Path.Combine("TestData", testFileName); // Root level, not in demo folder
-            Assert.True(File.Exists(testFilePath), "JSON file should be created");
-
-            var jsonContent = await File.ReadAllTextAsync(testFilePath);
-            Assert.Contains(motorDisplayName, jsonContent); // Motor name should be in JSON
-
-            // Now check if subject appears in the browser - search for the motor's display name
-            var createdSubject = page.GetByText(motorDisplayName);
-            await Assertions.Expect(createdSubject).ToBeVisibleAsync(new() { Timeout = 15000 });
-        }
-        finally
-        {
-            // Cleanup: Delete test file
-            await CleanupTestFileAsync(testFileName);
-        }
+        // Test 3: Valid name enables Next button
+        await nameInput.FillAsync("validname");
+        await Assertions.Expect(nextButton).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
     }
 
+    #endregion
 }

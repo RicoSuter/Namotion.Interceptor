@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using HomeBlaze.Components.Abstractions.Attributes;
 
 namespace HomeBlaze.Services.Components;
@@ -10,6 +11,9 @@ public class SubjectComponentRegistry
     private readonly TypeProvider _typeProvider;
     private readonly Lazy<Dictionary<(Type SubjectType, SubjectComponentType Type, string? Name), SubjectComponentRegistration>> _components;
 
+    // TODO: Clear cache when types are dynamically registered at runtime
+    private readonly ConcurrentDictionary<(Type, SubjectComponentType, string?), SubjectComponentRegistration?> _resolvedCache = new();
+
     public SubjectComponentRegistry(TypeProvider typeProvider)
     {
         _typeProvider = typeProvider;
@@ -21,6 +25,11 @@ public class SubjectComponentRegistry
     /// Supports inheritance and interface fallback for generic components.
     /// </summary>
     public SubjectComponentRegistration? GetComponent(Type subjectType, SubjectComponentType type, string? name = null)
+    {
+        return _resolvedCache.GetOrAdd((subjectType, type, name), key => ResolveComponent(key.Item1, key.Item2, key.Item3));
+    }
+
+    private SubjectComponentRegistration? ResolveComponent(Type subjectType, SubjectComponentType type, string? name)
     {
         // Try exact match first
         var exact = _components.Value.GetValueOrDefault((subjectType, type, name));

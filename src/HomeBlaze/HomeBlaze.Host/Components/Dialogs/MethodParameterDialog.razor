@@ -118,6 +118,23 @@
                     _inputValues[parameter.Name] = GetDefaultValue(parameter);
                 }
             }
+
+            // Validate all parameters initially
+            ValidateAll();
+        }
+    }
+
+    private void ValidateAll()
+    {
+        if (Operation == null)
+            return;
+
+        foreach (var parameter in Operation.Parameters)
+        {
+            if (!IsDIResolved(parameter))
+            {
+                ValidateParameter(parameter.Name);
+            }
         }
     }
 
@@ -203,15 +220,6 @@
         {
             if (Operation == null)
                 return false;
-
-            // Only validate non-DI parameters
-            foreach (var parameter in Operation.Parameters)
-            {
-                if (!IsDIResolved(parameter))
-                {
-                    ValidateParameter(parameter.Name);
-                }
-            }
 
             // Check if any parameter is neither DI-resolvable nor UI-supported
             foreach (var parameter in Operation.Parameters)

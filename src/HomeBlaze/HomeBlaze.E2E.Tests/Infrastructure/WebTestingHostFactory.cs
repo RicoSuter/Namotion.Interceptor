@@ -67,9 +67,9 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
 
         // Configure TypeProvider with essential assemblies for E2E tests
         var typeProvider = _kestrelHost.Services.GetRequiredService<TypeProvider>();
-        typeProvider.AddAssemblies(
-            typeof(FluentStorageContainer).Assembly,      // HomeBlaze.Storage
-            typeof(Motor).Assembly);                      // HomeBlaze.Samples (for test subjects)
+        typeProvider
+            .AddAssembly(typeof(FluentStorageContainer).Assembly)      // HomeBlaze.Storage
+            .AddAssembly(typeof(Motor).Assembly);                      // HomeBlaze.Samples (for test subjects)
 
         _kestrelHost.Start();
 

@@ -17,6 +17,7 @@
         {
             <SubjectComponent Subject="@Subject"
                               Type="SubjectComponentType.Edit"
+                              AdditionalParameters="@(new Dictionary<string, object?> { ["IsCreating"] = IsCreating })"
                               @bind-ComponentInstance="_subjectComponent" />
         }
         else
@@ -28,6 +29,8 @@
 
 @code {
     [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter] public bool IsCreating { get; set; }
 
     private ISubjectComponent? _subjectComponent;
     private ISubjectEditComponent? _editComponent;
@@ -127,7 +130,7 @@
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_editComponent != null)
         {
@@ -135,7 +138,7 @@
             _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
         }
 
-        await Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     private T FindNearest<T>(IInterceptorSubject subject)

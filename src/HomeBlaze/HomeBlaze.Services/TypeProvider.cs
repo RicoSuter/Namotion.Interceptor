@@ -7,7 +7,7 @@ namespace HomeBlaze.Services;
 /// </summary>
 public class TypeProvider
 {
-    private readonly List<Type> _types = new();
+    private readonly List<Type> _types = [];
 
     /// <summary>
     /// Gets all collected types.
@@ -15,22 +15,21 @@ public class TypeProvider
     public IReadOnlyCollection<Type> Types => _types;
 
     /// <summary>
-    /// Adds exported types from assemblies.
+    /// Adds exported types from an assembly.
     /// </summary>
-    public void AddAssemblies(params Assembly[] assemblies)
+    public TypeProvider AddAssembly(Assembly assembly)
     {
-        foreach (var assembly in assemblies)
+        try
         {
-            try
-            {
-                _types.AddRange(assembly.GetExportedTypes());
-            }
-            catch (ReflectionTypeLoadException exception)
-            {
-                var loadedTypes = exception.Types.Where(type => type != null);
-                _types.AddRange(loadedTypes!);
-            }
+            _types.AddRange(assembly.GetExportedTypes());
         }
+        catch (ReflectionTypeLoadException exception)
+        {
+            var loadedTypes = exception.Types.Where(type => type != null);
+            _types.AddRange(loadedTypes!);
+        }
+
+        return this;
     }
 
     /// <summary>

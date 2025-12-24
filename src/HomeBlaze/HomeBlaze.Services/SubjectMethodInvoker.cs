@@ -37,8 +37,14 @@ public class SubjectMethodInvoker : ISubjectMethodInvoker
             var parameters = ResolveParameters(method, userParameters, cancellationToken);
 
             var result = method.MethodInfo.Invoke(subject, parameters);
-            if (method.IsAsync && result is Task task)
+            if (method.IsAsync)
             {
+                if (result is not Task task)
+                {
+                    throw new InvalidOperationException(
+                        $"Async method '{method.Title}' returned null instead of Task");
+                }
+
                 await task.WaitAsync(cancellationToken);
                 result = GetTaskResult(task, method.ResultType);
             }

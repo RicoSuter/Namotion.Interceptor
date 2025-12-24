@@ -11,6 +11,8 @@ public class FluentStorageContainerTests
     private static (TypeProvider typeProvider, SubjectTypeRegistry typeRegistry, ConfigurableSubjectSerializer serializer, IServiceProvider serviceProvider, RootManager rootManager) CreateDependencies()
     {
         var typeProvider = new TypeProvider();
+        // Register HomeBlaze.Samples assembly for Motor and other configurable subjects
+        typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
         var context = InterceptorSubjectContext.Create();
 
@@ -150,7 +152,7 @@ public class FluentStorageContainerTests
 
         // Create a test subject (using Motor from HomeBlaze.Samples)
         var context = serviceProvider.GetRequiredService<IInterceptorSubjectContext>();
-        var motor = new HomeBlaze.Samples.Motor(context) { Name = "Test Motor" };
+        var motor = new Samples.Motor(context) { Name = "Test Motor" };
 
         // Act 1: Add subject
         await storage.AddSubjectAsync("testmotor.json", motor, CancellationToken.None);
@@ -183,7 +185,7 @@ public class FluentStorageContainerTests
 
         // Create a test subject
         var context = serviceProvider.GetRequiredService<IInterceptorSubjectContext>();
-        var motor = new HomeBlaze.Samples.Motor(context) { Name = "Nested Motor" };
+        var motor = new Samples.Motor(context) { Name = "Nested Motor" };
 
         // Act 1: Add subject in nested folder
         await storage.AddSubjectAsync("demo/motors/motor1.json", motor, CancellationToken.None);
