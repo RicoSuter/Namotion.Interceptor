@@ -68,6 +68,7 @@ public class SubjectComponentRegistry
     /// <summary>
     /// Checks if a component is registered for the given subject type and component type.
     /// </summary>
+    // TODO: Align HasComponent with GetComponent - currently only checks exact match while GetComponent supports inheritance/interface fallback
     public bool HasComponent(Type subjectType, SubjectComponentType type, string? name = null)
     {
         return _components.Value.ContainsKey((subjectType, type, name));

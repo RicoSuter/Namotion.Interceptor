@@ -42,6 +42,7 @@
     {
         base.OnParametersSet();
 
+        // TODO: Extract event subscription/unsubscription to helper method - logic duplicated in OnParametersSet, OnAfterRender, and DisposeAsync
         // Unsubscribe from previous edit component
         if (_editComponent != null)
         {
