@@ -1,8 +1,8 @@
 @using System.ComponentModel
 @using System.Reflection
+@using HomeBlaze.Components.Editors
 
 @inject SubjectTypeRegistry TypeRegistry
-@inject SubjectComponentRegistry ComponentRegistry
 @inject SubjectFactory SubjectFactory
 @inject ISnackbar Snackbar
 
@@ -21,6 +21,7 @@
                                   Label="Name"
                                   Required="true"
                                   RequiredError="Name is required"
+                                  Validation="@((Func<string?, string?>)(name => IsValidFileName(name) ? null : "Name contains invalid characters"))"
                                   HelperText="Name for the subject (will be saved as {name}.json)"
                                   Immediate="true"
                                   data-testid="create-name-input" />
@@ -58,20 +59,9 @@
             <MudTabPanel Text="Configure">
                 @if (_selectedType != null && _createdSubject != null)
                 {
-                    @if (_editComponentType != null)
-                    {
-                        <DynamicComponent @ref="_editComponentRef"
-                                          Type="_editComponentType"
-                                          Parameters="@(new Dictionary<string, object?>
-                                          {
-                                              { "Subject", _createdSubject },
-                                              { "IsCreating", true }
-                                          })" />
-                    }
-                    else
-                    {
-                        <MudAlert Severity="Severity.Info">No configuration needed for this type.</MudAlert>
-                    }
+                    <SubjectEditPanel @ref="_editPanel"
+                                      Subject="_createdSubject"
+                                      IsCreating="true" />
                 }
             </MudTabPanel>
         </MudTabs>
@@ -79,20 +69,20 @@
     <DialogActions>
         <MudButton OnClick="Cancel"
                    data-testid="cancel-button">Cancel</MudButton>
-        @if (_activeStep > 0)
+        @if (_activeStep > StepSelectType)
         {
             <MudButton OnClick="GoBack"
                        data-testid="back-button">Back</MudButton>
         }
-        @if (_activeStep == 0 && _selectedType != null)
+        @if (_activeStep == StepSelectType && _selectedType != null)
         {
             <MudButton Color="Color.Primary"
                        Variant="Variant.Filled"
-                       Disabled="@(string.IsNullOrWhiteSpace(_subjectName))"
+                       Disabled="@(!IsNameValid)"
                        OnClick="AdvanceToStep2"
                        data-testid="next-button">Next</MudButton>
         }
-        @if (_activeStep == 1)
+        @if (_activeStep == StepConfigure)
         {
             <MudButton Color="Color.Primary"
                        Variant="Variant.Filled"
@@ -104,34 +94,47 @@
 </MudDialog>
 
 @code {
+    private const int StepSelectType = 0;
+    private const int StepConfigure = 1;
+
     [CascadingParameter]
     private IMudDialogInstance? MudDialog { get; set; }
 
-    private int _activeStep = 0;
+    private int _activeStep = StepSelectType;
 
     private Type? _selectedType;
     private IInterceptorSubject? _createdSubject;
-    private Type? _editComponentType;
-    private DynamicComponent? _editComponentRef;
-    private ISubjectEditComponent? _editComponent;
+    private SubjectEditPanel? _editPanel;
     private string _subjectName = "";
-    private bool _isEditValid = true;
 
-    private bool CanCreate => _activeStep == 1
-        && !string.IsNullOrWhiteSpace(_subjectName)
+    // TODO: Invalidate cache when types can be dynamically loaded
+    private Dictionary<string, List<Type>>? _groupedTypes;
+
+    private bool IsNameValid => !string.IsNullOrWhiteSpace(_subjectName) && IsValidFileName(_subjectName);
+
+    private bool CanCreate => _activeStep == StepConfigure
+        && IsNameValid
         && _createdSubject != null
-        && _isEditValid;
+        && (_editPanel?.IsValid ?? true);
 
     private string GetTitle()
     {
-        return _activeStep == 0
+        return _activeStep == StepSelectType
             ? "Step 1: Select Type"
             : $"Step 2: Create {_selectedType?.Name ?? "Subject"}";
     }
 
+    private static bool IsValidFileName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return true; // Required attribute handles empty
+
+        return !name.Any(c => Path.GetInvalidFileNameChars().Contains(c));
+    }
+
     private Dictionary<string, List<Type>> GetGroupedTypes()
     {
-        return TypeRegistry.RegisteredTypes
+        return _groupedTypes ??= TypeRegistry.RegisteredTypes
             .Where(t => typeof(IConfigurableSubject).IsAssignableFrom(t))
             .GroupBy(t => t.GetCustomAttribute<System.ComponentModel.CategoryAttribute>()?.Category ?? "Uncategorized")
             .ToDictionary(g => g.Key, g => g.ToList());
@@ -140,33 +143,28 @@
     private void SelectType(Type type)
     {
         _selectedType = type;
-        _createdSubject = SubjectFactory.CreateSubject(type);
 
-        // Find edit component
-        var setupComponent = ComponentRegistry.GetComponent(type, SubjectComponentType.Setup);
-        var editComponent = ComponentRegistry.GetComponent(type, SubjectComponentType.Edit);
-        _editComponentType = setupComponent?.ComponentType ?? editComponent?.ComponentType;
-
-        // Only auto-advance if name is already set
-        if (!string.IsNullOrWhiteSpace(_subjectName))
+        // Only auto-advance if name is valid
+        if (IsNameValid)
         {
-            _activeStep = 1;
-            RefreshDialog();
+            AdvanceToStep2();
         }
     }
 
     private void AdvanceToStep2()
     {
-        if (_selectedType != null && !string.IsNullOrWhiteSpace(_subjectName))
+        if (_selectedType != null && IsNameValid)
         {
-            _activeStep = 1;
+            // TODO: Consider deferring subject creation until "Create" click to avoid orphaned subjects on cancel
+            _createdSubject ??= SubjectFactory.CreateSubject(_selectedType);
+            _activeStep = StepConfigure;
             RefreshDialog();
         }
     }
 
     private void GoBack()
     {
-        _activeStep = 0;
+        _activeStep = StepSelectType;
         RefreshDialog();
     }
 
@@ -188,9 +186,9 @@
             try
             {
                 // Save the edit component changes before creating
-                if (_editComponentRef?.Instance is ISubjectEditComponent editComponent)
+                if (_editPanel != null)
                 {
-                    await editComponent.SaveAsync(CancellationToken.None);
+                    await _editPanel.SaveAsync(CancellationToken.None);
                 }
 
                 MudDialog?.Close(DialogResult.Ok(new CreateSubjectResult(_createdSubject, _subjectName)));

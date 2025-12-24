@@ -1,8 +1,8 @@
 @using HomeBlaze.Components.Inputs
-@using Namotion.Interceptor.Registry.Abstractions
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Widget))]
 @implements ISubjectEditComponent
+@implements IDisposable
 
 <MudForm>
     <MudText Typo="Typo.body2" Class="mb-4">
@@ -84,5 +84,11 @@
         }
 
         return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        IsValidChanged = null;
+        IsDirtyChanged = null;
     }
 }

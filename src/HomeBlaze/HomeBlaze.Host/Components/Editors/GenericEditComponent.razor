@@ -28,8 +28,6 @@
         IsValidChanged?.Invoke(isValid);
     }
 
-    public string PreferredDialogSize => "Small";
-
     public Task SaveAsync(CancellationToken cancellationToken)
     {
         _editor?.ApplyChanges();

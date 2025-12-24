@@ -28,16 +28,15 @@ var app = builder.Build();
 // Configure TypeProvider with application-specific assemblies
 // This must happen before any service that depends on TypeProvider is used
 var typeProvider = app.Services.GetRequiredService<TypeProvider>();
-typeProvider.AddAssemblies(
-    typeof(FluentStorageContainer).Assembly,      // HomeBlaze.Storage
-    typeof(MarkdownFilePageComponent).Assembly,   // HomeBlaze.Storage.Blazor
-    typeof(Widget).Assembly,                      // HomeBlaze.Components
-    typeof(Motor).Assembly,                       // HomeBlaze.Samples
-    typeof(OpcUaServer).Assembly,                 // HomeBlaze.Servers.OpcUa
-    typeof(OpcUaServerEditComponent).Assembly,    // HomeBlaze.Servers.OpcUa.Blazor
-    typeof(OpcUaServerEditComponent).Assembly,    // HomeBlaze.Servers.OpcUa.Blazor
-    typeof(GpioSubject).Assembly,
-    typeof(GpioSubjectEditComponent).Assembly);
+typeProvider
+    .AddAssembly(typeof(FluentStorageContainer).Assembly)      // HomeBlaze.Storage
+    .AddAssembly(typeof(MarkdownFilePageComponent).Assembly)   // HomeBlaze.Storage.Blazor
+    .AddAssembly(typeof(Widget).Assembly)                      // HomeBlaze.Components
+    .AddAssembly(typeof(Motor).Assembly)                       // HomeBlaze.Samples
+    .AddAssembly(typeof(OpcUaServer).Assembly)                 // HomeBlaze.Servers.OpcUa
+    .AddAssembly(typeof(OpcUaServerEditComponent).Assembly)    // HomeBlaze.Servers.OpcUa.Blazor
+    .AddAssembly(typeof(GpioSubject).Assembly)
+    .AddAssembly(typeof(GpioSubjectEditComponent).Assembly);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

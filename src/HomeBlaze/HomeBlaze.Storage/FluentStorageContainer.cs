@@ -193,7 +193,10 @@ public partial class FluentStorageContainer :
                             var content = await Client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
                             _pathRegistry.UpdateHash(blob.FullPath, StoragePathRegistry.ComputeHash(content));
                         }
-                        catch { /* Ignore hash computation errors */ }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", blob.FullPath);
+                        }
                     }
                 }
             }
@@ -249,7 +252,10 @@ public partial class FluentStorageContainer :
                     var content = await _client!.ReadTextAsync(relativePath);
                     _pathRegistry.UpdateHash(relativePath, StoragePathRegistry.ComputeHash(content));
                 }
-                catch { /* Ignore */ }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", relativePath);
+                }
             }
 
             // Use reusable helper to add to hierarchy

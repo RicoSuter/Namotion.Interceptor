@@ -26,6 +26,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 {
     private readonly GpioDriver? _driver;
     private readonly ConcurrentDictionary<int, PinChangeEventHandler> _interruptHandlers = new();
+    private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
     private GpioController? _controller;
     private bool _currentlyUsingSimulation;
@@ -183,19 +184,14 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 
             if (result == InitializationResult.PermanentFailure)
             {
-                // TODO: Add signal instead of active waits t
-                
                 // Wait for configuration change (UseSimulation might be enabled)
-                while (!stoppingToken.IsCancellationRequested &&
-                       Status == ServiceStatus.Unavailable)
+                try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
-
-                    // Check if simulation was enabled
-                    if (UseSimulation && !_currentlyUsingSimulation)
-                    {
-                        break; // Retry initialization
-                    }
+                    await _configChangedSignal.WaitAsync(stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
                 }
                 continue;
             }
@@ -403,6 +399,12 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         // Handle simulation mode change (only when no injected driver)
         if (_driver == null && UseSimulation != _currentlyUsingSimulation)
         {
+            // Signal waiting loop that configuration changed
+            if (_configChangedSignal.CurrentCount == 0)
+            {
+                _configChangedSignal.Release();
+            }
+
             if (_controller != null)
             {
                 // Unregister all interrupts
