@@ -5,6 +5,8 @@ using Namotion.Interceptor;
 
 namespace HomeBlaze.Services;
 
+// TODO: Add unit tests for SubjectMethodInvoker - sync/async methods, [FromServices] injection, CancellationToken handling, error scenarios
+
 /// <summary>
 /// Invokes operations and queries on subjects, resolving DI services for parameters.
 /// </summary>

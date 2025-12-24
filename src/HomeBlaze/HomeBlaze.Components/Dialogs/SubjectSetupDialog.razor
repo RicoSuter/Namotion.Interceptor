@@ -124,6 +124,7 @@
             : $"Step 2: Create {_selectedType?.Name ?? "Subject"}";
     }
 
+    // TODO: Cache Path.GetInvalidFileNameChars() in static HashSet<char> to avoid allocation per keystroke
     private static bool IsValidFileName(string? name)
     {
         if (string.IsNullOrWhiteSpace(name))
