@@ -37,6 +37,9 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
+    [Parameter]
+    public bool IsCreating { get; set; }
+
     private Motor? MotorSubject => Subject as Motor;
 
     private string _name = string.Empty;
@@ -52,12 +55,10 @@
                            _targetSpeed != _originalTargetSpeed ||
                            _simulationIntervalMs != _originalSimulationIntervalMs;
 
-    public MaxWidth PreferredDialogSize => MaxWidth.Small;
-
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
 
-    protected override void OnParametersSet()
+    protected override void OnInitialized()
     {
         if (MotorSubject != null)
         {

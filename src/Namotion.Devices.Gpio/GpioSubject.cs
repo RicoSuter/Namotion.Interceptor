@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Device.Gpio;
 using System.Device.I2c;
 using HomeBlaze.Abstractions;
@@ -18,11 +19,14 @@ namespace Namotion.Devices.Gpio;
 /// and optional ADC support. Supports Raspberry Pi, Orange Pi, BeagleBone,
 /// and other Linux-based boards via System.Device.Gpio.
 /// </summary>
+[Category("Devices")]
+[Description("GPIO pins and analog channels for Raspberry Pi and other Linux boards")]
 [InterceptorSubject]
 public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHostedSubject, ITitleProvider, IIconProvider
 {
     private readonly GpioDriver? _driver;
     private readonly ConcurrentDictionary<int, PinChangeEventHandler> _interruptHandlers = new();
+    private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
     private GpioController? _controller;
     private bool _currentlyUsingSimulation;
@@ -168,22 +172,31 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Retry loop for initialization
         while (!stoppingToken.IsCancellationRequested)
         {
             var result = TryInitialize();
             if (result == InitializationResult.Success)
             {
                 await RunPollingLoopAsync(stoppingToken);
-                break;
+                // If polling loop exits (e.g., due to config change), continue outer loop
+                continue;
             }
 
             if (result == InitializationResult.PermanentFailure)
             {
-                // Don't retry for permanent failures (e.g., platform not supported)
-                return;
+                // Wait for configuration change (UseSimulation might be enabled)
+                try
+                {
+                    await _configChangedSignal.WaitAsync(stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                continue;
             }
 
+            // TransientFailure - retry after delay
             if (!stoppingToken.IsCancellationRequested)
             {
                 await Task.Delay(RetryInterval, stoppingToken);
@@ -268,25 +281,26 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         if (_controller == null) return;
 
         var existingPins = Pins;
-        var discoveredPins = new Dictionary<int, GpioPin>();
         var pinCount = _controller.PinCount;
 
+        // Build new dictionary, reusing existing pins
+        var newPins = new Dictionary<int, GpioPin>(pinCount);
         for (var pinNumber = 0; pinNumber < pinCount; pinNumber++)
         {
-            if (existingPins.TryGetValue(pinNumber, out var existingPin))
-            {
-                // Reuse existing pin with its persisted mode
-                InitializePin(existingPin);
-                discoveredPins[pinNumber] = existingPin;
-            }
-            else
-            {
-                // Create new pin with default mode
-                discoveredPins[pinNumber] = CreateAndOpenPin(pinNumber);
-            }
+            var pin = existingPins.TryGetValue(pinNumber, out var existing)
+                ? existing
+                : new GpioPin { Mode = GpioPinMode.Input };
+
+            pin.PinNumber = pinNumber;
+            InitializePin(pin);
+            newPins[pinNumber] = pin;
         }
 
-        Pins = discoveredPins;
+        // Only reassign if structure changed
+        if (existingPins.Count != pinCount || existingPins.Keys.Any(k => !newPins.ContainsKey(k)))
+        {
+            Pins = newPins;
+        }
     }
 
     private GpioPin CreateAndOpenPin(int pinNumber)
@@ -385,6 +399,12 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         // Handle simulation mode change (only when no injected driver)
         if (_driver == null && UseSimulation != _currentlyUsingSimulation)
         {
+            // Signal waiting loop that configuration changed
+            if (_configChangedSignal.CurrentCount == 0)
+            {
+                _configChangedSignal.Release();
+            }
+
             if (_controller != null)
             {
                 // Unregister all interrupts

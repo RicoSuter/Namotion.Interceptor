@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Devices;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.Gpio;
 
@@ -21,6 +22,7 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider, IS
     /// <summary>
     /// The GPIO pin number (BCM numbering).
     /// </summary>
+    [State]
     public partial int PinNumber { get; set; }
 
     /// <summary>
@@ -93,6 +95,18 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider, IS
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
     }
+    
+    [Derived]
+    [PropertyAttribute("TurnOn", KnownAttributes.IsEnabled)]
+    public bool TurnOn_IsEnabled => Mode == GpioPinMode.Output && Status == ServiceStatus.Running && !Value;
+
+    [Derived]
+    [PropertyAttribute("TurnOff", KnownAttributes.IsEnabled)]
+    public bool TurnOff_IsEnabled => Mode == GpioPinMode.Output && Status == ServiceStatus.Running && Value;
+
+    [Derived]
+    [PropertyAttribute("Toggle", KnownAttributes.IsEnabled)]
+    public bool Toggle_IsEnabled => Mode == GpioPinMode.Output && Status == ServiceStatus.Running;
 
     /// <inheritdoc />
     [Operation(Title = "Turn On", Icon = "ToggleOn", Position = 1)]

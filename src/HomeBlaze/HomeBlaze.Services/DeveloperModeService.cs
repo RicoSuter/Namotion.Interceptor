@@ -1,4 +1,4 @@
-namespace HomeBlaze.Host.Services;
+namespace HomeBlaze.Services;
 
 /// <summary>
 /// Service for managing developer mode state across the HomeBlaze application.
