@@ -1,0 +1,94 @@
+@using HomeBlaze.Components.Inputs
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Widget))]
+@implements ISubjectEditComponent
+@implements IDisposable
+
+<MudForm>
+    <MudText Typo="Typo.body2" Class="mb-4">
+        Configure which subject to display by selecting a path to the target subject.
+    </MudText>
+
+    <SubjectPathField Value="@_path"
+                      ValueChanged="@OnPathChanged"
+                      Label="Subject Path"
+                      Placeholder="e.g., Root.folder.motor.json"
+                      Variant="Variant.Outlined"
+                      CanSelectProperty="@_canSelectSubjectOnly" />
+
+    @if (WidgetSubject?.ResolvedSubject != null)
+    {
+        <MudAlert Severity="Severity.Success" Class="mt-4">
+            <MudText Typo="Typo.body2">
+                <strong>Resolved:</strong> @WidgetSubject.ResolvedSubject.GetType().Name
+            </MudText>
+        </MudAlert>
+    }
+    else if (!string.IsNullOrEmpty(_path))
+    {
+        <MudAlert Severity="Severity.Warning" Class="mt-4">
+            Subject not found at this path
+        </MudAlert>
+    }
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private Widget? WidgetSubject => Subject as Widget;
+
+    private string _path = string.Empty;
+    private string _originalPath = string.Empty;
+
+    private readonly Func<RegisteredSubjectProperty, bool> _canSelectSubjectOnly = prop => prop.IsSubjectReference;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_path);
+    public bool IsDirty => _path != _originalPath;
+    
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (WidgetSubject != null)
+        {
+            _path = WidgetSubject.Path;
+            _originalPath = _path;
+        }
+    }
+
+    private void OnPathChanged(string? newPath)
+    {
+        _path = newPath ?? string.Empty;
+        OnFieldChanged();
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (WidgetSubject != null && IsValid)
+        {
+            WidgetSubject.Path = _path;
+            _originalPath = _path;
+
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        IsValidChanged = null;
+        IsDirtyChanged = null;
+    }
+}

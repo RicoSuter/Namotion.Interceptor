@@ -19,7 +19,7 @@
             }
             <DynamicComponent Type="registration.ComponentType"
                               @ref="_dynamicComponent"
-                              Parameters="@(new Dictionary<string, object?> { ["Subject"] = Subject })" />
+                              Parameters="@GetComponentParameters()" />
         </div>
     }
     else
@@ -52,6 +52,12 @@
     [Parameter]
     public SubjectComponentType Type { get; set; }
 
+    /// <summary>
+    /// Additional parameters to pass to the rendered component (e.g., IsCreating).
+    /// </summary>
+    [Parameter]
+    public Dictionary<string, object?>? AdditionalParameters { get; set; }
+
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
 
@@ -68,6 +74,21 @@
     private bool HasEditComponent =>
         Subject != null &&
         ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit);
+
+    private Dictionary<string, object?> GetComponentParameters()
+    {
+        var parameters = new Dictionary<string, object?> { ["Subject"] = Subject };
+
+        if (AdditionalParameters != null)
+        {
+            foreach (var kvp in AdditionalParameters)
+            {
+                parameters[kvp.Key] = kvp.Value;
+            }
+        }
+
+        return parameters;
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

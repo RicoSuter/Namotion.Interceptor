@@ -1,5 +1,4 @@
 using System.Reflection;
-using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -14,28 +13,24 @@ public class MethodPropertyInitializer : ILifecycleHandler
 {
     public void AttachSubject(SubjectLifecycleChange change)
     {
+        // TODO: Replace with change.IsFirstAttach once PR #132 is merged
+        // https://github.com/RicoSuter/Namotion.Interceptor/pull/132
         if (change.ReferenceCount == 1)
         {
             var registeredSubject = change.Subject.TryGetRegisteredSubject()
                                     ?? throw new InvalidOperationException("Subject not registered");
 
-            foreach (var method in change.Subject.GetType().GetMethods())
+            foreach (var method in registeredSubject.GetAllMethods())
             {
-                var operationAttribute = method.GetCustomAttribute<OperationAttribute>();
-                var queryAttribute = method.GetCustomAttribute<QueryAttribute>();
-
-                if (operationAttribute == null && queryAttribute == null)
-                    continue;
-
-                var methodName = method.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
+                var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
                 var methodMetadata = new MethodPropertyMetadata();
-            
+
                 registeredSubject.AddProperty(
                     methodName,
                     typeof(MethodPropertyMetadata),
                     _ => methodMetadata,
                     null,
-                    [.. method.GetCustomAttributes<Attribute>()]);
+                    [.. method.MethodInfo.GetCustomAttributes<Attribute>()]);
             }
         }
     }

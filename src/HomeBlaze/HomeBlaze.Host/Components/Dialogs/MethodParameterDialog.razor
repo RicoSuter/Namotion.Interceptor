@@ -1,5 +1,6 @@
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Services
+@using HomeBlaze.Services
 
 <MudDialog>
     <DialogContent>
@@ -13,6 +14,19 @@
             <MudStack Spacing="3">
                 @foreach (var parameter in Operation.Parameters)
                 {
+                    @if (IsDIResolved(parameter))
+                    {
+                        <!-- Parameter will be DI-injected, no UI input needed -->
+                        continue;
+                    }
+                    else if (!ParameterConverter.IsSupported(parameter.Type))
+                    {
+                        <MudAlert Severity="Severity.Error">
+                            Parameter '@parameter.Name' (type @parameter.Type.Name) cannot be provided via UI or dependency injection
+                        </MudAlert>
+                        continue;
+                    }
+
                     <div>
                         @if (parameter.Type == typeof(bool) || Nullable.GetUnderlyingType(parameter.Type) == typeof(bool))
                         {
@@ -71,21 +85,62 @@
 
     [Parameter] public SubjectMethodInfo? Operation { get; set; }
 
+    /// <summary>
+    /// Pre-resolved DI parameters (parameter name -> resolved value).
+    /// These parameters won't be shown in the UI.
+    /// </summary>
+    [Parameter] public Dictionary<string, object?>? ResolvedParameters { get; set; }
+
     private Dictionary<string, string?> _inputValues = new();
     private Dictionary<string, string?> _errors = new();
+    private Dictionary<string, object?> _diResolvedValues = new();
 
     protected override void OnParametersSet()
     {
         if (Operation != null)
         {
+            // Use pre-resolved DI parameters if provided
+            _diResolvedValues.Clear();
+            if (ResolvedParameters != null)
+            {
+                foreach (var kvp in ResolvedParameters)
+                {
+                    _diResolvedValues[kvp.Key] = kvp.Value;
+                }
+            }
+
+            // Initialize input values for non-DI parameters
             foreach (var parameter in Operation.Parameters)
             {
-                if (!_inputValues.ContainsKey(parameter.Name))
+                if (!_diResolvedValues.ContainsKey(parameter.Name) &&
+                    !_inputValues.ContainsKey(parameter.Name))
                 {
                     _inputValues[parameter.Name] = GetDefaultValue(parameter);
                 }
             }
+
+            // Validate all parameters initially
+            ValidateAll();
         }
+    }
+
+    private void ValidateAll()
+    {
+        if (Operation == null)
+            return;
+
+        foreach (var parameter in Operation.Parameters)
+        {
+            if (!IsDIResolved(parameter))
+            {
+                ValidateParameter(parameter.Name);
+            }
+        }
+    }
+
+    private bool IsDIResolved(SubjectMethodParameter parameter)
+    {
+        return _diResolvedValues.ContainsKey(parameter.Name);
     }
 
     private string GetParameterLabel(SubjectMethodParameter parameter)
@@ -166,9 +221,13 @@
             if (Operation == null)
                 return false;
 
+            // Check if any parameter is neither DI-resolvable nor UI-supported
             foreach (var parameter in Operation.Parameters)
             {
-                ValidateParameter(parameter.Name);
+                if (!IsDIResolved(parameter) && !ParameterConverter.IsSupported(parameter.Type))
+                {
+                    return false;
+                }
             }
 
             return !_errors.Any();
@@ -186,22 +245,34 @@
         for (var i = 0; i < Operation.Parameters.Length; i++)
         {
             var parameter = Operation.Parameters[i];
-            var input = _inputValues.GetValueOrDefault(parameter.Name);
 
-            if (ParameterConverter.TryConvert(input, parameter.Type, out var value))
+            // Use DI-resolved value if available
+            if (_diResolvedValues.TryGetValue(parameter.Name, out var diValue))
             {
-                parameters[i] = value;
+                parameters[i] = diValue;
+            }
+            else
+            {
+                var input = _inputValues.GetValueOrDefault(parameter.Name);
+                if (ParameterConverter.TryConvert(input, parameter.Type, out var value))
+                {
+                    parameters[i] = value;
+                }
             }
         }
 
         MudDialog?.Close(DialogResult.Ok(parameters));
     }
 
-    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, SubjectMethodInfo operation)
+    public static Task<IDialogReference> ShowAsync(
+        IDialogService dialogService,
+        SubjectMethodInfo operation,
+        Dictionary<string, object?>? resolvedParameters = null)
     {
         var parameters = new DialogParameters<MethodParameterDialog>
         {
-            { x => x.Operation, operation }
+            { x => x.Operation, operation },
+            { x => x.ResolvedParameters, resolvedParameters }
         };
 
         var options = new DialogOptions

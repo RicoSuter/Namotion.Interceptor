@@ -1,5 +1,5 @@
 @using HomeBlaze.Abstractions
-@using HomeBlaze.Components
+@using HomeBlaze.Services
 @using HomeBlaze.Storage.Abstractions
 @using Namotion.Interceptor.Tracking.Parent
 
@@ -17,6 +17,7 @@
         {
             <SubjectComponent Subject="@Subject"
                               Type="SubjectComponentType.Edit"
+                              AdditionalParameters="@(new Dictionary<string, object?> { ["IsCreating"] = IsCreating })"
                               @bind-ComponentInstance="_subjectComponent" />
         }
         else
@@ -29,6 +30,8 @@
 @code {
     [Parameter] public IInterceptorSubject? Subject { get; set; }
 
+    [Parameter] public bool IsCreating { get; set; }
+
     private ISubjectComponent? _subjectComponent;
     private ISubjectEditComponent? _editComponent;
     private ConfigurationPropertiesEditor? _propertiesEditor;
@@ -39,6 +42,7 @@
     {
         base.OnParametersSet();
 
+        // TODO: Extract event subscription/unsubscription to helper method - logic duplicated in OnParametersSet, OnAfterRender, and DisposeAsync
         // Unsubscribe from previous edit component
         if (_editComponent != null)
         {
@@ -72,7 +76,7 @@
 
     private void OnIsDirtyChanged(bool isDirty) => InvokeAsync(StateHasChanged);
 
-    public async Task SaveAsync()
+    public async Task SaveAsync(CancellationToken cancellationToken)
     {
         var subject = Subject;
         if (subject == null) return;
@@ -86,7 +90,7 @@
                     return;
                 }
 
-                await _editComponent.SaveAsync(CancellationToken.None);
+                await _editComponent.SaveAsync(cancellationToken);
             }
             else
             {
@@ -111,12 +115,12 @@
 
             if (subject is IStorageFile storageFile)
             {
-                await storageFile.OnFileChangedAsync(CancellationToken.None);
+                await storageFile.OnFileChangedAsync(cancellationToken);
             }
 
             if (subject is IConfigurableSubject configurableSubject)
             {
-                await configurableSubject.ApplyConfigurationAsync(CancellationToken.None);
+                await configurableSubject.ApplyConfigurationAsync(cancellationToken);
             }
 
             Snackbar.Add("Configuration saved.", Severity.Info);
@@ -127,7 +131,7 @@
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_editComponent != null)
         {
@@ -135,13 +139,13 @@
             _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
         }
 
-        await Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     private T FindNearest<T>(IInterceptorSubject subject)
     {
         // TODO: Replace with BFS when available in Namotion.Interceptor.Tracking
-        
+
         // Check if the subject itself is a writer
         if (subject is T writer)
         {

@@ -174,15 +174,7 @@ HomeBlaze supports multiple storage backends via FluentStorage:
 
 ## Demo System
 
-The `demo/` folder contains a working example with 5 motors simulating a small factory:
-
-| Equipment | Current Speed | Target Speed | Temperature |
-|-----------|---------------|--------------|-------------|
-| Conveyor Belt | {{ Root.Children[Demo].Children[Conveyor].CurrentSpeed }} | {{ Root.Children[Demo].Children[Conveyor].TargetSpeed }} | {{ Root.Children[Demo].Children[Conveyor].Temperature }} |
-| Exhaust Fan | {{ Root.Children[Demo].Children[ExhaustFan].CurrentSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan].TargetSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan].Temperature }} |
-| Cooling Fan | {{ Root.Children[Demo].Children[CoolingFan].CurrentSpeed }} | {{ Root.Children[Demo].Children[CoolingFan].TargetSpeed }} | {{ Root.Children[Demo].Children[CoolingFan].Temperature }} |
-| Water Pump | {{ Root.Children[Demo].Children[WaterPump].CurrentSpeed }} | {{ Root.Children[Demo].Children[WaterPump].TargetSpeed }} | {{ Root.Children[Demo].Children[WaterPump].Temperature }} |
-| Compressor | {{ Root.Children[Demo].Children[Compressor].CurrentSpeed }} | {{ Root.Children[Demo].Children[Compressor].TargetSpeed }} | {{ Root.Children[Demo].Children[Compressor].Temperature }} |
+The `demo/` folder contains a working example with 5 motors simulating a small factory. 
 
 👉 **[View Demo Setup Guide](Demo/Setup.md)** for detailed exploration steps.
 

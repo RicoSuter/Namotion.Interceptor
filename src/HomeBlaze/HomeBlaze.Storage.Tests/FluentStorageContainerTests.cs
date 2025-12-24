@@ -11,6 +11,8 @@ public class FluentStorageContainerTests
     private static (TypeProvider typeProvider, SubjectTypeRegistry typeRegistry, ConfigurableSubjectSerializer serializer, IServiceProvider serviceProvider, RootManager rootManager) CreateDependencies()
     {
         var typeProvider = new TypeProvider();
+        // Register HomeBlaze.Samples assembly for Motor and other configurable subjects
+        typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
         var context = InterceptorSubjectContext.Create();
 
@@ -18,6 +20,7 @@ public class FluentStorageContainerTests
         services.AddSingleton(typeProvider);
         services.AddSingleton(typeRegistry);
         services.AddSingleton<IInterceptorSubjectContext>(context);
+        services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
         services.AddSingleton<SubjectPathResolver>();
@@ -135,5 +138,85 @@ public class FluentStorageContainerTests
 
         // Assert
         Assert.Equal(StorageStatus.Disconnected, storage.Status);
+    }
+
+    [Fact]
+    public async Task AddAndDeleteSubject_UpdatesChildrenHierarchy()
+    {
+        // Arrange
+        var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
+
+        storage.StorageType = "inmemory";
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Create a test subject (using Motor from HomeBlaze.Samples)
+        var context = serviceProvider.GetRequiredService<IInterceptorSubjectContext>();
+        var motor = new Samples.Motor(context) { Name = "Test Motor" };
+
+        // Act 1: Add subject
+        await storage.AddSubjectAsync("testmotor.json", motor, CancellationToken.None);
+
+        // Assert 1: Subject should be in Children
+        Assert.Single(storage.Children);
+        Assert.True(storage.Children.ContainsKey("testmotor"));
+        Assert.Equal(motor, storage.Children["testmotor"]);
+
+        // Act 2: Delete subject
+        await storage.DeleteSubjectAsync(motor, CancellationToken.None);
+
+        // Assert 2: Subject should be removed from Children
+        Assert.Empty(storage.Children);
+        Assert.False(storage.Children.ContainsKey("testmotor"));
+
+        // Cleanup
+        storage.Dispose();
+    }
+
+    [Fact]
+    public async Task AddAndDeleteSubject_InNestedFolder_UpdatesChildrenHierarchy()
+    {
+        // Arrange
+        var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
+        var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
+
+        storage.StorageType = "inmemory";
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Create a test subject
+        var context = serviceProvider.GetRequiredService<IInterceptorSubjectContext>();
+        var motor = new Samples.Motor(context) { Name = "Nested Motor" };
+
+        // Act 1: Add subject in nested folder
+        await storage.AddSubjectAsync("demo/motors/motor1.json", motor, CancellationToken.None);
+
+        // Assert 1: Folder hierarchy should be created
+        Assert.Single(storage.Children);
+        Assert.True(storage.Children.ContainsKey("demo"));
+
+        var demoFolder = storage.Children["demo"] as VirtualFolder;
+        Assert.NotNull(demoFolder);
+        Assert.Single(demoFolder.Children);
+        Assert.True(demoFolder.Children.ContainsKey("motors"));
+
+        var motorsFolder = demoFolder.Children["motors"] as VirtualFolder;
+        Assert.NotNull(motorsFolder);
+        Assert.Single(motorsFolder.Children);
+        Assert.True(motorsFolder.Children.ContainsKey("motor1"));
+        Assert.Equal(motor, motorsFolder.Children["motor1"]);
+
+        // Act 2: Delete subject
+        await storage.DeleteSubjectAsync(motor, CancellationToken.None);
+
+        // Assert 2: Subject should be removed from nested folder
+        // Note: Folders remain (they're not auto-cleaned up)
+        var demoFolderAfterDelete = storage.Children["demo"] as VirtualFolder;
+        var motorsFolderAfterDelete = demoFolderAfterDelete?.Children["motors"] as VirtualFolder;
+        Assert.NotNull(motorsFolderAfterDelete);
+        Assert.Empty(motorsFolderAfterDelete.Children);
+        Assert.False(motorsFolderAfterDelete.Children.ContainsKey("motor1"));
+
+        // Cleanup
+        storage.Dispose();
     }
 }

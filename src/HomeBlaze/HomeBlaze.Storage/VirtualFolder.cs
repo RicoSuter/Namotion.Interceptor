@@ -67,4 +67,29 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// </summary>
     public Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
         => Storage.DeleteBlobAsync(path, cancellationToken);
+
+    /// <summary>
+    /// Adds a subject to this folder.
+    /// </summary>
+    public Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
+    {
+        var fullPath = string.IsNullOrEmpty(RelativePath)
+            ? path
+            : Path.Combine(RelativePath, path);
+
+        return Storage.AddSubjectAsync(fullPath, subject, cancellationToken);
+    }
+
+    /// <summary>
+    /// Deletes a subject from this folder.
+    /// </summary>
+    public Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+        => Storage.DeleteSubjectAsync(subject, cancellationToken);
+
+    /// <summary>
+    /// Opens the create subject wizard to add a new subject to this folder.
+    /// </summary>
+    [Operation(Title = "Create", Icon = "Add", Position = 1)]
+    public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
+        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 }
