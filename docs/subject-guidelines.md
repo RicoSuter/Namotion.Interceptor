@@ -250,33 +250,56 @@ public partial class Sensor
 }
 ```
 
-## InlinePaths Attribute
+## OnSet* and OnGet* Partial Methods
 
-The `[InlinePaths]` attribute simplifies paths for subjects with child dictionaries.
+The source generator creates optional partial method hooks for each partial property, allowing you to execute custom logic before or after interceptors run.
 
-### Before vs After
+### Generated Methods
 
-| Without Attribute | With `[InlinePaths]` |
-|-------------------|----------------------|
-| `Root.Children[Documents].Children[Report]` | `Root.Documents.Report` |
+For each partial property, the generator creates:
+- `partial void OnSetPropertyName(ref TProperty value)` - Called before setter runs (before interceptors)
+- `partial void OnGetPropertyName(ref TProperty value)` - Called after getter runs (after interceptors, before return)
 
-### Usage
+### Execution Order
+
+```
+Setter: OnSet* → Interceptors → Field Update
+Getter: Field Read → Interceptors → OnGet* → Return
+```
+
+See [Interceptor Pipeline](interceptor.md#interceptor-pipeline) for how interceptors work.
+
+### Example
 
 ```csharp
 [InterceptorSubject]
-public partial class Folder
+public partial class GpioPin
 {
-    [InlinePaths]
-    public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
+    internal GpioController? Controller { get; init; }
+    public partial GpioPinMode Mode { get; set; }
+    
+    partial void OnSetMode(ref GpioPinMode value)
+    {
+        if (Controller == null) return;
+        Controller.SetPinMode(PinNumber, value switch
+        {
+            GpioPinMode.Input => PinMode.Input,
+            GpioPinMode.Output => PinMode.Output,
+            _ => PinMode.Input
+        });
+    }
 }
 ```
 
-### Resolution Rules
+**Use OnSet*/OnGet* when:**
+- Logic is specific to a single property
+- You need access to instance members
+- You want to transform values before/after interceptors
 
-1. **Properties win** - If both property "Foo" and child key "Foo" exist, the property resolves first
-2. **One per type** - Only one `[InlinePaths]` property per class
-3. **Backward compatible** - Explicit `Children[key]` syntax still works
-4. **Any property name** - The property doesn't have to be named "Children"
+**Use Interceptors when:**
+- Logic applies to many properties/classes
+- You need cross-cutting concerns (logging, validation)
+- Logic should be configurable at runtime
 
 ## Summary
 
@@ -288,3 +311,4 @@ public partial class Folder
 6. **Abstract doesn't work** - Use `virtual` instead
 
 Most other C# patterns (nullable, required, init, virtual, override, data annotations) work naturally.
+

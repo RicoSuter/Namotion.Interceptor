@@ -14,7 +14,7 @@ Motor:
 
 ```subject(mymotor)
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "MyMotor",
   "targetSpeed": 3000,
   "simulationInterval": "00:00:01.500"
@@ -33,7 +33,7 @@ Reference an existing subject's widget by path instead of embedding it inline:
 
 ```subject(conveyorRef)
 {
-  "type": "HomeBlaze.Components.Widget",
+  "$type": "HomeBlaze.Components.Widget",
   "path": "Root.Demo.Conveyor"
 }
 ```

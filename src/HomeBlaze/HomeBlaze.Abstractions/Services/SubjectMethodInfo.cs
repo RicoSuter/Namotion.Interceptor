@@ -24,7 +24,7 @@ public sealed class SubjectMethodInfo
     public string? Description { get; }
 
     /// <summary>
-    /// Icon name (e.g., "PlayArrow"), same convention as IIconProvider.Icon.
+    /// Icon name (e.g., "PlayArrow"), same convention as IIconProvider.IconName.
     /// </summary>
     public string? Icon { get; }
 
@@ -59,11 +59,6 @@ public sealed class SubjectMethodInfo
     /// </summary>
     public bool IsAsync => typeof(Task).IsAssignableFrom(MethodInfo.ReturnType);
 
-    /// <summary>
-    /// Whether all parameters are supported for UI input.
-    /// </summary>
-    public bool IsSupported => Array.TrueForAll(Parameters, p => p.IsSupported);
-
     public SubjectMethodInfo(
         MethodInfo methodInfo,
         SubjectMethodAttribute attribute,
@@ -77,7 +72,7 @@ public sealed class SubjectMethodInfo
         Icon = attribute.Icon;
         Position = attribute.Position;
         Kind = kind;
-        RequiresConfirmation = attribute is OperationAttribute op && op.RequiresConfirmation;
+        RequiresConfirmation = attribute is OperationAttribute { RequiresConfirmation: true };
         Parameters = parameters;
         ResultType = resultType;
     }

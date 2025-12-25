@@ -82,7 +82,7 @@ Create subjects inline within your markdown using fenced code blocks:
 ~~~markdown
 ```subject(mymotor)
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "My Motor",
   "targetSpeed": 2000,
   "simulationInterval": "00:00:01"
@@ -94,7 +94,7 @@ Create subjects inline within your markdown using fenced code blocks:
 
 - **Block type**: Use `subject(name)` as the language identifier
 - **Name**: The `name` in parentheses becomes the subject's key for expression references
-- **JSON content**: Valid JSON with `type` discriminator for polymorphic deserialization
+- **JSON content**: Valid JSON with `$type` discriminator for polymorphic deserialization
 
 ### Subject Lifecycle
 
@@ -112,7 +112,7 @@ Here's my motor:
 
 ```subject(motor1)
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "Primary Motor",
   "targetSpeed": 1500
 }
@@ -164,7 +164,7 @@ position: 0
 
 ```subject(conveyor)
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "Conveyor Belt",
   "targetSpeed": 600,
   "simulationInterval": "00:00:02"
@@ -177,7 +177,7 @@ Current speed: **{{ conveyor.CurrentSpeed }}** RPM
 
 ```subject(cooler)
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "Cooling Fan",
   "targetSpeed": 1800,
   "simulationInterval": "00:00:01"

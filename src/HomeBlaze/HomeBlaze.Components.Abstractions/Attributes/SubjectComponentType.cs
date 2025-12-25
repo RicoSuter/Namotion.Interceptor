@@ -16,6 +16,11 @@ public enum SubjectComponentType
     Edit,
 
     /// <summary>
+    /// A setup/creation view for the subject (used during initial creation).
+    /// </summary>
+    Setup,
+
+    /// <summary>
     /// A compact widget view for the subject.
     /// </summary>
     Widget
