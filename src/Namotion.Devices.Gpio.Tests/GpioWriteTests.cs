@@ -3,6 +3,8 @@ using HomeBlaze.Abstractions;
 using Namotion.Devices.Gpio.Simulation;
 using Xunit;
 
+using HardwareGpioController = System.Device.Gpio.GpioController;
+
 namespace Namotion.Devices.Gpio.Tests;
 
 public class GpioWriteTests
@@ -12,7 +14,7 @@ public class GpioWriteTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new HardwareGpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -35,7 +37,7 @@ public class GpioWriteTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new HardwareGpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Output);
         simulationDriver.SimulatePinValueChange(17, PinValue.High); // Start high
 
@@ -60,7 +62,7 @@ public class GpioWriteTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new HardwareGpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var pin = new GpioPin
@@ -83,7 +85,7 @@ public class GpioWriteTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new HardwareGpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -106,7 +108,7 @@ public class GpioWriteTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new HardwareGpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -129,7 +131,7 @@ public class GpioWriteTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriverWithVerificationFailure();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new HardwareGpioController(PinNumberingScheme.Logical, simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin

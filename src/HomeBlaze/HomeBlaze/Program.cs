@@ -35,8 +35,8 @@ typeProvider
     .AddAssembly(typeof(Motor).Assembly)                       // HomeBlaze.Samples
     .AddAssembly(typeof(OpcUaServer).Assembly)                 // HomeBlaze.Servers.OpcUa
     .AddAssembly(typeof(OpcUaServerEditComponent).Assembly)    // HomeBlaze.Servers.OpcUa.Blazor
-    .AddAssembly(typeof(GpioSubject).Assembly)
-    .AddAssembly(typeof(GpioSubjectEditComponent).Assembly);
+    .AddAssembly(typeof(GpioController).Assembly)
+    .AddAssembly(typeof(GpioControllerEditComponent).Assembly);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

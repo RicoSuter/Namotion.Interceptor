@@ -12,6 +12,8 @@ using Namotion.Devices.Gpio.Configuration;
 using Namotion.Devices.Gpio.Simulation;
 using Namotion.Interceptor.Attributes;
 
+using HardwareGpioController = System.Device.Gpio.GpioController;
+
 namespace Namotion.Devices.Gpio;
 
 /// <summary>
@@ -22,13 +24,13 @@ namespace Namotion.Devices.Gpio;
 [Category("Devices")]
 [Description("GPIO pins and analog channels for Raspberry Pi and other Linux boards")]
 [InterceptorSubject]
-public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHostedSubject, ITitleProvider, IIconProvider
+public partial class GpioController : BackgroundService, IConfigurableSubject, IHostedSubject, ITitleProvider, IIconProvider
 {
     private readonly GpioDriver? _driver;
     private readonly ConcurrentDictionary<int, PinChangeEventHandler> _interruptHandlers = new();
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
-    private GpioController? _controller;
+    private HardwareGpioController? _hardwareController;
     private bool _currentlyUsingSimulation;
     private Mcp3008? _mcp3008;
     private Ads1115? _ads1115;
@@ -109,7 +111,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         _ => "Warning"
     };
 
-    public GpioSubject()
+    public GpioController()
     {
         PollingInterval = TimeSpan.FromSeconds(5);
         RetryInterval = TimeSpan.FromSeconds(30);
@@ -122,11 +124,11 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     }
 
     /// <summary>
-    /// Creates a GpioSubject with a custom GPIO driver.
+    /// Creates a GpioController with a custom GPIO driver.
     /// Use this constructor for code-based usage with custom drivers or for testing.
     /// </summary>
     /// <param name="driver">The GPIO driver to use.</param>
-    public GpioSubject(GpioDriver driver) : this()
+    public GpioController(GpioDriver driver) : this()
     {
         _driver = driver;
     }
@@ -239,19 +241,19 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
             if (_driver != null)
             {
                 // Use injected driver (for testing)
-                _controller = new GpioController(PinNumberingScheme.Logical, _driver);
+                _hardwareController = new HardwareGpioController(PinNumberingScheme.Logical, _driver);
                 _currentlyUsingSimulation = false;
             }
             else if (UseSimulation)
             {
                 // Use simulation driver (28 pins like Raspberry Pi)
-                _controller = new GpioController(PinNumberingScheme.Logical, new SimulationGpioDriver());
+                _hardwareController = new HardwareGpioController(PinNumberingScheme.Logical, new SimulationGpioDriver());
                 _currentlyUsingSimulation = true;
             }
             else
             {
                 // Use real hardware
-                _controller = new GpioController();
+                _hardwareController = new HardwareGpioController();
                 _currentlyUsingSimulation = false;
             }
             return InitializationResult.Success;
@@ -278,10 +280,10 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 
     private void DiscoverPins()
     {
-        if (_controller == null) return;
+        if (_hardwareController == null) return;
 
         var existingPins = Pins;
-        var pinCount = _controller.PinCount;
+        var pinCount = _hardwareController.PinCount;
 
         // Build new dictionary, reusing existing pins
         var newPins = new Dictionary<int, GpioPin>(pinCount);
@@ -317,10 +319,10 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 
     private void InitializePin(GpioPin pin)
     {
-        if (_controller == null)
+        if (_hardwareController == null)
             throw new InvalidOperationException("Controller not initialized");
 
-        pin.Controller = _controller;
+        pin.Controller = _hardwareController;
         pin.RegisterInterrupt = RegisterInterrupt;
         pin.UnregisterInterrupt = UnregisterInterrupt;
 
@@ -334,9 +336,9 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
                 GpioPinMode.Output => PinMode.Output,
                 _ => PinMode.Input
             };
-            _controller.OpenPin(pin.PinNumber, pinMode);
+            _hardwareController.OpenPin(pin.PinNumber, pinMode);
 
-            pin.Value = _controller.Read(pin.PinNumber) == PinValue.High;
+            pin.Value = _hardwareController.Read(pin.PinNumber) == PinValue.High;
             pin.Status = ServiceStatus.Running;
             pin.StatusMessage = null;
 
@@ -378,14 +380,14 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 
     private void VerifyPins()
     {
-        if (_controller == null) return;
+        if (_hardwareController == null) return;
 
         foreach (var pin in Pins.Values)
         {
             if (pin.Status != ServiceStatus.Running)
                 continue;
 
-            var actualValue = _controller.Read(pin.PinNumber) == PinValue.High;
+            var actualValue = _hardwareController.Read(pin.PinNumber) == PinValue.High;
             if (pin.Value != actualValue)
             {
                 pin.Value = actualValue;
@@ -405,7 +407,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
                 _configChangedSignal.Release();
             }
 
-            if (_controller != null)
+            if (_hardwareController != null)
             {
                 // Unregister all interrupts
                 foreach (var pinNumber in _interruptHandlers.Keys.ToList())
@@ -414,8 +416,8 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
                 }
 
                 // Dispose old controller
-                _controller.Dispose();
-                _controller = null;
+                _hardwareController.Dispose();
+                _hardwareController = null;
             }
 
             // Recreate controller with new driver
@@ -474,7 +476,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 
     private void InitializeMcp3008(Dictionary<int, AnalogChannel> channels)
     {
-        if (_controller == null) return;
+        if (_hardwareController == null) return;
 
         try
         {
@@ -528,7 +530,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 
     private void RegisterInterrupt(int pinNumber)
     {
-        if (_controller == null) return;
+        if (_hardwareController == null) return;
 
         PinChangeEventHandler handler = (_, arguments) =>
         {
@@ -539,7 +541,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         };
 
         _interruptHandlers[pinNumber] = handler;
-        _controller.RegisterCallbackForPinValueChangedEvent(
+        _hardwareController.RegisterCallbackForPinValueChangedEvent(
             pinNumber,
             PinEventTypes.Rising | PinEventTypes.Falling,
             handler);
@@ -547,11 +549,11 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
 
     private void UnregisterInterrupt(int pinNumber)
     {
-        if (_controller == null) return;
+        if (_hardwareController == null) return;
 
         if (_interruptHandlers.TryRemove(pinNumber, out var handler))
         {
-            _controller.UnregisterCallbackForPinValueChangedEvent(pinNumber, handler);
+            _hardwareController.UnregisterCallbackForPinValueChangedEvent(pinNumber, handler);
         }
     }
 
@@ -591,7 +593,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         StatusMessage = null;
 
         // Unregister all interrupts
-        if (_controller != null)
+        if (_hardwareController != null)
         {
             foreach (var pinNumber in _interruptHandlers.Keys.ToList())
             {
@@ -602,11 +604,11 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
         // Dispose hardware
         _mcp3008?.Dispose();
         _ads1115?.Dispose();
-        _controller?.Dispose();
+        _hardwareController?.Dispose();
 
         _mcp3008 = null;
         _ads1115 = null;
-        _controller = null;
+        _hardwareController = null;
 
         base.Dispose();
     }

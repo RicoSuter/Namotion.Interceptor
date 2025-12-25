@@ -1,5 +1,5 @@
 {
-  "$type": "Namotion.Devices.Gpio.GpioSubject",
+  "$type": "Namotion.Devices.Gpio.GpioController",
   "pollingInterval": "00:00:05",
   "retryInterval": "00:00:30",
   "useSimulation": true,

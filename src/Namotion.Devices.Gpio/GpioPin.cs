@@ -5,6 +5,8 @@ using HomeBlaze.Abstractions.Devices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
+using HardwareGpioController = System.Device.Gpio.GpioController;
+
 namespace Namotion.Devices.Gpio;
 
 /// <summary>
@@ -13,7 +15,7 @@ namespace Namotion.Devices.Gpio;
 [InterceptorSubject]
 public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider, ISwitchDevice
 {
-    internal GpioController? Controller { get; set; }
+    internal HardwareGpioController? Controller { get; set; }
     internal Action<int>? RegisterInterrupt { get; set; }
     internal Action<int>? UnregisterInterrupt { get; set; }
 
