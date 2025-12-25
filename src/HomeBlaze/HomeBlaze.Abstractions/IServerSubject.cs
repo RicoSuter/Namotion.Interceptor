@@ -1,18 +1,27 @@
+using HomeBlaze.Abstractions.Attributes;
+
 namespace HomeBlaze.Abstractions;
 
 /// <summary>
 /// Interface for subjects that act as servers (OPC UA, MQTT, etc.).
-/// Provides common status reporting for server implementations.
 /// </summary>
-public interface IServerSubject
+public interface IServerSubject : IHostedSubject
 {
     /// <summary>
-    /// Gets the current status of the server.
+    /// The server URL (e.g., "opc.tcp://localhost:4840/").
     /// </summary>
-    ServerStatus Status { get; }
+    [State]
+    string? ServerUrl => null;
 
     /// <summary>
-    /// Gets the error message when Status is Error, otherwise null.
+    /// Whether the server is currently running.
     /// </summary>
-    string? ErrorMessage { get; }
+    [State]
+    bool IsServerRunning => false;
+
+    /// <summary>
+    /// The server port number.
+    /// </summary>
+    [State]
+    int? Port => null;
 }

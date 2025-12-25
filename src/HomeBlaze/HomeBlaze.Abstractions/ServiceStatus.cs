@@ -1,13 +1,14 @@
 namespace HomeBlaze.Abstractions;
 
 /// <summary>
-/// Status of a server subject.
+/// Status of a hosted service, device, or server.
 /// </summary>
-public enum ServerStatus
+public enum ServiceStatus
 {
-    Stopping,
     Stopped,
     Starting,
     Running,
+    Stopping,
+    Unavailable,
     Error
 }

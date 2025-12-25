@@ -46,30 +46,59 @@ public static class StateUnitExtensions
 
     private static string FormatWithUnit(object value, StateUnit unit)
     {
-        return unit switch
+        // Special handling for units that need value transformation
+        if (unit == StateUnit.Percent)
         {
-            StateUnit.Percent => $"{(int)(Convert.ToDecimal(value) * 100m)}%",
-            StateUnit.DegreeCelsius => $"{value} °C",
-            StateUnit.Watt => $"{value} W",
-            StateUnit.KiloWatt => $"{value} kW",
-            StateUnit.WattHour => FormatWattHour(value),
-            StateUnit.Volt => $"{value} V",
-            StateUnit.Ampere => $"{value} A",
-            StateUnit.Hertz => $"{value} Hz",
-            StateUnit.Lumen => $"{value} lm",
-            StateUnit.Lux => $"{value} lx",
-            StateUnit.Meter => $"{value} m",
-            StateUnit.Millimeter => $"{value} mm",
-            StateUnit.MillimeterPerHour => $"{value} mm/h",
-            StateUnit.Kilobyte => $"{value} kB",
-            StateUnit.KilobytePerSecond => $"{value} kB/s",
-            StateUnit.MegabitsPerSecond => $"{value} Mbit/s",
-            StateUnit.LiterPerHour => $"{value} l/h",
-            StateUnit.Currency => $"{value:C}",
-            StateUnit.Default => value.ToString() ?? "",
-            _ => $"{value} {unit}"
-        };
+            return $"{(int)(Convert.ToDecimal(value) * 100m)}%";
+        }
+
+        if (unit == StateUnit.WattHour)
+        {
+            return FormatWattHour(value);
+        }
+
+        if (unit == StateUnit.Currency)
+        {
+            return $"{value:C}";
+        }
+
+        var suffix = GetUnitSuffix(unit);
+        if (suffix != null)
+        {
+            return $"{value} {suffix}";
+        }
+
+        return unit == StateUnit.Default
+            ? value.ToString() ?? ""
+            : $"{value} {unit}";
     }
+
+    /// <summary>
+    /// Gets the unit suffix string for a given StateUnit.
+    /// </summary>
+    /// <returns>The unit suffix (e.g., "°C", "W") or null if no suffix applies.</returns>
+    public static string? GetUnitSuffix(StateUnit unit) => unit switch
+    {
+        StateUnit.Percent => "%",
+        StateUnit.DegreeCelsius => "°C",
+        StateUnit.Watt => "W",
+        StateUnit.KiloWatt => "kW",
+        StateUnit.WattHour => "Wh",
+        StateUnit.Volt => "V",
+        StateUnit.Ampere => "A",
+        StateUnit.Hertz => "Hz",
+        StateUnit.Lumen => "lm",
+        StateUnit.Lux => "lx",
+        StateUnit.Meter => "m",
+        StateUnit.Millimeter => "mm",
+        StateUnit.MillimeterPerHour => "mm/h",
+        StateUnit.Kilobyte => "kB",
+        StateUnit.KilobytePerSecond => "kB/s",
+        StateUnit.MegabitsPerSecond => "Mbit/s",
+        StateUnit.LiterPerHour => "l/h",
+        StateUnit.HexColor => "hex",
+        _ => null
+    };
 
     private static string FormatWattHour(object value)
     {

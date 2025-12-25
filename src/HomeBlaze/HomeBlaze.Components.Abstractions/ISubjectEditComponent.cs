@@ -35,4 +35,9 @@ public interface ISubjectEditComponent : ISubjectComponent
     /// Gets the preferred dialog size for this edit component.
     /// </summary>
     string PreferredDialogSize => "Small";
+
+    /// <summary>
+    /// Gets or sets whether the component is in creation mode (new subject) vs edit mode.
+    /// </summary>
+    bool IsCreating { get; set; }
 }

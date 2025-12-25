@@ -25,7 +25,9 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
-    private bool _isLoaded;
+    [Parameter]
+    public bool IsCreating { get; set; }
+
     private JsonFile? File => Subject as JsonFile;
     private StandaloneCodeEditor? _editor;
     private string _originalContent = string.Empty;
@@ -50,15 +52,14 @@
         };
     }
 
-    protected override async Task OnParametersSetAsync()
+    protected override async Task OnInitializedAsync()
     {
-        if (File != null && !_isLoaded)
+        if (File != null)
         {
             await using var stream = await File.ReadAsync(CancellationToken.None);
             using var reader = new StreamReader(stream);
             _originalContent = await reader.ReadToEndAsync();
             _currentContent = _originalContent;
-            _isLoaded = true;
         }
     }
 

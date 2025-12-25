@@ -1,9 +1,13 @@
 @using System.Collections.Concurrent
+@using System.Reactive.Linq
+@using Microsoft.Extensions.Logging
 @using Namotion.Interceptor.Tracking
 @using Namotion.Interceptor.Tracking.Parent
 @using Namotion.Interceptor.Tracking.Recorder
 
 @implements IDisposable
+
+@inject  ILogger<TrackingScope> Logger
 
 @if (ShowDebugInfo)
 {
@@ -53,6 +57,14 @@ else
     public IInterceptorSubjectContext? Context { get; set; }
 
     /// <summary>
+    /// The minimum time between rerenders in milliseconds.
+    /// Property changes within this window are batched into a single rerender.
+    /// Default is 33ms (~30fps).
+    /// </summary>
+    [Parameter]
+    public int ThrottleMilliseconds { get; set; } = 33;
+
+    /// <summary>
     /// When true, displays debug information (border and tooltip with tracked properties).
     /// </summary>
     [Parameter]
@@ -92,35 +104,49 @@ else
         {
             _subscription?.Dispose();
             _subscription = null;
-            _subscribedContext = Context;
 
-            _subscription = Context?
-                .GetPropertyChangeObservable()
-                .Subscribe(change =>
-                {
-                    if (_disposed != 0) return;
-
-                    try
+            try
+            {
+                _subscription = Context?
+                    .GetPropertyChangeObservable()
+                    .Buffer(TimeSpan.FromMilliseconds(ThrottleMilliseconds))
+                    .Where(changes => changes.Count > 0)
+                    .Subscribe(changes =>
                     {
-                        // Check if this property is directly tracked
-                        if (_properties.TryGetValue(change.Property, out _))
-                        {
-                            TriggerRerender();
-                            return;
-                        }
+                        if (_disposed != 0) return;
 
-                        // Check if the changed subject is a descendant of any tracked subject
-                        var changedSubject = change.Property.Subject;
-                        if (IsDescendantOfTrackedSubject(changedSubject))
+                        try
                         {
-                            TriggerRerender();
+                            // Check if any change in the batch requires a rerender
+                            foreach (var change in changes)
+                            {
+                                // Check if this property is directly tracked
+                                if (_properties.TryGetValue(change.Property, out _))
+                                {
+                                    TriggerRerender();
+                                    return;
+                                }
+
+                                // Check if the changed subject is a descendant of any tracked subject
+                                if (IsDescendantOfTrackedSubject(change.Property.Subject))
+                                {
+                                    TriggerRerender();
+                                    return;
+                                }
+                            }
                         }
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // Component was disposed during callback, ignore
-                    }
-                });
+                        catch (ObjectDisposedException)
+                        {
+                            // Component was disposed during callback, ignore
+                        }
+                    });
+
+                _subscribedContext = Context;
+            }
+            catch (Exception exception)
+            {
+                Logger.LogWarning(exception, "Failed to subscribe to property change observable.");
+            }
         }
         
         StartRecording();

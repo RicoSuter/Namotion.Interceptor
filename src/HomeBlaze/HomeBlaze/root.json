@@ -1,5 +1,5 @@
 {
-  "type": "HomeBlaze.Storage.FluentStorageContainer",
+  "$type": "HomeBlaze.Storage.FluentStorageContainer",
   "storageType": "disk",
   "connectionString": "./Data",
   "containerName": null,
