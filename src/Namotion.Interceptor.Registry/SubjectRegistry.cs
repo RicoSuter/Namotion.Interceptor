@@ -116,8 +116,8 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                 }
             }
 
-            // Only remove the subject from the registry when its reference count reaches zero
-            if (change.ReferenceCount == 0)
+            // Only remove the subject from the registry when it's the final detachment
+            if (change.IsFinalDetach)
             {
                 _knownSubjects.Remove(change.Subject);
             }

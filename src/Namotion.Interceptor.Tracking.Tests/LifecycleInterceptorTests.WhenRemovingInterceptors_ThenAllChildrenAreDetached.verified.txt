@@ -1,5 +1,5 @@
 ﻿[
-  Attached: { } at  with index , count: 1,
+  Attached: { } at  with index , count: 0,
   Attached: {Mother2 } at Mother with index , count: 1,
   Attached: {Mother3 } at Mother with index , count: 1,
   Detached: {Mother1 } at  with index , count: 0,
