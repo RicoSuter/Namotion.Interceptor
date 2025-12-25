@@ -1,6 +1,6 @@
 @using Namotion.Interceptor
 
-@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(GpioSubject))]
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(GpioController))]
 @implements ISubjectComponent
 
 <MudPaper Class="pa-4">
@@ -15,7 +15,7 @@
         <MudStack Row="true" Spacing="4">
             <MudStack>
                 <MudText Typo="Typo.caption">Digital Pins</MudText>
-                <MudText Typo="Typo.h5">@(GpioSubject?.Pins.Count ?? 0)</MudText>
+                <MudText Typo="Typo.h5">@(GpioController?.Pins.Count ?? 0)</MudText>
             </MudStack>
 
             <MudStack>
@@ -29,13 +29,13 @@
             </MudStack>
         </MudStack>
 
-        @if (GpioSubject?.AnalogChannels.Count > 0)
+        @if (GpioController?.AnalogChannels.Count > 0)
         {
             <MudDivider />
             <MudStack Row="true" Spacing="4">
                 <MudStack>
                     <MudText Typo="Typo.caption">Analog Channels</MudText>
-                    <MudText Typo="Typo.h5">@GpioSubject.AnalogChannels.Count</MudText>
+                    <MudText Typo="Typo.h5">@GpioController.AnalogChannels.Count</MudText>
                 </MudStack>
             </MudStack>
         }
@@ -46,11 +46,11 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
-    private GpioSubject? GpioSubject => Subject as GpioSubject;
+    private GpioController? GpioController => Subject as GpioController;
 
-    private int InputCount => GpioSubject?.Pins.Values
+    private int InputCount => GpioController?.Pins.Values
         .Count(p => p.Mode is GpioPinMode.Input or GpioPinMode.InputPullUp or GpioPinMode.InputPullDown) ?? 0;
 
-    private int OutputCount => GpioSubject?.Pins.Values
+    private int OutputCount => GpioController?.Pins.Values
         .Count(p => p.Mode == GpioPinMode.Output) ?? 0;
 }
