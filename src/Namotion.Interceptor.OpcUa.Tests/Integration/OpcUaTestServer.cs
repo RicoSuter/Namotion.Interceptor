@@ -24,8 +24,11 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     }
 
     public async Task StartAsync(
-        Func<IInterceptorSubjectContext, TRoot> createRoot, 
-        Action<IInterceptorSubjectContext, TRoot>? initializeDefaults = null)
+        Func<IInterceptorSubjectContext, TRoot> createRoot,
+        Action<IInterceptorSubjectContext, TRoot>? initializeDefaults = null,
+        bool enableStructureSynchronization = true,
+        bool allowRemoteNodeManagement = false,
+        bool enablePeriodicResynchronization = false)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddLogging(logging =>
@@ -47,7 +50,15 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         initializeDefaults?.Invoke(_context, Root);
 
         builder.Services.AddSingleton(Root);
-        builder.Services.AddOpcUaSubjectServer<TRoot>("opc", rootName: "Root");
+        builder.Services.AddOpcUaSubjectServer<TRoot>(
+            "opc",
+            rootName: "Root",
+            configure: configuration =>
+            {
+                configuration.EnableStructureSynchronization = enableStructureSynchronization;
+                configuration.AllowRemoteNodeManagement = allowRemoteNodeManagement;
+                configuration.EnablePeriodicResynchronization = enablePeriodicResynchronization;
+            });
 
         _host = builder.Build();
         await _host.StartAsync();

@@ -5,7 +5,7 @@ using Opc.Ua.Export;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-public class OpcUaServerConfiguration
+public class OpcUaServerConfiguration : OpcUaConfigurationBase
 {
     /// <summary>
     /// Gets the optional root folder name to create under the Objects folder for organizing server nodes.
@@ -24,18 +24,6 @@ public class OpcUaServerConfiguration
     /// Default is "http://namotion.com/Interceptor/".
     /// </summary>
     public string NamespaceUri { get; init; } = "http://namotion.com/Interceptor/";
-    
-    /// <summary>
-    /// Gets the path provider used to map between OPC UA node browse names and C# property names.
-    /// This provider determines which properties are included and how their names are translated.
-    /// </summary>
-    public required PathProviderBase PathProvider { get; init; }
-
-    /// <summary>
-    /// Gets the value converter used to convert between OPC UA node values and C# property values.
-    /// Handles type conversions such as decimal to double for OPC UA compatibility.
-    /// </summary>
-    public required OpcUaValueConverter ValueConverter { get; init; }
 
     /// <summary>
     /// Gets or sets a value indicating whether to clean up old certificates from the
@@ -44,14 +32,12 @@ public class OpcUaServerConfiguration
     public bool CleanCertificateStore { get; init; } = true;
 
     /// <summary>
-    /// Gets or sets the time window to buffer incoming changes (default: 8ms).
+    /// Allows external OPC UA clients to add/remove nodes via AddNodes/DeleteNodes services.
+    /// When true, server creates local subjects when external client adds nodes.
+    /// Security consideration: Only enable if you trust connected clients.
+    /// Default: false.
     /// </summary>
-    public TimeSpan? BufferTime { get; init; }
-    
-    /// <summary>
-    /// Gets or sets the retry time (default: 10s).
-    /// </summary>
-    public TimeSpan? RetryTime { get; init; }
+    public bool AllowRemoteNodeManagement { get; set; } = false;
 
     /// <summary>
     /// Gets or sets the base address for the OPC UA server.

@@ -298,6 +298,139 @@ internal class SubscriptionManager
         }
     }
 
+    /// <summary>
+    /// Adds monitored items for a dynamically attached subject.
+    /// Uses the first available subscription with capacity, or creates a new one.
+    /// </summary>
+    public async Task AddMonitoredItemsForSubjectAsync(
+        RegisteredSubject registeredSubject,
+        Session session,
+        CancellationToken cancellationToken)
+    {
+        var monitoredItems = new List<MonitoredItem>();
+
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (property.Reference.TryGetPropertyData(_source.OpcUaNodeIdKey, out var nodeIdData) && nodeIdData is NodeId nodeId)
+            {
+                var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
+                var monitoredItem = new MonitoredItem
+                {
+                    StartNodeId = nodeId,
+                    AttributeId = Opc.Ua.Attributes.Value,
+                    MonitoringMode = MonitoringMode.Reporting,
+                    SamplingInterval = opcUaNodeAttribute?.SamplingInterval ?? _configuration.DefaultSamplingInterval,
+                    QueueSize = opcUaNodeAttribute?.QueueSize ?? _configuration.DefaultQueueSize,
+                    DiscardOldest = opcUaNodeAttribute?.DiscardOldest ?? _configuration.DefaultDiscardOldest,
+                    Handle = property
+                };
+                monitoredItems.Add(monitoredItem);
+            }
+        }
+
+        if (monitoredItems.Count == 0)
+        {
+            return;
+        }
+
+        await AddMonitoredItemsBatchedAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Adds monitored items to existing subscriptions with capacity, or creates new ones as needed.
+    /// </summary>
+    private async Task AddMonitoredItemsBatchedAsync(
+        List<MonitoredItem> monitoredItems,
+        Session session,
+        CancellationToken cancellationToken)
+    {
+        var remainingItems = monitoredItems.ToList();
+        var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
+
+        // First, try to add to existing subscriptions with capacity
+        foreach (var subscription in _subscriptions.Keys)
+        {
+            if (remainingItems.Count == 0)
+            {
+                break;
+            }
+
+            var availableCapacity = maximumItemsPerSubscription - (int)subscription.MonitoredItemCount;
+            if (availableCapacity <= 0)
+            {
+                continue;
+            }
+
+            var itemsToAdd = remainingItems.Take(availableCapacity).ToList();
+            foreach (var item in itemsToAdd)
+            {
+                subscription.AddItem(item);
+
+                if (item.Handle is RegisteredSubjectProperty property)
+                {
+                    _monitoredItems[item.ClientHandle] = property;
+                }
+
+                remainingItems.Remove(item);
+            }
+
+            try
+            {
+                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to apply changes when adding dynamic monitored items");
+            }
+        }
+
+        // Create new subscriptions for remaining items if needed
+        if (remainingItems.Count > 0)
+        {
+            var subscription = new Subscription(session.DefaultSubscription)
+            {
+                PublishingEnabled = true,
+                PublishingInterval = _configuration.DefaultPublishingInterval,
+                DisableMonitoredItemCache = true,
+                MinLifetimeInterval = 60_000,
+                KeepAliveCount = _configuration.SubscriptionKeepAliveCount,
+                LifetimeCount = _configuration.SubscriptionLifetimeCount,
+                Priority = _configuration.SubscriptionPriority,
+                MaxNotificationsPerPublish = _configuration.SubscriptionMaximumNotificationsPerPublish,
+            };
+
+            if (!session.AddSubscription(subscription))
+            {
+                _logger.LogWarning("Failed to add subscription for dynamic subject");
+                return;
+            }
+
+            subscription.FastDataChangeCallback += OnFastDataChange;
+            await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
+
+            foreach (var item in remainingItems)
+            {
+                subscription.AddItem(item);
+
+                if (item.Handle is RegisteredSubjectProperty property)
+                {
+                    _monitoredItems[item.ClientHandle] = property;
+                }
+            }
+
+            try
+            {
+                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to apply changes for new dynamic subscription");
+            }
+
+            _subscriptions.TryAdd(subscription, 0);
+        }
+    }
+
     public void Dispose()
     {
         _shuttingDown = true;
