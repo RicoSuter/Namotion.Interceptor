@@ -22,15 +22,15 @@
 
 | Setting | Source | Value |
 |---------|--------|-------|
-| Password length | Identity default | 6 characters |
-| Password complexity | Identity default | Digit + upper + lower + special |
+| Password length | Custom | 6 characters minimum |
+| Password complexity | Custom | None (no requirements) |
 | Lockout attempts | Identity default | 5 attempts |
 | Lockout duration | Identity default | 5 minutes |
 | Cookie expiration | Identity default | 14 days, sliding |
 | Concurrent sessions | Identity default | Allowed |
 | HTTPS | ASP.NET Core | `UseHttpsRedirection()` - only redirects if HTTPS configured |
 
-**No open questions - all resolved with framework defaults.**
+**No open questions - all resolved with framework defaults or simple custom settings.**
 
 ---
 
@@ -69,7 +69,7 @@
 
 **Summary**: Extensibility interface for serializing additional subject data (like permissions)
 
-**Location**: `HomeBlaze.Services`
+**Location**: `HomeBlaze.Abstractions` (to avoid circular dependencies - HomeBlaze.Authorization can reference it)
 
 **Implementation**:
 1. Create `ISubjectDataProvider` interface:
@@ -89,7 +89,7 @@
 
        /// <summary>
        /// Receives additional "$" properties from deserialized JSON.
-       /// Keys have "$" prefix stripped (e.g., "$permissions" → "permissions").
+       /// Keys have "$" prefix stripped (e.g., "$authorization" → "authorization").
        /// Provider picks out the ones it handles and ignores the rest.
        /// </summary>
        void SetAdditionalProperties(IInterceptorSubject subject, Dictionary<string, JsonElement> properties);
@@ -182,12 +182,117 @@ public IConfigurableSubject? Deserialize(string json)
 
 **Note**: If no providers are registered, `IEnumerable<ISubjectDataProvider>` is empty and behavior is unchanged.
 
+**Breaking Change**: This modifies the `ConfigurableSubjectSerializer` constructor signature:
+- **Before**: `ConfigurableSubjectSerializer(TypeProvider, IServiceProvider)`
+- **After**: `ConfigurableSubjectSerializer(TypeProvider, IServiceProvider, IEnumerable<ISubjectDataProvider>)`
+
+**Migration**:
+1. Update all tests that instantiate `ConfigurableSubjectSerializer` directly
+2. DI registration automatically resolves `IEnumerable<ISubjectDataProvider>` (empty if none registered)
+3. Existing code using DI works without changes
+
+**Test Updates Required**:
+```csharp
+// Before
+var serializer = new ConfigurableSubjectSerializer(typeProvider, serviceProvider);
+
+// After
+var serializer = new ConfigurableSubjectSerializer(
+    typeProvider,
+    serviceProvider,
+    Enumerable.Empty<ISubjectDataProvider>());  // or: []
+```
+
 **Subtasks**:
 - [ ] Tests: Serialization round-trip tests with provider
+- [ ] Tests: Update existing ConfigurableSubjectSerializer tests
 - [ ] Docs: N/A
-- [ ] Code quality: Backwards compatible
+- [ ] Code quality: Backwards compatible via DI
 - [ ] Dependencies: No new dependencies
 - [ ] Performance: Provider iteration is O(n) where n = number of providers
+
+---
+
+### Task 1d: ISubjectDataProvider Unit Tests
+
+**Summary**: Comprehensive tests for extensible serialization
+
+**Location**: `HomeBlaze.Services.Tests`
+
+**Test Cases**:
+1. **Round-trip serialization**:
+   - Serialize subject with `$authorization` data
+   - Deserialize and verify data restored to Subject.Data
+   - Verify `[Configuration]` properties still work
+
+2. **Empty provider scenario**:
+   - No `ISubjectDataProvider` registered
+   - Verify serialization works without `$` properties
+
+3. **Multiple providers**:
+   - Two providers returning different `$` properties
+   - Verify both are serialized
+
+4. **Edge cases**:
+   - Null subject passed to provider
+   - Empty permissions dictionary
+   - Property name with special characters
+
+5. **Backward compatibility**:
+   - Deserialize JSON without `$` properties (old format)
+   - Verify no errors, subject created normally
+
+```csharp
+public class SubjectDataProviderTests
+{
+    [Fact]
+    public void Serialize_WithPermissionsProvider_Includes$PermissionsProperty()
+    {
+        // Arrange
+        var subject = CreateTestSubject();
+        subject.Data[(null, "HomeBlaze.Authorization:Read")] = new[] { "Admin" };
+
+        var serializer = CreateSerializer(new AuthorizationDataProvider());
+
+        // Act
+        var json = serializer.Serialize(subject);
+
+        // Assert
+        json.Should().Contain("\"$authorization\"");
+        json.Should().Contain("\"Read\":[\"Admin\"]");
+    }
+
+    [Fact]
+    public void Deserialize_With$Permissions_RestoresSubjectData()
+    {
+        // Arrange
+        var json = """
+        {
+            "$type": "TestSubject",
+            "name": "Test",
+            "$authorization": {
+                "": { "State:Read": ["Guest"], "State:Write": ["Admin"] }
+            }
+        }
+        """;
+
+        var serializer = CreateSerializer(new AuthorizationDataProvider());
+
+        // Act
+        var subject = serializer.Deserialize(json);
+
+        // Assert
+        subject.Data[(null, "HomeBlaze.Authorization:State:Read")].Should().BeEquivalentTo(new[] { "Guest" });
+        subject.Data[(null, "HomeBlaze.Authorization:State:Write")].Should().BeEquivalentTo(new[] { "Admin" });
+    }
+}
+```
+
+**Subtasks**:
+- [ ] Create test fixture with mock subjects
+- [ ] Test provider registration in DI
+- [ ] Test with real ConfigurableSubjectSerializer
+- [ ] Performance: N/A
 
 ---
 
@@ -200,12 +305,15 @@ public IConfigurableSubject? Deserialize(string json)
    ```csharp
    public class AuthorizationOptions
    {
-       public string UnauthenticatedRole { get; set; } = "Anonymous";
-       public Dictionary<string, string[]> DefaultPermissionRoles { get; set; } = new()
+       public string UnauthenticatedRole { get; set; } = DefaultRoles.Anonymous;
+       public Dictionary<(Kind, AuthorizationAction), string[]> DefaultPermissionRoles { get; set; } = new()
        {
-           ["Read"] = ["Anonymous"],
-           ["Write"] = ["User"],
-           ["Invoke"] = ["User"]
+           [(Kind.State, AuthorizationAction.Read)] = [DefaultRoles.Guest],
+           [(Kind.State, AuthorizationAction.Write)] = [DefaultRoles.Operator],
+           [(Kind.Configuration, AuthorizationAction.Read)] = [DefaultRoles.User],
+           [(Kind.Configuration, AuthorizationAction.Write)] = [DefaultRoles.Supervisor],
+           [(Kind.Query, AuthorizationAction.Invoke)] = [DefaultRoles.User],
+           [(Kind.Operation, AuthorizationAction.Invoke)] = [DefaultRoles.Operator]
        };
    }
    ```
@@ -354,11 +462,13 @@ public class RoleHierarchyClaimsTransformation : IClaimsTransformation
 
 **Implementation**:
 1. Create `IdentitySeeding : IHostedService`
-2. Seed default roles in AspNetRoles + RoleComposition:
+2. Seed default roles in AspNetRoles + RoleComposition (stored in database, editable via Admin UI):
    - Anonymous = []
    - Guest = [Anonymous]
    - User = [Guest]
-   - Admin = [User]
+   - Operator = [User]
+   - Supervisor = [Operator]
+   - Admin = [Supervisor]
 3. Check if any users exist
 4. Create admin with no password, `MustChangePassword = true`
 5. Assign Admin role to seeded user
@@ -429,16 +539,95 @@ public class RoleHierarchyClaimsTransformation : IClaimsTransformation
 
 ## Phase 3: Authorization Resolution
 
-### Task 8: Create Permission Attributes
+### Task 8: Create Authorization Enums, Attributes, and Roles
 
-**Summary**: Attributes for compile-time permission and role definitions
+**Summary**: Type-safe authorization model with Kind + Action dimensions
 
 **Implementation**:
-1. Create `[Permission("Read", Roles = new[] { "Guest" })]` attribute for properties/methods
-2. Create `[DefaultPermissions("Read", "Guest")]` attribute for classes
-3. Configure proper `AttributeUsage`
 
-**Note**: Attributes should live in `HomeBlaze.Abstractions` to avoid circular dependencies.
+1. Create `AuthorizationAction` enum:
+   ```csharp
+   public enum AuthorizationAction
+   {
+       Read,    // Read property value
+       Write,   // Write property value
+       Invoke   // Invoke method
+   }
+   ```
+
+2. Create `Kind` enum:
+   ```csharp
+   public enum Kind
+   {
+       State,          // Runtime state properties
+       Configuration,  // Persisted configuration properties
+       Query,          // Read-only methods (idempotent)
+       Operation       // Mutating methods (side effects)
+   }
+   ```
+
+3. Create `DefaultRoles` static class:
+   ```csharp
+   public static class DefaultRoles
+   {
+       public const string Anonymous = "Anonymous";
+       public const string Guest = "Guest";
+       public const string User = "User";
+       public const string Operator = "Operator";
+       public const string Supervisor = "Supervisor";
+       public const string Admin = "Admin";
+   }
+   ```
+
+4. Create `[SubjectAuthorize]` attribute (on class):
+   ```csharp
+   [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+   public class SubjectAuthorizeAttribute : Attribute
+   {
+       public Kind Kind { get; }
+       public Action Action { get; }
+       public string[] Roles { get; }
+
+       public SubjectAuthorizeAttribute(Kind kind, AuthorizationAction action, params string[] roles)
+       {
+           Kind = kind;
+           Action = action;
+           Roles = roles;
+       }
+   }
+   ```
+
+5. Create `[SubjectPropertyAuthorize]` attribute (on property):
+   ```csharp
+   [AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
+   public class SubjectPropertyAuthorizeAttribute : Attribute
+   {
+       public Action Action { get; }
+       public string[] Roles { get; }
+
+       public SubjectPropertyAuthorizeAttribute(AuthorizationAction action, params string[] roles)
+       {
+           Action = action;
+           Roles = roles;
+       }
+   }
+   ```
+
+6. Create `[SubjectMethodAuthorize]` attribute (on method):
+   ```csharp
+   [AttributeUsage(AttributeTargets.Method)]
+   public class SubjectMethodAuthorizeAttribute : Attribute
+   {
+       public string[] Roles { get; }
+
+       public SubjectMethodAuthorizeAttribute(params string[] roles)
+       {
+           Roles = roles;
+       }
+   }
+   ```
+
+**Note**: All attributes should live in `HomeBlaze.Abstractions` to avoid circular dependencies.
 
 **Subtasks**:
 - [ ] Tests: Attribute parsing via reflection
@@ -449,121 +638,393 @@ public class RoleHierarchyClaimsTransformation : IClaimsTransformation
 
 ---
 
-### Task 8b: Implement PermissionsDataProvider
+### Task 8b: Implement AuthorizationDataProvider
 
-**Summary**: Serialization provider for permission data persistence
+**Summary**: Serialization provider for authorization override persistence
 
 **Location**: `HomeBlaze.Authorization`
 
 **Implementation**:
-1. Create `PermissionsDataProvider : ISubjectDataProvider`
-2. Use `HomeBlaze.Authorization:` prefix for Subject.Data keys (Namotion convention)
-3. Serialize permissions to `$permissions` JSON property
-4. Register as `ISubjectDataProvider` in DI
+1. Create `AuthorizationDataProvider : ISubjectDataProvider`
+2. Use `HomeBlaze.Authorization:Kind:Action` format for Subject.Data keys
+3. Serialize overrides to `$authorization` JSON property
+4. **Handle non-configurable descendants**: Collect permissions from descendants that don't implement `IConfigurableSubject` and store them with path prefix
+5. Register as `ISubjectDataProvider` in DI
+
+**Storage key format**: `HomeBlaze.Authorization:{Kind}:{Action}` e.g.:
+- `HomeBlaze.Authorization:State:Read`
+- `HomeBlaze.Authorization:Configuration:Write`
+
+**Descendant Storage**:
+Only `IConfigurableSubject` subjects are serialized. Permission overrides on non-configurable descendants must be persisted with the nearest configurable ancestor.
+
+- **Runtime**: Overrides stored in each subject's own `Data` dictionary (works normally)
+- **Serialize**: Walk descendants, collect permissions from non-`IConfigurableSubject` children, store with path
+- **Deserialize**: Use path resolver to find target subject, restore to correct `Data` dictionary
+
+**Path format** (uses existing path resolver patterns):
+- `""` in JSON = subject-level on this configurable subject (maps to `null` in Subject.Data)
+- `PropertyName` = property on this subject
+- `Child/PropertyName` = property on child subject
+- `Children[2]/PropertyName` = property on indexed child
+
+**Note**: JSON uses `""` (empty string) for subject-level since JSON doesn't support null keys. In `Subject.Data`, use `null` for subject-level per Namotion.Interceptor convention.
+
+All non-empty paths resolve to properties. No subject-level overrides on descendants - permissions flow through property access.
 
 ```csharp
-public class PermissionsDataProvider : ISubjectDataProvider
+public class AuthorizationOverride
+{
+    public bool Inherit { get; set; }
+    public string[] Roles { get; set; } = [];
+}
+
+public class AuthorizationDataProvider : ISubjectDataProvider
 {
     private const string DataKeyPrefix = "HomeBlaze.Authorization:";
-    private const string PropertyKey = "permissions";
+    private const string PropertyKey = "authorization";
+    private readonly ISubjectPathResolver _pathResolver;
+
+    public AuthorizationDataProvider(ISubjectPathResolver pathResolver)
+    {
+        _pathResolver = pathResolver;
+    }
 
     public Dictionary<string, object>? GetAdditionalProperties(IInterceptorSubject subject)
     {
-        // Structure: { "propertyName": { "permission": ["role1", "role2"] } }
-        var permissions = new Dictionary<string, Dictionary<string, string[]>>();
+        if (subject?.Data == null)
+            return null;
 
-        foreach (var kvp in subject.Data)
-        {
-            if (!kvp.Key.key.StartsWith(DataKeyPrefix) || kvp.Value is not string[] roles)
-                continue;
+        // Structure: { "path": { "Kind:Action": { inherit, roles } } }
+        var permissions = new Dictionary<string, Dictionary<string, AuthorizationOverride>>();
 
-            var permission = kvp.Key.key[DataKeyPrefix.Length..]; // "Read", "Write", etc.
-            var propertyName = kvp.Key.property ?? "";
+        // 1. Collect permissions from this subject
+        CollectSubjectPermissions(subject, "", permissions);
 
-            if (!permissions.TryGetValue(propertyName, out var permDict))
-            {
-                permDict = [];
-                permissions[propertyName] = permDict;
-            }
-            permDict[permission] = roles;
-        }
+        // 2. Walk descendants and collect from non-IConfigurableSubject children
+        CollectDescendantPermissions(subject, "", permissions);
 
         return permissions.Count > 0
             ? new Dictionary<string, object> { [PropertyKey] = permissions }
             : null;
     }
 
+    private void CollectSubjectPermissions(
+        IInterceptorSubject subject,
+        string pathPrefix,
+        Dictionary<string, Dictionary<string, AuthorizationOverride>> result)
+    {
+        foreach (var kvp in subject.Data)
+        {
+            if (!kvp.Key.key.StartsWith(DataKeyPrefix) || kvp.Value is not AuthorizationOverride authOverride)
+                continue;
+
+            var kindAction = kvp.Key.key[DataKeyPrefix.Length..];
+            // Subject.Data uses null for subject-level, convert to "" for JSON
+            var propertyName = kvp.Key.property ?? "";
+
+            // Skip subject-level on descendants - not supported
+            if (string.IsNullOrEmpty(propertyName) && !string.IsNullOrEmpty(pathPrefix))
+                continue;
+
+            var fullPath = string.IsNullOrEmpty(pathPrefix)
+                ? propertyName
+                : $"{pathPrefix}/{propertyName}";
+
+            if (!result.TryGetValue(fullPath, out var permDict))
+            {
+                permDict = [];
+                result[fullPath] = permDict;
+            }
+            permDict[kindAction] = authOverride;
+        }
+    }
+
+    private void CollectDescendantPermissions(
+        IInterceptorSubject parent,
+        string pathPrefix,
+        Dictionary<string, Dictionary<string, AuthorizationOverride>> result)
+    {
+        foreach (var prop in parent.Properties.Values)
+        {
+            var value = prop.PropertyInfo?.GetValue(parent);
+
+            // Handle single child subject
+            if (value is IInterceptorSubject child && child is not IConfigurableSubject)
+            {
+                var childPath = string.IsNullOrEmpty(pathPrefix)
+                    ? prop.Name
+                    : $"{pathPrefix}/{prop.Name}";
+                CollectSubjectPermissions(child, childPath, result);
+                CollectDescendantPermissions(child, childPath, result);
+            }
+
+            // Handle collection of subjects
+            if (value is IEnumerable<IInterceptorSubject> children)
+            {
+                var index = 0;
+                foreach (var item in children)
+                {
+                    if (item is not IConfigurableSubject)
+                    {
+                        var itemPath = string.IsNullOrEmpty(pathPrefix)
+                            ? $"{prop.Name}[{index}]"
+                            : $"{pathPrefix}/{prop.Name}[{index}]";
+                        CollectSubjectPermissions(item, itemPath, result);
+                        CollectDescendantPermissions(item, itemPath, result);
+                    }
+                    index++;
+                }
+            }
+        }
+    }
+
     public void SetAdditionalProperties(
         IInterceptorSubject subject,
         Dictionary<string, JsonElement> properties)
     {
+        if (subject == null || properties == null)
+            return;
+
         if (!properties.TryGetValue(PropertyKey, out var element))
             return;
 
-        var permissions = element.Deserialize<Dictionary<string, Dictionary<string, string[]>>>();
-        if (permissions == null)
+        var overrides = element.Deserialize<
+            Dictionary<string, Dictionary<string, AuthorizationOverride>>>();
+        if (overrides == null)
             return;
 
-        foreach (var (propertyName, permissionMap) in permissions)
+        foreach (var (path, overrideMap) in overrides)
         {
-            foreach (var (permission, roles) in permissionMap)
+            if (overrideMap == null)
+                continue;
+
+            // Resolve path to target subject and property
+            var (targetSubject, propertyName) = ResolvePath(subject, path);
+            if (targetSubject == null)
+                continue;
+
+            foreach (var (kindAction, authOverride) in overrideMap)
             {
-                subject.Data[(propertyName, $"{DataKeyPrefix}{permission}")] = roles;
+                if (authOverride != null)
+                {
+                    targetSubject.Data[(propertyName, $"{DataKeyPrefix}{kindAction}")] = authOverride;
+                }
             }
         }
+    }
+
+    private (IInterceptorSubject? subject, string? propertyName) ResolvePath(
+        IInterceptorSubject root,
+        string path)
+    {
+        // "" in JSON = subject-level on root (maps to null in Subject.Data)
+        if (string.IsNullOrEmpty(path))
+            return (root, null);
+
+        // Use path resolver to get the property reference
+        var propertyRef = _pathResolver.ResolveProperty(root, path);
+        if (propertyRef == null)
+            return (null, null);
+
+        return (propertyRef.Value.Subject, propertyRef.Value.Name);
     }
 }
 ```
 
-**JSON Output**:
-```json
+**Authorization Override Schema**:
+```csharp
+public class AuthorizationOverride
 {
-  "$type": "HomeBlaze.Samples.SecuritySystem",
-  "name": "Security",
-  "$permissions": {
-    "": { "Read": ["SecurityGuard"], "Write": ["Admin"] },
-    "ArmCode": { "Read": ["Admin"] }
-  }
+    public bool Inherit { get; set; }  // true = extend, false = replace
+    public string[] Roles { get; set; } = [];
 }
 ```
+
+- `inherit: false` → Replace: Only these roles can access (ignores parent/defaults)
+- `inherit: true` → Extend: These roles can also access, in addition to inherited roles
+
+**JSON Output**: See [Design Document Section 26](./2025-12-25-homeblaze-authorization-design.md#26-authorization-data-persistence) for complete JSON schema examples.
 
 **Registration**:
 ```csharp
 // In AddHomeBlazeAuthorization()
-services.AddSingleton<ISubjectDataProvider, PermissionsDataProvider>();
+services.AddSingleton<ISubjectDataProvider, AuthorizationDataProvider>();
 ```
 
 **Subtasks**:
-- [ ] Tests: Round-trip serialization tests
+- [ ] Tests: Round-trip serialization tests (flat format)
+- [ ] Tests: Round-trip serialization with descendant overrides
+- [ ] Tests: Path resolution with missing/changed descendants (graceful skip)
 - [ ] Docs: N/A
 - [ ] Code quality: Use constants for key prefix
 - [ ] Dependencies: Depends on Task 1b (ISubjectDataProvider)
-- [ ] Performance: N/A
+- [ ] Performance: Cache property navigation if needed
 
 ---
 
-### Task 9: Implement PermissionResolver
+### Task 8c: Role Hierarchy Edge Case Tests
 
-**Summary**: Core resolution logic with inheritance traversal and caching
+**Summary**: Tests for role composition edge cases and circular reference detection
 
-**Implementation**:
-1. Create `IPermissionResolver` interface
-2. Implement 6-level priority chain:
-   - Property ExtData
-   - Property Attribute
-   - Subject ExtData
-   - Subject Attribute
-   - Parent traversal (OR combine)
-   - Global defaults
-3. Implement `TraverseParents()` with OR combination and visited set
-4. **Cache resolved permissions per (subject, property, permission)** - critical for performance
+**Location**: `HomeBlaze.Authorization.Tests`
+
+**Test Cases**:
+1. **Circular role detection**:
+   - A → B → C → A (throws with clear message)
+   - Self-reference A → A (ignored, no error)
+
+2. **Deep hierarchy**:
+   - Chain of 10+ roles
+   - Verify all are expanded correctly
+
+3. **Diamond inheritance**:
+   - Admin → [User, SecurityGuard]
+   - User → Guest
+   - SecurityGuard → Guest
+   - Verify Guest only appears once in expanded set
+
+4. **Unknown role handling**:
+   - Role not in hierarchy config
+   - Should be passed through unchanged
+
+5. **Empty hierarchy**:
+   - No role composition configured
+   - Each role stands alone
 
 ```csharp
-public interface IPermissionResolver
+public class RoleExpanderEdgeCaseTests
 {
-    string[] ResolvePropertyRoles(PropertyReference property, string permission);
-    string[] ResolveSubjectRoles(IInterceptorSubject subject, string permission);
+    [Fact]
+    public void ExpandRoles_CircularReference_ThrowsWithClearMessage()
+    {
+        // Arrange
+        var options = new AuthorizationOptions
+        {
+            RoleHierarchy = new Dictionary<string, string[]>
+            {
+                ["A"] = ["B"],
+                ["B"] = ["C"],
+                ["C"] = ["A"]  // Circular!
+            }
+        };
+        var expander = new RoleExpander(options);
+
+        // Act & Assert
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            expander.ExpandRoles(["A"]));
+
+        ex.Message.Should().Contain("circular");
+        ex.Message.Should().ContainAny("A", "B", "C");
+    }
+
+    [Fact]
+    public void ExpandRoles_SelfReference_IsIgnored()
+    {
+        // Arrange
+        var options = new AuthorizationOptions
+        {
+            RoleHierarchy = new Dictionary<string, string[]>
+            {
+                ["Admin"] = ["Admin", "User"]  // Self-reference
+            }
+        };
+        var expander = new RoleExpander(options);
+
+        // Act
+        var expanded = expander.ExpandRoles(["Admin"]);
+
+        // Assert - Should not throw, Admin appears once
+        expanded.Should().Contain("Admin");
+        expanded.Should().Contain("User");
+        expanded.Count(r => r == "Admin").Should().Be(1);
+    }
+
+    [Fact]
+    public void ExpandRoles_DiamondInheritance_NoDuplicates()
+    {
+        // Arrange
+        var options = new AuthorizationOptions
+        {
+            RoleHierarchy = new Dictionary<string, string[]>
+            {
+                ["Admin"] = ["User", "SecurityGuard"],
+                ["User"] = ["Guest"],
+                ["SecurityGuard"] = ["Guest"]
+            }
+        };
+        var expander = new RoleExpander(options);
+
+        // Act
+        var expanded = expander.ExpandRoles(["Admin"]);
+
+        // Assert - Guest should appear only once
+        expanded.Should().Contain("Guest");
+        expanded.Count(r => r == "Guest").Should().Be(1);
+    }
+}
+```
+
+**Subtasks**:
+- [ ] Test circular detection at startup vs first use
+- [ ] Performance test with large hierarchies
+- [ ] Integration with claims transformation
+
+---
+
+### Task 9: Implement AuthorizationResolver
+
+**Summary**: Core resolution logic with Kind+Action dimensions, inheritance traversal and caching
+
+**Implementation**:
+1. Create `IAuthorizationResolver` interface with Kind+Action parameters
+2. Implement 6-level priority chain:
+   - Property runtime override (Kind, AuthorizationAction)
+   - Subject runtime override (Kind, AuthorizationAction)
+   - Property [SubjectPropertyAuthorize] attribute
+   - Subject [SubjectAuthorize] attribute
+   - Parent traversal (OR combine)
+   - Global defaults (Kind, AuthorizationAction)
+3. Implement `TraverseParents()` with OR combination and visited set
+4. **Cache resolved permissions per (subject, property, kind, action)** - critical for performance
+
+```csharp
+public interface IAuthorizationResolver
+{
+    string[] ResolvePropertyRoles(PropertyReference property, Kind kind, AuthorizationAction action);
+    string[] ResolveSubjectRoles(IInterceptorSubject subject, Kind kind, AuthorizationAction action);
+    string[] ResolveMethodRoles(IInterceptorSubject subject, string methodName, Kind kind);
     void InvalidateCache(IInterceptorSubject subject); // Call on ExtData change
+}
+```
+
+**Resolution for properties**:
+```csharp
+public string[] ResolvePropertyRoles(PropertyReference property, Kind kind, AuthorizationAction action)
+{
+    // 1. Property runtime override
+    var key = $"HomeBlaze.Authorization:{kind}:{action}";
+    if (property.TryGetPropertyData(key, out var roles))
+        return (string[])roles;
+
+    // 2. Subject runtime override
+    if (property.Subject.Data.TryGetValue(("", key), out var subjectRoles))
+        return (string[])subjectRoles;
+
+    // 3. Property [SubjectPropertyAuthorize] attribute
+    var propAttr = GetPropertyAttribute(property, action);
+    if (propAttr != null) return propAttr.Roles;
+
+    // 4. Subject [SubjectAuthorize] attribute
+    var subjectAttr = GetSubjectAttribute(property.Subject, kind, action);
+    if (subjectAttr != null) return subjectAttr.Roles;
+
+    // 5. Parent traversal
+    var parentRoles = TraverseParents(property.Subject, kind, action);
+    if (parentRoles.Length > 0) return parentRoles;
+
+    // 6. Global defaults
+    return _options.Defaults[(kind, action)];
 }
 ```
 
@@ -578,7 +1039,7 @@ public interface IPermissionResolver
 - [ ] Code quality: Avoid allocations in hot path
 - [ ] Dependencies: `Namotion.Interceptor.Tracking`
 - [ ] Performance:
-  - **Cache per (subject, propertyName, permission) using ConcurrentDictionary**
+  - **Cache per (subject, propertyName, kind, action) using ConcurrentDictionary**
   - Cache attribute lookups per type (FrozenDictionary at startup)
   - Use pooled HashSet for parent traversal
   - Return ImmutableArray<string> instead of string[]
@@ -595,10 +1056,11 @@ public interface IPermissionResolver
 
 **Implementation**:
 1. Create `AuthorizationInterceptor : IReadInterceptor, IWriteInterceptor` with **`[RunsFirst]`** attribute
-   - Read: Throw `UnauthorizedAccessException` on denied read (defense in depth)
-   - Write: Throw `UnauthorizedAccessException` on denied write (defense in depth)
+   - Read: Resolve Kind from property's marker ([State]/[Configuration]), check Read action
+   - Write: Resolve Kind from property's marker, check Write action
+   - Throw `UnauthorizedAccessException` on denied access (defense in depth)
    - UI should filter - interceptor is last line of defense
-2. Resolve `IPermissionResolver` via DI (`IServiceProvider` from context)
+2. Resolve `IAuthorizationResolver` via DI (`IServiceProvider` from context)
 3. Access user context via `AsyncLocal<ClaimsPrincipal>` (populated at request start)
 
 ```csharp
@@ -609,16 +1071,43 @@ public class AuthorizationInterceptor : IReadInterceptor, IWriteInterceptor
     {
         // Resolve from DI via IServiceProvider
         var serviceProvider = context.Property.Subject.Context.TryGetService<IServiceProvider>();
-        var resolver = serviceProvider?.GetService<IPermissionResolver>();
+        var resolver = serviceProvider?.GetService<IAuthorizationResolver>();
         if (resolver == null) return next(ref context); // Graceful degradation
 
-        var requiredRoles = resolver.ResolvePropertyRoles(context.Property, "Read");
+        // Get Kind from property's marker attribute ([State] or [Configuration])
+        var kind = GetPropertyKind(context.Property); // State or Configuration
+        var requiredRoles = resolver.ResolvePropertyRoles(context.Property, kind, AuthorizationAction.Read);
         var user = AuthorizationContext.CurrentUser; // AsyncLocal
 
         if (user != null && !HasAnyRole(user, requiredRoles))
-            throw new UnauthorizedAccessException(...);
+            throw new UnauthorizedAccessException($"Access denied: {kind}+Read requires [{string.Join(", ", requiredRoles)}]");
 
         return next(ref context);
+    }
+
+    public void WriteProperty<TProperty>(ref PropertyWriteContext context, ...)
+    {
+        var serviceProvider = context.Property.Subject.Context.TryGetService<IServiceProvider>();
+        var resolver = serviceProvider?.GetService<IAuthorizationResolver>();
+        if (resolver == null) { next(ref context); return; }
+
+        var kind = GetPropertyKind(context.Property);
+        var requiredRoles = resolver.ResolvePropertyRoles(context.Property, kind, AuthorizationAction.Write);
+        var user = AuthorizationContext.CurrentUser;
+
+        if (user != null && !HasAnyRole(user, requiredRoles))
+            throw new UnauthorizedAccessException($"Access denied: {kind}+Write requires [{string.Join(", ", requiredRoles)}]");
+
+        next(ref context);
+    }
+
+    private Kind GetPropertyKind(PropertyReference property)
+    {
+        // Check for [State] or [Configuration] attribute on property
+        // Default to State if no marker
+        return property.Metadata.HasAttribute<ConfigurationAttribute>()
+            ? Kind.Configuration
+            : Kind.State;
     }
 }
 ```
@@ -638,23 +1127,32 @@ public class AuthorizationInterceptor : IReadInterceptor, IWriteInterceptor
 
 ### Task 11: Implement AuthorizedMethodInvoker
 
-**Summary**: Decorator for ISubjectMethodInvoker that checks Invoke permission
+**Summary**: Decorator for ISubjectMethodInvoker that checks Invoke permission with Kind
 
 **Implementation**:
 1. Create `AuthorizedMethodInvoker : ISubjectMethodInvoker`
-2. Wrap existing invoker, check permission before delegating
-3. Use same resolution logic as property authorization
+2. Get Kind from method's marker ([Query] or [Operation])
+3. Wrap existing invoker, check permission before delegating
+4. Use same resolution logic as property authorization
 
 ```csharp
 public class AuthorizedMethodInvoker : ISubjectMethodInvoker
 {
     private readonly ISubjectMethodInvoker _inner;
-    private readonly IPermissionResolver _resolver;
+    private readonly IAuthorizationResolver _resolver;
 
     public async Task<MethodInvocationResult> InvokeAsync(...)
     {
-        var requiredRoles = _resolver.ResolveMethodRoles(subject, method.Name);
+        var kind = GetMethodKind(method); // Query or Operation
+        var requiredRoles = _resolver.ResolveMethodRoles(subject, method.Name, kind);
         // Check, then delegate to _inner
+    }
+
+    private Kind GetMethodKind(MethodInfo method)
+    {
+        return method.GetCustomAttribute<QueryAttribute>() != null
+            ? Kind.Query
+            : Kind.Operation; // Default to Operation
     }
 }
 ```
@@ -768,14 +1266,19 @@ public class AuthorizationCircuitHandler : CircuitHandler
             // Set scoped services accessor
             _servicesAccessor.Services = _services;
 
-            // Update authorization context with current user
-            await UpdateAuthorizationContextAsync();
+            try
+            {
+                // Update authorization context with current user
+                await UpdateAuthorizationContextAsync();
 
-            // Execute the activity (event handler, render, etc.)
-            await next(context);
-
-            // Note: We don't clear AuthorizationContext here because
-            // the user doesn't change during an activity
+                // Execute the activity (event handler, render, etc.)
+                await next(context);
+            }
+            finally
+            {
+                // Clear services accessor to prevent stale state on exceptions
+                _servicesAccessor.Services = null;
+            }
         };
     }
 
@@ -1228,7 +1731,7 @@ public class RoleExpanderTests
 }
 ```
 
-**File**: `src/HomeBlaze/HomeBlaze.Services.Tests/Authorization/PermissionResolverTests.cs`
+**File**: `src/HomeBlaze/HomeBlaze.Services.Tests/Authorization/AuthorizationResolverTests.cs`
 
 ```csharp
 using HomeBlaze.Authorization.Services;
@@ -1238,7 +1741,7 @@ using Moq;
 
 namespace HomeBlaze.Services.Tests.Authorization;
 
-public class PermissionResolverTests
+public class AuthorizationResolverTests
 {
     [Fact]
     public void ResolvePropertyRoles_UsesDefaultWhenNoOverride()
@@ -1246,22 +1749,22 @@ public class PermissionResolverTests
         // Arrange
         var options = new AuthorizationOptions
         {
-            DefaultRoles = new Dictionary<string, string[]>
+            DefaultPermissionRoles = new Dictionary<(Kind, AuthorizationAction), string[]>
             {
-                ["Read"] = ["Anonymous"],
-                ["Write"] = ["User"]
+                [(Kind.State, AuthorizationAction.Read)] = [DefaultRoles.Guest],
+                [(Kind.State, AuthorizationAction.Write)] = [DefaultRoles.Operator]
             }
         };
-        var resolver = new PermissionResolver(options);
+        var resolver = new AuthorizationResolver(options);
         var property = CreateMockProperty("Name");
 
         // Act
-        var readRoles = resolver.ResolvePropertyRoles(property, "Read");
-        var writeRoles = resolver.ResolvePropertyRoles(property, "Write");
+        var readRoles = resolver.ResolvePropertyRoles(property, Kind.State, AuthorizationAction.Read);
+        var writeRoles = resolver.ResolvePropertyRoles(property, Kind.State, AuthorizationAction.Write);
 
         // Assert
-        Assert.Contains("Anonymous", readRoles);
-        Assert.Contains("User", writeRoles);
+        Assert.Contains(DefaultRoles.Guest, readRoles);
+        Assert.Contains(DefaultRoles.Operator, writeRoles);
     }
 
     [Fact]
@@ -1270,20 +1773,20 @@ public class PermissionResolverTests
         // Arrange
         var options = new AuthorizationOptions
         {
-            DefaultRoles = new Dictionary<string, string[]>
+            DefaultPermissionRoles = new Dictionary<(Kind, AuthorizationAction), string[]>
             {
-                ["Read"] = ["Anonymous"]
+                [(Kind.Configuration, AuthorizationAction.Read)] = [DefaultRoles.User]
             }
         };
-        var resolver = new PermissionResolver(options);
-        var property = CreateMockPropertyWithOverride("SecretCode", "Read", ["Admin"]);
+        var resolver = new AuthorizationResolver(options);
+        var property = CreateMockPropertyWithOverride("SecretCode", Kind.Configuration, AuthorizationAction.Read, [DefaultRoles.Admin]);
 
         // Act
-        var roles = resolver.ResolvePropertyRoles(property, "Read");
+        var roles = resolver.ResolvePropertyRoles(property, Kind.Configuration, AuthorizationAction.Read);
 
         // Assert
-        Assert.Contains("Admin", roles);
-        Assert.DoesNotContain("Anonymous", roles);
+        Assert.Contains(DefaultRoles.Admin, roles);
+        Assert.DoesNotContain(DefaultRoles.User, roles);
     }
 
     [Fact]
@@ -1292,20 +1795,20 @@ public class PermissionResolverTests
         // Arrange
         var options = new AuthorizationOptions
         {
-            DefaultRoles = new Dictionary<string, string[]>
+            DefaultPermissionRoles = new Dictionary<(Kind, AuthorizationAction), string[]>
             {
-                ["Write"] = ["User"]
+                [(Kind.State, AuthorizationAction.Write)] = [DefaultRoles.Operator]
             }
         };
-        var resolver = new PermissionResolver(options);
-        var property = CreateMockPropertyWithSubjectOverride("Name", "Write", ["Admin"]);
+        var resolver = new AuthorizationResolver(options);
+        var property = CreateMockPropertyWithSubjectOverride("Name", Kind.State, AuthorizationAction.Write, [DefaultRoles.Admin]);
 
         // Act
-        var roles = resolver.ResolvePropertyRoles(property, "Write");
+        var roles = resolver.ResolvePropertyRoles(property, Kind.State, AuthorizationAction.Write);
 
         // Assert
-        Assert.Contains("Admin", roles);
-        Assert.DoesNotContain("User", roles);
+        Assert.Contains(DefaultRoles.Admin, roles);
+        Assert.DoesNotContain(DefaultRoles.Operator, roles);
     }
 
     [Fact]
@@ -1314,17 +1817,17 @@ public class PermissionResolverTests
         // Arrange
         var options = new AuthorizationOptions
         {
-            DefaultRoles = new Dictionary<string, string[]>
+            DefaultPermissionRoles = new Dictionary<(Kind, AuthorizationAction), string[]>
             {
-                ["Read"] = ["Anonymous"]
+                [(Kind.State, AuthorizationAction.Read)] = [DefaultRoles.Guest]
             }
         };
-        var resolver = new PermissionResolver(options);
+        var resolver = new AuthorizationResolver(options);
         var property = CreateMockProperty("Name");
 
         // Act
-        var roles1 = resolver.ResolvePropertyRoles(property, "Read");
-        var roles2 = resolver.ResolvePropertyRoles(property, "Read");
+        var roles1 = resolver.ResolvePropertyRoles(property, Kind.State, AuthorizationAction.Read);
+        var roles2 = resolver.ResolvePropertyRoles(property, Kind.State, AuthorizationAction.Read);
 
         // Assert - Should return same cached instance
         Assert.Same(roles1, roles2);
@@ -1555,23 +2058,26 @@ public class AuthorizationInterceptorIntegrationTests
 
         var options = new AuthorizationOptions
         {
-            UnauthenticatedRole = "Anonymous",
-            DefaultRoles = new Dictionary<string, string[]>
+            UnauthenticatedRole = DefaultRoles.Anonymous,
+            DefaultPermissionRoles = new Dictionary<(Kind, AuthorizationAction), string[]>
             {
-                ["Read"] = ["Anonymous"],
-                ["Write"] = ["User"]
+                [(Kind.State, AuthorizationAction.Read)] = [DefaultRoles.Guest],
+                [(Kind.State, AuthorizationAction.Write)] = [DefaultRoles.Operator],
+                [(Kind.Configuration, AuthorizationAction.Read)] = [DefaultRoles.User],
+                [(Kind.Configuration, AuthorizationAction.Write)] = [DefaultRoles.Supervisor]
             },
             RoleHierarchy = new Dictionary<string, string[]>
             {
-                ["Admin"] = ["User"],
-                ["User"] = ["Guest"],
-                ["Guest"] = ["Anonymous"]
+                [DefaultRoles.Admin] = [DefaultRoles.Supervisor],
+                [DefaultRoles.Supervisor] = [DefaultRoles.Operator],
+                [DefaultRoles.Operator] = [DefaultRoles.User],
+                [DefaultRoles.User] = [DefaultRoles.Guest]
             }
         };
 
         services.AddSingleton(options);
         services.AddSingleton<IRoleExpander, RoleExpander>();
-        services.AddScoped<IPermissionResolver, PermissionResolver>();
+        services.AddScoped<IAuthorizationResolver, AuthorizationResolver>();
 
         var serviceProvider = services.BuildServiceProvider();
 
@@ -1620,13 +2126,18 @@ public class AuthorizationInterceptorIntegrationTests
 
 // Test subject for integration tests
 [InterceptorSubject]
-[DefaultPermissions("Read", "Anonymous")]
-[DefaultPermissions("Write", "User")]
+[SubjectAuthorize(Kind.State, AuthorizationAction.Read, DefaultRoles.Guest)]
+[SubjectAuthorize(Kind.State, AuthorizationAction.Write, DefaultRoles.Operator)]
+[SubjectAuthorize(Kind.Configuration, AuthorizationAction.Read, DefaultRoles.User)]
+[SubjectAuthorize(Kind.Configuration, AuthorizationAction.Write, DefaultRoles.Supervisor)]
 public partial class TestPerson
 {
+    [State]
     public partial string Name { get; set; }
 
-    [Permission("Admin")]
+    [Configuration]
+    [SubjectPropertyAuthorize(AuthorizationAction.Read, DefaultRoles.Admin)]
+    [SubjectPropertyAuthorize(AuthorizationAction.Write, DefaultRoles.Admin)]
     public partial string SocialSecurityNumber { get; set; }
 }
 ```
@@ -1649,7 +2160,7 @@ dotnet test src/HomeBlaze/HomeBlaze.Host.Services.Tests
 - [ ] Add AuthorizationTests.cs to HomeBlaze.E2E.Tests
 - [ ] Add Authorization folder to HomeBlaze.Services.Tests
 - [ ] Add RoleExpanderTests.cs
-- [ ] Add PermissionResolverTests.cs
+- [ ] Add AuthorizationResolverTests.cs
 - [ ] Add AuthorizationContextTests.cs
 - [ ] Add Authorization folder to HomeBlaze.Host.Services.Tests
 - [ ] Add AuthorizationInterceptorIntegrationTests.cs
@@ -1791,21 +2302,99 @@ dotnet test src/HomeBlaze/HomeBlaze.Host.Services.Tests
 
 ### Task 19: Create Subject Authorization Panel
 
-**Summary**: Inline authorization editor for subjects
+**Summary**: Authorization editor panes for subjects, properties, and methods
 
 **Implementation**:
-1. Create `SubjectAuthorizationPanel.razor` component
-2. Permission table with source indicators (ExtData/Attribute/Inherited/Default)
-3. Property/method override tables
-4. Edit role mapping dialog (sets ExtData)
-5. Clear override action
+
+#### 19a: Subject Authorization Button & Pane
+
+1. Add `[🔒 Auth]` button to subject pane header (alongside Edit/Delete)
+2. Create `SubjectAuthorizationPane.razor` as **right pane** (follows existing pane pattern)
+3. Show all (Kind, AuthorizationAction) combinations with resolved roles:
+   ```
+   ┌─────────────────────────────────────────────────────────────┐
+   │ Authorization: SecuritySystem                    [Save] [X] │
+   ├─────────────────────────────────────────────────────────────┤
+   │ Subject Permissions                                         │
+   │ ┌──────────────────┬─────────────────┬──────────┬─────────┐ │
+   │ │ Kind + Action    │ Roles           │ Source   │ Actions │ │
+   │ ├──────────────────┼─────────────────┼──────────┼─────────┤ │
+   │ │ State+Read       │ SecurityGuard   │ Override │ ✏️ ↩️   │ │
+   │ │ State+Write      │ Admin           │ Override │ ✏️ ↩️   │ │
+   │ │ Config+Read      │ Operator        │ Inherited│         │ │
+   │ │ Config+Write     │ Admin           │ Attribute│         │ │
+   │ │ Operation+Invoke │ User            │ Default  │         │ │
+   │ │ Query+Invoke     │ Guest           │ Default  │         │ │
+   │ └──────────────────┴─────────────────┴──────────┴─────────┘ │
+   │                                                             │
+   │ Inheritance source: Home → LivingRoom                       │
+   └─────────────────────────────────────────────────────────────┘
+   ```
+4. Edit action opens inline role multi-select
+5. Clear override (↩️) removes ExtData entry
+
+#### 19b: Property Authorization Icon & Pane
+
+1. Add `🔒` icon next to each property in property grid
+2. **Highlight overridden properties** (filled 🔒 icon or subtle background color)
+3. Click `🔒` → Opens **right pane** for property authorization:
+   ```
+   ┌─────────────────────────────────────────────────────────────┐
+   │ Authorization: MacAddress                        [Save] [X] │
+   ├─────────────────────────────────────────────────────────────┤
+   │ Kind: Configuration                                         │
+   │                                                             │
+   │ Read                                                        │
+   │ ├─ Current: [Operator, Admin]                               │
+   │ ├─ Source: Inherited from SecuritySystem                    │
+   │ └─ ☐ Override: [select roles...]                            │
+   │                                                             │
+   │ Write                                                       │
+   │ ├─ Current: [Admin]                                         │
+   │ ├─ Source: Override                           [Clear ↩️]    │
+   │ └─ ☑ Override: [Admin ▼]                                    │
+   └─────────────────────────────────────────────────────────────┘
+   ```
+4. Shows inheritance source on hover/inline
+5. Toggle checkbox enables override → shows role multi-select
+6. Clear button removes override, reverts to inherited
+
+#### 19c: Method Authorization Icon & Pane
+
+1. Add small `🔒` button **to the right** of each method button:
+   ```
+   [Toggle] [🔒]    [Factory Reset] [🔒]
+   ```
+2. **Highlight overridden methods** (filled 🔒 vs outline)
+3. Click `🔒` → Opens **right pane** for method authorization:
+   ```
+   ┌─────────────────────────────────────────────────────────────┐
+   │ Authorization: FactoryReset                      [Save] [X] │
+   ├─────────────────────────────────────────────────────────────┤
+   │ Kind: Operation                                             │
+   │                                                             │
+   │ Invoke                                                      │
+   │ ├─ Current: [Admin]                                         │
+   │ ├─ Source: [SubjectMethodAuthorize] Attribute               │
+   │ └─ ☐ Override: [select roles...]                            │
+   └─────────────────────────────────────────────────────────────┘
+   ```
+4. Same pattern as property: show current, source, override toggle
+
+#### Pane Behavior (consistent with existing)
+- Opens as right pane (pushes content or overlays)
+- Save button persists changes to ExtData
+- Close (X) discards unsaved changes (or prompt if dirty)
+- Changes write to `subject.Data[(propertyName, "HomeBlaze.Authorization:Kind:Action")]`
 
 **Subtasks**:
-- [ ] Tests: Component tests
+- [ ] Tests: Component tests for each pane
+- [ ] Tests: Override persistence tests
 - [ ] Docs: N/A
 - [ ] Code quality: Consistent with existing subject editors
 - [ ] Dependencies: No new dependencies
 - [ ] Performance: Lazy load property/method lists
+- [ ] UX: Highlight overridden items in grid
 
 ---
 
@@ -1875,7 +2464,7 @@ dotnet test src/HomeBlaze/HomeBlaze.Host.Services.Tests
 1. Create `AddHomeBlazeAuthorization()` that calls:
    - `AddHomeBlazeIdentity()`
    - `AddHomeBlazeOAuth()` (if configured)
-   - Register `IPermissionResolver` as **scoped** (for per-request caching)
+   - Register `IAuthorizationResolver` as **scoped** (for per-request caching)
    - Register `AuthorizedMethodInvoker` as decorator
    - Register `HomeBlazeAuthenticationStateProvider` (extends `RevalidatingServerAuthenticationStateProvider`)
 2. Create middleware registration extension (`UseAuthorizationContext`)
@@ -1891,7 +2480,7 @@ public static IServiceCollection AddHomeBlazeAuthorization(
 
     services.AddSingleton(options);
     services.AddSingleton<IRoleExpander, RoleExpander>();
-    services.AddScoped<IPermissionResolver, PermissionResolver>();
+    services.AddScoped<IAuthorizationResolver, AuthorizationResolver>();
 
     // Use RevalidatingServerAuthenticationStateProvider for Blazor Server
     services.AddScoped<AuthenticationStateProvider, HomeBlazeAuthenticationStateProvider>();
@@ -1905,7 +2494,7 @@ public static IApplicationBuilder UseAuthorizationContext(this IApplicationBuild
 }
 ```
 
-**Note**: `AuthorizationInterceptor` is registered directly on context via extension method, `IPermissionResolver` is resolved via DI
+**Note**: `AuthorizationInterceptor` is registered directly on context via extension method, `IAuthorizationResolver` is resolved via DI
 
 **CRITICAL**: IServiceProvider must be explicitly registered on the context for DI resolution to work:
 ```csharp
@@ -1923,12 +2512,27 @@ context.AddService(serviceProvider); // Required for TryGetService<IServiceProvi
 
 ### Task 24: Update SubjectContextFactory
 
-**Summary**: Add authorization interceptor to subject context
+**Summary**: Add authorization interceptor to subject context and enable DI resolution
+
+**Current Signature**:
+```csharp
+public static IInterceptorSubjectContext Create(IServiceCollection services)
+```
+
+**New Signature** (breaking change):
+```csharp
+public static IInterceptorSubjectContext Create(IServiceProvider serviceProvider, IServiceCollection services)
+```
+
+**Why Both Parameters**:
+- `IServiceProvider` - needed to register on context for DI resolution in interceptors
+- `IServiceCollection` - needed for `WithHostedServices()` to register services
 
 **Implementation**:
-1. Update `SubjectContextFactory.Create()` to use `.WithAuthorization()` extension
-2. **CRITICAL**: Register `IServiceProvider` on context for DI resolution
-3. Interceptor uses `[RunsFirst]` so ordering is automatic
+1. Add `IServiceProvider` parameter to `Create()` method
+2. Add `.WithAuthorization()` extension method call
+3. Register `IServiceProvider` on context for DI resolution
+4. Interceptor uses `[RunsFirst]` so ordering is automatic
 
 ```csharp
 // Extension method (in HomeBlaze.Authorization)
@@ -1941,7 +2545,9 @@ public static class AuthorizationContextExtensions
 }
 
 // SubjectContextFactory.cs
-public static IInterceptorSubjectContext Create(IServiceProvider serviceProvider)
+public static IInterceptorSubjectContext Create(
+    IServiceProvider serviceProvider,
+    IServiceCollection services)
 {
     var context = InterceptorSubjectContext
         .Create()
@@ -1950,7 +2556,10 @@ public static IInterceptorSubjectContext Create(IServiceProvider serviceProvider
         .WithRegistry()
         .WithParents()
         .WithLifecycle()
-        .WithAuthorization() // Uses extension method
+        .WithService<ILifecycleHandler>(
+            () => new MethodPropertyInitializer(),
+            handler => handler is MethodPropertyInitializer)
+        .WithAuthorization() // NEW: Uses extension method
         .WithDataAnnotationValidation()
         .WithHostedServices(services);
 
@@ -1961,11 +2570,22 @@ public static IInterceptorSubjectContext Create(IServiceProvider serviceProvider
 }
 ```
 
+**Breaking Change Migration**:
+```csharp
+// Before (in Program.cs or similar)
+var context = SubjectContextFactory.Create(services);
+
+// After
+var app = builder.Build();
+var context = SubjectContextFactory.Create(app.Services, builder.Services);
+```
+
 **Subtasks**:
-- [ ] Tests: Integration tests
+- [ ] Tests: Update all tests calling SubjectContextFactory.Create()
+- [ ] Tests: Integration tests for authorization
 - [ ] Docs: N/A
 - [ ] Code quality: Proper ordering
-- [ ] Dependencies: No new dependencies
+- [ ] Dependencies: HomeBlaze.Authorization
 - [ ] Performance: N/A
 
 ---
@@ -2011,20 +2631,63 @@ public static IInterceptorSubjectContext Create(IServiceProvider serviceProvider
 
 ---
 
+### Task 27: Add Audit Logging (Future Enhancement)
+
+**Summary**: Log authorization decisions for security auditing
+
+**Status**: Optional / Future enhancement - not required for initial implementation
+
+**Implementation** (when needed):
+1. Create `IAuthorizationAuditLogger` interface
+2. Log access denied events with context (user, subject, property, permission)
+3. Optional: Log successful access for high-security properties
+4. Store in database or external logging service
+
+```csharp
+public interface IAuthorizationAuditLogger
+{
+    void LogAccessDenied(
+        ClaimsPrincipal user,
+        IInterceptorSubject subject,
+        string? propertyName,
+        string permission,
+        string[] requiredRoles);
+
+    void LogAccessGranted(
+        ClaimsPrincipal user,
+        IInterceptorSubject subject,
+        string? propertyName,
+        string permission);
+}
+```
+
+**Why Optional**:
+- Initial implementation focuses on core authorization functionality
+- Audit logging adds complexity and storage requirements
+- Can be added later without breaking changes
+
+**Subtasks**:
+- [ ] Define audit log schema
+- [ ] Implement file/database logger
+- [ ] Add configuration for audit verbosity
+- [ ] Performance: Async logging to avoid blocking
+
+---
+
 ## Summary
 
 | Phase | Tasks | Description |
 |-------|-------|-------------|
-| 1. Infrastructure | 1, 1b, 1c, 2 | Projects, ISubjectDataProvider, serializer update, options |
+| 1. Infrastructure | 1, 1b, 1c, 1d, 2 | Projects, ISubjectDataProvider, serializer update, provider tests, options |
 | 2. Identity & DB | 3-7 | DbContext, role expander, claims transform, seeding, Identity, OAuth |
-| 3. Authorization | 8, 8b, 9-12 | Attributes, PermissionsDataProvider, resolver, interceptor, method auth, user context |
+| 3. Authorization | 8, 8b, 8c, 9-12 | Attributes, AuthorizationDataProvider, role edge case tests, resolver, interceptor, method auth, user context |
 | 4. Auth UI | 13-16 | Login/logout, SetPassword, Account, App.razor |
 | 5. Admin UI | 17-19 | Users, Roles, Subject panel |
 | 6. Filtering | 20-22 | Nav, browser, properties |
 | 7. Integration | 23-25 | DI, SubjectContextFactory, Program.cs |
-| 8. Session | 26 | Revalidation |
+| 8. Session | 26, 27 | Revalidation, Audit logging (optional) |
 
-**Total: 30 tasks across 8 phases** (includes 1b, 1c for serialization extensibility, 4b for claims, 8b for persistence, 12b for tests)
+**Total: 33 tasks across 8 phases** (includes 1b, 1c, 1d for serialization extensibility, 4b for claims, 8b, 8c for persistence/tests, 12b for auth tests, 27 optional)
 
 ---
 

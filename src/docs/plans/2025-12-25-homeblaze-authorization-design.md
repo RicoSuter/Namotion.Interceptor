@@ -62,20 +62,20 @@ User "guest@example.com" → Roles: ["Guest"]
 
 ### Composition
 
-Roles can include other roles (OR combination):
+Roles can include other roles (OR combination). Role hierarchy is **stored in database** (not appsettings.json) and is editable via Admin UI:
 
-```json
-{
-  "Authorization": {
-    "Roles": {
-      "Guest": [],
-      "User": ["Guest"],
-      "SecurityGuard": ["Guest"],
-      "HomeOwner": ["User"],
-      "Admin": ["HomeOwner", "SecurityGuard"]
-    }
-  }
-}
+```
+Database: RoleComposition table
+┌────────────┬──────────────────┐
+│ RoleName   │ IncludesRole     │
+├────────────┼──────────────────┤
+│ Guest      │ (none)           │
+│ User       │ Guest            │
+│ SecurityGuard │ Guest         │
+│ HomeOwner  │ User             │
+│ Admin      │ HomeOwner        │
+│ Admin      │ SecurityGuard    │
+└────────────┴──────────────────┘
 ```
 
 **Expansion:**
@@ -106,115 +106,159 @@ Map OAuth provider roles/groups to internal roles:
 
 ---
 
-## 3. Permissions
+## 3. Authorization Model
 
-### Built-in Permissions
+Authorization uses two dimensions: **Kind** (what type of member) and **Action** (what operation).
 
-| Permission | Purpose |
-|------------|---------|
-| `Read` | Read property value |
-| `Write` | Write property value |
-| `Invoke` | Invoke method |
-
-### Custom Permissions
-
-Any string key for domain-specific access:
-- `Config` - configuration access
-- `AdminRead` - admin-only state
-- `Diagnostics` - diagnostic information
-
----
-
-## 4. Property/Method Tagging
-
-### Default Behavior
-
-Properties use `Read`/`Write`, methods use `Invoke`:
+### AuthorizationAction Enum
 
 ```csharp
-[InterceptorSubject]
-public partial class Light
+public enum AuthorizationAction
 {
-    public partial bool IsOn { get; set; }  // Read, Write
-    public void Toggle() { }                 // Invoke
+    Read,    // Read property value
+    Write,   // Write property value
+    Invoke   // Invoke method
 }
 ```
 
-### Explicit Permission
+### Kind Enum
+
+```csharp
+public enum Kind
+{
+    State,          // Runtime state properties
+    Configuration,  // Persisted configuration properties
+    Query,          // Read-only methods (idempotent)
+    Operation       // Mutating methods (side effects)
+}
+```
+
+### Default Roles
+
+```csharp
+public static class DefaultRoles
+{
+    public const string Guest = "Guest";
+    public const string User = "User";
+    public const string Operator = "Operator";
+    public const string Supervisor = "Supervisor";
+    public const string Admin = "Admin";
+}
+```
+
+---
+
+## 4. Property/Method Kind Markers
+
+Properties and methods are marked with their **Kind**:
 
 ```csharp
 [InterceptorSubject]
 public partial class Light
 {
-    [Permission("Read")]
+    [State]  // Runtime state
     public partial bool IsOn { get; set; }
 
-    [Permission("Config")]  // custom permission
-    public partial string MacAddress { get; set; }
+    [Configuration]  // Persisted setting
+    public partial string DisplayName { get; set; }
 
-    [Permission("Invoke")]
+    [Query]  // Read-only method
+    public LightStatus GetStatus() { }
+
+    [Operation]  // Mutating method
     public void Toggle() { }
-
-    [Permission("AdminInvoke")]
-    public void FactoryReset() { }
 }
 ```
 
+The Kind determines which global defaults apply and how authorization attributes are resolved.
+
 ---
 
-## 5. Subject Role Mappings
+## 5. Authorization Attributes
 
-Subjects map permissions to roles.
+Three attributes for specifying role requirements:
 
-### Runtime (Extension Data)
+### `[SubjectAuthorize]` - On Subject Class
 
-```csharp
-subject.SetPermissionRoles("Read", ["Guest", "User", "Admin"]);
-subject.SetPermissionRoles("Write", ["User", "Admin"]);
-subject.SetPermissionRoles("Invoke", ["User", "Admin"]);
-subject.SetPermissionRoles("Config", ["Admin"]);
-```
-
-### Compile-time (Attributes)
+Applies to all properties/methods of matching Kind + Action:
 
 ```csharp
-[DefaultRoles("Read", "Guest", "User")]
-[DefaultRoles("Write", "User")]
-[DefaultRoles("Invoke", "User")]
-[DefaultRoles("Config", "Admin")]
+[SubjectAuthorize(Kind.State, AuthorizationAction.Read, DefaultRoles.Guest)]
+[SubjectAuthorize(Kind.State, AuthorizationAction.Write, DefaultRoles.User)]
+[SubjectAuthorize(Kind.Configuration, AuthorizationAction.Read, DefaultRoles.Operator)]
+[SubjectAuthorize(Kind.Configuration, AuthorizationAction.Write, DefaultRoles.Admin)]
+[SubjectAuthorize(Kind.Query, AuthorizationAction.Invoke, DefaultRoles.Guest)]
+[SubjectAuthorize(Kind.Operation, AuthorizationAction.Invoke, DefaultRoles.User)]
 public partial class Light { }
 ```
 
----
+### `[SubjectPropertyAuthorize]` - On Property
 
-## 6. Property-Level Override
-
-Properties can override subject-level mappings:
+Overrides subject-level for this property. Kind is implicit from `[State]`/`[Configuration]`:
 
 ```csharp
-var property = subject.GetProperty("MacAddress");
-property.SetPropertyData("Read:Roles", ["Admin"]);
+[Configuration]
+[SubjectPropertyAuthorize(AuthorizationAction.Read, DefaultRoles.Guest, DefaultRoles.User)]
+[SubjectPropertyAuthorize(AuthorizationAction.Write, DefaultRoles.Admin)]
+public partial string DisplayName { get; set; }
 ```
+
+### `[SubjectMethodAuthorize]` - On Method
+
+Overrides subject-level for this method. Kind is implicit from `[Query]`/`[Operation]`, Action is always Invoke:
+
+```csharp
+[Operation]
+[SubjectMethodAuthorize(DefaultRoles.Admin)]
+public void FactoryReset() { }
+```
+
+---
+
+## 6. Runtime Overrides
+
+Override role mappings at runtime via extension data:
+
+### Subject-Level Override
+
+```csharp
+// Override for all State+Read on this subject
+subject.SetRoles(Kind.State, AuthorizationAction.Read, ["SecurityGuard"], inherit: true);
+```
+
+### Property-Level Override
+
+```csharp
+// Override for this specific property
+var property = subject.GetProperty("ApiKey");
+property.SetRoles(AuthorizationAction.Read, ["Admin"]);  // Kind from property's marker
+```
+
+### Inheritance
+
+When `inherit: true`, the override applies to child subjects unless they define their own override.
 
 ---
 
 ## 7. Resolution Priority
 
-For a property/method with permission `X`:
+For a property with Kind `K` and Action `A`:
 
 ```
-1. Property ExtData["X:Roles"]?  → use it, STOP
-        ↓ no
-2. Property Attribute[X]?        → use it, STOP
-        ↓ no
-3. Subject ExtData["X:Roles"]?   → use it, STOP
-        ↓ no
-4. Subject Attribute[X]?         → use it, STOP
-        ↓ no
-5. Traverse Parent Subjects      → OR combine
+1. Property runtime override (Kind, AuthorizationAction)           → use it, STOP
+        ↓ not found
+2. Subject runtime override (Kind, AuthorizationAction)            → use it, STOP
+        ↓ not found
+3. Property [SubjectPropertyAuthorize(Action)]        → use it, STOP
+        ↓ not found
+4. Subject [SubjectAuthorize(Kind, AuthorizationAction)]           → use it, STOP
+        ↓ not found
+5. Parent inheritance                                 → OR combine
         ↓ none found
-6. Global Defaults               → use it
+6. Global defaults (Kind, AuthorizationAction)                     → use it
 ```
+
+For methods, Kind is from `[Query]`/`[Operation]` and Action is always `Invoke`.
 
 ---
 
@@ -228,7 +272,7 @@ Subjects can have multiple parents (graph structure).
           Home
          /    \
    LivingRoom  Kitchen
-   (Read→[Guest])    (Read→[Chef])
+   (State+Read→[Guest])  (State+Read→[Chef])
          \    /
           Light ← TWO parents
 ```
@@ -236,15 +280,15 @@ Subjects can have multiple parents (graph structure).
 ### Traversal Rules
 
 1. Traverse ALL parent branches
-2. Stop at first ancestor with roles defined (ExtData OR Attribute)
+2. Stop at first ancestor with roles defined for (Kind, AuthorizationAction)
 3. That ancestor contributes its roles
 4. **OR combine** across all branches
 5. Defining roles = override point (stops further traversal up that branch)
 
 ### Result
 
-- LivingRoom: `Read→[Guest]` → stops, contributes [Guest]
-- Kitchen: `Read→[Chef]` → stops, contributes [Chef]
+- LivingRoom: `State+Read→[Guest]` → stops, contributes [Guest]
+- Kitchen: `State+Read→[Chef]` → stops, contributes [Chef]
 - **Result: [Guest] OR [Chef]** (either role grants access)
 
 ---
@@ -265,22 +309,35 @@ OR semantics - user needs ANY of the required roles:
 ## 10. Resolution Algorithm
 
 ```
-ResolvePropertyRoles(property, permission):
-  1. property.ExtData[permission + ":Roles"]? → return it
-  2. property.Attribute[permission]?          → return it
-  3. subject.ExtData[permission + ":Roles"]?  → return it
-  4. subject.Attribute[permission]?           → return it
-  5. TraverseParents(subject, permission)     → OR combine
-  6. GlobalDefaults[permission]               → return it
+ResolvePropertyRoles(property, action):
+  kind = property.Kind  // From [State] or [Configuration] marker
 
-TraverseParents(subject, permission):
+  1. property.RuntimeOverride(kind, action)?              → return it
+  2. subject.RuntimeOverride(kind, action)?               → return it
+  3. property.GetAttribute<SubjectPropertyAuthorize>(action)? → return it
+  4. subject.GetAttribute<SubjectAuthorize>(kind, action)?    → return it
+  5. TraverseParents(subject, kind, action)               → OR combine
+  6. GlobalDefaults(kind, action)                         → return it
+
+ResolveMethodRoles(method):
+  kind = method.Kind  // From [Query] or [Operation] marker
+  action = AuthorizationAction.Invoke
+
+  1. method.RuntimeOverride(kind, action)?                → return it
+  2. subject.RuntimeOverride(kind, action)?               → return it
+  3. method.GetAttribute<SubjectMethodAuthorize>()?       → return it
+  4. subject.GetAttribute<SubjectAuthorize>(kind, action)?    → return it
+  5. TraverseParents(subject, kind, action)               → OR combine
+  6. GlobalDefaults(kind, action)                         → return it
+
+TraverseParents(subject, kind, action):
   roles = []
   for each parent in subject.Parents:
-    if parent.ExtData[permission] OR parent.Attribute[permission]:
-      roles = roles OR (parent.ExtData ?? parent.Attribute)
+    if parent.RuntimeOverride(kind, action) OR parent.Attribute(kind, action):
+      roles = roles OR (parent.RuntimeOverride ?? parent.Attribute)
       // STOP this branch
     else:
-      roles = roles OR TraverseParents(parent, permission)
+      roles = roles OR TraverseParents(parent, kind, action)
   return roles
 ```
 
@@ -288,15 +345,15 @@ TraverseParents(subject, permission):
 
 ## 11. Data Storage
 
-Using Namotion.Interceptor extension data:
+Using Namotion.Interceptor extension data with `HomeBlaze.Authorization:` prefix:
 
 ```csharp
-// Subject-level
-subject.Data[("", "Read:Roles")] = new[] { "Guest" };
-subject.Data[("", "Write:Roles")] = new[] { "User" };
+// Subject-level override (Kind+Action as key) - use null for subject-level
+subject.Data[(null, "HomeBlaze.Authorization:State:Read")] = new[] { "Guest" };
+subject.Data[(null, "HomeBlaze.Authorization:Configuration:Write")] = new[] { "Admin" };
 
-// Property-level override
-subject.Data[("MacAddress", "Read:Roles")] = new[] { "Admin" };
+// Property-level override (Kind determined from property's [State]/[Configuration] attribute)
+subject.Data[("ApiKey", "HomeBlaze.Authorization:Configuration:Read")] = new[] { "Admin" };
 ```
 
 ---
@@ -307,32 +364,42 @@ subject.Data[("MacAddress", "Read:Roles")] = new[] { "Admin" };
 Subject Graph:
 ──────────────
 Home
-├── ExtData: Read→[Guest], Write→[User], Invoke→[User], Config→[Admin]
+├── [SubjectAuthorize(State, Read, Guest)]
+├── [SubjectAuthorize(State, Write, User)]
+├── [SubjectAuthorize(Configuration, Read, Operator)]
+├── [SubjectAuthorize(Configuration, Write, Admin)]
 │
 ├── LivingRoom
 │   └── (no override, inherits from Home)
 │   │
 │   └── Light1
-│       ├── IsOn [Permission("Read")]       → inherits [Guest]
-│       ├── Brightness [Permission("Read")] → inherits [Guest]
-│       └── Toggle() [Permission("Invoke")] → inherits [User]
+│       ├── IsOn [State]                    → State+Read inherits [Guest]
+│       ├── DisplayName [Configuration]    → Config+Read inherits [Operator]
+│       └── Toggle() [Operation]           → Operation+Invoke inherits [User]
 │
 └── SecuritySystem
-    ├── ExtData: Read→[SecurityGuard], Invoke→[Admin]  ← OVERRIDE
+    ├── RuntimeOverride: State+Read→[SecurityGuard]  ← OVERRIDE
     │
     └── Camera
-        ├── IsRecording [Permission("Read")]   → inherits [SecurityGuard]
-        ├── MacAddress [Permission("Config")]  → traverses to Home → [Admin]
-        └── FactoryReset() [Permission("Invoke")] → inherits [Admin]
+        ├── IsRecording [State]              → State+Read inherits [SecurityGuard]
+        ├── ApiKey [Configuration]           → Config+Read traverses to Home → [Operator]
+        └── FactoryReset() [Operation]       → Operation+Invoke inherits [User]
+            └── [SubjectMethodAuthorize(Admin)]  ← OVERRIDE
 ```
 
-**Access Check: `Camera.IsRecording` with user roles ["Guest"]:**
-1. Property ExtData? No
-2. Property Attribute? Permission="Read"
-3. Camera ExtData["Read:Roles"]? No
-4. Camera Attribute? No
-5. Traverse → SecuritySystem has Read→[SecurityGuard]
+**Access Check: `Camera.IsRecording` (State+Read) with user roles ["Guest"]:**
+1. Property runtime override (State, Read)? No
+2. Subject (Camera) runtime override (State, Read)? No
+3. Property [SubjectPropertyAuthorize(Read)]? No
+4. Subject (Camera) [SubjectAuthorize(State, Read)]? No
+5. Traverse → SecuritySystem has State+Read→[SecurityGuard]
 6. Required: [SecurityGuard], User has: [Guest] → **DENIED**
+
+**Access Check: `Camera.FactoryReset()` (Operation+Invoke) with user roles ["User"]:**
+1. Method runtime override? No
+2. Subject (Camera) runtime override (Operation, Invoke)? No
+3. Method [SubjectMethodAuthorize]? Yes → [Admin]
+4. Required: [Admin], User has: [User] → **DENIED**
 
 ---
 
@@ -364,26 +431,36 @@ src/HomeBlaze/
 ├── HomeBlaze.Authorization/
 │   ├── Configuration/
 │   │   ├── AuthorizationOptions.cs
-│   │   └── RoleDefinition.cs
+│   │   └── DefaultRoles.cs
+│   ├── Enums/
+│   │   ├── Action.cs
+│   │   └── Kind.cs
 │   ├── Roles/
 │   │   ├── RoleExpander.cs
 │   │   └── ExternalRoleMapper.cs
 │   ├── Resolution/
-│   │   ├── IPermissionResolver.cs
-│   │   ├── PermissionResolver.cs
+│   │   ├── IAuthorizationResolver.cs
+│   │   ├── AuthorizationResolver.cs
 │   │   └── ResolvedRoles.cs
 │   ├── Attributes/
-│   │   ├── PermissionAttribute.cs
-│   │   └── DefaultRolesAttribute.cs
+│   │   ├── SubjectAuthorizeAttribute.cs
+│   │   ├── SubjectPropertyAuthorizeAttribute.cs
+│   │   └── SubjectMethodAuthorizeAttribute.cs
 │   ├── Extensions/
 │   │   └── SubjectAuthorizationExtensions.cs
 │   └── ServiceCollectionExtensions.cs
 │
 ├── HomeBlaze.Authorization.Blazor/
+│   ├── Panes/
+│   │   ├── SubjectAuthorizationPane.razor
+│   │   ├── PropertyAuthorizationPane.razor
+│   │   └── MethodAuthorizationPane.razor
 │   ├── Components/
-│   │   ├── AuthorizationPanel.razor
-│   │   ├── PropertyRolesEditor.razor
-│   │   └── RoleMappingDialog.razor
+│   │   ├── AuthorizationButton.razor
+│   │   ├── PropertyAuthIcon.razor
+│   │   ├── MethodAuthIcon.razor
+│   │   ├── KindActionTable.razor
+│   │   └── RoleSelector.razor
 │   └── ServiceCollectionExtensions.cs
 │
 └── HomeBlaze/
@@ -475,92 +552,125 @@ src/HomeBlaze/
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Subject Authorization Panel
+### Subject Pane with Authorization Button
 
-Inline panel shown when viewing/editing a subject:
+The existing subject pane gets a new `[🔒 Auth]` button alongside Edit/Delete:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ SecuritySystem                                   [Auth ▼]   │
+│ SecuritySystem                       [🔒 Auth] [✏️] [🗑️]    │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│ Subject Permissions                            [+ Add]    │
-│ ┌──────────────┬─────────────────────┬───────────┬───────┐ │
-│ │ Level        │ Roles               │ Source    │Actions│ │
-│ ├──────────────┼─────────────────────┼───────────┼───────┤ │
-│ │ Read         │ SecurityGuard       │ Override  │ ✏️ ↩️ │ │
-│ │ Write        │ Admin               │ Override  │ ✏️ ↩️ │ │
-│ │ Invoke       │ Admin               │ Override  │ ✏️ ↩️ │ │
-│ │ Config       │ Admin               │ Inherited │       │ │
-│ └──────────────┴─────────────────────┴───────────┴───────┘ │
+│ Properties                                                  │
+│ ┌──────────────┬─────────────────────────────────────┬────┐ │
+│ │ IsRecording  │ true                                │ 🔒 │ │
+│ │ MacAddress   │ AA:BB:CC:DD:EE:FF                  │ 🔒*│ │  ← * = has override
+│ │ LastMotion   │ 2025-12-26T10:30:00                │ 🔒 │ │
+│ └──────────────┴─────────────────────────────────────┴────┘ │
 │                                                             │
-│ Property Overrides                                          │
-│ ┌──────────────┬────────┬─────────────────┬────────┬─────┐ │
-│ │ Property     │ Level  │ Roles           │ Source │     │ │
-│ ├──────────────┼────────┼─────────────────┼────────┼─────┤ │
-│ │ IsRecording  │ Read   │ SecurityGuard   │ Subject│     │ │
-│ │ MacAddress   │ Read   │ Admin ✏️        │Override│ ↩️  │ │
-│ │ LastMotion   │ Read   │ SecurityGuard   │ Subject│     │ │
-│ └──────────────┴────────┴─────────────────┴────────┴─────┘ │
+│ Methods                                                     │
+│ [Start Recording] [🔒]    [Factory Reset] [🔒*]             │  ← 🔒* = has override
 │                                                             │
-│ Method Overrides                                            │
-│ ┌──────────────┬────────┬─────────────────┬────────┬─────┐ │
-│ │ Method       │ Level  │ Roles           │ Source │     │ │
-│ ├──────────────┼────────┼─────────────────┼────────┼─────┤ │
-│ │ StartRecord  │ Invoke │ Admin           │ Subject│     │ │
-│ │ FactoryReset │ Invoke │ SuperAdmin ✏️   │Override│ ↩️  │ │
-│ └──────────────┴────────┴─────────────────┴────────┴─────┘ │
 └─────────────────────────────────────────────────────────────┘
-
-Legend:
-  ✏️  = Edit (opens dialog)
-  ↩️  = Clear override (revert to inherited/attribute)
-  Source: Override | Subject | Inherited | Attribute | Global
 ```
 
-### Edit Role Mapping Dialog
+### Subject Authorization Pane (Right Pane)
+
+Click `[🔒 Auth]` → Opens right pane with subject-level permissions:
 
 ```
-┌─────────────────────────────────────┐
-│ Edit: Read Roles                    │
-├─────────────────────────────────────┤
-│ Permission: Read                  │
-│                                     │
-│ Current Source: Inherited (Home)    │
-│ Inherited Value: [Guest]            │
-│                                     │
-│ ○ Use inherited [Guest]             │
-│ ● Override with:                    │
-│   ☑ Admin                           │
-│   ☐ HomeOwner                       │
-│   ☐ User                            │
-│   ☑ SecurityGuard                   │
-│   ☐ Guest                           │
-│                                     │
-│        [Cancel]  [Save]             │
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ Authorization: SecuritySystem                    [Save] [X] │
+├─────────────────────────────────────────────────────────────┤
+│ Subject Permissions                                         │
+│ ┌──────────────────┬─────────────────┬──────────┬─────────┐ │
+│ │ Kind + Action    │ Roles           │ Source   │ Actions │ │
+│ ├──────────────────┼─────────────────┼──────────┼─────────┤ │
+│ │ State+Read       │ SecurityGuard   │ Override │ ✏️ ↩️   │ │
+│ │ State+Write      │ Admin           │ Override │ ✏️ ↩️   │ │
+│ │ Config+Read      │ Operator        │ Inherited│         │ │
+│ │ Config+Write     │ Admin           │ Attribute│         │ │
+│ │ Operation+Invoke │ User            │ Default  │         │ │
+│ │ Query+Invoke     │ Guest           │ Default  │         │ │
+│ └──────────────────┴─────────────────┴──────────┴─────────┘ │
+│                                                             │
+│ Inheritance source: Home → LivingRoom                       │
+│                                                             │
+│ Legend:                                                     │
+│   Override  = Runtime override (ExtData)                    │
+│   Inherited = From parent subject                           │
+│   Attribute = [SubjectAuthorize] on class                   │
+│   Default   = Global defaults                               │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+### Property Authorization Pane (Right Pane)
+
+Click `🔒` on property → Opens right pane for that property:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Authorization: MacAddress                        [Save] [X] │
+├─────────────────────────────────────────────────────────────┤
+│ Kind: Configuration                                         │
+│                                                             │
+│ Read                                                        │
+│ ├─ Current: [Operator, Admin]                               │
+│ ├─ Source: Inherited from SecuritySystem                    │
+│ └─ ☐ Override: [select roles...]                            │
+│                                                             │
+│ Write                                                       │
+│ ├─ Current: [Admin]                                         │
+│ ├─ Source: Override                           [Clear ↩️]    │
+│ └─ ☑ Override: [Admin ▼]                                    │
+│                                                             │
+│ Inheritance Chain:                                          │
+│   MacAddress (this) → SecuritySystem → Home                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Method Authorization Pane (Right Pane)
+
+Click `🔒` next to method button → Opens right pane:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Authorization: FactoryReset                      [Save] [X] │
+├─────────────────────────────────────────────────────────────┤
+│ Kind: Operation                                             │
+│                                                             │
+│ Invoke                                                      │
+│ ├─ Current: [Admin]                                         │
+│ ├─ Source: [SubjectMethodAuthorize] Attribute               │
+│ └─ ☐ Override: [select roles...]                            │
+│                                                             │
+│ Inheritance Chain:                                          │
+│   FactoryReset (this) → SecuritySystem → Home               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Visual Indicators
+
+- `🔒` = Authorization icon (click to open pane)
+- `🔒*` or filled icon = Has override (differs from inherited/attribute)
+- Properties/methods with overrides get subtle highlight in grid
 
 ### Inheritance Visualization
 
-Optional: Show inheritance chain on hover/expand:
+Shown inline in authorization panes:
 
 ```
+Inheritance Chain:
 ┌─────────────────────────────────────────────────────────────┐
-│ Read Roles: [SecurityGuard]                                 │
+│ Camera (this)                                               │
+│   └── No override                                           │
+│       ↓                                                     │
+│ SecuritySystem (parent)                                     │
+│   └── State+Read: [SecurityGuard] ← RESOLVED                │
+│       (stops here)                                          │
 │                                                             │
-│ Inheritance Chain:                                          │
-│ ┌─────────────────────────────────────────────────────────┐ │
-│ │ Camera (this)                                           │ │
-│ │   └── No override                                       │ │
-│ │       ↓                                                 │ │
-│ │ SecuritySystem (parent)                                 │ │
-│ │   └── Read: [SecurityGuard] ← RESOLVED                  │ │
-│ │       (stops here)                                      │ │
-│ │                                                         │ │
-│ │ Home (grandparent)                                      │ │
-│ │   └── Read: [Guest] (not reached)                       │ │
-│ └─────────────────────────────────────────────────────────┘ │
+│ Home (grandparent)                                          │
+│   └── State+Read: [Guest] (not reached)                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -569,20 +679,25 @@ Optional: Show inheritance chain on hover/expand:
 ```
 HomeBlaze.Authorization.Blazor/
 ├── Pages/
-│   ├── UserManagement.razor
-│   └── RoleConfiguration.razor
+│   ├── UserManagement.razor          # Admin: manage users and roles
+│   └── RoleConfiguration.razor       # Admin: role hierarchy & external mappings
+│
+├── Panes/
+│   ├── SubjectAuthorizationPane.razor    # Right pane for subject-level auth
+│   ├── PropertyAuthorizationPane.razor   # Right pane for property auth
+│   └── MethodAuthorizationPane.razor     # Right pane for method auth
 │
 ├── Components/
-│   ├── SubjectAuthorizationPanel.razor
-│   ├── PermissionTable.razor
-│   ├── PropertyOverrideTable.razor
-│   ├── MethodOverrideTable.razor
-│   ├── RoleMappingDialog.razor
-│   ├── InheritanceChainView.razor
-│   └── RoleSelector.razor
+│   ├── AuthorizationButton.razor         # 🔒 button for subject header
+│   ├── PropertyAuthIcon.razor            # 🔒 icon for property grid
+│   ├── MethodAuthIcon.razor              # 🔒 button next to method buttons
+│   ├── KindActionTable.razor             # Table showing Kind+Action permissions
+│   ├── RoleSelector.razor                # Multi-select for roles
+│   ├── InheritanceChainView.razor        # Visual inheritance chain
+│   └── SourceBadge.razor                 # Override/Inherited/Attribute/Default badge
 │
 └── Services/
-    └── AuthorizationUIService.cs
+    └── AuthorizationUIService.cs         # UI helpers for authorization
 ```
 
 ---
@@ -610,7 +725,9 @@ Unauthenticated users are mapped to a configurable role:
       "Anonymous": [],
       "Guest": ["Anonymous"],
       "User": ["Guest"],
-      "Admin": ["User"]
+      "Operator": ["User"],
+      "Supervisor": ["Operator"],
+      "Admin": ["Supervisor"]
     }
   }
 }
@@ -627,11 +744,11 @@ User authenticated?
 ### Subject Access for Unauthenticated
 
 ```csharp
-// Public read access
-subject.SetPermissionRoles("Read", ["Anonymous"]);
+// Public read access for state
+subject.SetRoles(Kind.State, AuthorizationAction.Read, ["Anonymous"]);
 
-// Requires login
-subject.SetPermissionRoles("Write", ["User"]);
+// Requires login for write
+subject.SetRoles(Kind.State, AuthorizationAction.Write, ["User"]);
 ```
 
 ---
@@ -822,7 +939,7 @@ Hide menu items the user can't access:
 
 ### Subject Browser Filtering
 
-Filter subjects based on Read access:
+Filter subjects based on State+Read access:
 
 ```csharp
 public class AuthorizedSubjectBrowser
@@ -836,7 +953,8 @@ public class AuthorizedSubjectBrowser
         return registry.GetAllSubjects()
             .Where(subject =>
             {
-                var readRoles = resolver.ResolvePermission(subject, "Read");
+                // Check if user can read any state property
+                var readRoles = resolver.ResolveSubjectRoles(subject, Kind.State, AuthorizationAction.Read);
                 return readRoles.Any(role => userRoles.Contains(role));
             });
     }
@@ -848,7 +966,8 @@ public class AuthorizedSubjectBrowser
 ```razor
 @foreach (var property in subject.Properties)
 {
-    var roles = resolver.ResolvePropertyRoles(property, "Read");
+    var kind = GetPropertyKind(property);  // State or Configuration
+    var roles = resolver.ResolvePropertyRoles(property, kind, AuthorizationAction.Read);
     if (UserHasAnyRole(roles))
     {
         <PropertyEditor Property="@property" />
@@ -857,7 +976,8 @@ public class AuthorizedSubjectBrowser
 
 @foreach (var method in subject.Methods)
 {
-    var roles = resolver.ResolveMethodRoles(method, "Invoke");
+    var kind = GetMethodKind(method);  // Query or Operation
+    var roles = resolver.ResolveMethodRoles(subject, method.Name, kind);
     if (UserHasAnyRole(roles))
     {
         <MethodButton Method="@method" />
@@ -882,17 +1002,18 @@ public class AuthorizationInterceptor : IWriteInterceptor
         WriteInterceptionDelegate<TProperty> next)
     {
         var serviceProvider = context.Property.Subject.Context.TryGetService<IServiceProvider>();
-        var resolver = serviceProvider?.GetService<IPermissionResolver>();
+        var resolver = serviceProvider?.GetService<IAuthorizationResolver>();
         if (resolver == null) { next(ref context); return; }
 
-        var requiredRoles = resolver.ResolvePropertyRoles(context.Property, "Write");
+        var kind = GetPropertyKind(context.Property);  // State or Configuration
+        var requiredRoles = resolver.ResolvePropertyRoles(context.Property, kind, AuthorizationAction.Write);
         var user = AuthorizationContext.CurrentUser;
 
         if (user != null && !HasAnyRole(user, requiredRoles))
         {
             // UI should filter - interceptor throws as defense in depth
             throw new UnauthorizedAccessException(
-                $"Access denied: cannot modify {context.Property.PropertyName}");
+                $"Access denied: {kind}+Write on {context.Property.PropertyName}");
         }
 
         next(ref context);
@@ -1043,11 +1164,7 @@ await signInManager.PasswordSignInAsync(
 {
   "Authentication": {
     "Password": {
-      "RequiredLength": 8,
-      "RequireDigit": true,
-      "RequireLowercase": false,
-      "RequireUppercase": false,
-      "RequireNonAlphanumeric": false
+      "RequiredLength": 6
     }
   }
 }
@@ -1058,8 +1175,9 @@ await signInManager.PasswordSignInAsync(
 ```csharp
 services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 {
-    options.Password.RequiredLength = 8;
-    options.Password.RequireDigit = true;
+    // Simple password policy - 6 chars minimum, no complexity requirements
+    options.Password.RequiredLength = 6;
+    options.Password.RequireDigit = false;
     options.Password.RequireLowercase = false;
     options.Password.RequireUppercase = false;
     options.Password.RequireNonAlphanumeric = false;
@@ -1152,17 +1270,18 @@ public class AuthorizationInterceptor : IReadInterceptor, IWriteInterceptor
     {
         // Resolve services from DI via IServiceProvider
         var serviceProvider = context.Property.Subject.Context.TryGetService<IServiceProvider>();
-        var resolver = serviceProvider?.GetService<IPermissionResolver>();
+        var resolver = serviceProvider?.GetService<IAuthorizationResolver>();
         if (resolver == null) { next(ref context); return; } // Graceful degradation
 
-        var requiredRoles = resolver.ResolvePropertyRoles(context.Property, "Write");
+        var kind = GetPropertyKind(context.Property);  // State or Configuration
+        var requiredRoles = resolver.ResolvePropertyRoles(context.Property, kind, AuthorizationAction.Write);
         var user = AuthorizationContext.CurrentUser; // AsyncLocal
 
         if (user != null && !HasAnyRole(user, requiredRoles))
         {
             // UI should filter - this is defense in depth
             throw new UnauthorizedAccessException(
-                $"Write access denied for property '{context.Property.PropertyName}'");
+                $"{kind}+Write denied for '{context.Property.PropertyName}'");
         }
 
         next(ref context);
@@ -1173,20 +1292,28 @@ public class AuthorizationInterceptor : IReadInterceptor, IWriteInterceptor
         ReadInterceptionDelegate<TProperty> next)
     {
         var serviceProvider = context.Property.Subject.Context.TryGetService<IServiceProvider>();
-        var resolver = serviceProvider?.GetService<IPermissionResolver>();
+        var resolver = serviceProvider?.GetService<IAuthorizationResolver>();
         if (resolver == null) return next(ref context); // Graceful degradation
 
-        var requiredRoles = resolver.ResolvePropertyRoles(context.Property, "Read");
+        var kind = GetPropertyKind(context.Property);  // State or Configuration
+        var requiredRoles = resolver.ResolvePropertyRoles(context.Property, kind, AuthorizationAction.Read);
         var user = AuthorizationContext.CurrentUser; // AsyncLocal
 
         if (user != null && !HasAnyRole(user, requiredRoles))
         {
             // UI should filter - this is defense in depth
             throw new UnauthorizedAccessException(
-                $"Read access denied for property '{context.Property.PropertyName}'");
+                $"{kind}+Read denied for '{context.Property.PropertyName}'");
         }
 
         return next(ref context);
+    }
+
+    private Kind GetPropertyKind(PropertyReference property)
+    {
+        return property.Metadata.HasAttribute<ConfigurationAttribute>()
+            ? Kind.Configuration
+            : Kind.State;
     }
 
     private static bool HasAnyRole(ClaimsPrincipal user, string[] requiredRoles)
@@ -1325,9 +1452,9 @@ await next(context) ← Entire activity runs here
 Subject authorization data uses the existing extension data system with namespaced keys:
 
 ```csharp
-// Stored in Subject.Data dictionary with "HomeBlaze.Authorization:" prefix
-subject.Data[("", "HomeBlaze.Authorization:Read")] = new[] { "Guest" };           // Subject-level
-subject.Data[("MacAddress", "HomeBlaze.Authorization:Read")] = new[] { "Admin" }; // Property-level
+// Stored in Subject.Data dictionary with "HomeBlaze.Authorization:{Kind}:{Action}" format
+subject.Data[(null, "HomeBlaze.Authorization:State:Read")] = new[] { "Guest" };                // Subject-level (null = subject)
+subject.Data[("MacAddress", "HomeBlaze.Authorization:Configuration:Read")] = new[] { "Admin" }; // Property-level
 ```
 
 The `HomeBlaze.Authorization:` prefix follows the Namotion convention (e.g., `Namotion.Interceptor.WriteTimestamp`) to avoid conflicts with other extensions.
@@ -1336,7 +1463,7 @@ The `HomeBlaze.Authorization:` prefix follows the Namotion convention (e.g., `Na
 
 The `ConfigurableSubjectSerializer` only serializes `[Configuration]` properties by default. To persist `Subject.Data` extension data, we introduce an extensibility point:
 
-#### Interface (in HomeBlaze.Services)
+#### Interface (in HomeBlaze.Abstractions)
 
 ```csharp
 /// <summary>
@@ -1354,7 +1481,7 @@ public interface ISubjectDataProvider
 
     /// <summary>
     /// Receives additional "$" properties from deserialized JSON.
-    /// Keys have "$" prefix stripped (e.g., "$permissions" → "permissions").
+    /// Keys have "$" prefix stripped (e.g., "$authorization" → "authorization").
     /// Provider picks out the ones it handles and ignores the rest.
     /// </summary>
     void SetAdditionalProperties(IInterceptorSubject subject, Dictionary<string, JsonElement> properties);
@@ -1369,9 +1496,9 @@ The `$` prefix creates a clear namespace separation in JSON:
 |--------------|---------|--------|
 | Type discriminator | `$type` | Built-in (System.Text.Json) |
 | Configuration | `name`, `isArmed` | `[Configuration]` attributes |
-| Extension data | `$permissions` | `ISubjectDataProvider` |
+| Extension data | `$authorization` | `ISubjectDataProvider` |
 
-This prevents conflicts - a subject can have both a `[Configuration] string Permissions` property and `$permissions` extension data.
+This prevents conflicts - a subject can have both a `[Configuration] string Authorization` property and `$authorization` extension data.
 
 #### Serializer Integration
 
@@ -1435,76 +1562,94 @@ public class ConfigurableSubjectSerializer
 
 #### Authorization Provider Implementation
 
+**Descendant Storage**: Only `IConfigurableSubject` subjects are serialized to JSON. Permission overrides on non-configurable descendants must be persisted with the nearest configurable ancestor.
+
+- **Runtime**: Overrides stored in each subject's own `Data` dictionary (works normally)
+- **Serialize**: Walk descendants, collect permissions from non-`IConfigurableSubject` children, store with path
+- **Deserialize**: Use path resolver to navigate to target subject, restore to correct `Data` dictionary
+
+**Path format** (uses existing path resolver patterns):
+- `""` = subject-level on this configurable subject (default for all properties)
+- `PropertyName` = property on this subject
+- `Child/PropertyName` = property on child subject
+- `Children[2]/PropertyName` = property on indexed child
+
+All non-empty paths resolve to properties via `ISubjectPathResolver`.
+
 ```csharp
-public class PermissionsDataProvider : ISubjectDataProvider
+public class AuthorizationDataProvider : ISubjectDataProvider
 {
     private const string DataKeyPrefix = "HomeBlaze.Authorization:";
-    private const string PropertyKey = "permissions";
+    private const string PropertyKey = "authorization";
 
     public Dictionary<string, object>? GetAdditionalProperties(IInterceptorSubject subject)
     {
-        // Structure: { "propertyName": { "permission": ["role1", "role2"] } }
-        var permissions = new Dictionary<string, Dictionary<string, string[]>>();
-
-        foreach (var kvp in subject.Data)
-        {
-            if (!kvp.Key.key.StartsWith(DataKeyPrefix) || kvp.Value is not string[] roles)
-                continue;
-
-            var permission = kvp.Key.key[DataKeyPrefix.Length..]; // "Read", "Write", etc.
-            var propertyName = kvp.Key.property ?? "";
-
-            if (!permissions.TryGetValue(propertyName, out var permDict))
-            {
-                permDict = [];
-                permissions[propertyName] = permDict;
-            }
-            permDict[permission] = roles;
-        }
-
-        return permissions.Count > 0
-            ? new Dictionary<string, object> { [PropertyKey] = permissions }
-            : null;
+        // 1. Collect authorization overrides from this subject
+        // 2. Walk descendants, collect from non-IConfigurableSubject children
+        // 3. Return flat format if no descendant overrides, hierarchical otherwise
+        // (See implementation plan Task 8b for full code)
     }
 
     public void SetAdditionalProperties(
         IInterceptorSubject subject,
         Dictionary<string, JsonElement> properties)
     {
-        if (!properties.TryGetValue(PropertyKey, out var element))
-            return;
-
-        var permissions = element.Deserialize<Dictionary<string, Dictionary<string, string[]>>>();
-        if (permissions == null)
-            return;
-
-        foreach (var (propertyName, permissionMap) in permissions)
-        {
-            foreach (var (permission, roles) in permissionMap)
-            {
-                subject.Data[(propertyName, $"{DataKeyPrefix}{permission}")] = roles;
-            }
-        }
+        // 1. Try flat format first (backward compat / simple case)
+        // 2. Parse hierarchical format with $descendant: paths
+        // 3. Resolve each path and apply permissions to correct subject
+        // (See implementation plan Task 8b for full code)
     }
 }
 ```
 
+### Authorization Override Schema
+
+```csharp
+public class AuthorizationOverride
+{
+    public bool Inherit { get; set; }  // true = extend, false = replace
+    public string[] Roles { get; set; } = [];
+}
+```
+
+- `inherit: false` → Replace: Only these roles can access (ignores parent/defaults)
+- `inherit: true` → Extend: These roles can also access, in addition to inherited roles
+
 ### JSON Output
 
+Simple case (overrides on this subject only):
 ```json
 {
   "$type": "HomeBlaze.Samples.SecuritySystem",
   "name": "Security",
   "isArmed": false,
-  "$permissions": {
+  "$authorization": {
     "": {
-      "Read": ["SecurityGuard"],
-      "Write": ["Admin"],
-      "Invoke": ["Admin"]
+      "State:Read": { "inherit": false, "roles": ["SecurityGuard"] },
+      "Operation:Invoke": { "inherit": false, "roles": ["Admin"] }
     },
     "ArmCode": {
-      "Read": ["Admin"],
-      "Write": ["Admin"]
+      "Configuration:Read": { "inherit": false, "roles": ["Admin"] },
+      "Configuration:Write": { "inherit": false, "roles": ["Admin"] }
+    }
+  }
+}
+```
+
+With descendant overrides (Room has non-configurable Thermostat child):
+```json
+{
+  "$type": "HomeBlaze.Samples.Room",
+  "name": "Living Room",
+  "$authorization": {
+    "": {
+      "State:Read": { "inherit": true, "roles": ["Guest"] }
+    },
+    "Thermostat/TargetTemperature": {
+      "State:Write": { "inherit": false, "roles": ["Admin"] }
+    },
+    "Thermostat/Sensor/Calibration": {
+      "Configuration:Write": { "inherit": false, "roles": ["Admin"] }
     }
   }
 }
@@ -1517,7 +1662,7 @@ public class PermissionsDataProvider : ISubjectDataProvider
 services.AddSingleton<ConfigurableSubjectSerializer>();
 
 // In HomeBlaze.Authorization
-services.AddSingleton<ISubjectDataProvider, PermissionsDataProvider>();
+services.AddSingleton<ISubjectDataProvider, AuthorizationDataProvider>();
 ```
 
 ### Extension Methods for Authorization
@@ -1570,7 +1715,7 @@ Uses existing `GetParents()` API from `Namotion.Interceptor.Tracking.Parent`:
 ```csharp
 using Namotion.Interceptor.Tracking.Parent;
 
-public class PermissionResolver : IPermissionResolver
+public class AuthorizationResolver : IAuthorizationResolver
 {
     private const string KeyPrefix = "HomeBlaze.Authorization:";
 
@@ -1601,7 +1746,7 @@ public class PermissionResolver : IPermissionResolver
             return inheritedRoles;
 
         // 6. Global defaults
-        return _options.GetDefaultRoles(permission);
+        return _options.GetDefaultPermissionRoles(permission);
     }
 
     private string[] TraverseParents(IInterceptorSubject subject, string permission)
@@ -1830,12 +1975,24 @@ public class CircuitAuthHandler : CircuitHandler
 // In Program.cs - DI registration
 services.AddHomeBlazeAuthorization(options =>
 {
-    options.UnauthenticatedRole = "Anonymous";
-    options.DefaultRoles = new Dictionary<string, string[]>
+    options.UnauthenticatedRole = DefaultRoles.Anonymous;
+
+    // Defaults by Kind and Action
+    options.DefaultPermissionRoles = new Dictionary<(Kind, AuthorizationAction), string[]>
     {
-        ["Read"] = ["Anonymous"],
-        ["Write"] = ["User"],
-        ["Invoke"] = ["User"]
+        // State defaults (runtime property values)
+        [(Kind.State, AuthorizationAction.Read)] = [DefaultRoles.Guest],
+        [(Kind.State, AuthorizationAction.Write)] = [DefaultRoles.Operator],
+
+        // Configuration defaults (persisted settings)
+        [(Kind.Configuration, AuthorizationAction.Read)] = [DefaultRoles.User],
+        [(Kind.Configuration, AuthorizationAction.Write)] = [DefaultRoles.Supervisor],
+
+        // Query defaults (read-only methods)
+        [(Kind.Query, AuthorizationAction.Invoke)] = [DefaultRoles.User],
+
+        // Operation defaults (state-changing methods)
+        [(Kind.Operation, AuthorizationAction.Invoke)] = [DefaultRoles.Operator]
     };
 });
 
@@ -1850,7 +2007,7 @@ public static IServiceCollection AddHomeBlazeAuthorization(
     services.AddSingleton(options);
     services.AddSingleton<IRoleExpander, RoleExpander>();
     services.AddSingleton<IExternalRoleMapper, ExternalRoleMapper>();
-    services.AddScoped<IPermissionResolver, PermissionResolver>(); // Per-request caching
+    services.AddScoped<IAuthorizationResolver, AuthorizationResolver>(); // Per-request caching
 
     return services;
 }
@@ -1903,10 +2060,12 @@ public class AuthorizedMethodInvoker : ISubjectMethodInvoker
         string methodName,
         object?[] parameters)
     {
-        var resolver = subject.Context.GetService<IPermissionResolver>();
+        var resolver = subject.Context.GetService<IAuthorizationResolver>();
         var userContext = subject.Context.GetService<IAuthorizationUserContext>();
 
-        var requiredRoles = resolver.ResolveMethodRoles(subject, methodName);
+        // Get method Kind from [Query] or [Operation] attribute
+        var kind = GetMethodKind(subject, methodName); // Kind.Query or Kind.Operation
+        var requiredRoles = resolver.ResolveMethodRoles(subject, methodName, kind);
 
         if (!userContext.HasAnyRole(requiredRoles))
         {
@@ -1917,6 +2076,14 @@ public class AuthorizedMethodInvoker : ISubjectMethodInvoker
         // Invoke actual method
         return await _innerInvoker.InvokeAsync(subject, methodName, parameters);
     }
+
+    private Kind GetMethodKind(IInterceptorSubject subject, string methodName)
+    {
+        var method = subject.GetType().GetMethod(methodName);
+        if (method?.GetCustomAttribute<QueryAttribute>() != null)
+            return Kind.Query;
+        return Kind.Operation; // Default to Operation for methods
+    }
 }
 ```
 
@@ -1924,19 +2091,31 @@ public class AuthorizedMethodInvoker : ISubjectMethodInvoker
 
 ```csharp
 // Inject into Blazor components
-@inject IPermissionResolver AuthResolver
+@inject IAuthorizationResolver AuthResolver
 @inject IAuthorizationUserContext UserContext
 
-// Check access before rendering
-@if (UserContext.HasAnyRole(AuthResolver.ResolvePropertyRoles(property, "Read")))
+// Check access before rendering - Kind determined from [State]/[Configuration] attribute
+@if (UserContext.HasAnyRole(AuthResolver.ResolvePropertyRoles(property, GetPropertyKind(property), AuthorizationAction.Read)))
 {
     <PropertyEditor Property="@property"
                     ReadOnly="@(!CanWrite(property))" />
 }
 
 @code {
-    private bool CanWrite(PropertyReference property) =>
-        UserContext.HasAnyRole(AuthResolver.ResolvePropertyRoles(property, "Write"));
+    private Kind GetPropertyKind(PropertyReference property)
+    {
+        // Determined from [State] or [Configuration] attribute on the property
+        var hasConfiguration = property.Metadata.PropertyInfo?
+            .GetCustomAttribute<ConfigurationAttribute>() != null;
+        return hasConfiguration ? Kind.Configuration : Kind.State;
+    }
+
+    private bool CanWrite(PropertyReference property)
+    {
+        var kind = GetPropertyKind(property);
+        return UserContext.HasAnyRole(
+            AuthResolver.ResolvePropertyRoles(property, kind, AuthorizationAction.Write));
+    }
 }
 ```
 
@@ -1978,9 +2157,10 @@ public class AuthorizedMethodInvoker : ISubjectMethodInvoker
 
 | Old Term | New Term |
 |----------|----------|
-| Permission | Permission |
-| `[Permission("Read")]` | `[Permission("Read")]` |
-| `PermissionAttribute` | `PermissionAttribute` |
+| Permission string | Kind + Action tuple |
+| `[Permission("Read")]` | `[SubjectPropertyAuthorize(AuthorizationAction.Read, ...)]` |
+| `PermissionAttribute` | `SubjectAuthorize`, `SubjectPropertyAuthorize`, `SubjectMethodAuthorize` |
+| Permission level | Kind enum (State, Configuration, Query, Operation) |
 
 ### IdentitySeeding
 
@@ -1991,13 +2171,15 @@ public class IdentitySeeding : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Seed default roles with composition
+        // Seed default roles with composition (stored in database)
         var defaultRoles = new Dictionary<string, string[]>
         {
             ["Anonymous"] = [],
             ["Guest"] = ["Anonymous"],
             ["User"] = ["Guest"],
-            ["Admin"] = ["User"]
+            ["Operator"] = ["User"],
+            ["Supervisor"] = ["Operator"],
+            ["Admin"] = ["Supervisor"]
         };
 
         foreach (var (roleName, includes) in defaultRoles)
@@ -2033,7 +2215,7 @@ Inject permission check into existing `ISubjectMethodInvoker`:
 public class AuthorizedMethodInvoker : ISubjectMethodInvoker
 {
     private readonly ISubjectMethodInvoker _inner;
-    private readonly IPermissionResolver _resolver;
+    private readonly IAuthorizationResolver _resolver;
     private readonly IAuthorizationUserContext _userContext;
 
     public async Task<object?> InvokeAsync(
@@ -2060,52 +2242,47 @@ public class AuthorizedMethodInvoker : ISubjectMethodInvoker
 1. UI hides unauthorized methods (primary)
 2. Service throws if invoked anyway (safety net)
 
-### PermissionDiscoveryService
+### AuthorizationDiscoveryService
 
-Discovers permissions from attributes across all subject types:
+Provides the fixed set of Kind+Action combinations for authorization configuration:
 
 ```csharp
-public interface IPermissionDiscoveryService
+public interface IAuthorizationDiscoveryService
 {
-    IReadOnlyList<string> GetAllPermissions();
+    IReadOnlyList<(Kind Kind, Action Action)> GetAllKindActionCombinations();
+    string FormatStorageKey(Kind kind, AuthorizationAction action);
 }
 
-public class PermissionDiscoveryService : IPermissionDiscoveryService
+public class AuthorizationDiscoveryService : IAuthorizationDiscoveryService
 {
-    private readonly Lazy<IReadOnlyList<string>> _permissions;
-
-    public PermissionDiscoveryService(ITypeProvider typeProvider)
+    /// <summary>
+    /// Returns all valid Kind+Action combinations for permission configuration.
+    /// These are fixed and don't need discovery - they're defined by the enums.
+    /// </summary>
+    public IReadOnlyList<(Kind Kind, Action Action)> GetAllKindActionCombinations()
     {
-        _permissions = new Lazy<IReadOnlyList<string>>(() =>
+        return new List<(Kind, AuthorizationAction)>
         {
-            var permissions = new HashSet<string>
-            {
-                "Read", "Write", "Invoke" // Built-in
-            };
+            // State (runtime property values)
+            (Kind.State, AuthorizationAction.Read),
+            (Kind.State, AuthorizationAction.Write),
 
-            // Scan all subject types for [Permission] attributes
-            foreach (var type in typeProvider.GetSubjectTypes())
-            {
-                foreach (var prop in type.GetProperties())
-                {
-                    var attr = prop.GetCustomAttribute<PermissionAttribute>();
-                    if (attr != null)
-                        permissions.Add(attr.Name);
-                }
+            // Configuration (persisted settings)
+            (Kind.Configuration, AuthorizationAction.Read),
+            (Kind.Configuration, AuthorizationAction.Write),
 
-                foreach (var method in type.GetMethods())
-                {
-                    var attr = method.GetCustomAttribute<PermissionAttribute>();
-                    if (attr != null)
-                        permissions.Add(attr.Name);
-                }
-            }
+            // Query (read-only methods)
+            (Kind.Query, AuthorizationAction.Invoke),
 
-            return permissions.OrderBy(p => p).ToList();
-        });
+            // Operation (state-changing methods)
+            (Kind.Operation, AuthorizationAction.Invoke)
+        };
     }
 
-    public IReadOnlyList<string> GetAllPermissions() => _permissions.Value;
+    /// <summary>
+    /// Formats Kind+Action as storage key suffix.
+    /// </summary>
+    public string FormatStorageKey(Kind kind, AuthorizationAction action) => $"{kind}:{action}";
 }
 ```
 
@@ -2139,40 +2316,33 @@ public class RoleComposition
 
 ### User Context Resolution
 
+**Note**: The primary user context is provided via `AuthorizationContext` (AsyncLocal), which is set by `AuthorizationCircuitHandler` for Blazor and `AuthorizationContextMiddleware` for HTTP requests. This avoids sync-over-async issues.
+
 ```csharp
-public class BlazorAuthorizationUserContext : IAuthorizationUserContext
+/// <summary>
+/// Primary pattern: Use AuthorizationContext static class (set by circuit handler/middleware)
+/// </summary>
+public static class AuthorizationContext
 {
-    private readonly IServiceProvider _serviceProvider;
+    private static readonly AsyncLocal<ClaimsPrincipal?> _currentUser = new();
+    private static readonly AsyncLocal<HashSet<string>?> _expandedRoles = new();
 
-    public ClaimsPrincipal? CurrentUser
+    public static ClaimsPrincipal? CurrentUser => _currentUser.Value;
+    public static HashSet<string> ExpandedRoles => _expandedRoles.Value ?? [];
+
+    public static void SetUser(ClaimsPrincipal? user, IEnumerable<string> expandedRoles)
     {
-        get
-        {
-            // Try HTTP context first
-            var httpContextAccessor = _serviceProvider.GetService<IHttpContextAccessor>();
-            if (httpContextAccessor?.HttpContext?.User is { } user)
-                return user;
-
-            // Try Blazor auth state
-            var authStateProvider = _serviceProvider.GetService<AuthenticationStateProvider>();
-            if (authStateProvider != null)
-            {
-                var authState = authStateProvider.GetAuthenticationStateAsync()
-                    .GetAwaiter().GetResult();
-                return authState.User;
-            }
-
-            return null; // No user context = no restrictions
-        }
+        _currentUser.Value = user;
+        _expandedRoles.Value = expandedRoles.ToHashSet();
     }
 
-    public bool HasAnyRole(params string[] roles)
+    public static bool HasAnyRole(IEnumerable<string> requiredRoles)
     {
+        // No user context = allow all (background tasks)
         if (CurrentUser == null)
-            return true; // No user context = allow all (background tasks)
+            return true;
 
-        var userRoles = GetExpandedRoles();
-        return roles.Any(r => userRoles.Contains(r));
+        return requiredRoles.Any(ExpandedRoles.Contains);
     }
 }
 ```
