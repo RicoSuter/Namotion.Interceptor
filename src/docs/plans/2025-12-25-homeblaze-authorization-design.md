@@ -1322,76 +1322,246 @@ await next(context) ← Entire activity runs here
 
 ### Where Data is Stored
 
-Subject authorization data uses the existing extension data system:
+Subject authorization data uses the existing extension data system with namespaced keys:
 
 ```csharp
-// Stored in Subject.Data dictionary
-subject.Data[("", "Read:Roles")] = new[] { "Guest" };           // Subject-level
-subject.Data[("MacAddress", "Read:Roles")] = new[] { "Admin" }; // Property-level
+// Stored in Subject.Data dictionary with "HomeBlaze.Authorization:" prefix
+subject.Data[("", "HomeBlaze.Authorization:Read")] = new[] { "Guest" };           // Subject-level
+subject.Data[("MacAddress", "HomeBlaze.Authorization:Read")] = new[] { "Admin" }; // Property-level
 ```
 
-### Serialization with Existing System
+The `HomeBlaze.Authorization:` prefix follows the Namotion convention (e.g., `Namotion.Interceptor.WriteTimestamp`) to avoid conflicts with other extensions.
 
-HomeBlaze uses `ConfigurableSubjectSerializer`. Authorization data is included automatically if it's in `Subject.Data`.
+### Extensible Serialization via ISubjectDataProvider
 
-**Ensure auth keys are serialized:**
+The `ConfigurableSubjectSerializer` only serializes `[Configuration]` properties by default. To persist `Subject.Data` extension data, we introduce an extensibility point:
+
+#### Interface (in HomeBlaze.Services)
 
 ```csharp
-public class AuthorizationDataSerializer : ISubjectDataSerializer
+/// <summary>
+/// Provides additional data to serialize/deserialize with subjects.
+/// Implementations are called by ConfigurableSubjectSerializer.
+/// </summary>
+public interface ISubjectDataProvider
 {
-    private static readonly string[] AuthKeys =
-        ["Read:Roles", "Write:Roles", "Invoke:Roles"];
+    /// <summary>
+    /// Returns additional properties to serialize with the subject.
+    /// Keys are plain names (e.g., "permissions") - serializer adds "$" prefix.
+    /// Return null if no data to add.
+    /// </summary>
+    Dictionary<string, object>? GetAdditionalProperties(IInterceptorSubject subject);
 
-    public bool ShouldSerialize(string key) =>
-        AuthKeys.Any(k => key.EndsWith(k));
-
-    public object Serialize(object value) =>
-        value is string[] roles ? roles : value;
-
-    public object Deserialize(object value, Type targetType) =>
-        value is JsonElement json ? json.Deserialize<string[]>() : value;
+    /// <summary>
+    /// Receives additional "$" properties from deserialized JSON.
+    /// Keys have "$" prefix stripped (e.g., "$permissions" → "permissions").
+    /// Provider picks out the ones it handles and ignores the rest.
+    /// </summary>
+    void SetAdditionalProperties(IInterceptorSubject subject, Dictionary<string, JsonElement> properties);
 }
 ```
 
-### Storage Location
+#### Why "$" Prefix?
 
-```
-Data/
-├── subjects.json           # Subject graph with properties
-└── authorization.json      # Or included in subjects.json
-```
+The `$` prefix creates a clear namespace separation in JSON:
 
-**Option A: Embedded in subject data (simpler)**
-```json
+| Property Type | Example | Source |
+|--------------|---------|--------|
+| Type discriminator | `$type` | Built-in (System.Text.Json) |
+| Configuration | `name`, `isArmed` | `[Configuration]` attributes |
+| Extension data | `$permissions` | `ISubjectDataProvider` |
+
+This prevents conflicts - a subject can have both a `[Configuration] string Permissions` property and `$permissions` extension data.
+
+#### Serializer Integration
+
+```csharp
+public class ConfigurableSubjectSerializer
 {
-  "Type": "SecuritySystem",
-  "Properties": { ... },
-  "Data": {
-    ":Read:Roles": ["SecurityGuard"],
-    ":Write:Roles": ["Admin"],
-    "MacAddress:Read:Roles": ["Admin"]
-  }
+    private readonly IEnumerable<ISubjectDataProvider> _dataProviders;
+
+    public ConfigurableSubjectSerializer(
+        TypeProvider typeProvider,
+        IServiceProvider serviceProvider,
+        IEnumerable<ISubjectDataProvider> dataProviders)
+    {
+        _dataProviders = dataProviders;
+        // ... existing setup ...
+    }
+
+    public string Serialize(IInterceptorSubject subject)
+    {
+        // ... write $type and [Configuration] properties ...
+
+        // Collect and write provider data with "$" prefix
+        foreach (var provider in _dataProviders)
+        {
+            var props = provider.GetAdditionalProperties(subject);
+            if (props != null)
+            {
+                foreach (var (key, value) in props)
+                {
+                    writer.WritePropertyName($"${key}");
+                    JsonSerializer.Serialize(writer, value, _options);
+                }
+            }
+        }
+    }
+
+    public IConfigurableSubject? Deserialize(string json)
+    {
+        // ... create subject, populate [Configuration] properties ...
+
+        // Collect "$" properties (strip prefix) and pass to providers
+        var additionalProperties = new Dictionary<string, JsonElement>();
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (prop.Name.StartsWith('$') && prop.Name != "$type")
+            {
+                var cleanKey = prop.Name[1..]; // Remove "$"
+                additionalProperties[cleanKey] = prop.Value.Clone();
+            }
+        }
+
+        foreach (var provider in _dataProviders)
+        {
+            provider.SetAdditionalProperties(subject, additionalProperties);
+        }
+
+        return subject;
+    }
 }
 ```
 
-**Option B: Separate file (cleaner separation)**
+#### Authorization Provider Implementation
+
+```csharp
+public class PermissionsDataProvider : ISubjectDataProvider
+{
+    private const string DataKeyPrefix = "HomeBlaze.Authorization:";
+    private const string PropertyKey = "permissions";
+
+    public Dictionary<string, object>? GetAdditionalProperties(IInterceptorSubject subject)
+    {
+        // Structure: { "propertyName": { "permission": ["role1", "role2"] } }
+        var permissions = new Dictionary<string, Dictionary<string, string[]>>();
+
+        foreach (var kvp in subject.Data)
+        {
+            if (!kvp.Key.key.StartsWith(DataKeyPrefix) || kvp.Value is not string[] roles)
+                continue;
+
+            var permission = kvp.Key.key[DataKeyPrefix.Length..]; // "Read", "Write", etc.
+            var propertyName = kvp.Key.property ?? "";
+
+            if (!permissions.TryGetValue(propertyName, out var permDict))
+            {
+                permDict = [];
+                permissions[propertyName] = permDict;
+            }
+            permDict[permission] = roles;
+        }
+
+        return permissions.Count > 0
+            ? new Dictionary<string, object> { [PropertyKey] = permissions }
+            : null;
+    }
+
+    public void SetAdditionalProperties(
+        IInterceptorSubject subject,
+        Dictionary<string, JsonElement> properties)
+    {
+        if (!properties.TryGetValue(PropertyKey, out var element))
+            return;
+
+        var permissions = element.Deserialize<Dictionary<string, Dictionary<string, string[]>>>();
+        if (permissions == null)
+            return;
+
+        foreach (var (propertyName, permissionMap) in permissions)
+        {
+            foreach (var (permission, roles) in permissionMap)
+            {
+                subject.Data[(propertyName, $"{DataKeyPrefix}{permission}")] = roles;
+            }
+        }
+    }
+}
+```
+
+### JSON Output
+
 ```json
 {
-  "SubjectAuthorization": {
-    "SecuritySystem-123": {
+  "$type": "HomeBlaze.Samples.SecuritySystem",
+  "name": "Security",
+  "isArmed": false,
+  "$permissions": {
+    "": {
       "Read": ["SecurityGuard"],
       "Write": ["Admin"],
-      "Properties": {
-        "MacAddress": { "Read": ["Admin"] }
-      }
+      "Invoke": ["Admin"]
+    },
+    "ArmCode": {
+      "Read": ["Admin"],
+      "Write": ["Admin"]
     }
   }
 }
 ```
 
-### Recommendation
+### Registration
 
-Use **Option A** (embedded) - fits existing serialization, no separate sync needed.
+```csharp
+// In HomeBlaze.Services (serializer picks up all providers)
+services.AddSingleton<ConfigurableSubjectSerializer>();
+
+// In HomeBlaze.Authorization
+services.AddSingleton<ISubjectDataProvider, PermissionsDataProvider>();
+```
+
+### Extension Methods for Authorization
+
+```csharp
+public static class SubjectAuthorizationExtensions
+{
+    private const string KeyPrefix = "HomeBlaze.Authorization:";
+
+    public static void SetPermissionRoles(
+        this IInterceptorSubject subject,
+        string permission,
+        string[] roles)
+    {
+        subject.Data[("", $"{KeyPrefix}{permission}")] = roles;
+    }
+
+    public static string[]? GetPermissionRoles(
+        this IInterceptorSubject subject,
+        string permission)
+    {
+        return subject.Data.TryGetValue(("", $"{KeyPrefix}{permission}"), out var roles)
+            ? roles as string[]
+            : null;
+    }
+
+    public static void SetPropertyPermissionRoles(
+        this PropertyReference property,
+        string permission,
+        string[] roles)
+    {
+        property.SetPropertyData($"{KeyPrefix}{permission}", roles);
+    }
+
+    public static string[]? GetPropertyPermissionRoles(
+        this PropertyReference property,
+        string permission)
+    {
+        return property.TryGetPropertyData($"{KeyPrefix}{permission}", out var roles)
+            ? roles as string[]
+            : null;
+    }
+}
+```
 
 ### Parent Traversal for Inheritance
 
@@ -1402,10 +1572,12 @@ using Namotion.Interceptor.Tracking.Parent;
 
 public class PermissionResolver : IPermissionResolver
 {
+    private const string KeyPrefix = "HomeBlaze.Authorization:";
+
     public string[] ResolvePropertyRoles(PropertyReference property, string permission)
     {
         // 1. Check property extension data
-        if (property.TryGetPropertyData($"{permission}:Roles", out var propRoles))
+        if (property.TryGetPropertyData($"{KeyPrefix}{permission}", out var propRoles))
             return (string[])propRoles!;
 
         // 2. Check property attribute
@@ -1415,7 +1587,7 @@ public class PermissionResolver : IPermissionResolver
 
         // 3. Check subject extension data
         var subject = property.Subject;
-        if (subject.Data.TryGetValue(("", $"{permission}:Roles"), out var subjectRoles))
+        if (subject.Data.TryGetValue(("", $"{KeyPrefix}{permission}"), out var subjectRoles))
             return (string[])subjectRoles!;
 
         // 4. Check subject attribute
@@ -1441,7 +1613,7 @@ public class PermissionResolver : IPermissionResolver
             var parentSubject = parentRef.Property.Subject;
 
             // Check if parent has roles defined (ext data OR attribute)
-            if (parentSubject.Data.TryGetValue(("", $"{permission}:Roles"), out var roles))
+            if (parentSubject.Data.TryGetValue(("", $"{KeyPrefix}{permission}"), out var roles))
             {
                 // Parent has roles - add them and stop this branch
                 foreach (var role in (string[])roles!)
