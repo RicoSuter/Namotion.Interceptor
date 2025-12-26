@@ -2,6 +2,35 @@
 
 This guide explains how to create custom subjects for HomeBlaze, using the Motor example as reference.
 
+## Quick Start
+
+```csharp
+using Namotion.Interceptor.Attributes;
+using HomeBlaze.Abstractions.Attributes;
+
+[InterceptorSubject]
+public partial class MyDevice : ITitleProvider
+{
+    [Configuration]                    // Persisted to JSON
+    public partial string Name { get; set; }
+
+    [State(Unit = StateUnit.Percent)]  // Displayed in UI
+    public partial double Value { get; set; }
+
+    [Derived]                          // Auto-updates when Value changes
+    public bool IsHigh => Value > 80;
+
+    [Operation]                        // Executable from UI
+    public void Reset() => Value = 0;
+
+    public string? Title => Name;
+}
+```
+
+**Requirements:** Class and tracked properties must be `partial`. Uses C# 13 preview features.
+
+**See also:** [Architecture - Subject Context Factory](Architecture.md#subject-context-factory) for interceptor configuration.
+
 ## What is a Subject?
 
 A **subject** is an intercepted object in the HomeBlaze object graph. Subjects can:
@@ -1013,3 +1042,5 @@ Page components provide full-page views:
 | Full configuration | No | Yes | No |
 | Uses IsEditing | Yes (optional) | No | Yes (provides) |
 | Auto edit button | Yes (if Edit exists) | N/A | No |
+
+For interceptor-level services (property tracking, parents, lifecycle), see [Architecture - Subject Context Factory](Architecture.md#subject-context-factory).
