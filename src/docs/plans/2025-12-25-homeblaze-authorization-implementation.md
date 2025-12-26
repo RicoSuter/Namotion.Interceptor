@@ -65,6 +65,132 @@
 
 ---
 
+### Task 1b: Create ISubjectDataProvider Interface
+
+**Summary**: Extensibility interface for serializing additional subject data (like permissions)
+
+**Location**: `HomeBlaze.Services`
+
+**Implementation**:
+1. Create `ISubjectDataProvider` interface:
+   ```csharp
+   /// <summary>
+   /// Provides additional data to serialize/deserialize with subjects.
+   /// Implementations are called by ConfigurableSubjectSerializer.
+   /// </summary>
+   public interface ISubjectDataProvider
+   {
+       /// <summary>
+       /// Returns additional properties to serialize with the subject.
+       /// Keys are plain names (e.g., "permissions") - serializer adds "$" prefix.
+       /// Return null if no data to add.
+       /// </summary>
+       Dictionary<string, object>? GetAdditionalProperties(IInterceptorSubject subject);
+
+       /// <summary>
+       /// Receives additional "$" properties from deserialized JSON.
+       /// Keys have "$" prefix stripped (e.g., "$permissions" → "permissions").
+       /// Provider picks out the ones it handles and ignores the rest.
+       /// </summary>
+       void SetAdditionalProperties(IInterceptorSubject subject, Dictionary<string, JsonElement> properties);
+   }
+   ```
+
+**Why "$" Prefix**:
+- Prevents conflicts with `[Configuration]` properties
+- Follows existing `$type` convention
+- Clear namespace separation in JSON
+
+**Subtasks**:
+- [ ] Tests: Interface contract tests
+- [ ] Docs: XML documentation
+- [ ] Code quality: N/A
+- [ ] Dependencies: No new dependencies
+- [ ] Performance: N/A
+
+---
+
+### Task 1c: Update ConfigurableSubjectSerializer
+
+**Summary**: Add ISubjectDataProvider support to serializer
+
+**Location**: `HomeBlaze.Services/ConfigurableSubjectSerializer.cs`
+
+**Implementation**:
+1. Add `IEnumerable<ISubjectDataProvider>` constructor parameter
+2. In `Serialize()`:
+   - After writing `[Configuration]` properties, iterate providers
+   - Call `GetAdditionalProperties()` on each provider
+   - Write each returned property with `$` prefix
+3. In `Deserialize()`:
+   - Collect all `$`-prefixed properties (except `$type`)
+   - Strip `$` prefix from keys
+   - Pass dictionary to each provider's `SetAdditionalProperties()`
+
+```csharp
+public ConfigurableSubjectSerializer(
+    TypeProvider typeProvider,
+    IServiceProvider serviceProvider,
+    IEnumerable<ISubjectDataProvider> dataProviders)  // NEW
+{
+    _dataProviders = dataProviders;
+    // ... existing setup ...
+}
+
+public string Serialize(IInterceptorSubject subject)
+{
+    // ... write $type and [Configuration] properties ...
+
+    // Collect and write provider data with "$" prefix
+    foreach (var provider in _dataProviders)
+    {
+        var props = provider.GetAdditionalProperties(subject);
+        if (props != null)
+        {
+            foreach (var (key, value) in props)
+            {
+                writer.WritePropertyName($"${key}");
+                JsonSerializer.Serialize(writer, value, _options);
+            }
+        }
+    }
+}
+
+public IConfigurableSubject? Deserialize(string json)
+{
+    // ... create subject, populate [Configuration] properties ...
+
+    // Collect "$" properties (strip prefix) and pass to providers
+    var additionalProperties = new Dictionary<string, JsonElement>();
+    foreach (var prop in root.EnumerateObject())
+    {
+        if (prop.Name.StartsWith('$') && prop.Name != "$type")
+        {
+            var cleanKey = prop.Name[1..]; // Remove "$"
+            additionalProperties[cleanKey] = prop.Value.Clone();
+        }
+    }
+
+    foreach (var provider in _dataProviders)
+    {
+        provider.SetAdditionalProperties(subject, additionalProperties);
+    }
+
+    return subject;
+}
+```
+
+**Note**: If no providers are registered, `IEnumerable<ISubjectDataProvider>` is empty and behavior is unchanged.
+
+**Subtasks**:
+- [ ] Tests: Serialization round-trip tests with provider
+- [ ] Docs: N/A
+- [ ] Code quality: Backwards compatible
+- [ ] Dependencies: No new dependencies
+- [ ] Performance: Provider iteration is O(n) where n = number of providers
+
+---
+
 ### Task 2: Implement AuthorizationOptions
 
 **Summary**: Configuration class for authorization settings (use Identity defaults for password/session)
@@ -320,6 +446,99 @@ public class RoleHierarchyClaimsTransformation : IClaimsTransformation
 - [ ] Code quality: Allow multiple on same target
 - [ ] Dependencies: No new dependencies
 - [ ] Performance: N/A (reflection cached in resolver)
+
+---
+
+### Task 8b: Implement PermissionsDataProvider
+
+**Summary**: Serialization provider for permission data persistence
+
+**Location**: `HomeBlaze.Authorization`
+
+**Implementation**:
+1. Create `PermissionsDataProvider : ISubjectDataProvider`
+2. Use `HomeBlaze.Authorization:` prefix for Subject.Data keys (Namotion convention)
+3. Serialize permissions to `$permissions` JSON property
+4. Register as `ISubjectDataProvider` in DI
+
+```csharp
+public class PermissionsDataProvider : ISubjectDataProvider
+{
+    private const string DataKeyPrefix = "HomeBlaze.Authorization:";
+    private const string PropertyKey = "permissions";
+
+    public Dictionary<string, object>? GetAdditionalProperties(IInterceptorSubject subject)
+    {
+        // Structure: { "propertyName": { "permission": ["role1", "role2"] } }
+        var permissions = new Dictionary<string, Dictionary<string, string[]>>();
+
+        foreach (var kvp in subject.Data)
+        {
+            if (!kvp.Key.key.StartsWith(DataKeyPrefix) || kvp.Value is not string[] roles)
+                continue;
+
+            var permission = kvp.Key.key[DataKeyPrefix.Length..]; // "Read", "Write", etc.
+            var propertyName = kvp.Key.property ?? "";
+
+            if (!permissions.TryGetValue(propertyName, out var permDict))
+            {
+                permDict = [];
+                permissions[propertyName] = permDict;
+            }
+            permDict[permission] = roles;
+        }
+
+        return permissions.Count > 0
+            ? new Dictionary<string, object> { [PropertyKey] = permissions }
+            : null;
+    }
+
+    public void SetAdditionalProperties(
+        IInterceptorSubject subject,
+        Dictionary<string, JsonElement> properties)
+    {
+        if (!properties.TryGetValue(PropertyKey, out var element))
+            return;
+
+        var permissions = element.Deserialize<Dictionary<string, Dictionary<string, string[]>>>();
+        if (permissions == null)
+            return;
+
+        foreach (var (propertyName, permissionMap) in permissions)
+        {
+            foreach (var (permission, roles) in permissionMap)
+            {
+                subject.Data[(propertyName, $"{DataKeyPrefix}{permission}")] = roles;
+            }
+        }
+    }
+}
+```
+
+**JSON Output**:
+```json
+{
+  "$type": "HomeBlaze.Samples.SecuritySystem",
+  "name": "Security",
+  "$permissions": {
+    "": { "Read": ["SecurityGuard"], "Write": ["Admin"] },
+    "ArmCode": { "Read": ["Admin"] }
+  }
+}
+```
+
+**Registration**:
+```csharp
+// In AddHomeBlazeAuthorization()
+services.AddSingleton<ISubjectDataProvider, PermissionsDataProvider>();
+```
+
+**Subtasks**:
+- [ ] Tests: Round-trip serialization tests
+- [ ] Docs: N/A
+- [ ] Code quality: Use constants for key prefix
+- [ ] Dependencies: Depends on Task 1b (ISubjectDataProvider)
+- [ ] Performance: N/A
 
 ---
 
@@ -1796,16 +2015,16 @@ public static IInterceptorSubjectContext Create(IServiceProvider serviceProvider
 
 | Phase | Tasks | Description |
 |-------|-------|-------------|
-| 1. Infrastructure | 1-2 | Projects, options |
+| 1. Infrastructure | 1, 1b, 1c, 2 | Projects, ISubjectDataProvider, serializer update, options |
 | 2. Identity & DB | 3-7 | DbContext, role expander, claims transform, seeding, Identity, OAuth |
-| 3. Authorization | 8-12 | Attributes, resolver, interceptor, method auth, user context |
+| 3. Authorization | 8, 8b, 9-12 | Attributes, PermissionsDataProvider, resolver, interceptor, method auth, user context |
 | 4. Auth UI | 13-16 | Login/logout, SetPassword, Account, App.razor |
 | 5. Admin UI | 17-19 | Users, Roles, Subject panel |
 | 6. Filtering | 20-22 | Nav, browser, properties |
 | 7. Integration | 23-25 | DI, SubjectContextFactory, Program.cs |
 | 8. Session | 26 | Revalidation |
 
-**Total: 27 tasks across 8 phases** (Task 4 split into 4 + 4b)
+**Total: 30 tasks across 8 phases** (includes 1b, 1c for serialization extensibility, 4b for claims, 8b for persistence, 12b for tests)
 
 ---
 
