@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Connection;
 /// Manages OPC UA session lifecycle, reconnection handling, and thread-safe session access.
 /// Optimized for fast session reads (hot path) with simple lock-based writes (cold path).
 /// </summary>
-internal sealed class SessionManager : IDisposable, IAsyncDisposable
+internal sealed class SessionManager : IAsyncDisposable, IDisposable
 {
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
@@ -40,7 +40,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
     /// <summary>
     /// Gets a value indicating whether the session is currently reconnecting.
     /// </summary>
-    public bool IsReconnecting => Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1;
+    public bool IsReconnecting => Volatile.Read(ref _isReconnecting) == 1;
 
     /// <summary>
     /// Gets the current subscriptions managed by the subscription manager.
@@ -62,7 +62,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         _propertyWriter = propertyWriter;
         _logger = logger;
         _configuration = configuration;
-        _reconnectHandler = new SessionReconnectHandler(false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
+        _reconnectHandler = new SessionReconnectHandler(configuration.TelemetryContext, false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
         if (_configuration.EnablePollingFallback)
         {
@@ -88,23 +88,52 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         CancellationToken cancellationToken)
     {
         var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
+        var serverUri = new Uri(configuration.ServerUrl);
+
+        EndpointDescriptionCollection endpoints;
+        try
+        {
+            using var discoveryClient = await DiscoveryClient.CreateAsync(
+                application.ApplicationConfiguration,
+                serverUri,
+                endpointConfiguration, ct: cancellationToken).ConfigureAwait(false);
+
+            endpoints = await discoveryClient.GetEndpointsAsync(null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                $"Failed to discover OPC UA endpoints at '{configuration.ServerUrl}'. " +
+                $"Verify the server is running and the URL is correct. " +
+                $"The connection will be retried automatically.",
+                ex);
+        }
+
         var endpointDescription = CoreClientUtils.SelectEndpoint(
             application.ApplicationConfiguration,
-            configuration.ServerUrl,
-            useSecurity: false);
+            serverUri,
+            endpoints,
+            useSecurity: false,
+            configuration.TelemetryContext);
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
         var oldSession = Volatile.Read(ref _session);
 
-        var newSession = await Session.Create(
+        var sessionFactory = configuration.ActualSessionFactory;
+        var sessionResult = await sessionFactory.CreateAsync(
             application.ApplicationConfiguration,
             endpoint,
             updateBeforeConnect: false,
-            application.ApplicationName,
+            sessionName: application.ApplicationName,
             sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
-            new UserIdentity(),
+            identity: new UserIdentity(),
             preferredLocales: null,
             cancellationToken).ConfigureAwait(false);
+
+        var newSession = sessionResult as Session
+            ?? throw new InvalidOperationException(
+                $"Session factory returned unexpected type '{sessionResult?.GetType().FullName ?? "null"}'. " +
+                $"Expected '{typeof(Session).FullName}'. Ensure the configured SessionFactory returns a valid Session instance.");
 
         newSession.KeepAlive -= OnKeepAlive;
         newSession.KeepAlive += OnKeepAlive;
@@ -154,8 +183,8 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
 
         try
         {
-            if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1 ||
-                Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1)
+            if (Volatile.Read(ref _disposed) == 1 ||
+                Volatile.Read(ref _isReconnecting) == 1)
             {
                 return;
             }
@@ -197,7 +226,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         bool reconnectionSucceeded;
         lock (_reconnectingLock)
         {
-            if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
+            if (Volatile.Read(ref _disposed) == 1)
             {
                 return;
             }
@@ -250,7 +279,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         {
             Task.Run(async () =>
             {
-                if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
+                if (Volatile.Read(ref _disposed) == 1)
                 {
                     return; // Already disposing, skip reconnection work
                 }
@@ -266,8 +295,13 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
                         _logger.LogError(exception, "Reconnect failed, closing session. Health check will trigger full restart.");
                         await DisposeSessionAsync(session, _stoppingToken).ConfigureAwait(false);
 
-                        // Clear session - health check will detect null session and trigger full restart
-                        Volatile.Write(ref _session, null);
+                        // Only clear session if it's still the same one we tried to initialize
+                        // Prevents race with concurrent reconnection or disposal
+                        var currentSession = Volatile.Read(ref _session);
+                        if (ReferenceEquals(currentSession, session))
+                        {
+                            Volatile.Write(ref _session, null);
+                        }
                     }
                 }
             }, _stoppingToken);
@@ -286,7 +320,7 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         lock (_reconnectingLock)
         {
             // Double-check: still reconnecting AND session still null?
-            if (Interlocked.CompareExchange(ref _isReconnecting, 0, 0) == 1 &&
+            if (Volatile.Read(ref _isReconnecting) == 1 &&
                 Volatile.Read(ref _session) is null)
             {
                 // Truly stalled - OnReconnectComplete never fired or failed:
@@ -330,13 +364,14 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         }
 
         try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
-        try { SubscriptionManager.Dispose(); } catch { /* best effort */ }
+        try { await SubscriptionManager.DisposeAsync().ConfigureAwait(false); } catch { /* best effort */ }
         try { PollingManager?.Dispose(); } catch { /* best effort */ }
 
         var sessionToDispose = _session;
         if (sessionToDispose is not null)
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var timeout = _configuration.SessionDisposalTimeout;
+            using var cts = new CancellationTokenSource(timeout);
             try
             {
                 await DisposeSessionAsync(sessionToDispose, cts.Token).ConfigureAwait(false);
@@ -344,8 +379,9 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
             catch (OperationCanceledException)
             {
                 _logger.LogWarning(
-                    "Session disposal timed out after 5 seconds during shutdown. " +
-                    "Forcing synchronous disposal to complete cleanup.");
+                    "Session disposal timed out after {Timeout} during shutdown. " +
+                    "Forcing synchronous disposal to complete cleanup.",
+                    timeout);
 
                 // Force immediate disposal without waiting for server acknowledgment
                 try { sessionToDispose.Dispose(); } catch { /* best effort */ }
@@ -355,8 +391,26 @@ internal sealed class SessionManager : IDisposable, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Synchronous dispose - prefer DisposeAsync() for proper cleanup.
+    /// This is only called if the caller doesn't check for IAsyncDisposable.
+    /// </summary>
     public void Dispose()
     {
-        DisposeAsync().GetAwaiter().GetResult();
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
+
+        try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
+        try { PollingManager?.Dispose(); } catch { /* best effort */ }
+
+        var sessionToDispose = _session;
+        if (sessionToDispose is not null)
+        {
+            sessionToDispose.KeepAlive -= OnKeepAlive;
+            try { sessionToDispose.Dispose(); } catch { /* best effort */ }
+            Volatile.Write(ref _session, null);
+        }
     }
 }

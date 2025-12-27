@@ -48,7 +48,7 @@ The `root.json` file in your application directory defines the storage location:
 
 ```json
 {
-    "type": "HomeBlaze.Storage.FluentStorageContainer",
+    "$type": "HomeBlaze.Storage.FluentStorageContainer",
     "storageType": "disk",
     "connectionString": "./Data"
 }
@@ -63,7 +63,7 @@ The `root.json` file in your application directory defines the storage location:
 
 | Extension | Subject Type | Description |
 |-----------|--------------|-------------|
-| `.json` | Configured type or `JsonFile` | Subject defined by `type` property |
+| `.json` | Configured type or `JsonFile` | Subject defined by `$type` property |
 | `.md` | `MarkdownFile` | Interactive page with expressions |
 | Other | `GenericFile` | Basic file representation |
 
@@ -88,18 +88,18 @@ Note: Keys with dots (like `guide.md`) use brackets to preserve the extension.
 
 ### JSON Format
 
-Create subjects by adding JSON files with a `type` discriminator:
+Create subjects by adding JSON files with a `$type` discriminator:
 
 ```json
 {
-    "type": "HomeBlaze.Samples.Motor",
+    "$type": "HomeBlaze.Samples.Motor",
     "name": "Conveyor Belt",
     "targetSpeed": 600,
     "simulationInterval": "00:00:02"
 }
 ```
 
-The `type` property specifies the .NET class to instantiate. Properties marked with `[Configuration]` in the class are automatically persisted.
+The `$type` property specifies the .NET class to instantiate. Properties marked with `[Configuration]` in the class are automatically persisted.
 
 ### Background Services
 
@@ -111,7 +111,7 @@ Subjects that inherit from `BackgroundService` start automatically when loaded. 
 
 ```json
 {
-    "type": "HomeBlaze.Samples.Motor",
+    "$type": "HomeBlaze.Samples.Motor",
     "name": "My Custom Motor",
     "targetSpeed": 2000,
     "simulationInterval": "00:00:01"
@@ -192,7 +192,7 @@ Use the `Widget` subject to embed another subject's widget by path:
 
 ```json
 {
-    "type": "HomeBlaze.Components.Widget",
+    "$type": "HomeBlaze.Components.Widget",
     "path": "Root.Demo.Conveyor"
 }
 ```
@@ -206,7 +206,7 @@ Embed a widget inline:
 ~~~markdown
 ```subject(mywidget)
 {
-    "type": "HomeBlaze.Components.Widget",
+    "$type": "HomeBlaze.Components.Widget",
     "path": "Root.Demo.Conveyor"
 }
 ```

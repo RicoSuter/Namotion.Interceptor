@@ -87,7 +87,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         _sessionManager = new SessionManager(this, propertyWriter, _configuration, _logger);
 
-        var application = _configuration.CreateApplicationInstance();
+        var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
         var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Connected to OPC UA server successfully.");
@@ -283,7 +283,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             propertyWriter.StartBuffering();
 
             // Create new session (CreateSessionAsync disposes old session internally)
-            var application = _configuration.CreateApplicationInstance();
+            var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
             var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("New OPC UA session created successfully.");
 

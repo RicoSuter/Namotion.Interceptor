@@ -93,6 +93,7 @@ Each browser session has isolated tracking. Server-side Blazor with multiple con
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `Context` | `IInterceptorSubjectContext` | Required. The context to subscribe to for property changes. |
+| `ThrottleMilliseconds` | `int` | Optional. Minimum time between rerenders in ms. Default: 33 (~30fps). |
 | `ShowDebugInfo` | `bool` | Optional. Shows visual debugging (border, tracked properties tooltip). |
 | `ChildContent` | `RenderFragment` | The content to render within the tracking scope. |
 
@@ -244,14 +245,7 @@ return false;
 
 **Problem**: Rapid property changes can cause excessive re-renders.
 
-**Solution**: Use `Interlocked.Exchange` to coalesce multiple rapid changes into a single re-render.
-
-```csharp
-if (Interlocked.Exchange(ref _rerenderPending, 1) == 0)
-{
-    InvokeAsync(StateHasChanged);
-}
-```
+**Solution**: Property changes are buffered within a configurable time window (`ThrottleMilliseconds`, default 33ms). All changes in the window are checked, and at most one rerender is triggered per window.
 
 ## Thread Safety
 

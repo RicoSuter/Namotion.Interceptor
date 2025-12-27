@@ -68,13 +68,10 @@ public class RootManager : BackgroundService, IConfigurationWriter
         }
 
         var json = await File.ReadAllTextAsync(_configurationPath, cancellationToken);
+        var root = _serializer.Deserialize(json);
 
-        Root = _serializer.Deserialize(json);
-        if (Root == null)
-        {
-            throw new InvalidOperationException("Failed to deserialize root configuration");
-        }
-
+        // All IConfigurableSubject implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
+        Root = root as IInterceptorSubject ?? throw new InvalidOperationException("Failed to deserialize root configuration");
         Root.Context.AddFallbackContext(_context);
 
         _logger?.LogInformation("Root loaded: {Type}", Root.GetType().FullName);

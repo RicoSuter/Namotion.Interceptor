@@ -2,7 +2,7 @@
 
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
-@using HomeBlaze.Host.Components.Editors
+@using HomeBlaze.Components.Editors
 @using HomeBlaze.Services.Components
 @using Microsoft.AspNetCore.Components.Sections
 @using Namotion.Interceptor.Blazor
@@ -209,8 +209,7 @@
     {
         if (_editPanel != null)
         {
-            await _editPanel.SaveAsync();
-            // Increment key to refresh page component with saved changes
+            await _editPanel.SaveAsync(CancellationToken.None);
             _componentKey++;
             StateHasChanged();
         }
@@ -260,5 +259,4 @@
             await _hotKeysContext.DisposeAsync();
         }
     }
-
 }

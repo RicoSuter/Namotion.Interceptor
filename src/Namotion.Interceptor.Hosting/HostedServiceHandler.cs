@@ -144,11 +144,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         {
             if (_hostedServices.Add(hostedService))
             {
-                _actions.Post(token =>
-                {
-                    _logger?.LogInformation("Starting attached hosted service {Service}.", hostedService.ToString());
-                    return hostedService.StartAsync(token);
-                });
+                PostStartService(hostedService, null);
             }
         }
     }
@@ -159,11 +155,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         {
             if (_hostedServices.Remove(hostedService))
             {
-                _actions.Post(token =>
-                {
-                    _logger?.LogInformation("Stopping detached hosted service {Service}.", hostedService.ToString());
-                    return hostedService.StopAsync(token);
-                });
+                PostStopService(hostedService, null);
             }
         }
     }
@@ -175,19 +167,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         {
             if (_hostedServices.Add(hostedService))
             {
-                _actions.Post(async token =>
-                {
-                    try
-                    {
-                        _logger?.LogInformation("Starting attached hosted service {Service}.", hostedService.ToString());
-                        await hostedService.StartAsync(token);
-                        tcs.TrySetResult();
-                    }
-                    catch (Exception ex)
-                    {
-                        tcs.TrySetException(ex);
-                    }
-                });
+                PostStartService(hostedService, tcs);
             }
             else
             {
@@ -197,7 +177,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
 
         await tcs.Task.WaitAsync(cancellationToken);
     }
-
+    
     internal async Task DetachHostedServiceAsync(IHostedService hostedService, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource();
@@ -205,19 +185,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         {
             if (_hostedServices.Remove(hostedService))
             {
-                _actions.Post(async token =>
-                {
-                    try
-                    {
-                        _logger?.LogInformation("Stopping detached hosted service {Service}.", hostedService.ToString());
-                        await hostedService.StopAsync(token);
-                        tcs.TrySetResult();
-                    }
-                    catch (Exception ex)
-                    {
-                        tcs.TrySetException(ex);
-                    }
-                });
+                PostStopService(hostedService, tcs);
             }
             else
             {
@@ -226,6 +194,44 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         }
 
         await tcs.Task.WaitAsync(cancellationToken);
+    }
+
+    private void PostStartService(IHostedService hostedService, TaskCompletionSource? tcs)
+    {
+        _actions.Post(async token =>
+        {
+            try
+            {
+                await Task.Delay(50, token); // TODO: Fix small delay to let sync property assignments/deserialization complete
+
+                _logger?.LogInformation("Starting attached hosted service {Service}.", hostedService.ToString());
+                await hostedService.StartAsync(token);
+                tcs?.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                tcs?.TrySetException(ex);
+            }
+        });
+    }
+
+    private void PostStopService(IHostedService hostedService, TaskCompletionSource? tcs)
+    {
+        _actions.Post(async token =>
+        {
+            try
+            {
+                await Task.Delay(50, token); // TODO: Fix small delay to let sync property assignments/deserialization complete
+
+                _logger?.LogInformation("Stopping detached hosted service {Service}.", hostedService.ToString());
+                await hostedService.StopAsync(token);
+                tcs?.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                tcs?.TrySetException(ex);
+            }
+        });
     }
 
     public void Dispose()

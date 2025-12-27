@@ -71,7 +71,7 @@ public class MarkdownDecorationParserTests
 
             ```subject(mymotor)
             {
-              "type": "HomeBlaze.Devices.Motor"
+              "$type": "HomeBlaze.Devices.Motor"
             }
             ```
             """;
@@ -98,7 +98,7 @@ public class MarkdownDecorationParserTests
 
             ```subject(mymotor)
             {
-              "type": "HomeBlaze.Devices.Motor"
+              "$type": "HomeBlaze.Devices.Motor"
             }
             ```
 

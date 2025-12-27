@@ -21,10 +21,22 @@ public static class SubjectIconExtensions
     /// </summary>
     public static string GetIcon(this IInterceptorSubject subject)
     {
-        if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.Icon))
-            return iconProvider.Icon;
+        if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.IconName))
+            return iconProvider.IconName;
 
         return DefaultIconName;
+    }
+
+    /// <summary>
+    /// Gets the icon color for a subject.
+    /// Returns null if no color is specified.
+    /// </summary>
+    public static string? GetIconColor(this IInterceptorSubject subject)
+    {
+        if (subject is IIconProvider iconProvider)
+            return iconProvider.IconColor;
+
+        return null;
     }
 
     /// <summary>
@@ -42,5 +54,24 @@ public static class SubjectIconExtensions
 
             return field?.GetValue(null) as string ?? Icons.Material.Filled.Article;
         });
+    }
+
+    /// <summary>
+    /// Resolves a color name to a MudBlazor Color enum value.
+    /// </summary>
+    public static Color ResolveMudBlazorColor(string? colorName)
+    {
+        return colorName switch
+        {
+            "Success" => Color.Success,
+            "Warning" => Color.Warning,
+            "Error" => Color.Error,
+            "Primary" => Color.Primary,
+            "Secondary" => Color.Secondary,
+            "Info" => Color.Info,
+            "Dark" => Color.Dark,
+            "Default" => Color.Default,
+            _ => Color.Default
+        };
     }
 }
