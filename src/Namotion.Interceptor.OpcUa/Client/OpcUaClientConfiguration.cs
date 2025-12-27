@@ -1,11 +1,15 @@
-﻿using Namotion.Interceptor.Registry.Paths;
+﻿using System.Threading;
+using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
+using Opc.Ua.Client;
 using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
 public class OpcUaClientConfiguration
 {
+    private ISessionFactory? _resolvedSessionFactory;
+
     /// <summary>
     /// Gets the OPC UA server endpoint URL to connect to (e.g., "opc.tcp://localhost:4840").
     /// </summary>
@@ -196,9 +200,41 @@ public class OpcUaClientConfiguration
     /// </summary>
     public TimeSpan ReconnectInterval { get; init; } = TimeSpan.FromSeconds(5);
 
-    public virtual ApplicationInstance CreateApplicationInstance()
+    /// <summary>
+    /// Gets or sets the telemetry context for OPC UA operations.
+    /// Defaults to NullTelemetryContext for minimal overhead.
+    /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
+    /// </summary>
+    public ITelemetryContext TelemetryContext { get; init; } = NullTelemetryContext.Instance;
+
+    /// <summary>
+    /// Gets or sets the session factory for creating OPC UA sessions.
+    /// If not specified, a DefaultSessionFactory using the configured TelemetryContext is created automatically.
+    /// </summary>
+    public ISessionFactory? SessionFactory { get; init; }
+
+    /// <summary>
+    /// Gets or sets the timeout for session disposal during shutdown.
+    /// If the session doesn't close gracefully within this timeout, it will be forcefully disposed.
+    /// Default is 5 seconds.
+    /// </summary>
+    public TimeSpan SessionDisposalTimeout { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Gets the actual session factory, creating a default one using TelemetryContext if not explicitly set.
+    /// The default factory is cached after first access (thread-safe).
+    /// </summary>
+    public ISessionFactory ActualSessionFactory => SessionFactory ?? LazyInitializer.EnsureInitialized(
+        ref _resolvedSessionFactory, () => new DefaultSessionFactory(TelemetryContext))!;
+
+    /// <summary>
+    /// Creates and configures an OPC UA application instance for the client.
+    /// Override this method to customize application configuration, security settings, or certificate handling.
+    /// </summary>
+    /// <returns>A configured <see cref="ApplicationInstance"/> ready for connecting to OPC UA servers.</returns>
+    public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
-        var application = new ApplicationInstance
+        var application = new ApplicationInstance(TelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Client
@@ -253,10 +289,10 @@ public class OpcUaClientConfiguration
                 OutputFilePath = "Logs/UaClient.log",
                 TraceMasks = 0
             },
-            CertificateValidator = new CertificateValidator()
+            CertificateValidator = new CertificateValidator(TelemetryContext)
         };
 
-        config.CertificateValidator.Update(config);
+        await config.CertificateValidator.UpdateAsync(config).ConfigureAwait(false);
 
         application.ApplicationConfiguration = config;
         return application;
