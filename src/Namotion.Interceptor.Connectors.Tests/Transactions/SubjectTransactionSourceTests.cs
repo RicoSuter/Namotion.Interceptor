@@ -320,7 +320,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             person.FirstName = "John";
 
             var exception = await Assert.ThrowsAsync<TransactionException>(
-                () => transaction.CommitAsync());
+                () => transaction.CommitAsync(CancellationToken.None));
 
             // Assert
             Assert.Single(exception.FailedChanges);

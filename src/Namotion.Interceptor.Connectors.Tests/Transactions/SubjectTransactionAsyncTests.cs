@@ -376,7 +376,7 @@ public class SubjectTransactionAsyncTests
 
         // Act
         // CommitAsync should succeed - underlying value is still null
-        await tx.CommitAsync();
+        await tx.CommitAsync(CancellationToken.None);
 
         // Assert
         // Verify the value was applied

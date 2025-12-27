@@ -51,7 +51,7 @@ public class SubjectTransactionOptimisticLockingTests
 
         // Act & Assert
         // CommitAsync should throw because current value != captured OldValue
-        var ex = await Assert.ThrowsAsync<TransactionConflictException>(() => tx.CommitAsync());
+        var ex = await Assert.ThrowsAsync<TransactionConflictException>(() => tx.CommitAsync(CancellationToken.None));
         Assert.Contains(nameof(Person.FirstName), ex.Message);
     }
 
@@ -124,7 +124,7 @@ public class SubjectTransactionOptimisticLockingTests
                 // Hold the lock for a bit
                 await Task.Delay(100);
 
-                await tx.CommitAsync();
+                await tx.CommitAsync(CancellationToken.None);
                 tx1Complete.SetResult(true);
             });
         }
@@ -155,7 +155,7 @@ public class SubjectTransactionOptimisticLockingTests
         // Now tx2 should complete
         using var tx2 = await tx2Task;
         person.LastName = "Tx2";
-        await tx2.CommitAsync();
+        await tx2.CommitAsync(CancellationToken.None);
 
         await tx1Task;
 
@@ -196,7 +196,7 @@ public class SubjectTransactionOptimisticLockingTests
 
         // Act
         // Should NOT throw because ConflictBehavior is Ignore
-        await tx.CommitAsync();
+        await tx.CommitAsync(CancellationToken.None);
 
         // Assert
         // Transaction value should overwrite the external change
@@ -274,7 +274,7 @@ public class SubjectTransactionOptimisticLockingTests
             TransactionLocking.Exclusive);
 
         person.FirstName = "NewValue";
-        await tx2.CommitAsync();
+        await tx2.CommitAsync(CancellationToken.None);
 
         Assert.Equal("NewValue", person.FirstName);
     }
@@ -349,7 +349,7 @@ public class SubjectTransactionOptimisticLockingTests
                 await optimisticCommitStarted.Task;
                 await Task.Delay(100);
 
-                await tx.CommitAsync();
+                await tx.CommitAsync(CancellationToken.None);
                 exclusiveComplete.SetResult(true);
             });
         }
@@ -373,7 +373,7 @@ public class SubjectTransactionOptimisticLockingTests
                 optimisticCommitStarted.SetResult(true);
 
                 // This should wait for exclusive to complete
-                await tx.CommitAsync();
+                await tx.CommitAsync(CancellationToken.None);
                 tx.Dispose();
             });
         }
@@ -422,7 +422,7 @@ public class SubjectTransactionOptimisticLockingTests
                 optimisticCommitStarted.SetResult(true);
 
                 // This commit acquires the lock
-                await tx.CommitAsync();
+                await tx.CommitAsync(CancellationToken.None);
             });
         }
 
@@ -442,7 +442,7 @@ public class SubjectTransactionOptimisticLockingTests
                     TransactionLocking.Exclusive);
 
                 person.LastName = "Exclusive";
-                await tx.CommitAsync();
+                await tx.CommitAsync(CancellationToken.None);
             });
         }
 

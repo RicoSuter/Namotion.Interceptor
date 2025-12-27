@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
@@ -17,8 +18,11 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
     private readonly ITestOutputHelper _output;
     private IHost? _host;
+    private IInterceptorSubjectContext? _context;
 
     public TRoot? Root { get; private set; }
+
+    public IInterceptorSubjectContext Context => _context ?? throw new InvalidOperationException("Client not started.");
 
     public OpcUaTestClient(ITestOutputHelper output)
     {
@@ -36,15 +40,16 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
             logging.AddConsole();
         });
 
-        var context = InterceptorSubjectContext
+        _context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry()
             .WithLifecycle()
             .WithDataAnnotationValidation()
+            .WithSourceTransactions()
             .WithHostedServices(builder.Services);
 
-        Root = createRoot(context);
+        Root = createRoot(_context);
 
         builder.Services.AddSingleton(Root);
         builder.Services.AddOpcUaSubjectClientSource<TRoot>(serverUrl, "opc", rootName: "Root");

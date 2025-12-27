@@ -173,7 +173,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ObjectDisposedException">Thrown when the transaction has been disposed.</exception>
     /// <exception cref="TransactionException">Thrown when one or more external source writes failed.</exception>
-    public async Task CommitAsync(CancellationToken cancellationToken = default)
+    public async Task CommitAsync(CancellationToken cancellationToken)
     {
         if (Volatile.Read(ref _isDisposed) != 0)
             throw new ObjectDisposedException(nameof(SubjectTransaction));
