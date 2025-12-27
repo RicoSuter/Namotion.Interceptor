@@ -1,7 +1,8 @@
+using System.Text.Json;
+using HomeBlaze.Abstractions.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
-using Xunit;
 
 namespace HomeBlaze.Services.Tests.Serialization;
 
@@ -32,7 +33,7 @@ public class ConfigurableSubjectSerializerTests
         var services = new ServiceCollection();
         var serviceProvider = services.BuildServiceProvider();
 
-        _serializer = new ConfigurableSubjectSerializer(_typeProvider, serviceProvider);
+        _serializer = new ConfigurableSubjectSerializer(_typeProvider, serviceProvider, []);
     }
 
     #region Serialize Tests
@@ -574,6 +575,200 @@ public class ConfigurableSubjectSerializerTests
         Assert.Equal("level-2", deserialized.Child.Level2Config);
         Assert.NotNull(deserialized.Child.Child);
         Assert.Equal("level-3", deserialized.Child.Child.Level3Config);
+    }
+
+    #endregion
+
+    #region IAdditionalPropertiesSerializer Tests
+
+    [Fact]
+    public void Serialize_WithAdditionalPropertiesSerializer_IncludesDataWithDollarPrefix()
+    {
+        // Arrange
+        var testSerializer = new TestAdditionalPropertiesSerializer(
+            getProperties: _ => new Dictionary<string, object>
+            {
+                ["authorization"] = new Dictionary<string, object>
+                {
+                    ["roles"] = new[] { "Admin", "User" }
+                }
+            });
+
+        var serializer = CreateSerializerWithProviders([testSerializer]);
+        var context = InterceptorSubjectContext.Create();
+        var subject = new TestSubject(context) { ConfigProperty = "test" };
+
+        // Act
+        var json = serializer.Serialize(subject);
+
+        // Assert
+        Assert.Contains("\"$authorization\"", json);
+        Assert.Contains("\"roles\"", json);
+        Assert.Contains("\"Admin\"", json);
+        Assert.Contains("\"User\"", json);
+    }
+
+    [Fact]
+    public void Serialize_WithMultipleSerializers_IncludesAllData()
+    {
+        // Arrange
+        var serializer1 = new TestAdditionalPropertiesSerializer(
+            getProperties: _ => new Dictionary<string, object> { ["auth"] = "value1" });
+        var serializer2 = new TestAdditionalPropertiesSerializer(
+            getProperties: _ => new Dictionary<string, object> { ["metadata"] = "value2" });
+
+        var serializer = CreateSerializerWithProviders([serializer1, serializer2]);
+        var context = InterceptorSubjectContext.Create();
+        var subject = new TestSubject(context) { ConfigProperty = "test" };
+
+        // Act
+        var json = serializer.Serialize(subject);
+
+        // Assert
+        Assert.Contains("\"$auth\"", json);
+        Assert.Contains("\"value1\"", json);
+        Assert.Contains("\"$metadata\"", json);
+        Assert.Contains("\"value2\"", json);
+    }
+
+    [Fact]
+    public void Serialize_WithNullFromSerializer_DoesNotIncludeProperty()
+    {
+        // Arrange
+        var testSerializer = new TestAdditionalPropertiesSerializer(
+            getProperties: _ => null);
+
+        var serializer = CreateSerializerWithProviders([testSerializer]);
+        var context = InterceptorSubjectContext.Create();
+        var subject = new TestSubject(context) { ConfigProperty = "test" };
+
+        // Act
+        var json = serializer.Serialize(subject);
+
+        // Assert
+        Assert.DoesNotContain("\"$", json.Replace("\"$type\"", "")); // Only $type should exist
+    }
+
+    [Fact]
+    public void Deserialize_WithAdditionalPropertiesSerializer_PassesDollarPropertiesToSerializer()
+    {
+        // Arrange
+        Dictionary<string, JsonElement>? receivedProperties = null;
+        var testSerializer = new TestAdditionalPropertiesSerializer(
+            setProperties: (_, props) => receivedProperties = props);
+
+        var serializer = CreateSerializerWithProviders([testSerializer]);
+        var json = """
+        {
+            "$type": "HomeBlaze.Services.Tests.Serialization.TestSubject",
+            "configProperty": "test",
+            "$authorization": { "roles": ["Admin"] },
+            "$metadata": "some-value"
+        }
+        """;
+
+        // Act
+        var result = serializer.Deserialize(json);
+
+        // Assert
+        Assert.NotNull(receivedProperties);
+        Assert.Equal(2, receivedProperties.Count);
+        Assert.True(receivedProperties.ContainsKey("authorization"));
+        Assert.True(receivedProperties.ContainsKey("metadata"));
+    }
+
+    [Fact]
+    public void Deserialize_WithNoDollarProperties_DoesNotCallSerializer()
+    {
+        // Arrange
+        var wasCalled = false;
+        var testSerializer = new TestAdditionalPropertiesSerializer(
+            setProperties: (_, _) => wasCalled = true);
+
+        var serializer = CreateSerializerWithProviders([testSerializer]);
+        var json = """
+        {
+            "$type": "HomeBlaze.Services.Tests.Serialization.TestSubject",
+            "configProperty": "test"
+        }
+        """;
+
+        // Act
+        var result = serializer.Deserialize(json);
+
+        // Assert
+        Assert.False(wasCalled);
+    }
+
+    [Fact]
+    public void RoundTrip_WithAdditionalProperties_PreservesData()
+    {
+        // Arrange
+        var storedData = new Dictionary<IInterceptorSubject, Dictionary<string, object>>();
+
+        var testSerializer = new TestAdditionalPropertiesSerializer(
+            getProperties: subject =>
+            {
+                if (storedData.TryGetValue(subject, out var data))
+                    return data;
+                return null;
+            },
+            setProperties: (subject, props) =>
+            {
+                var data = new Dictionary<string, object>();
+                foreach (var (key, value) in props)
+                {
+                    data[key] = value.GetRawText();
+                }
+                storedData[subject] = data;
+            });
+
+        var serializer = CreateSerializerWithProviders([testSerializer]);
+        var context = InterceptorSubjectContext.Create();
+        var original = new TestSubject(context) { ConfigProperty = "test" };
+
+        // Store some data
+        storedData[original] = new Dictionary<string, object>
+        {
+            ["authorization"] = new Dictionary<string, object> { ["roles"] = new[] { "Admin" } }
+        };
+
+        // Act
+        var json = serializer.Serialize(original);
+        var deserialized = serializer.Deserialize(json);
+
+        // Assert
+        Assert.Contains("\"$authorization\"", json);
+        Assert.NotNull(deserialized);
+        Assert.True(storedData.ContainsKey((IInterceptorSubject)deserialized));
+    }
+
+    private ConfigurableSubjectSerializer CreateSerializerWithProviders(
+        IEnumerable<IAdditionalPropertiesSerializer> serializers)
+    {
+        var services = new ServiceCollection();
+        var serviceProvider = services.BuildServiceProvider();
+        return new ConfigurableSubjectSerializer(_typeProvider, serviceProvider, serializers);
+    }
+
+    private class TestAdditionalPropertiesSerializer : IAdditionalPropertiesSerializer
+    {
+        private readonly Func<IInterceptorSubject, Dictionary<string, object>?>? _getProperties;
+        private readonly Action<IInterceptorSubject, Dictionary<string, JsonElement>>? _setProperties;
+
+        public TestAdditionalPropertiesSerializer(
+            Func<IInterceptorSubject, Dictionary<string, object>?>? getProperties = null,
+            Action<IInterceptorSubject, Dictionary<string, JsonElement>>? setProperties = null)
+        {
+            _getProperties = getProperties;
+            _setProperties = setProperties;
+        }
+
+        public Dictionary<string, object>? GetAdditionalProperties(IInterceptorSubject subject)
+            => _getProperties?.Invoke(subject);
+
+        public void SetAdditionalProperties(IInterceptorSubject subject, Dictionary<string, JsonElement> properties)
+            => _setProperties?.Invoke(subject, properties);
     }
 
     #endregion

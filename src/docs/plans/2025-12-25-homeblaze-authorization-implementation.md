@@ -3,6 +3,46 @@
 **Date**: 2025-12-25
 **Design Document**: `2025-12-25-homeblaze-authorization-design.md`
 
+---
+
+## Implementation Status (Updated 2025-12-26)
+
+### Completed Tasks
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 1-2 | Project Structure & Options | ✅ Complete |
+| 3-7 | Identity & Database (DbContext, RoleExpander, Claims, Seeding) | ✅ Complete |
+| 8-12 | Authorization Core (Attributes, Resolver, Interceptor, Method Auth, Context) | ✅ Complete |
+| 13-16 | Auth UI (Login, Logout, SetPassword, Account, App.razor) | ✅ Complete |
+| 17-18 | Admin UI (Users, Roles Management) | ✅ Complete |
+| 19a | Subject Authorization Panel (dialog) | ✅ Complete |
+| 19 Integration | Authorization button in browser UI | ✅ Complete |
+| 19b | Property Authorization Icon in grid | ✅ Complete |
+| 19c | Method Authorization Icon next to buttons | ✅ Complete |
+| 20 | Navigation Filtering | ✅ Complete |
+| 21 | Subject Browser Filtering | ✅ Complete |
+| 22 | Property/Method Filtering | ✅ Complete |
+| 23-25 | DI Integration, ServiceCollectionExtensions | ✅ Complete |
+| 26 | RevalidatingAuthStateProvider | ✅ Complete |
+
+### Pending/Deferred Tasks
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 27 | Audit Logging | ⏳ Optional, not implemented |
+
+### Implementation Notes
+
+1. **Admin Pages**: Changed from HttpClient to direct UserManager/RoleManager injection (Blazor Server can't use HttpClient for auth cookies)
+2. **Role Hierarchy**: Fully database-driven, editable via Role Management UI
+3. **SubjectAuthorizationPanel**: Opens as dialog from browser UI (🔒 button), Admin-only
+4. **UI Filtering**: Properties, methods, subjects, and navigation items filtered based on user's expanded roles
+5. **Property Authorization Icons**: Lock icon next to each property (Admin-only), filled if override exists, shows read-only indicator for non-writable properties
+6. **Method Authorization Icons**: Lock icon next to each method button (Admin-only), filled if override exists
+
+---
+
 ## Implementation Decisions
 
 | Question | Decision |
@@ -31,6 +71,110 @@
 | HTTPS | ASP.NET Core | `UseHttpsRedirection()` - only redirects if HTTPS configured |
 
 **No open questions - all resolved with framework defaults or simple custom settings.**
+
+---
+
+## Implementation Deviations (Discovered During Development)
+
+**Date**: 2025-12-26
+
+These deviations from the original plan were discovered during implementation and should be followed.
+
+### Critical: Blazor Server Cookie Authentication
+
+**Problem**: In Blazor Server, `HttpClient` runs server-side and doesn't share cookie storage with the browser. When the API sets an authentication cookie, the browser never receives it.
+
+**Microsoft's Recommendation**: ASP.NET Core Identity is designed for HTTP request/response. Microsoft recommends Razor Pages for Identity UI in Blazor apps.
+
+**Our Solution**: Use traditional HTML `<form method="post">` that submits directly to the API endpoint, letting the browser handle the HTTP request and cookie storage.
+
+### Deviation 1: Login/Logout - Use Form POST, Not HttpClient
+
+- Use `<form method="post" action="/api/auth/login">` (NOT EditForm/HttpClient)
+- API endpoints use `Results.Redirect()` for responses, not JSON
+- Errors passed via query parameter: `/login?ErrorMessage=...`
+- Logout page redirects to GET endpoint: `Navigation.NavigateTo("/api/auth/logout", forceLoad: true)`
+
+### Deviation 2: MudBlazor Components Don't Support Form POST Name Attribute
+
+MudBlazor components don't render standard HTML `<input>` elements with `name` attributes required for form POST.
+
+**Solution**: Use MudBlazor components with hidden form inputs that sync via Blazor binding:
+```razor
+<form method="post" action="/api/auth/login">
+    <!-- Hidden inputs for form POST -->
+    <input type="hidden" name="Username" value="@_username" />
+    <input type="hidden" name="Password" value="@_password" />
+    <input type="hidden" name="RememberMe" value="@(_rememberMe ? "true" : "")" />
+
+    <!-- MudBlazor components for UI -->
+    <MudTextField T="string" Label="Username" @bind-Value="_username" />
+    <MudTextField T="string" Label="Password" @bind-Value="_password" InputType="InputType.Password" />
+    <MudCheckBox T="bool" @bind-Value="_rememberMe" Label="Remember me" />
+
+    <MudButton ButtonType="ButtonType.Submit">Sign In</MudButton>
+</form>
+
+@code {
+    private string _username = "";
+    private string _password = "";
+    private bool _rememberMe = false;
+}
+```
+
+This approach:
+- Uses MudBlazor for all UI components (proper styling, behavior)
+- Syncs values to hidden inputs via Blazor binding
+- Form POST submits the hidden input values to the API
+
+**Important**: Use `Immediate="true"` on MudTextField components. Without it, binding updates on blur (focus loss), so if user clicks submit directly the hidden inputs won't have the latest values.
+
+**For checkboxes**: Only render the hidden input when checked:
+```razor
+@if (_rememberMe)
+{
+    <input type="hidden" name="RememberMe" value="true" />
+}
+```
+This avoids sending empty string which fails to bind to `bool?`.
+
+### Deviation 3: HTML Checkbox Doesn't Submit When Unchecked
+
+HTML checkboxes only submit values when checked.
+
+**Solution**: Make bool parameters nullable with default:
+```csharp
+[FromForm] bool? rememberMe  // NOT [FromForm] bool rememberMe
+// Usage: rememberMe ?? false
+```
+
+### Deviation 4: MapRazorComponents Needs AdditionalAssemblies
+
+When using `forceLoad: true` navigation, server-side routing needs to know about components in other assemblies.
+
+**Solution**: Add `AddAdditionalAssemblies()` to BOTH locations:
+```csharp
+// Program.cs - for server-side routing on forceLoad:true
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode()
+    .AddAdditionalAssemblies(
+        typeof(HomeBlaze.Host.Components.HomeBlazorComponentBase).Assembly,
+        typeof(HomeBlaze.Authorization.Blazor.Pages.Login).Assembly);
+
+// Router - for client-side Blazor navigation (already existed)
+```
+
+### Deviation 5: Enum Renamed
+
+`Kind` enum renamed to `AuthorizationEntity` for clarity.
+
+### Deviation 6: Anonymous Access by Default
+
+Use `RouteView` instead of `AuthorizeRouteView` - authorization enforced at action level, not page level.
+
+### Deviation 7: User Menu Component Added
+
+Added `UserMenu.razor` to MainLayout showing login icon when not authenticated, user menu with logout when authenticated.
 
 ---
 
@@ -2174,21 +2318,35 @@ dotnet test src/HomeBlaze/HomeBlaze.Host.Services.Tests
 
 **Summary**: Login form with local auth, OAuth buttons, and logout
 
-**Implementation**:
+**⚠️ SEE DEVIATIONS SECTION** - This task was significantly modified during implementation.
+
+**Implementation** (Updated):
 1. Create `Login.razor` page at `/login`
-2. Username/password form with validation
-3. Remember me checkbox
-4. Dynamically show OAuth provider buttons from config
-5. Error handling for failed login
-6. **Create `/logout` endpoint** (POST, signs out, redirects to home)
+2. Use `<form method="post" action="/api/auth/login">` (NOT EditForm/HttpClient - see Deviation 1)
+3. Use standard HTML inputs with MudBlazor CSS classes (see Deviation 2)
+4. Handle errors via `[SupplyParameterFromQuery] ErrorMessage` query parameter
+5. Create `Logout.razor` that redirects to `/api/auth/logout` with `forceLoad: true`
+6. Create API endpoints in `AuthenticationEndpoints.cs`:
+   - POST `/api/auth/login` - accepts `[FromForm]` parameters, returns `Results.Redirect()`
+   - POST `/api/auth/set-password` - for first-time password setup
+   - GET/POST `/api/auth/logout` - signs out and redirects
+7. Use nullable `bool?` for rememberMe checkbox (see Deviation 3)
+8. Add `.DisableAntiforgery()` to endpoints (add CSRF later)
+
+**Files Created**:
+- `HomeBlaze.Authorization/Endpoints/AuthenticationEndpoints.cs`
+- `HomeBlaze.Authorization.Blazor/Pages/Login.razor`
+- `HomeBlaze.Authorization.Blazor/Pages/SetPassword.razor`
+- `HomeBlaze.Authorization.Blazor/Pages/Logout.razor`
+- `HomeBlaze.Authorization.Blazor/Components/UserMenu.razor`
 
 **Subtasks**:
 - [ ] Tests: Component render tests
 - [ ] Docs: N/A
-- [ ] Code quality: MudBlazor components
-- [ ] Dependencies: No new dependencies
+- [ ] Code quality: HTML inputs with MudBlazor CSS (not MudBlazor components)
+- [ ] Dependencies: `System.Web` for `HttpUtility.UrlEncode`
 - [ ] Performance: N/A
-- [ ] Security: Don't reveal if username exists, generic error messages, antiforgery token
+- [ ] Security: Don't reveal if username exists, generic error messages
 
 ---
 
@@ -2389,12 +2547,21 @@ dotnet test src/HomeBlaze/HomeBlaze.Host.Services.Tests
 
 **Subtasks**:
 - [ ] Tests: Component tests for each pane
-- [ ] Tests: Override persistence tests
-- [ ] Docs: N/A
-- [ ] Code quality: Consistent with existing subject editors
-- [ ] Dependencies: No new dependencies
-- [ ] Performance: Lazy load property/method lists
-- [ ] UX: Highlight overridden items in grid
+- [x] Tests: Override persistence tests (implemented with configuration writer)
+- [x] Docs: N/A
+- [x] Code quality: Consistent with existing subject editors
+- [x] Dependencies: Added HomeBlaze.Storage.Abstractions for IConfigurationWriter
+- [x] Performance: Lazy load property/method lists
+- [x] UX: Highlight overridden items in grid (filled lock icon with warning color)
+
+**Status**: ✅ IMPLEMENTED (2025-12-26)
+
+**Implementation Notes**:
+- `SubjectAuthorizationPanel.razor` created as MudDialog with property/method-specific editing
+- Supports PropertyName, MethodName, PropertyEntity, MethodEntity parameters for targeted editing
+- Rows are highlighted with primary background color and arrow icon when editing property/method
+- Configuration persistence via IConfigurationWriter (traverses parent hierarchy to find writer)
+- Lock icons added to properties and methods with override indication (filled vs outlined)
 
 ---
 
@@ -2410,10 +2577,17 @@ dotnet test src/HomeBlaze/HomeBlaze.Host.Services.Tests
 
 **Subtasks**:
 - [ ] Tests: Menu visibility tests
-- [ ] Docs: N/A
-- [ ] Code quality: N/A
-- [ ] Dependencies: No new dependencies
-- [ ] Performance: N/A
+- [x] Docs: N/A
+- [x] Code quality: N/A
+- [x] Dependencies: No new dependencies
+- [x] Performance: N/A
+
+**Status**: ✅ IMPLEMENTED (2025-12-26)
+
+**Implementation Notes**:
+- `NavMenu.razor` updated with `CanReadSubject()` filtering
+- `NavFolder.razor` updated with authorization filtering for child items
+- Uses IAuthorizationResolver.ResolveSubjectRoles and IRoleExpander for role checks
 
 ---
 
@@ -2428,10 +2602,17 @@ dotnet test src/HomeBlaze/HomeBlaze.Host.Services.Tests
 
 **Subtasks**:
 - [ ] Tests: Filtering tests
-- [ ] Docs: N/A
-- [ ] Code quality: N/A
-- [ ] Dependencies: No new dependencies
-- [ ] Performance: Cache accessible subjects per user, hierarchical filtering
+- [x] Docs: N/A
+- [x] Code quality: N/A
+- [x] Dependencies: No new dependencies
+- [x] Performance: Cache accessible subjects per user, hierarchical filtering
+
+**Status**: ✅ IMPLEMENTED (2025-12-26)
+
+**Implementation Notes**:
+- Implemented directly in `SubjectPropertyPanel.razor` via `GetFilteredChildren()` and `CanReadChildSubject()`
+- No separate service created - filtering integrated into existing component
+- Uses cached user roles from authentication state
 
 ---
 
@@ -2447,10 +2628,18 @@ dotnet test src/HomeBlaze/HomeBlaze.Host.Services.Tests
 
 **Subtasks**:
 - [ ] Tests: UI access tests
-- [ ] Docs: N/A
-- [ ] Code quality: Consistent styling
-- [ ] Dependencies: No new dependencies
-- [ ] Performance: Cache access checks per render
+- [x] Docs: N/A
+- [x] Code quality: Consistent styling
+- [x] Dependencies: No new dependencies
+- [x] Performance: Cache access checks per render
+
+**Status**: ✅ IMPLEMENTED (2025-12-26)
+
+**Implementation Notes**:
+- Property filtering via `CanReadProperty()` and `CanWriteProperty()` methods
+- Method filtering already existed via invoke authorization checks
+- Properties hidden when user cannot read, shown read-only when user can read but not write
+- Disabled controls styled appropriately
 
 ---
 
@@ -2594,12 +2783,23 @@ var context = SubjectContextFactory.Create(app.Services, builder.Services);
 
 **Summary**: Configure middleware and services in HomeBlaze.Host
 
-**Implementation**:
+**⚠️ SEE DEVIATIONS SECTION** - Additional configuration required for server-side routing.
+
+**Implementation** (Updated):
 1. Add `builder.Services.AddHomeBlazeAuthorization()`
-2. Add `app.UseAuthentication()`
-3. Add `app.UseAuthorization()`
-4. Add authorization context middleware (populates AsyncLocal)
-5. Ensure proper middleware ordering
+2. Add `builder.Services.AddHttpContextAccessor()`
+3. Add `app.UseAuthentication()`
+4. Add `app.UseAuthorization()`
+5. Add `app.MapAuthenticationEndpoints()` for login/logout API
+6. **Add `AddAdditionalAssemblies()` to `MapRazorComponents()`** (see Deviation 4):
+   ```csharp
+   app.MapRazorComponents<App>()
+       .AddInteractiveServerRenderMode()
+       .AddAdditionalAssemblies(
+           typeof(HomeBlaze.Host.Components.HomeBlazorComponentBase).Assembly,
+           typeof(HomeBlaze.Authorization.Blazor.Pages.Login).Assembly);
+   ```
+7. Ensure proper middleware ordering
 
 **Subtasks**:
 - [ ] Tests: Startup tests

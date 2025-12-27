@@ -1,0 +1,236 @@
+@using HomeBlaze.Authorization.Blazor.Utilities
+@using HomeBlaze.Authorization.Extensions
+
+@inject UserManager<ApplicationUser> UserManager
+@inject RoleManager<IdentityRole> RoleManager
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudForm @ref="_form" @bind-IsValid="_isValid">
+            <MudTextField T="string"
+                          @bind-Value="User.UserName"
+                          Label="Username"
+                          Required="true"
+                          RequiredError="Username is required"
+                          Disabled="@(!IsNew)"
+                          Variant="Variant.Outlined"
+                          Class="mb-4" />
+
+            <MudTextField T="string"
+                          @bind-Value="User.Email"
+                          Label="Email"
+                          InputType="InputType.Email"
+                          Variant="Variant.Outlined"
+                          Class="mb-4" />
+
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Roles</MudText>
+            @if (_availableRoles.Any())
+            {
+                <MudStack Spacing="1" Class="mb-4">
+                    @foreach (var role in _availableRoles)
+                    {
+                        var isSelected = _selectedRoleSet.Contains(role.Name);
+                        <MudCheckBox T="bool"
+                                     Value="@isSelected"
+                                     ValueChanged="@(v => ToggleRole(role.Name, v))"
+                                     Color="@GetRoleColor(role.Name)"
+                                     Dense="true">
+                            <MudChip T="string"
+                                     Size="Size.Small"
+                                     Color="@GetRoleColor(role.Name)"
+                                     Variant="@(isSelected ? Variant.Filled : Variant.Outlined)">
+                                @role.Name
+                            </MudChip>
+                        </MudCheckBox>
+                    }
+                </MudStack>
+            }
+            else
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+            }
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   Variant="Variant.Filled"
+                   OnClick="Submit"
+                   Disabled="@(!_isValid || _saving)">
+            @if (_saving)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            @(IsNew ? "Create" : "Save")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public bool IsNew { get; set; }
+
+    [Parameter]
+    public UserDto User { get; set; } = new();
+
+    private MudForm _form = null!;
+    private bool _isValid;
+    private bool _saving;
+    private List<RoleDto> _availableRoles = [];
+    private HashSet<string> _selectedRoleSet = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadRoles();
+        _selectedRoleSet = User.Roles.ToHashSet();
+    }
+
+    private void ToggleRole(string roleName, bool selected)
+    {
+        if (selected)
+        {
+            _selectedRoleSet.Add(roleName);
+        }
+        else
+        {
+            _selectedRoleSet.Remove(roleName);
+        }
+    }
+
+    private async Task LoadRoles()
+    {
+        try
+        {
+            var roles = await RoleManager.Roles
+                .OrderBy(r => r.Name)
+                .ToListAsync();
+
+            _availableRoles = roles
+                .Where(r => r.Name != null)
+                .Select(r => new RoleDto { Id = r.Id, Name = r.Name! })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading roles: {ex.Message}", Severity.Error);
+            // Fallback to default roles (excluding Anonymous - can't be assigned to users)
+            _availableRoles = DefaultRoles.AllRoles
+                .Where(r => r != DefaultRoles.Anonymous)
+                .Select(r => new RoleDto { Name = r })
+                .ToList();
+        }
+    }
+
+    private static Color GetRoleColor(string role) => RoleDisplayUtility.GetRoleColor(role);
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Submit()
+    {
+        await _form.Validate();
+        if (!_isValid) return;
+
+        _saving = true;
+        try
+        {
+            if (IsNew)
+            {
+                await CreateUser();
+            }
+            else
+            {
+                await UpdateUser();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task CreateUser()
+    {
+        var user = new ApplicationUser
+        {
+            UserName = User.UserName,
+            Email = User.Email,
+            MustChangePassword = true
+        };
+
+        var result = await UserManager.CreateAsync(user);
+        if (!result.Succeeded)
+        {
+            Snackbar.Add($"Failed to create user: {result.GetErrorMessage()}", Severity.Error);
+            return;
+        }
+
+        // Add roles
+        if (_selectedRoleSet.Count > 0)
+        {
+            var roleResult = await UserManager.AddToRolesAsync(user, _selectedRoleSet);
+            if (!roleResult.Succeeded)
+            {
+                    Snackbar.Add($"User created but failed to assign roles: {roleResult.GetErrorMessage()}", Severity.Warning);
+            }
+        }
+
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private async Task UpdateUser()
+    {
+        var user = await UserManager.FindByIdAsync(User.Id);
+        if (user == null)
+        {
+            Snackbar.Add("User not found", Severity.Error);
+            return;
+        }
+
+        // Update email
+        if (user.Email != User.Email)
+        {
+            user.Email = User.Email;
+            var updateResult = await UserManager.UpdateAsync(user);
+            if (!updateResult.Succeeded)
+            {
+                Snackbar.Add($"Failed to update user: {updateResult.GetErrorMessage()}", Severity.Error);
+                return;
+            }
+        }
+
+        // Update roles
+        var currentRoles = await UserManager.GetRolesAsync(user);
+        var rolesToRemove = currentRoles.Except(_selectedRoleSet).ToList();
+        var rolesToAdd = _selectedRoleSet.Except(currentRoles).ToList();
+
+        if (rolesToRemove.Any())
+        {
+            var removeResult = await UserManager.RemoveFromRolesAsync(user, rolesToRemove);
+            if (!removeResult.Succeeded)
+            {
+                Snackbar.Add($"Failed to remove roles: {removeResult.GetErrorMessage()}", Severity.Error);
+                return;
+            }
+        }
+
+        if (rolesToAdd.Any())
+        {
+            var addResult = await UserManager.AddToRolesAsync(user, rolesToAdd);
+            if (!addResult.Succeeded)
+            {
+                Snackbar.Add($"Failed to add roles: {addResult.GetErrorMessage()}", Severity.Error);
+                return;
+            }
+        }
+
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

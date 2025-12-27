@@ -5,6 +5,9 @@
 @inject NavigationItemResolver NavigationResolver
 @inject NavigationManager NavigationManager
 @inject ILogger<NavMenu> Logger
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IAuthorizationResolver AuthorizationResolver
+@inject IRoleExpander RoleExpander
 
 @implements IDisposable
 
@@ -39,8 +42,9 @@
 @code {
     private Timer? _refreshTimer;
     private string _currentPath = string.Empty;
+    private IReadOnlySet<string>? _userExpandedRoles;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         // Periodically refresh to catch new files
         _refreshTimer = new Timer(_ => InvokeAsync(StateHasChanged),
@@ -48,6 +52,35 @@
 
         NavigationManager.LocationChanged += OnLocationChanged;
         UpdateCurrentPath();
+
+        await LoadUserRolesAsync();
+    }
+
+    private async Task LoadUserRolesAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            if (user.Identity?.IsAuthenticated == true)
+            {
+                var userRoles = user.Claims
+                    .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role)
+                    .Select(c => c.Value)
+                    .ToList();
+                _userExpandedRoles = RoleExpander.ExpandRoles(userRoles);
+            }
+            else
+            {
+                // Anonymous user gets Anonymous role
+                _userExpandedRoles = RoleExpander.ExpandRoles(["Anonymous"]);
+            }
+        }
+        catch
+        {
+            // Fallback to anonymous if auth state can't be determined
+            _userExpandedRoles = RoleExpander.ExpandRoles(["Anonymous"]);
+        }
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
@@ -68,13 +101,30 @@
 
         try
         {
-            return NavigationResolver.GetChildItems(RootManager.Root);
+            var items = NavigationResolver.GetChildItems(RootManager.Root);
+
+            // Filter items based on user's read access
+            return items.Where(CanReadSubject);
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Error getting navigation items");
             return Enumerable.Empty<NavigationItem>();
         }
+    }
+
+    private bool CanReadSubject(NavigationItem item)
+    {
+        if (_userExpandedRoles == null)
+            return true; // No roles loaded yet, show all
+
+        var requiredRoles = AuthorizationResolver.ResolveSubjectRoles(
+            item.Subject,
+            AuthorizationEntity.State,
+            AuthorizationAction.Read);
+
+        // Check if user has any of the required roles
+        return requiredRoles.Any(r => _userExpandedRoles.Contains(r));
     }
 
     public void Dispose()

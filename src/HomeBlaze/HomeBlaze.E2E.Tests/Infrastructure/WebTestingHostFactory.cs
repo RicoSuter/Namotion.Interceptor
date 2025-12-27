@@ -1,15 +1,16 @@
-using HomeBlaze.Components;
+using HomeBlaze.Authorization.Data;
+using HomeBlaze.Authorization.Roles;
+using HomeBlaze.Authorization.Services;
 using HomeBlaze.Samples;
-using HomeBlaze.Servers.OpcUa;
-using HomeBlaze.Servers.OpcUa.Blazor;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
-using HomeBlaze.Storage.Blazor.Files;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
 namespace HomeBlaze.E2E.Tests.Infrastructure;
@@ -42,6 +43,21 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
 
         // Use test-specific root configuration to avoid loading HomeBlaze's Data folder
         builder.UseSetting("HomeBlaze:RootConfigFile", "testRoot.json");
+
+        // Override the AuthorizationDbContext to use an in-memory SQLite database
+        // This ensures each test run starts with a fresh database
+        builder.ConfigureServices(services =>
+        {
+            // Remove the existing DbContext registration
+            services.RemoveAll<DbContextOptions<AuthorizationDbContext>>();
+            services.RemoveAll<AuthorizationDbContext>();
+
+            // Add in-memory SQLite database for testing
+            // Using a unique connection string per factory instance
+            var connectionString = $"DataSource=file:e2etest_{Guid.NewGuid():N}?mode=memory&cache=shared";
+            services.AddDbContext<AuthorizationDbContext>(options =>
+                options.UseSqlite(connectionString));
+        });
     }
 
     private void EnsureServer()
@@ -73,6 +89,10 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
 
         _kestrelHost.Start();
 
+        // After IdentitySeeding has run, add role composition so Anonymous includes Admin
+        // This allows E2E tests to run without authentication
+        ConfigureAnonymousAsAdminAsync(_kestrelHost.Services).GetAwaiter().GetResult();
+
         // Get the address from Kestrel
         var server = _kestrelHost.Services.GetRequiredService<IServer>();
         var addresses = server.Features.Get<IServerAddressesFeature>();
@@ -86,6 +106,30 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         // Start the TestServer host to satisfy the base class
         testHost.Start();
         return testHost;
+    }
+
+    /// <summary>
+    /// Configures the Anonymous role to include Admin role for E2E testing.
+    /// This allows tests to run without authentication while keeping
+    /// the security attributes on methods.
+    /// </summary>
+    private static async Task ConfigureAnonymousAsAdminAsync(IServiceProvider services)
+    {
+        using var scope = services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AuthorizationDbContext>();
+
+        // Add role composition: Anonymous includes Admin
+        // This effectively gives anonymous users admin privileges in tests
+        dbContext.RoleCompositions.Add(new RoleComposition
+        {
+            RoleName = DefaultRoles.Anonymous,
+            IncludesRole = DefaultRoles.Admin
+        });
+        await dbContext.SaveChangesAsync();
+
+        // Reload the RoleExpander to pick up the new composition
+        var roleExpander = services.GetRequiredService<IRoleExpander>();
+        await roleExpander.ReloadAsync();
     }
 
     protected override void Dispose(bool disposing)

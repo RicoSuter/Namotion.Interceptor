@@ -1,0 +1,336 @@
+@page "/admin/users"
+@attribute [Authorize(Roles = "Admin")]
+
+@using HomeBlaze.Authorization.Blazor.Utilities
+@using HomeBlaze.Authorization.Extensions
+
+@inject UserManager<ApplicationUser> UserManager
+@inject RoleManager<IdentityRole> RoleManager
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
+    <MudText Typo="Typo.h4" Class="mb-4">User Management</MudText>
+
+    <MudPaper Class="pa-4 mb-4">
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string"
+                              @bind-Value="_searchText"
+                              Placeholder="Search users..."
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Immediate="true"
+                              DebounceInterval="300"
+                              OnDebounceIntervalElapsed="SearchUsers" />
+            </MudItem>
+            <MudItem xs="12" md="6" Class="d-flex justify-end">
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="OpenCreateDialog">
+                    Add User
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <MudTable Items="@_users"
+              Dense="true"
+              Hover="true"
+              Loading="@_loading"
+              LoadingProgressColor="Color.Primary">
+        <HeaderContent>
+            <MudTh>Username</MudTh>
+            <MudTh>Email</MudTh>
+            <MudTh>Roles</MudTh>
+            <MudTh>Last Login</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh Style="width: 150px">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Username">@context.UserName</MudTd>
+            <MudTd DataLabel="Email">@context.Email</MudTd>
+            <MudTd DataLabel="Roles">
+                <MudChipSet T="string" ReadOnly="true">
+                    @foreach (var role in context.Roles.Take(3))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="@GetRoleColor(role)">@role</MudChip>
+                    }
+                    @if (context.Roles.Count > 3)
+                    {
+                        <MudChip T="string" Size="Size.Small">+@(context.Roles.Count - 3)</MudChip>
+                    }
+                </MudChipSet>
+            </MudTd>
+            <MudTd DataLabel="Last Login">
+                @if (context.LastLoginAt.HasValue)
+                {
+                    @context.LastLoginAt.Value.ToLocalTime().ToString("g")
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Never</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Status">
+                @if (context.LockoutEnd.HasValue && context.LockoutEnd > DateTimeOffset.UtcNow)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error">Locked</MudChip>
+                }
+                else if (context.MustChangePassword)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning">Password Reset Required</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Active</MudChip>
+                }
+            </MudTd>
+            <MudTd DataLabel="Actions">
+                <MudTooltip Text="Edit">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                   Size="Size.Small"
+                                   OnClick="@(() => OpenEditDialog(context))" />
+                </MudTooltip>
+                @if (context.LockoutEnd.HasValue && context.LockoutEnd > DateTimeOffset.UtcNow)
+                {
+                    <MudTooltip Text="Unlock">
+                        <MudIconButton Icon="@Icons.Material.Filled.LockOpen"
+                                       Size="Size.Small"
+                                       Color="Color.Warning"
+                                       OnClick="@(() => UnlockUser(context))" />
+                    </MudTooltip>
+                }
+                <MudTooltip Text="Reset Password">
+                    <MudIconButton Icon="@Icons.Material.Filled.Key"
+                                   Size="Size.Small"
+                                   OnClick="@(() => ResetPassword(context))" />
+                </MudTooltip>
+                <MudTooltip Text="Delete">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                   Size="Size.Small"
+                                   Color="Color.Error"
+                                   OnClick="@(() => DeleteUser(context))" />
+                </MudTooltip>
+            </MudTd>
+        </RowTemplate>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new[] { 10, 20, 50 }" />
+        </PagerContent>
+    </MudTable>
+</MudContainer>
+
+@code {
+    private List<UserDto> _users = [];
+    private string _searchText = "";
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsers();
+    }
+
+    private async Task LoadUsers()
+    {
+        _loading = true;
+        try
+        {
+            var query = UserManager.Users.AsQueryable();
+
+            if (!string.IsNullOrEmpty(_searchText))
+            {
+                query = query.Where(u =>
+                    u.UserName!.Contains(_searchText) ||
+                    (u.Email != null && u.Email.Contains(_searchText)));
+            }
+
+            var users = await query
+                .OrderBy(u => u.UserName)
+                .Take(100)
+                .ToListAsync();
+
+            _users = [];
+            foreach (var user in users)
+            {
+                var roles = await UserManager.GetRolesAsync(user);
+                _users.Add(new UserDto
+                {
+                    Id = user.Id,
+                    UserName = user.UserName!,
+                    Email = user.Email,
+                    LastLoginAt = user.LastLoginAt,
+                    MustChangePassword = user.MustChangePassword,
+                    LockoutEnd = user.LockoutEnd,
+                    Roles = roles.ToList()
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading users: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SearchUsers()
+    {
+        await LoadUsers();
+    }
+
+    private static Color GetRoleColor(string role) => RoleDisplayUtility.GetRoleColor(role);
+
+    private async Task OpenCreateDialog()
+    {
+        var parameters = new DialogParameters<UserDialog>
+        {
+            { x => x.IsNew, true },
+            { x => x.User, new UserDto() }
+        };
+
+        var dialog = await DialogService.ShowAsync<UserDialog>("Create User", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            await LoadUsers();
+            Snackbar.Add("User created successfully", Severity.Success);
+        }
+    }
+
+    private async Task OpenEditDialog(UserDto user)
+    {
+        var parameters = new DialogParameters<UserDialog>
+        {
+            { x => x.IsNew, false },
+            { x => x.User, user }
+        };
+
+        var dialog = await DialogService.ShowAsync<UserDialog>("Edit User", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            await LoadUsers();
+            Snackbar.Add("User updated successfully", Severity.Success);
+        }
+    }
+
+    private async Task DeleteUser(UserDto user)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete User",
+            $"Are you sure you want to delete user '{user.UserName}'? This action cannot be undone.",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            try
+            {
+                var appUser = await UserManager.FindByIdAsync(user.Id);
+                if (appUser == null)
+                {
+                    Snackbar.Add("User not found", Severity.Error);
+                    return;
+                }
+
+                // Check if this is the last admin
+                if (await UserManager.IsInRoleAsync(appUser, DefaultRoles.Admin))
+                {
+                    var adminUsers = await UserManager.GetUsersInRoleAsync(DefaultRoles.Admin);
+                    if (adminUsers.Count <= 1)
+                    {
+                        Snackbar.Add("Cannot delete the last admin user", Severity.Error);
+                        return;
+                    }
+                }
+
+                var result = await UserManager.DeleteAsync(appUser);
+                if (result.Succeeded)
+                {
+                    await LoadUsers();
+                    Snackbar.Add("User deleted successfully", Severity.Success);
+                }
+                else
+                {
+                    Snackbar.Add($"Failed to delete user: {result.GetErrorMessage()}", Severity.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private async Task ResetPassword(UserDto user)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Reset Password",
+            $"Reset password for user '{user.UserName}'? They will need to set a new password on next login.",
+            yesText: "Reset",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            try
+            {
+                var appUser = await UserManager.FindByIdAsync(user.Id);
+                if (appUser == null)
+                {
+                    Snackbar.Add("User not found", Severity.Error);
+                    return;
+                }
+
+                // Remove existing password and set flag
+                if (await UserManager.HasPasswordAsync(appUser))
+                {
+                    await UserManager.RemovePasswordAsync(appUser);
+                }
+
+                appUser.MustChangePassword = true;
+                await UserManager.UpdateAsync(appUser);
+
+                await LoadUsers();
+                Snackbar.Add("Password reset. User must set new password on next login.", Severity.Success);
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private async Task UnlockUser(UserDto user)
+    {
+        try
+        {
+            var appUser = await UserManager.FindByIdAsync(user.Id);
+            if (appUser == null)
+            {
+                Snackbar.Add("User not found", Severity.Error);
+                return;
+            }
+
+            var result = await UserManager.SetLockoutEndDateAsync(appUser, null);
+            if (result.Succeeded)
+            {
+                await LoadUsers();
+                Snackbar.Add("User unlocked successfully", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("Failed to unlock user", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+}

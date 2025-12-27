@@ -2,6 +2,7 @@ using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
@@ -451,6 +452,7 @@ public partial class FluentStorageContainer :
     /// Opens the create subject wizard to add a new subject to this storage.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
+    [SubjectMethodAuthorize("Admin")]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 

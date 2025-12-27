@@ -1,0 +1,65 @@
+@using HomeBlaze.Authorization.Data
+@using Microsoft.AspNetCore.Identity
+@using System.Web
+
+@inject NavigationManager Navigation
+
+<AuthorizeView>
+    <Authorized>
+        <MudMenu Icon="@Icons.Material.Filled.AccountCircle" Color="Color.Inherit" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+            <ChildContent>
+                <MudMenuItem Disabled="true">
+                    <MudText Typo="Typo.body2">@context.User.Identity?.Name</MudText>
+                </MudMenuItem>
+                <MudDivider />
+                <MudMenuItem Href="/account" Icon="@Icons.Material.Filled.Person">
+                    Account
+                </MudMenuItem>
+                <AuthorizeView Roles="Admin" Context="adminContext">
+                    <Authorized>
+                        <MudDivider />
+                        <MudMenuItem Href="/admin/users" Icon="@Icons.Material.Filled.Group">
+                            User Management
+                        </MudMenuItem>
+                        <MudMenuItem Href="/admin/roles" Icon="@Icons.Material.Filled.AdminPanelSettings">
+                            Role Management
+                        </MudMenuItem>
+                    </Authorized>
+                </AuthorizeView>
+                <MudDivider />
+                <MudMenuItem Href="/logout" Icon="@Icons.Material.Filled.Logout">
+                    Logout
+                </MudMenuItem>
+            </ChildContent>
+        </MudMenu>
+    </Authorized>
+    <NotAuthorized>
+        <MudMenu Icon="@Icons.Material.Filled.AccountCircle" Color="Color.Inherit" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+            <ChildContent>
+                <MudMenuItem Disabled="true">
+                    <MudText Typo="Typo.body2">Anonymous</MudText>
+                </MudMenuItem>
+                <MudDivider />
+                <MudMenuItem Href="/account" Icon="@Icons.Material.Filled.Person">
+                    My Account
+                </MudMenuItem>
+                <MudDivider />
+                <MudMenuItem Href="@GetLoginUrl()" Icon="@Icons.Material.Filled.Login">
+                    Login
+                </MudMenuItem>
+            </ChildContent>
+        </MudMenu>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private string GetLoginUrl()
+    {
+        var currentUri = Navigation.ToBaseRelativePath(Navigation.Uri);
+        if (string.IsNullOrEmpty(currentUri) || currentUri == "login")
+        {
+            return "/login";
+        }
+        return $"/login?returnUrl={HttpUtility.UrlEncode("/" + currentUri)}";
+    }
+}
