@@ -30,8 +30,8 @@ public static class SubjectDisplayExtensions
     /// </summary>
     public static string GetIconName(this IInterceptorSubject subject)
     {
-        if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.Icon))
-            return iconProvider.Icon;
+        if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.IconName))
+            return iconProvider.IconName;
 
         return DefaultIconName;
     }

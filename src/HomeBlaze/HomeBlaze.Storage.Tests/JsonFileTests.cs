@@ -17,7 +17,7 @@ public class JsonFileTests
         var storage = CreateMockStorage();
 
         // Act
-        var file = new HomeBlaze.Storage.Files.JsonFile(storage, "data/config.json");
+        var file = new Files.JsonFile(storage, "data/config.json");
 
         // Assert
         Assert.Same(storage, file.Storage);
@@ -32,7 +32,7 @@ public class JsonFileTests
         var storage = CreateMockStorage();
 
         // Act
-        var file = new HomeBlaze.Storage.Files.JsonFile(storage, "data/my-config.json");
+        var file = new Files.JsonFile(storage, "data/my-config.json");
 
         // Assert
         Assert.Equal("my-config", file.Title);
@@ -45,9 +45,9 @@ public class JsonFileTests
         var storage = CreateMockStorage();
 
         // Act
-        var file = new HomeBlaze.Storage.Files.JsonFile(storage, "test.json");
+        var file = new Files.JsonFile(storage, "test.json");
 
         // Assert
-        Assert.Equal("DataObject", file.Icon);
+        Assert.Equal("DataObject", file.IconName);
     }
 }

@@ -233,7 +233,7 @@ internal class OpcUaSubjectLoader
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
     {
         var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
-        var monitoredItem = new MonitoredItem
+        var monitoredItem = new MonitoredItem(_configuration.TelemetryContext)
         {
             StartNodeId = nodeId,
             AttributeId = Opc.Ua.Attributes.Value,

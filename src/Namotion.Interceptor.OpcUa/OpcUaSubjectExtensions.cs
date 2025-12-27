@@ -6,6 +6,7 @@ using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry.Paths;
+using Opc.Ua;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -68,14 +69,22 @@ public static class OpcUaSubjectExtensions
         string? pathPrefix = null,
         string? rootName = null)
     {
-        return serviceCollection.AddOpcUaSubjectClientSource(subjectSelector, sp => new OpcUaClientConfiguration
+        return serviceCollection.AddOpcUaSubjectClientSource(subjectSelector, sp =>
         {
-            ServerUrl = serverUrl,
-            RootName = rootName,
-            PathProvider = new AttributeBasedPathProvider(sourceName),
-            TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
-            ValueConverter = new OpcUaValueConverter(),
-            SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+            var telemetryContext = DefaultTelemetry.Create(builder =>
+                builder.Services.AddSingleton(loggerFactory));
+
+            return new OpcUaClientConfiguration
+            {
+                ServerUrl = serverUrl,
+                RootName = rootName,
+                PathProvider = new AttributeBasedPathProvider(sourceName),
+                TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
+                ValueConverter = new OpcUaValueConverter(),
+                SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
+                TelemetryContext = telemetryContext
+            };
         });
     }
 
@@ -132,11 +141,19 @@ public static class OpcUaSubjectExtensions
         string? pathPrefix = null,
         string? rootName = null)
     {
-        return serviceCollection.AddOpcUaSubjectServer(subjectSelector, _ => new OpcUaServerConfiguration
+        return serviceCollection.AddOpcUaSubjectServer(subjectSelector, sp =>
         {
-            RootName = rootName,
-            PathProvider = new AttributeBasedPathProvider(sourceName),
-            ValueConverter = new OpcUaValueConverter()
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+            var telemetryContext = DefaultTelemetry.Create(builder =>
+                builder.Services.AddSingleton(loggerFactory));
+
+            return new OpcUaServerConfiguration
+            {
+                RootName = rootName,
+                PathProvider = new AttributeBasedPathProvider(sourceName),
+                ValueConverter = new OpcUaValueConverter(),
+                TelemetryContext = telemetryContext
+            };
         });
     }
 

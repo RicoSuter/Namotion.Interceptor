@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
@@ -16,6 +17,8 @@ namespace HomeBlaze.Servers.OpcUa;
 /// <summary>
 /// OPC UA server subject that exposes other subjects via OPC UA protocol.
 /// </summary>
+[Category("Servers")]
+[Description("Exposes subjects via OPC UA protocol")]
 [InterceptorSubject]
 public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITitleProvider, IIconProvider, IServerSubject
 {
@@ -94,13 +97,13 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     /// Current server status.
     /// </summary>
     [State]
-    public partial ServerStatus Status { get; set; }
+    public partial ServiceStatus Status { get; set; }
 
     /// <summary>
     /// Error message when Status is Error.
     /// </summary>
     [State]
-    public partial string? ErrorMessage { get; set; }
+    public partial string? StatusMessage { get; set; }
 
     // Operations
 
@@ -116,7 +119,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
 
     [Derived]
     [PropertyAttribute("Start", KnownAttributes.IsEnabled)]
-    public bool Start_IsEnabled => Status == ServerStatus.Stopped || Status == ServerStatus.Error;
+    public bool Start_IsEnabled => Status == ServiceStatus.Stopped || Status == ServiceStatus.Error;
 
     /// <summary>
     /// Stops the OPC UA server and disables auto-start on next application startup.
@@ -130,13 +133,21 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
 
     [Derived]
     [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
-    public bool Stop_IsEnabled => Status is ServerStatus.Running or ServerStatus.Starting; // TODO: Should check state of _serverService
+    public bool Stop_IsEnabled => Status is ServiceStatus.Running or ServiceStatus.Starting; // TODO: Should check state of _serverService
 
     // Interface implementations
 
     public string? Title => Name;
 
-    public string? Icon => "Dns";
+    public string? IconName => "Dns";
+
+    [Derived]
+    public string? IconColor => Status switch
+    {
+        ServiceStatus.Running => "Success",
+        ServiceStatus.Error => "Error",
+        _ => "Warning"
+    };
 
     public OpcUaServer(
         RootManager rootManager,
@@ -149,7 +160,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
 
         Name = string.Empty;
         Path = string.Empty;
-        Status = ServerStatus.Stopped;
+        Status = ServiceStatus.Stopped;
         IsEnabled = true;
     }
 
@@ -184,13 +195,13 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     {
         try
         {
-            Status = ServerStatus.Starting;
-            ErrorMessage = null;
+            Status = ServiceStatus.Starting;
+            StatusMessage = null;
 
             if (string.IsNullOrEmpty(Path))
             {
-                Status = ServerStatus.Error;
-                ErrorMessage = "Path is not configured";
+                Status = ServiceStatus.Error;
+                StatusMessage = "Path is not configured";
                 return;
             }
 
@@ -202,7 +213,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
 
             if (cancellationToken.IsCancellationRequested)
             {
-                Status = ServerStatus.Stopped;
+                Status = ServiceStatus.Stopped;
                 return;
             }
 
@@ -212,8 +223,8 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
                 : _pathResolver.ResolveSubject(Path);
             if (targetSubject == null)
             {
-                Status = ServerStatus.Error;
-                ErrorMessage = $"Could not resolve subject at path: {Path}";
+                Status = ServiceStatus.Error;
+                StatusMessage = $"Could not resolve subject at path: {Path}";
                 return;
             }
 
@@ -241,13 +252,13 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
             _serverService = targetSubject.CreateOpcUaServer(configuration, _logger);
             await this.AttachHostedServiceAsync(_serverService, cancellationToken);
 
-            Status = ServerStatus.Running;
+            Status = ServiceStatus.Running;
             _logger.LogInformation("OPC UA server started for path: {Path}", Path);
         }
         catch (Exception ex)
         {
-            Status = ServerStatus.Error;
-            ErrorMessage = ex.Message;
+            Status = ServiceStatus.Error;
+            StatusMessage = ex.Message;
             _logger.LogError(ex, "Failed to start OPC UA server");
         }
     }
@@ -258,7 +269,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
         {
             try
             {
-                Status = ServerStatus.Stopping;
+                Status = ServiceStatus.Stopping;
                 await this.DetachHostedServiceAsync(_serverService, cancellationToken);
                 _logger.LogInformation("OPC UA server stopped");
             }
@@ -269,7 +280,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
             finally
             {
                 _serverService = null;
-                Status = ServerStatus.Stopped;
+                Status = ServiceStatus.Stopped;
             }
         }
     }

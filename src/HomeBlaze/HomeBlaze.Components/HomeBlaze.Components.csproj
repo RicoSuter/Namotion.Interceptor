@@ -11,7 +11,11 @@
         <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
         <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
         <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Storage.Abstractions\HomeBlaze.Storage.Abstractions.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Blazor\Namotion.Interceptor.Blazor.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
         <PackageReference Include="Markdig" Version="0.*" />
         <PackageReference Include="MudBlazor" Version="8.*" />

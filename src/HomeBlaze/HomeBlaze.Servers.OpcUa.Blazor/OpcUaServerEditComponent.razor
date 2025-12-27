@@ -33,9 +33,9 @@
             <br />
             <MudText Typo="Typo.subtitle2" Class="mb-2">Server Status</MudText>
             <MudText>Status: <strong>@ServerSubject?.Status</strong></MudText>
-            @if (!string.IsNullOrEmpty(ServerSubject?.ErrorMessage))
+            @if (!string.IsNullOrEmpty(ServerSubject?.StatusMessage))
             {
-                <MudAlert Severity="Severity.Error" Class="mt-2">@ServerSubject.ErrorMessage</MudAlert>
+                <MudAlert Severity="Severity.Error" Class="mt-2">@ServerSubject.StatusMessage</MudAlert>
             }
         </MudForm>
     </MudTabPanel>
@@ -89,6 +89,9 @@
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
 
     private OpcUaServer? ServerSubject => Subject as OpcUaServer;
 
