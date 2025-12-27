@@ -19,9 +19,11 @@ public static class SubjectContextFactory
     /// Creates an InterceptorSubjectContext with full tracking, registry,
     /// validation, and hosted service support.
     /// </summary>
-    public static IInterceptorSubjectContext Create(IServiceCollection services)
+    /// <param name="services">The service collection for hosted services registration.</param>
+    /// <param name="serviceProvider">Optional service provider to register on context for DI access from interceptors.</param>
+    public static IInterceptorSubjectContext Create(IServiceCollection services, IServiceProvider? serviceProvider = null)
     {
-        return InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithReadPropertyRecorder()
@@ -33,5 +35,14 @@ public static class SubjectContextFactory
                 handler => handler is MethodPropertyInitializer)
             .WithDataAnnotationValidation()
             .WithHostedServices(services);
+        
+        // Register service provider on context for interceptors that need DI access
+        if (serviceProvider != null)
+        {
+            // TODO: Maybe instead of this we should register a background service which adds the service provider to the context in ctor?
+            context.AddService(serviceProvider);
+        }
+
+        return context;
     }
 }

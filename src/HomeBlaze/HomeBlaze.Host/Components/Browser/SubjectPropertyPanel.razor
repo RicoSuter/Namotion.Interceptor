@@ -1,5 +1,6 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Services
+@using HomeBlaze.Authorization.Blazor.Components
 @using HomeBlaze.Host.Components.Dialogs
 @using HomeBlaze.Services
 @using HomeBlaze.Storage.Abstractions
@@ -9,6 +10,9 @@
 @inject DeveloperModeService DeveloperMode
 @inject ISubjectMethodInvoker MethodInvoker
 @inject IServiceProvider ServiceProvider
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IAuthorizationResolver AuthorizationResolver
+@inject IRoleExpander RoleExpander
 
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
 @if (Subject != null)
@@ -49,6 +53,18 @@
                            Size="Size.Small"
                            Class="mr-2" />
         }
+        <AuthorizeView Roles="Admin">
+            <Authorized>
+                <MudTooltip Text="Authorization">
+                    <MudIconButton OnClick="@OpenAuthorizationDialog"
+                                   Icon="@Icons.Material.Filled.Lock"
+                                   Variant="Variant.Outlined"
+                                   Color="Color.Warning"
+                                   Size="Size.Small"
+                                   Class="mr-2" />
+                </MudTooltip>
+            </Authorized>
+        </AuthorizeView>
     </MudListSubheader>
 
     <div style="max-height: calc(100vh - 300px); overflow-y: auto; overflow-x: hidden;">
@@ -74,19 +90,32 @@
                         var methodProperty = _registeredSubject?.TryGetProperty(methodName);
                         var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
                         var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
-                        <MudButton Variant="Variant.Filled"
-                                   Color="@(isQuery ? Color.Info : Color.Primary)"
-                                   Size="Size.Small"
-                                   FullWidth="true"
-                                   StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
-                                   Disabled="@(_executingOperation == method || !isEnabled)"
-                                   OnClick="@(() => ExecuteMethodAsync(method))">
-                            @if (_executingOperation == method)
-                            {
-                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                            }
-                            @method.Title
-                        </MudButton>
+                        var hasMethodOverride = HasMethodAuthorizationOverride(method);
+                        <div class="d-flex align-center gap-1">
+                            <MudButton Variant="Variant.Filled"
+                                       Color="@(isQuery ? Color.Info : Color.Primary)"
+                                       Size="Size.Small"
+                                       FullWidth="true"
+                                       StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
+                                       Disabled="@(_executingOperation == method || !isEnabled)"
+                                       OnClick="@(() => ExecuteMethodAsync(method))">
+                                @if (_executingOperation == method)
+                                {
+                                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                                }
+                                @method.Title
+                            </MudButton>
+                            <AuthorizeView Roles="Admin">
+                                <Authorized>
+                                    <MudTooltip Text="@(hasMethodOverride ? "Authorization (Override)" : "Authorization")">
+                                        <MudIconButton Icon="@(hasMethodOverride ? Icons.Material.Filled.Lock : Icons.Material.Outlined.Lock)"
+                                                       Size="Size.Small"
+                                                       Color="@(hasMethodOverride ? Color.Warning : Color.Default)"
+                                                       OnClick="@(() => OpenMethodAuthorizationDialog(method))" />
+                                    </MudTooltip>
+                                </Authorized>
+                            </AuthorizeView>
+                        </div>
                     }
                 </MudStack>
             }
@@ -95,7 +124,7 @@
         @* Child Collections *@
         @foreach (var property in GetChildProperties())
         {
-            var children = property.Children;
+            var children = GetFilteredChildren(property);
             @if (children.Length == 1)
             {
                 @* Single child - no expansion panel *@
@@ -189,6 +218,7 @@
 
     private RegisteredSubject? _registeredSubject;
     private SubjectMethodInfo? _executingOperation;
+    private IReadOnlySet<string>? _userExpandedRoles;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -213,7 +243,39 @@
 
     [Parameter]
     public EventCallback OnDelete { get; set; }
-    
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUserRolesAsync();
+    }
+
+    private async Task LoadUserRolesAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            if (user.Identity?.IsAuthenticated == true)
+            {
+                var userRoles = user.Claims
+                    .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role)
+                    .Select(c => c.Value)
+                    .ToList();
+                _userExpandedRoles = RoleExpander.ExpandRoles(userRoles);
+            }
+            else
+            {
+                // Anonymous user gets Anonymous role
+                _userExpandedRoles = RoleExpander.ExpandRoles(["Anonymous"]);
+            }
+        }
+        catch
+        {
+            // Fallback to anonymous if auth state can't be determined
+            _userExpandedRoles = RoleExpander.ExpandRoles(["Anonymous"]);
+        }
+    }
+
     protected override void OnParametersSet()
     {
         base.OnParametersSet();
@@ -259,8 +321,42 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => p.GetStateAttribute() != null && !HasChildSubjects(p))
+            .Where(p => p.GetStateAttribute() != null && !HasChildSubjects(p) && CanReadProperty(p))
             .OrderBy(p => p.GetDisplayPosition());
+    }
+
+    private bool CanReadProperty(RegisteredSubjectProperty property)
+    {
+        if (Subject == null || _userExpandedRoles == null)
+            return true;
+
+        var entity = property.IsConfigurationProperty()
+            ? AuthorizationEntity.Configuration
+            : AuthorizationEntity.State;
+
+        var requiredRoles = AuthorizationResolver.ResolvePropertyRoles(
+            new PropertyReference(Subject, property.Name),
+            entity,
+            AuthorizationAction.Read);
+
+        return requiredRoles.Any(r => _userExpandedRoles.Contains(r));
+    }
+
+    private bool CanWriteProperty(RegisteredSubjectProperty property)
+    {
+        if (Subject == null || _userExpandedRoles == null)
+            return true;
+
+        var entity = property.IsConfigurationProperty()
+            ? AuthorizationEntity.Configuration
+            : AuthorizationEntity.State;
+
+        var requiredRoles = AuthorizationResolver.ResolvePropertyRoles(
+            new PropertyReference(Subject, property.Name),
+            entity,
+            AuthorizationAction.Write);
+
+        return requiredRoles.Any(r => _userExpandedRoles.Contains(r));
     }
 
     private IEnumerable<RegisteredSubjectProperty> GetChildProperties()
@@ -288,8 +384,10 @@
         var isExpanded = _expandedProperties.Contains(prop.Name);
         var marginLeft = depth * 24;
         var displayName = prop.IsAttribute ? prop.AttributeMetadata.AttributeName : GetPropertyDisplayName(prop);
+        var hasOverride = HasPropertyAuthorizationOverride(prop);
+        var isReadOnly = !CanWriteProperty(prop);
 
-        <MudText Style="@($"margin-left: {marginLeft}px; {(value is null ? "opacity: 0.5" : "")}")">
+        <MudText Style="@($"margin-left: {marginLeft}px; {(value is null ? "opacity: 0.5" : "")} {(isReadOnly ? "font-style: italic;" : "")}")">
             @if (hasAttributes)
             {
                 <MudIconButton Icon="@(isExpanded ? Icons.Material.Filled.ArrowDropDown : Icons.Material.Filled.ArrowRight)"
@@ -304,6 +402,23 @@
             }
             <strong>@displayName: </strong>
             @prop.GetPropertyDisplayValue(value)
+            <AuthorizeView Roles="Admin">
+                <Authorized>
+                    <MudTooltip Text="@(hasOverride ? "Authorization (Override)" : "Authorization")">
+                        <MudIconButton Icon="@(hasOverride ? Icons.Material.Filled.Lock : Icons.Material.Outlined.Lock)"
+                                       Size="Size.Small"
+                                       Color="@(hasOverride ? Color.Warning : Color.Default)"
+                                       Style="padding: 0; width: 16px; height: 16px; margin-left: 4px;"
+                                       OnClick="@(() => OpenPropertyAuthorizationDialog(prop))" />
+                    </MudTooltip>
+                </Authorized>
+            </AuthorizeView>
+            @if (isReadOnly)
+            {
+                <MudTooltip Text="Read-only">
+                    <MudIcon Icon="@Icons.Material.Filled.VisibilityOff" Size="Size.Small" Color="Color.Default" Style="margin-left: 4px; opacity: 0.5;" />
+                </MudTooltip>
+            }
         </MudText>
 
         @if (isExpanded)
@@ -342,7 +457,105 @@
 
         return registered.Properties
             .Where(p => !p.IsAttribute && HasChildSubjects(p))
-            .Sum(p => p.Children.Length);
+            .Sum(p => GetFilteredChildren(p).Length);
+    }
+
+    private SubjectPropertyChild[] GetFilteredChildren(RegisteredSubjectProperty property)
+    {
+        return property.Children.Where(CanReadChildSubject).ToArray();
+    }
+
+    private bool CanReadChildSubject(SubjectPropertyChild child)
+    {
+        if (_userExpandedRoles == null)
+            return true;
+
+        var requiredRoles = AuthorizationResolver.ResolveSubjectRoles(
+            child.Subject,
+            AuthorizationEntity.State,
+            AuthorizationAction.Read);
+
+        return requiredRoles.Any(r => _userExpandedRoles.Contains(r));
+    }
+
+    private const string AuthorizationDataKeyPrefix = "HomeBlaze.Authorization:";
+
+    private bool HasPropertyAuthorizationOverride(RegisteredSubjectProperty property)
+    {
+        if (Subject == null) return false;
+
+        var entity = property.IsConfigurationProperty()
+            ? AuthorizationEntity.Configuration
+            : AuthorizationEntity.State;
+
+        // Check for Read or Write override
+        var readKey = $"{AuthorizationDataKeyPrefix}{entity}:{AuthorizationAction.Read}";
+        var writeKey = $"{AuthorizationDataKeyPrefix}{entity}:{AuthorizationAction.Write}";
+
+        return Subject.Data.ContainsKey((property.Name, readKey)) ||
+               Subject.Data.ContainsKey((property.Name, writeKey));
+    }
+
+    private async Task OpenPropertyAuthorizationDialog(RegisteredSubjectProperty property)
+    {
+        if (Subject == null) return;
+
+        var entity = property.IsConfigurationProperty()
+            ? AuthorizationEntity.Configuration
+            : AuthorizationEntity.State;
+
+        var title = $"{GetSubjectTitle()} - {property.GetDisplayName()}";
+        var parameters = new DialogParameters<SubjectAuthorizationPanel>
+        {
+            { x => x.Subject, Subject },
+            { x => x.PropertyName, property.Name },
+            { x => x.PropertyEntity, entity }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true
+        };
+
+        await DialogService.ShowAsync<SubjectAuthorizationPanel>($"Authorization: {title}", parameters, options);
+    }
+
+    private bool HasMethodAuthorizationOverride(SubjectMethodInfo method)
+    {
+        if (Subject == null) return false;
+
+        var entity = method.Kind == SubjectMethodKind.Query
+            ? AuthorizationEntity.Query
+            : AuthorizationEntity.Operation;
+
+        var invokeKey = $"{AuthorizationDataKeyPrefix}{entity}:{AuthorizationAction.Invoke}";
+        return Subject.Data.ContainsKey((method.MethodInfo.Name, invokeKey));
+    }
+
+    private async Task OpenMethodAuthorizationDialog(SubjectMethodInfo method)
+    {
+        if (Subject == null) return;
+
+        var entity = method.Kind == SubjectMethodKind.Query
+            ? AuthorizationEntity.Query
+            : AuthorizationEntity.Operation;
+
+        var title = $"{GetSubjectTitle()} - {method.Title}";
+        var parameters = new DialogParameters<SubjectAuthorizationPanel>
+        {
+            { x => x.Subject, Subject },
+            { x => x.MethodName, method.MethodInfo.Name },
+            { x => x.MethodEntity, entity }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true
+        };
+
+        await DialogService.ShowAsync<SubjectAuthorizationPanel>($"Authorization: {title}", parameters, options);
     }
 
     public record PropertyClickEventArgs(string PropertyName, object? Index, IInterceptorSubject Subject);
@@ -367,8 +580,52 @@
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
     }
 
-    private IReadOnlyList<SubjectMethodInfo> GetMethods() =>
-        _registeredSubject?.GetAllMethods() ?? [];
+    private async Task OpenAuthorizationDialog()
+    {
+        if (Subject == null) return;
+
+        var title = GetSubjectTitle();
+        var parameters = new DialogParameters<SubjectAuthorizationPanel>
+        {
+            { x => x.Subject, Subject }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true
+        };
+
+        await DialogService.ShowAsync<SubjectAuthorizationPanel>($"Authorization: {title}", parameters, options);
+    }
+
+    private IReadOnlyList<SubjectMethodInfo> GetMethods()
+    {
+        var allMethods = _registeredSubject?.GetAllMethods() ?? [];
+
+        // Filter methods based on user authorization
+        if (Subject == null || _userExpandedRoles == null)
+            return allMethods;
+
+        return allMethods
+            .Where(CanInvokeMethod)
+            .ToList();
+    }
+
+    private bool CanInvokeMethod(SubjectMethodInfo method)
+    {
+        if (Subject == null || _userExpandedRoles == null)
+            return true;
+
+        var entity = method.Kind == SubjectMethodKind.Query
+            ? AuthorizationEntity.Query
+            : AuthorizationEntity.Operation;
+
+        var requiredRoles = AuthorizationResolver.ResolveMethodRoles(Subject, entity, method.MethodInfo.Name);
+
+        // Check if user has any of the required roles
+        return requiredRoles.Any(r => _userExpandedRoles.Contains(r));
+    }
 
     private async Task ExecuteMethodAsync(SubjectMethodInfo operation)
     {

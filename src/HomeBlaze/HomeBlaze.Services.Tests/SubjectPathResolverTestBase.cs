@@ -22,7 +22,7 @@ public abstract class SubjectPathResolverTestBase
         var services = new ServiceCollection();
         var serviceProvider = services.BuildServiceProvider();
 
-        var serializer = new ConfigurableSubjectSerializer(typeProvider, serviceProvider);
+        var serializer = new ConfigurableSubjectSerializer(typeProvider, serviceProvider, []);
 
         Context = InterceptorSubjectContext
             .Create()

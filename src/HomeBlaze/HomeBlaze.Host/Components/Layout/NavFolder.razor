@@ -1,5 +1,9 @@
 @using HomeBlaze.Components.Abstractions.Pages
 
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IAuthorizationResolver AuthorizationResolver
+@inject IRoleExpander RoleExpander
+
 <MudNavGroup Title="@Item.Title" Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(Item.Icon)" Expanded="_expanded" ExpandedChanged="OnExpandedChanged">
     @if (_expanded && _children != null)
     {
@@ -34,6 +38,37 @@
     private bool _expanded;
     private List<NavigationItem>? _children;
     private string? _lastCurrentPath;
+    private IReadOnlySet<string>? _userExpandedRoles;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUserRolesAsync();
+    }
+
+    private async Task LoadUserRolesAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            if (user.Identity?.IsAuthenticated == true)
+            {
+                var userRoles = user.Claims
+                    .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role)
+                    .Select(c => c.Value)
+                    .ToList();
+                _userExpandedRoles = RoleExpander.ExpandRoles(userRoles);
+            }
+            else
+            {
+                _userExpandedRoles = RoleExpander.ExpandRoles(["Anonymous"]);
+            }
+        }
+        catch
+        {
+            _userExpandedRoles = RoleExpander.ExpandRoles(["Anonymous"]);
+        }
+    }
 
     protected override void OnParametersSet()
     {
@@ -44,7 +79,7 @@
             if (!string.IsNullOrEmpty(CurrentPath) && IsCurrentPageInFolder())
             {
                 _expanded = true;
-                _children ??= NavigationResolver.GetChildItems(Item.Subject).ToList();
+                _children ??= GetFilteredChildren();
             }
         }
     }
@@ -64,7 +99,26 @@
         _expanded = expanded;
         if (_expanded && _children == null)
         {
-            _children = NavigationResolver.GetChildItems(Item.Subject).ToList();
+            _children = GetFilteredChildren();
         }
+    }
+
+    private List<NavigationItem> GetFilteredChildren()
+    {
+        var items = NavigationResolver.GetChildItems(Item.Subject);
+        return items.Where(CanReadSubject).ToList();
+    }
+
+    private bool CanReadSubject(NavigationItem item)
+    {
+        if (_userExpandedRoles == null)
+            return true;
+
+        var requiredRoles = AuthorizationResolver.ResolveSubjectRoles(
+            item.Subject,
+            AuthorizationEntity.State,
+            AuthorizationAction.Read);
+
+        return requiredRoles.Any(r => _userExpandedRoles.Contains(r));
     }
 }
