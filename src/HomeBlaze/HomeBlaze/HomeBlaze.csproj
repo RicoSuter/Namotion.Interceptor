@@ -11,6 +11,7 @@
         <PackageReference Include="CodeBeam.MudBlazor.Extensions" Version="8.3.0" />
         <ProjectReference Include="..\..\Namotion.Devices.Gpio.HomeBlaze\Namotion.Devices.Gpio.HomeBlaze.csproj" />
         <ProjectReference Include="..\..\Namotion.Devices.Gpio\Namotion.Devices.Gpio.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Authorization.Blazor\HomeBlaze.Authorization.Blazor.csproj" />
         <ProjectReference Include="..\HomeBlaze.Host\HomeBlaze.Host.csproj" />
         <ProjectReference Include="..\HomeBlaze.Samples\HomeBlaze.Samples.csproj" />
         <ProjectReference Include="..\HomeBlaze.Servers.OpcUa\HomeBlaze.Servers.OpcUa.csproj" />

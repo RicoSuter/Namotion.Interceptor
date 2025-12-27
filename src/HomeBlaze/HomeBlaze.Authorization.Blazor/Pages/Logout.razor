@@ -1,0 +1,20 @@
+@page "/logout"
+
+@inject NavigationManager Navigation
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-8">
+    <MudCard>
+        <MudCardContent Class="text-center">
+            <MudProgressCircular Indeterminate="true" Class="mb-4" />
+            <MudText Typo="Typo.body1">Signing out...</MudText>
+        </MudCardContent>
+    </MudCard>
+</MudContainer>
+
+@code {
+    protected override void OnInitialized()
+    {
+        // Redirect to logout endpoint which will clear the cookie and redirect to home
+        Navigation.NavigateTo("/api/auth/logout", forceLoad: true);
+    }
+}

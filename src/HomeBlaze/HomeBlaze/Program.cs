@@ -1,3 +1,6 @@
+using HomeBlaze.Authorization.Endpoints;
+using HomeBlaze.Authorization.Extensions;
+using HomeBlaze.Authorization.Middleware;
 using HomeBlaze.Components;
 using HomeBlaze.Host;
 using HomeBlaze.Samples;
@@ -17,7 +20,22 @@ var builder = WebApplication.CreateBuilder(args);
 // This registers the singleton IInterceptorSubjectContext with HostedServiceHandler
 builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
+builder.Services.AddHomeBlazeAuthorization();
 builder.Services.AddHotKeys2();
+
+// Add HttpClient for authentication API calls from Blazor components
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpClient("Auth") // TODO: Unnamed? It's the default client to access itself
+    .ConfigureHttpClient((serviceProvider, client) =>
+    {
+        var httpContextAccessor = serviceProvider.GetRequiredService<IHttpContextAccessor>();
+        var request = httpContextAccessor.HttpContext?.Request;
+        if (request != null)
+        {
+            var baseAddress = $"{request.Scheme}://{request.Host}";
+            client.BaseAddress = new Uri(baseAddress);
+        }
+    });
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -46,10 +64,22 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseAuthorizationContext(); // Populates AuthorizationContext for interceptors
+
 app.UseAntiforgery();
+
+// Map authentication and admin API endpoints
+app.MapAuthenticationEndpoints();
+app.MapAdminEndpoints();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .AddAdditionalAssemblies(
+        typeof(HomeBlaze.Host.Components.HomeBlazorComponentBase).Assembly,
+        typeof(HomeBlaze.Authorization.Blazor.Pages.Login).Assembly);
 
 app.Run();

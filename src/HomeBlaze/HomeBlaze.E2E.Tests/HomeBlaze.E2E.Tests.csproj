@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HomeBlaze\HomeBlaze.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Authorization\HomeBlaze.Authorization.csproj" />
   </ItemGroup>
 
   <ItemGroup>

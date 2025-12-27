@@ -1,0 +1,270 @@
+@page "/account"
+
+@using HomeBlaze.Authorization.Blazor.Utilities
+
+@inject AuthenticationStateProvider AuthStateProvider
+@inject UserManager<ApplicationUser> UserManager
+@inject IRoleExpander RoleExpander
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-8">
+    <MudText Typo="Typo.h4" Class="mb-4">My Account</MudText>
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-4" ShowCloseIcon="true" CloseIconClicked="() => ErrorMessage = null">
+            @ErrorMessage
+        </MudAlert>
+    }
+
+    @if (!string.IsNullOrEmpty(SuccessMessage))
+    {
+        <MudAlert Severity="Severity.Success" Class="mb-4" ShowCloseIcon="true" CloseIconClicked="() => SuccessMessage = null">
+            @SuccessMessage
+        </MudAlert>
+    }
+
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else if (!_isAuthenticated)
+    {
+        <!-- Anonymous User View -->
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudCard>
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">Current Status</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudAlert Severity="Severity.Info" Class="mb-4">
+                            You are not logged in. You are accessing the system as an anonymous user.
+                        </MudAlert>
+                        <MudButton Href="/login?returnUrl=%2Faccount"
+                                   Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Login">
+                            Login
+                        </MudButton>
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudCard>
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">Active Roles</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudText Typo="Typo.subtitle2" Class="mb-2">Your Role</MudText>
+                        <MudChipSet T="string" ReadOnly="true" Class="mb-4">
+                            <MudChip T="string" Color="Color.Default" Size="Size.Small">Anonymous</MudChip>
+                        </MudChipSet>
+
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+                            As an anonymous user, you have limited access to the system.
+                        </MudText>
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        </MudGrid>
+    }
+    else if (_user != null)
+    {
+        <MudGrid>
+            <!-- Profile Section -->
+            <MudItem xs="12" md="6">
+                <MudCard>
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">Profile</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudTextField T="string"
+                                      Label="Username"
+                                      Value="@_user.UserName"
+                                      ReadOnly="true"
+                                      Variant="Variant.Outlined"
+                                      Class="mb-4" />
+
+                        <MudTextField T="string"
+                                      Label="Email"
+                                      Value="@_user.Email"
+                                      ReadOnly="true"
+                                      Variant="Variant.Outlined"
+                                      Class="mb-4" />
+
+                        @if (_user.LastLoginAt.HasValue)
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                Last login: @_user.LastLoginAt.Value.ToLocalTime().ToString("g")
+                            </MudText>
+                        }
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+
+            <!-- Roles Section -->
+            <MudItem xs="12" md="6">
+                <MudCard>
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">Roles & Permissions</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        @if (_directRoles.Any())
+                        {
+                            <MudText Typo="Typo.subtitle2" Class="mb-2">Assigned Roles</MudText>
+                            <MudChipSet T="string" ReadOnly="true" Class="mb-4">
+                                @foreach (var role in _directRoles)
+                                {
+                                    <MudChip T="string" Color="Color.Primary" Size="Size.Small">@role</MudChip>
+                                }
+                            </MudChipSet>
+                        }
+
+                        @if (_expandedRoles.Except(_directRoles).Any())
+                        {
+                            <MudText Typo="Typo.subtitle2" Class="mb-2">Inherited Roles</MudText>
+                            <MudChipSet T="string" ReadOnly="true" Class="mb-4">
+                                @foreach (var role in _expandedRoles.Except(_directRoles).OrderBy(r => r))
+                                {
+                                    <MudChip T="string" Color="Color.Default" Size="Size.Small">@role</MudChip>
+                                }
+                            </MudChipSet>
+                        }
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+
+            <!-- Change Password Section -->
+            <MudItem xs="12">
+                <MudCard>
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">Change Password</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <form method="post" action="/api/auth/change-password">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="CurrentPassword" value="@_currentPassword" />
+                            <input type="hidden" name="NewPassword" value="@_newPassword" />
+                            <input type="hidden" name="ConfirmPassword" value="@_confirmPassword" />
+
+                            <MudGrid>
+                                <MudItem xs="12" md="4">
+                                    <MudTextField T="string"
+                                                  Label="Current Password"
+                                                  @bind-Value="_currentPassword"
+                                                  Immediate="true"
+                                                  InputType="InputType.Password"
+                                                  Variant="Variant.Outlined"
+                                                  Required="true" />
+                                </MudItem>
+                                <MudItem xs="12" md="4">
+                                    <MudTextField T="string"
+                                                  Label="New Password"
+                                                  @bind-Value="_newPassword"
+                                                  Immediate="true"
+                                                  InputType="InputType.Password"
+                                                  Variant="Variant.Outlined"
+                                                  Required="true"
+                                                  HelperText="@GetPasswordHelperText()"
+                                                  Error="@(!string.IsNullOrEmpty(_newPassword) && !IsPasswordValid())" />
+                                </MudItem>
+                                <MudItem xs="12" md="4">
+                                    <MudTextField T="string"
+                                                  Label="Confirm Password"
+                                                  @bind-Value="_confirmPassword"
+                                                  Immediate="true"
+                                                  InputType="InputType.Password"
+                                                  Variant="Variant.Outlined"
+                                                  Required="true"
+                                                  Error="@(!string.IsNullOrEmpty(_confirmPassword) && _newPassword != _confirmPassword)"
+                                                  ErrorText="Passwords do not match" />
+                                </MudItem>
+                            </MudGrid>
+
+                            @if (!string.IsNullOrEmpty(_newPassword))
+                            {
+                                <MudProgressLinear Color="@GetStrengthColor()" Value="@GetStrengthValue()" Class="my-4" />
+                            }
+
+                            <MudButton ButtonType="ButtonType.Submit"
+                                       Variant="Variant.Filled"
+                                       Color="Color.Primary"
+                                       Class="mt-4"
+                                       Disabled="@(!CanSubmitPassword())">
+                                Change Password
+                            </MudButton>
+                        </form>
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        </MudGrid>
+    }
+</MudContainer>
+
+@code {
+    [SupplyParameterFromQuery]
+    public string? ErrorMessage { get; set; }
+
+    [SupplyParameterFromQuery]
+    public string? SuccessMessage { get; set; }
+
+    private bool _loading = true;
+    private bool _isAuthenticated;
+    private ApplicationUser? _user;
+    private IEnumerable<string> _directRoles = [];
+    private IEnumerable<string> _expandedRoles = [];
+
+    private string _currentPassword = "";
+    private string _newPassword = "";
+    private string _confirmPassword = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            _isAuthenticated = authState.User.Identity?.IsAuthenticated == true;
+
+            if (_isAuthenticated)
+            {
+                _user = await UserManager.GetUserAsync(authState.User);
+                if (_user != null)
+                {
+                    _directRoles = await UserManager.GetRolesAsync(_user);
+                    _expandedRoles = RoleExpander.ExpandRoles(_directRoles);
+                }
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private bool IsPasswordValid() => PasswordStrengthUtility.IsValid(_newPassword);
+
+    private bool CanSubmitPassword()
+    {
+        return !string.IsNullOrEmpty(_currentPassword) &&
+               IsPasswordValid() &&
+               !string.IsNullOrEmpty(_confirmPassword) &&
+               _newPassword == _confirmPassword;
+    }
+
+    private string GetPasswordHelperText() => PasswordStrengthUtility.GetHelperText(_newPassword);
+
+    private int GetStrengthValue() => PasswordStrengthUtility.GetStrengthPercentage(_newPassword);
+
+    private Color GetStrengthColor() => PasswordStrengthUtility.GetStrengthColor(_newPassword);
+}
