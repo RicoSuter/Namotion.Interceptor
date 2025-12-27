@@ -14,17 +14,17 @@ internal class OpcUaSubjectLoader
 
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
-    private readonly HashSet<PropertyReference> _propertiesWithOpcData;
+    private readonly SourceOwnershipManager _ownership;
     private readonly OpcUaSubjectClientSource _source;
 
     public OpcUaSubjectLoader(
         OpcUaClientConfiguration configuration,
-        HashSet<PropertyReference> propertiesWithOpcData,
+        SourceOwnershipManager ownership,
         OpcUaSubjectClientSource source,
         ILogger logger)
     {
         _configuration = configuration;
-        _propertiesWithOpcData = propertiesWithOpcData;
+        _ownership = ownership;
         _source = source;
         _logger = logger;
     }
@@ -197,6 +197,8 @@ internal class OpcUaSubjectLoader
 
         property.SetValueFromSource(_source, null, collection);
 
+        // TODO(perf): Consider parallelizing child subject loading with Task.WhenAll.
+        // Requires making monitoredItems and loadedSubjects thread-safe (e.g., ConcurrentBag, ConcurrentHashSet).
         foreach (var child in children)
         {
             await LoadSubjectAsync(child.Subject, child.Node, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
@@ -248,8 +250,15 @@ internal class OpcUaSubjectLoader
         };
 
         property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
-        _propertiesWithOpcData.Add(property.Reference);
-        
+
+        if (!_ownership.ClaimSource(property.Reference))
+        {
+            _logger.LogError(
+                "Property {Subject}.{Property} already owned by another source. Skipping OPC UA monitoring.",
+                property.Subject.GetType().Name, property.Name);
+            return;
+        }
+
         monitoredItems.Add(monitoredItem);
     }
 

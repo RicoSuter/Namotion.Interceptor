@@ -47,6 +47,7 @@ public sealed class PropertyChangeQueue : IWriteInterceptor, IDisposable
         }
     }
 
+    /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         // ReSharper disable once InconsistentlySynchronizedField

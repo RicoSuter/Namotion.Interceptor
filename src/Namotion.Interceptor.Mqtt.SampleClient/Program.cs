@@ -27,7 +27,7 @@ context.AddService(root);
 
 builder.Services.AddSingleton(root);
 builder.Services.AddHostedService<ClientWorker>();
-builder.Services.AddMqttSubjectClient(
+builder.Services.AddMqttSubjectClientSource(
     _ => root,
     _ => new MqttClientConfiguration
     {

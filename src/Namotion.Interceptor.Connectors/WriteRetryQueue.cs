@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking.Change;
@@ -102,8 +103,9 @@ internal sealed class WriteRetryQueue : IDisposable
         {
             return false;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Error acquiring flush semaphore");
             return false;
         }
 
@@ -143,31 +145,16 @@ internal sealed class WriteRetryQueue : IDisposable
                 }
 
                 var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);
-                try
+                var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
+                if (result.Error is not null)
                 {
-                    await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception e)
-                {
-                    _logger.LogWarning(e, "Failed to flush {Count} queued writes to source, re-queuing.", count);
-
-                    // Insert at front to preserve order
-                    lock (_lock)
-                    {
-                        _pendingWrites.InsertRange(0, memory.ToArray());
-                        Volatile.Write(ref _count, _pendingWrites.Count);
-                    }
-
+                    _logger.LogWarning(result.Error, "Failed to flush {Count} queued writes to source, re-queuing failed items.", count);
+                    RequeueChanges(result.FailedChanges);
+                    Array.Clear(_scratchBuffer, 0, count);
                     return false;
                 }
-                finally
-                {
-                    // Null out references to allow GC (SubjectPropertyChange contains object refs)
-                    for (var i = 0; i < count; i++)
-                    {
-                        _scratchBuffer[i] = default;
-                    }
-                }
+
+                Array.Clear(_scratchBuffer, 0, count);
             }
 
             return true;
@@ -175,6 +162,15 @@ internal sealed class WriteRetryQueue : IDisposable
         finally
         {
             try { _flushSemaphore.Release(); } catch { /* might be disposed already */ }
+        }
+    }
+
+    private void RequeueChanges(ImmutableArray<SubjectPropertyChange> changes)
+    {
+        lock (_lock)
+        {
+            _pendingWrites.InsertRange(0, changes);
+            Volatile.Write(ref _count, _pendingWrites.Count);
         }
     }
 

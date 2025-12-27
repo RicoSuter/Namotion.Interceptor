@@ -4,8 +4,12 @@ using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Validation;
 
+/// <summary>
+/// Interceptor that validates property values using registered validators before writing.
+/// </summary>
 public class ValidationInterceptor : IWriteInterceptor
 {
+    /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         var validators = context.Property.Subject.Context.GetServices<IPropertyValidator>();
