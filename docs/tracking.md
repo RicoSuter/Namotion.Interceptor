@@ -42,7 +42,7 @@ context
     {
         Console.WriteLine(
             $"Property '{change.Property.Name}' changed " +
-            $"from '{change.GetOldValue<object>()}' to '{change.GetNewValue<object>()}'.");
+            $"from '{change.GetOldValue<object?>()}' to '{change.GetNewValue<object?>()}'.");
     });
 
 var person = new Person(context)
@@ -78,7 +78,7 @@ while (subscription.TryDequeue(out var change, cancellationToken))
 {
     Console.WriteLine(
         $"Property '{change.Property.Name}' changed " +
-        $"from '{change.GetOldValue<object>()}' to '{change.GetNewValue<object>()}'.");
+        $"from '{change.GetOldValue<object?>()}' to '{change.GetNewValue<object?>()}'.");
 }
 ```
 
@@ -169,7 +169,7 @@ var context = InterceptorSubjectContext
 
 context.GetPropertyChangeObservable().Subscribe(change =>
 {
-    Console.WriteLine($"{change.Property.Name}: {change.GetOldValue<object>()} → {change.GetNewValue<object>()}");
+    Console.WriteLine($"{change.Property.Name}: {change.GetOldValue<object?>()} → {change.GetNewValue<object?>()}");
 });
 
 var person = new Person(context);
