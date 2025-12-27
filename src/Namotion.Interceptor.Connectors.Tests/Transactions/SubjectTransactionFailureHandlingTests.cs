@@ -132,12 +132,11 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_ChangesWithoutSource_RemainSuccessful_WhenSourceFails()
+    public async Task RollbackMode_ChangesWithoutSource_NotApplied_WhenSourceFails()
     {
         // Arrange
-        // Tests that changes without source (NullSource) are always successful,
-        // even in Rollback mode when source writes fail.
-        // In SourceTransactionWriter, changes with NullSource are excluded from rollback.
+        // Tests that in Rollback mode, when source writes fail,
+        // local changes (without source) are NOT applied and are reported as failed.
         var context = CreateContext();
         var person = new Person(context);
 
@@ -149,17 +148,14 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
         // Act
         using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
         person.FirstName = "John";
-        person.LastName = "Doe"; // No source - should be in successful changes
+        person.LastName = "Doe"; // No source - not applied when source fails in Rollback mode
 
         var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
-        // LastName should NOT be applied in Rollback mode (shouldApplyChanges is false)
-        // because the rollback mode check is at SubjectTransaction level, not SourceTransactionWriter
-        // However, the successful changes returned from SourceTransactionWriter should include LastName
-        Assert.Single(ex.FailedChanges);
-        Assert.Single(ex.AppliedChanges); // LastName is in successful changes (written to "NullSource")
-        Assert.Equal(nameof(Person.LastName), ex.AppliedChanges[0].Property.Metadata.Name);
+        // Both changes should be in FailedChanges - FirstName failed to write, LastName wasn't applied
+        Assert.Equal(2, ex.FailedChanges.Count);
+        Assert.Empty(ex.AppliedChanges);
 
         // Nothing applied in rollback mode
         Assert.Null(person.FirstName);

@@ -199,36 +199,15 @@ public sealed class SubjectTransaction : IDisposable
             _isCommitting = true;
 
             var changes = PendingChanges.Values.ToList();
-            try
+
+            // 1. Conflict detection
+            if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
             {
-                if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
+                var conflictingProperties = DetectConflicts(changes);
+                if (conflictingProperties.Count > 0)
                 {
-                    // Check for conflicts at commit time if FailOnConflict behavior is enabled
-                    // Value-based conflict detection: Compare captured OldValue with the current actual value
-
-                    var conflictingProperties = new List<PropertyReference>();
-                    foreach (var change in changes)
-                    {
-                        var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
-                        var capturedOldValue = change.GetOldValue<object?>();
-
-                        if (!Equals(currentValue, capturedOldValue))
-                        {
-                            conflictingProperties.Add(change.Property);
-                        }
-                    }
-
-                    if (conflictingProperties.Count > 0)
-                    {
-                        _isCommitting = false;
-                        throw new TransactionConflictException(conflictingProperties);
-                    }
+                    throw new TransactionConflictException(conflictingProperties);
                 }
-            }
-            catch
-            {
-                _isCommitting = false;
-                throw;
             }
 
             // 2. Create timeout-only token, ignoring user cancellation during commit
@@ -238,64 +217,83 @@ public sealed class SubjectTransaction : IDisposable
                 : new CancellationTokenSource(_commitTimeout);
             var commitToken = timeoutCts?.Token ?? CancellationToken.None;
 
-            // 3. Call write handler on the context (single writer - no context grouping needed)
+            // 3. Call write handler and apply local changes
             var allSuccessfulChanges = new List<SubjectPropertyChange>();
             var allFailedChanges = new List<SubjectPropertyChange>();
             var allErrors = new List<Exception>();
+            var localChangesToApply = new List<SubjectPropertyChange>();
 
             var writeHandler = Context.TryGetService<ITransactionWriter>();
             if (writeHandler != null)
             {
+                // Writer handles source-bound changes and returns local changes for us to apply
                 var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, commitToken);
                 allSuccessfulChanges.AddRange(result.SuccessfulChanges);
                 allFailedChanges.AddRange(result.FailedChanges);
                 allErrors.AddRange(result.Errors);
+                localChangesToApply.AddRange(result.LocalChanges);
+
+                // If source writes failed in Rollback mode, don't apply local changes
+                if (_failureHandling == TransactionFailureHandling.Rollback && allFailedChanges.Count > 0)
+                {
+                    // Local changes are not applied - add them to failed for reporting
+                    allFailedChanges.AddRange(localChangesToApply);
+                    localChangesToApply.Clear();
+                }
             }
             else
             {
-                // No handler configured: All changes are successful
-                allSuccessfulChanges.AddRange(changes);
+                // No writer: all changes are local
+                localChangesToApply.AddRange(changes);
             }
 
-            // 4. Handle mode-specific behavior
-            var shouldApplyChanges = _failureHandling switch
+            // 4. Apply local changes to in-process model
+            if (localChangesToApply.Count > 0)
             {
-                // BestEffort: Apply all successful changes even if some failed
-                TransactionFailureHandling.BestEffort => true,
-                // Rollback: Only apply if ALL changes succeeded
-                TransactionFailureHandling.Rollback => allFailedChanges.Count == 0,
-                _ => true
-            };
+                var (applied, applyFailed, applyErrors) = localChangesToApply.ApplyAll();
+                allSuccessfulChanges.AddRange(applied);
+                allFailedChanges.AddRange(applyFailed);
+                allErrors.AddRange(applyErrors);
 
-            // _isCommitting already set to true above (for conflict detection)
-            try
-            {
-                if (shouldApplyChanges)
+                // In Rollback mode, revert everything if local changes failed
+                if (_failureHandling == TransactionFailureHandling.Rollback && applyFailed.Count > 0)
                 {
-                    // 4. Apply successful changes to in-process model (full interceptor chain runs)
-                    foreach (var change in allSuccessfulChanges)
+                    // Revert successful local applies
+                    var (_, localRevertFailed, localRevertErrors) = applied.ToRollbackChanges().ApplyAll();
+                    allFailedChanges.AddRange(localRevertFailed);
+                    allErrors.AddRange(localRevertErrors);
+
+                    // Revert source-bound changes by calling writer with rollback changes
+                    if (writeHandler != null && allSuccessfulChanges.Count > 0)
                     {
-                        var metadata = change.Property.Metadata;
-                        metadata.SetValue?.Invoke(change.Property.Subject, change.GetNewValue<object?>());
+                        // Use BestEffort for rollback - we want to revert as much as possible
+                        var rollbackResult = await writeHandler.WriteChangesAsync(
+                            allSuccessfulChanges.ToRollbackChanges().ToList(),
+                            TransactionFailureHandling.BestEffort,
+                            TransactionRequirement.None,
+                            commitToken);
+
+                        allFailedChanges.AddRange(rollbackResult.FailedChanges);
+                        allErrors.AddRange(rollbackResult.Errors);
                     }
+
+                    // Clear successful changes since we rolled back
+                    allSuccessfulChanges.Clear();
                 }
             }
-            finally
-            {
-                // 5. Partial cleanup - clear pending changes but let Dispose handle AsyncLocal
-                // AsyncLocal changes in async context don't propagate back to caller
-                PendingChanges.Clear();
-                _isCommitted = true;
-            }
 
-            // 6. Throw if any external writes failed
+            // 5. Cleanup
+            PendingChanges.Clear();
+            _isCommitted = true;
+
+            // 6. Throw if any writes failed
             if (allFailedChanges.Count > 0)
             {
                 var message = _failureHandling switch
                 {
-                    TransactionFailureHandling.BestEffort => "One or more external sources failed. Successfully written changes have been applied.",
-                    TransactionFailureHandling.Rollback => "One or more external sources failed. Rollback was attempted. No changes have been applied to the in-process model.",
-                    _ => "One or more external sources failed."
+                    TransactionFailureHandling.BestEffort => "One or more changes failed. Successfully written changes have been applied.",
+                    TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the in-process model.",
+                    _ => "One or more changes failed."
                 };
 
                 throw new TransactionException(message, allSuccessfulChanges, allFailedChanges, allErrors);
@@ -303,9 +301,29 @@ public sealed class SubjectTransaction : IDisposable
         }
         finally
         {
+            _isCommitting = false;
             // Release the commit lock for Optimistic transactions
             commitLock?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Detects conflicts by comparing captured OldValue with current actual value.
+    /// </summary>
+    private static List<PropertyReference> DetectConflicts(IReadOnlyList<SubjectPropertyChange> changes)
+    {
+        var conflictingProperties = new List<PropertyReference>();
+        foreach (var change in changes)
+        {
+            var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
+            var capturedOldValue = change.GetOldValue<object?>();
+
+            if (!Equals(currentValue, capturedOldValue))
+            {
+                conflictingProperties.Add(change.Property);
+            }
+        }
+        return conflictingProperties;
     }
 
     /// <summary>

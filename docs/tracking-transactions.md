@@ -6,7 +6,7 @@ The `Namotion.Interceptor.Tracking` package provides transaction support for bat
 
 Without transactions, property changes are applied to the in-process model immediately, while external sources synchronize asynchronously in the background. This is suitable when the local model is the source of truth, or eventual consistency is acceptable.
 
-Use transactions when you need guarantees about what was actually persisted to external sources. See [Transaction Modes](#transaction-modes) and [Transaction Requirements](#transaction-requirements) for configuration options.
+Use transactions when you need guarantees about what was actually persisted to external sources.
 
 ## Overview
 
@@ -94,14 +94,14 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
     var pendingChanges = transaction.GetPendingChanges();
     foreach (var change in pendingChanges)
     {
-        Console.WriteLine($"{change.Property.Name}: {change.GetOldValue<object>()} -> {change.GetNewValue<object>()}");
+        Console.WriteLine($"{change.Property.Name}: {change.GetOldValue<object?>()} -> {change.GetNewValue<object?>()}");
     }
 
     await transaction.CommitAsync(cancellationToken);
 }
 ```
 
-## Last-Write-Wins Semantics
+### Last-Write-Wins Semantics
 
 If the same property is written multiple times within a transaction, only the final value is committed:
 
@@ -119,98 +119,32 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 }
 ```
 
-## Commit Timeout and Cancellation
+## Configuration Options
 
-**Default: 30-second timeout** for all commits. Throws `TaskCanceledException` if exceeded.
+### Failure Handling
 
-```csharp
-// Default 30s timeout
-await transaction.CommitAsync(cancellationToken);
-
-// Custom timeout or disable
-using var tx = await context.BeginTransactionAsync(
-    TransactionFailureHandling.Rollback,
-    commitTimeout: TimeSpan.FromSeconds(60)); // Custom
-    // or: commitTimeout: Timeout.InfiniteTimeSpan); // Disable
-```
-
-**Important:** The `cancellationToken` is **ignored during commit** - only the timeout can cancel. This prevents partial commits leaving sources inconsistent (mid-commit cancellation → some sources updated, others not, failed rollbacks).
-
-Timeout protects against hung operations while ensuring commits complete atomically.
-
-## Exception Handling
-
-### Already Committed
-
-Calling `CommitAsync()` twice throws an exception:
-
-```csharp
-using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-{
-    person.FirstName = "John";
-    await transaction.CommitAsync(cancellationToken);
-
-    await transaction.CommitAsync(cancellationToken); // Throws InvalidOperationException
-}
-```
-
-### Disposed Transaction
-
-Using a disposed transaction throws an exception:
-
-```csharp
-var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-transaction.Dispose();
-
-await transaction.CommitAsync(cancellationToken); // Throws ObjectDisposedException
-```
-
-### Nested Transactions
-
-Nested transactions are not supported:
-
-```csharp
-using (var transaction1 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-{
-    using (var transaction2 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort)) // Throws InvalidOperationException
-    {
-    }
-}
-```
-
-## Failure Handling
-
-When creating a transaction, specify a `TransactionFailureHandling` mode to control partial failure behavior:
+Controls behavior when some writes fail during commit.
 
 ```csharp
 using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
-device.Temperature = 25.5;  // Bound to Source A
-device.Pressure = 101.3;    // Bound to Source B
-
-await tx.CommitAsync(cancellationToken);
 ```
 
-Failure modes matter when:
-- Properties are bound to **different external sources** (one may succeed, another fail)
-- A source has `WriteBatchSize` configured (early batches succeed, later batches fail)
+| Value | Description |
+|-------|-------------|
+| `BestEffort` | Apply successful changes even if some fail. Failed changes are reported in `TransactionException`. |
+| `Rollback` | All-or-nothing with best-effort revert of successful writes when any fail. |
 
-### Behavior Comparison
+**Behavior comparison:**
 
 | Scenario | BestEffort | Rollback |
 |----------|------------|----------|
-| **All sources succeed** | All changes applied to model<br>No exception thrown | All changes applied to model<br>No exception thrown |
-| **Source A succeeds,<br>Source B fails** | Source A: keeps new value (25.5)<br>Source B: not updated<br>Model: Temperature=25.5, Pressure=unchanged<br>`TransactionException` thrown | Source A: **reverted** to original<br>Source B: not updated<br>Model: **unchanged** (both old values)<br>`TransactionException` thrown |
-| **Consistency** | Partial updates accepted | All-or-nothing (best effort) |
-| **Performance on failure** | Faster (no revert writes) | Slower (reverts successful sources) |
-| **Use when** | Partial progress acceptable,<br>maximize successful writes | Consistency critical,<br>minimize source divergence |
+| All succeed | All changes applied | All changes applied |
+| Partial failure | Successful changes applied, failed reported | All reverted (best effort) |
+| Use when | Partial progress acceptable | Consistency critical |
 
-**Notes:**
-- Rollback revert is best-effort. If revert also fails, the exception includes both failures.
-- `TransactionException.FailedChanges` contains details of all failures.
+### Locking
 
-## Transaction Locking
-
-Control how concurrent transactions are synchronized:
+Controls how concurrent transactions are synchronized.
 
 ```csharp
 // Exclusive (default) - lock at begin, serializes all transactions
@@ -225,24 +159,23 @@ using var tx = await context.BeginTransactionAsync(
     conflictBehavior: TransactionConflictBehavior.FailOnConflict);
 ```
 
-| Aspect | Exclusive (Default) | Optimistic |
-|--------|---------------------|------------|
-| Lock at Begin | Yes (waits if busy) | No (returns immediately) |
-| During Transaction | Other transactions wait | Multiple transactions run concurrently |
-| Lock at Commit | Already held | Acquires for commit phase |
-| Conflict Detection | N/A (serialized) | Via `FailOnConflict` - throws on concurrent changes |
-| Best For | Short transactions, high contention | Long transactions, low contention |
+| Value | Description |
+|-------|-------------|
+| `Exclusive` | Acquires lock at begin, holds until dispose. Other transactions wait. (default) |
+| `Optimistic` | No lock at begin, acquires only during commit. Multiple transactions can run concurrently. |
 
-**Optimistic conflict example:**
-```csharp
-// If another transaction modified Temperature since we started,
-// CommitAsync will throw TransactionConflictException
-await tx.CommitAsync(cancellationToken);
-```
+### Conflict Behavior
 
-## Transaction Requirements
+Controls how optimistic transactions detect concurrent modifications.
 
-In addition to failure handling, you can specify a `TransactionRequirement` to enforce constraints on the transaction scope. This is particularly useful for industrial protocols like OPC UA where you want to ensure predictable behavior.
+| Value | Description |
+|-------|-------------|
+| `FailOnConflict` | Throw `TransactionConflictException` if values changed since transaction started. (default) |
+| `Ignore` | Overwrite any concurrent changes without checking. |
+
+### Requirements
+
+Enforces constraints on transaction scope, useful for protocols like OPC UA.
 
 ```csharp
 using var tx = await context.BeginTransactionAsync(
@@ -250,92 +183,74 @@ using var tx = await context.BeginTransactionAsync(
     requirement: TransactionRequirement.SingleWrite);
 ```
 
-### None (Default)
+| Value | Description |
+|-------|-------------|
+| `None` | No constraints - multiple sources and batches allowed. (default) |
+| `SingleWrite` | Requires single source and changes within `WriteBatchSize` limit. Validated at commit time. |
 
-No constraints - multiple sources and multiple batches are allowed. This is the default behavior.
+**SingleWrite validation errors:**
+- Multiple sources: `"SingleWrite requirement violated: Transaction spans 2 sources, but only 1 is allowed."`
+- Exceeds batch size: `"SingleWrite requirement violated: Transaction contains 10 changes, but WriteBatchSize is 5."`
 
-### SingleWrite
+### Commit Timeout
 
-The `SingleWrite` requirement ensures that all changes are written in a single `WriteChangesAsync` call. This is validated at commit time and requires:
-
-1. **Single source**: All changes with an associated source must use the same source
-2. **Single batch**: The number of changes must not exceed the source's `WriteBatchSize`
-
-Changes to properties without a source are always allowed and don't count toward these constraints.
+**Default: 30-second timeout** for all commits. Throws `TaskCanceledException` if exceeded.
 
 ```csharp
-// OPC UA scenario: maximum safety with single write requirement
+// Custom timeout
 using var tx = await context.BeginTransactionAsync(
     TransactionFailureHandling.Rollback,
-    TransactionRequirement.SingleWrite);
+    commitTimeout: TimeSpan.FromSeconds(60));
 
-device.Temperature = 25.5;  // Bound to OPC UA source
-device.Pressure = 101.3;    // Same OPC UA source
-
-await tx.CommitAsync(cancellationToken);
-```
-
-**Why use SingleWrite with Rollback?**
-
-For protocols like OPC UA that don't guarantee atomic multi-node writes:
-- `SingleWrite` ensures only one `WriteChangesAsync` call is made
-- If that single write fails (even partially), `Rollback` mode will attempt to revert
-- Since there's only one source and one batch, the rollback is simpler and more reliable
-- Validation fails early (before any writes) if the requirements aren't met
-
-**Validation errors:**
-
-If the requirements aren't met, `CommitAsync()` throws a `TransactionException` with a descriptive error:
-
-```csharp
-// Multiple sources - will fail validation
-new PropertyReference(device, "Temperature").SetSource(opcUaSource);
-new PropertyReference(device, "Pressure").SetSource(mqttSource);  // Different source!
-
+// Disable timeout
 using var tx = await context.BeginTransactionAsync(
     TransactionFailureHandling.Rollback,
-    TransactionRequirement.SingleWrite);
-
-device.Temperature = 25.5;
-device.Pressure = 101.3;
-
-// Throws: "SingleWrite requirement violated: Transaction contains changes for 2 sources, but only 1 is allowed."
-await tx.CommitAsync(cancellationToken);
+    commitTimeout: Timeout.InfiniteTimeSpan);
 ```
 
-## External Source Integration
+**Important:** The `cancellationToken` passed to `CommitAsync()` is **ignored during commit** - only the timeout can cancel. This prevents partial commits leaving sources inconsistent.
 
-Enable external source writes with `WithSourceTransactions()`:
+## Commit Flow
 
-```csharp
-var context = InterceptorSubjectContext
-    .Create()
-    .WithFullPropertyTracking()
-    .WithSourceTransactions(); // Enables external source writes
+When `CommitAsync()` is called, changes are processed in stages. The exact flow depends on whether `WithSourceTransactions()` is configured.
+
+### Without Source Transactions
+
+When only `WithTransactions()` is configured (no external sources):
+
+1. **Apply all changes** to the in-process model (calls property setters, triggers `OnSet*` methods)
+2. If any apply fails and `Rollback` mode: revert successful applies
+3. Fire change notifications
+
+### With Source Transactions
+
+When `WithSourceTransactions()` is configured, commits execute in three stages:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Stage 1: External Sources (parallel)                       │
+│  Write to OPC UA, MQTT, databases, etc.                     │
+│  Properties with SetSource() are processed here             │
+├─────────────────────────────────────────────────────────────┤
+│  Stage 2: Source-Bound Properties                           │
+│  Apply source-bound values to in-process model              │
+│  (After external writes succeed, triggers OnSet* methods)   │
+├─────────────────────────────────────────────────────────────┤
+│  Stage 3: Local Properties                                  │
+│  Apply changes to properties WITHOUT sources                │
+│  (Calls to OnSet* partial methods can throw exceptions)     │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-`CommitAsync()` writes to external sources first (grouped by source, written in batches), then applies to the in-process model. Failures are handled per the `TransactionFailureHandling` mode.
+**Rollback cascade on failure:**
 
-```csharp
-try
-{
-    using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
-    {
-        // These properties are bound to an OPC UA source
-        device.Temperature = 25.5;
-        device.Pressure = 101.3;
+| Failure Stage | What Gets Reverted |
+|---------------|-------------------|
+| External sources fail | Successful external source writes |
+| Source-bound apply fails | Source-bound properties + external sources |
+| Local properties fail | Local + source-bound + external sources |
 
-        await transaction.CommitAsync(cancellationToken);
-    }
-}
-catch (TransactionException ex)
-{
-    foreach (var failure in ex.FailedChanges)
-    {
-        Console.WriteLine($"Failed to write {failure.Change.Property.Name}: {failure.Error?.Message}");
-    }
-}
-```
+Revert operations call setters with old values, which also trigger `OnSet*` methods.
 
 ### Source Association
 
@@ -343,20 +258,87 @@ Properties must be associated with a source for external writes:
 
 ```csharp
 // In your source implementation
-propertyReference.SetSource(this); // Associate property with this source
+propertyReference.SetSource(this);
 
-// Later, when the transaction commits, WriteChangesInBatchesAsync is called on the source
+// On commit, WriteChangesInBatchesAsync is called on the source
 ```
 
-Properties without an associated source are applied directly to the in-process model without external writes.
+Properties without an associated source are applied directly in Stage 3.
 
-## Derived Properties
+## Error Handling
 
-Derived properties (marked with `[Derived]`) are handled specially during transactions:
+### TransactionException
 
-- **During capture**: Derived property recalculation is skipped
-- **During read**: Derived properties return their calculated value based on pending changes
-- **After commit**: Derived properties are recalculated with the committed values
+Thrown when one or more changes fail during commit:
+
+```csharp
+try
+{
+    await transaction.CommitAsync(cancellationToken);
+}
+catch (TransactionException ex)
+{
+    Console.WriteLine($"Failed: {ex.FailedChanges.Count}, Applied: {ex.AppliedChanges.Count}");
+
+    foreach (var change in ex.FailedChanges)
+    {
+        Console.WriteLine($"  {change.Property.Name}: {change.Error?.Message}");
+    }
+}
+```
+
+### TransactionConflictException
+
+Thrown when optimistic locking detects concurrent modifications:
+
+```csharp
+try
+{
+    await transaction.CommitAsync(cancellationToken);
+}
+catch (TransactionConflictException ex)
+{
+    Console.WriteLine($"Conflicts on: {string.Join(", ", ex.ConflictingProperties.Select(p => p.Name))}");
+}
+```
+
+### Other Exceptions
+
+| Exception | Cause |
+|-----------|-------|
+| `InvalidOperationException` | Nested transactions, already committed, transactions not enabled |
+| `ObjectDisposedException` | Using a disposed transaction |
+| `TaskCanceledException` | Commit timeout exceeded |
+
+## Advanced Topics
+
+### Local Property Failures
+
+Properties can fail during commit if their `OnSet*` partial methods throw exceptions. This is useful for hardware integrations like GPIO.
+
+```csharp
+[InterceptorSubject]
+public partial class GpioDevice
+{
+    public partial bool LedA { get; set; }
+    public partial bool LedB { get; set; }
+
+    partial void OnSetLedA(bool value) => _gpio.Write(pinA, value); // can throw!
+    partial void OnSetLedB(bool value) => _gpio.Write(pinB, value); // can throw!
+}
+```
+
+When `OnSet*` throws:
+- **BestEffort mode**: Other successful changes are applied, failure reported
+- **Rollback mode**: All previous stages are reverted (sources + successful local changes)
+
+### Derived Properties
+
+Derived properties (marked with `[Derived]`) are handled specially:
+
+- **During capture**: Derived property recalculation notifications are skipped
+- **During read**: Derived properties return calculated value based on pending changes
+- **After commit**: Derived properties are recalculated with committed values and notifications fired
 
 ```csharp
 [InterceptorSubject]
@@ -374,99 +356,86 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
     person.FirstName = "John";
     person.LastName = "Doe";
 
-    // FullName is calculated from pending values
-    Console.WriteLine(person.FullName); // Output: John Doe
+    Console.WriteLine(person.FullName); // Output: John Doe (from pending values)
 
     await transaction.CommitAsync(cancellationToken);
     // FullName change notification is fired after commit
 }
 ```
 
-## Thread Safety
+### Thread Safety
 
-- `context.BeginTransactionAsync(TransactionFailureHandling.BestEffort)` uses `AsyncLocal<T>` to store the current transaction, making it safe for async/await patterns
-- Exclusive transactions use a per-context semaphore to ensure only one transaction executes at a time
+- `BeginTransactionAsync()` uses `AsyncLocal<T>` to store the current transaction
+- Exclusive transactions use a per-context semaphore
 - Each async execution context has its own transaction scope
-- The transaction is automatically cleared when `Dispose()` is called
-- On `CommitAsync()`, write callbacks are resolved from each subject's context, supporting multi-context scenarios
+- The transaction is automatically cleared on `Dispose()`
 
 ## Best Practices
 
-1. **Always use `using` blocks**: This ensures transactions are properly disposed even if exceptions occur
-2. **Keep transactions short**: Long-running transactions hold pending changes in memory
-3. **Register transactions before notifications**: Ensure `WithTransactions()` is called before `WithPropertyChangeObservable()` or `WithPropertyChangeQueue()`
-4. **Handle exceptions from CommitAsync**: Especially when using external sources, commits can fail partially
-5. **Don't share transactions across threads**: Each async context should have its own transaction
+1. **Always use `using` blocks** - Ensures proper disposal even on exceptions
+2. **Keep transactions short** - Long transactions hold pending changes in memory
+3. **Register transactions before notifications** - Call `WithTransactions()` before `WithPropertyChangeObservable()`
+4. **Handle exceptions from CommitAsync** - Commits can fail partially
+5. **Don't share transactions across threads** - Each async context should have its own transaction
 
 ## API Reference
 
-### IInterceptorSubjectContext Extensions
+### BeginTransactionAsync
+
+```csharp
+Task<SubjectTransaction> BeginTransactionAsync(
+    TransactionFailureHandling failureHandling,
+    TransactionLocking locking = TransactionLocking.Exclusive,
+    TransactionRequirement requirement = TransactionRequirement.None,
+    TransactionConflictBehavior conflictBehavior = TransactionConflictBehavior.FailOnConflict,
+    TimeSpan? commitTimeout = null, // default: 30 seconds
+    CancellationToken cancellationToken = default)
+```
+
+### SubjectTransaction
 
 | Member | Description |
 |--------|-------------|
-| `BeginTransactionAsync(failureHandling, locking, requirement, conflictBehavior, commitTimeout, ct)` | Begins a new transaction with the specified options |
+| `CommitAsync(CancellationToken)` | Commits all pending changes |
+| `GetPendingChanges()` | Returns list of pending changes |
+| `Dispose()` | Discards uncommitted changes and releases lock |
+| `Context` | The context this transaction is bound to |
+| `Locking` | The locking mode |
+| `ConflictBehavior` | The conflict detection behavior |
 
-**Parameters:**
-- `failureHandling` (required): How to handle partial failures (`BestEffort` or `Rollback`)
-- `locking` (default: `Exclusive`): Concurrency control mode
-- `requirement` (default: `None`): Validation constraints
-- `conflictBehavior` (default: `FailOnConflict`): How to handle value conflicts at commit time
-- `commitTimeout` (default: 30 seconds): Maximum time for commit operation. Use `Timeout.InfiniteTimeSpan` to disable
-- `cancellationToken` (default: `default`): Used before commit starts, ignored during commit phase
+### Enums
 
-### TransactionFailureHandling
+**TransactionFailureHandling:**
+- `BestEffort` - Apply successful changes even if some fail
+- `Rollback` - All-or-nothing with best-effort revert
 
-| Value | Description |
-|-------|-------------|
-| `BestEffort` | Apply successful changes even if some sources fail |
-| `Rollback` | All-or-nothing with best-effort revert of successful source writes |
+**TransactionLocking:**
+- `Exclusive` - Lock at begin, hold until dispose
+- `Optimistic` - Lock only during commit
 
-### TransactionLocking
+**TransactionRequirement:**
+- `None` - No constraints
+- `SingleWrite` - Single source, within batch size
 
-| Value | Description |
-|-------|-------------|
-| `Exclusive` | Acquires lock at begin, holds until dispose (default) |
-| `Optimistic` | No lock at begin, acquires only during commit phase |
-
-### TransactionRequirement
-
-| Value | Description |
-|-------|-------------|
-| `None` | No requirements - multiple sources and batches allowed (default) |
-| `SingleWrite` | Requires single source and changes within `WriteBatchSize` limit |
-
-### TransactionConflictBehavior
-
-| Value | Description |
-|-------|-------------|
-| `FailOnConflict` | Throw `TransactionConflictException` if values changed since transaction started (default) |
-| `Ignore` | Overwrite any concurrent changes without checking |
+**TransactionConflictBehavior:**
+- `FailOnConflict` - Throw on concurrent changes
+- `Ignore` - Overwrite without checking
 
 ## Limitations
 
 ### Optimistic Concurrency - ABA Problem
 
-The `TransactionConflictBehavior.FailOnConflict` option uses value-based conflict detection.
-This means if a property value changes from A → B → A between transaction start and commit,
-no conflict will be detected (the "ABA problem").
+`FailOnConflict` uses value-based detection. If a property changes A → B → A between start and commit, no conflict is detected. For strict version-based detection, implement external versioning.
 
-For most use cases, this is acceptable since the final state matches the expected state.
-If strict version-based conflict detection is required, consider implementing external
-versioning at the application level.
+### Multi-Source Transactions
 
-### Multi-Source Transactions - Eventual Consistency
+When writing to multiple sources, true atomicity is not guaranteed:
+1. Writes are parallel for performance
+2. On failure, successful sources are rolled back (best effort)
+3. During rollback, sources may temporarily have inconsistent values
 
-When a transaction writes to multiple external sources (e.g., OPC UA server and MQTT broker),
-true atomicity is not guaranteed. Writes are performed in parallel for performance, but if
-one source fails:
+For strict atomicity, use a single source per transaction or implement application-level compensation.
 
-1. Successfully written sources will be rolled back (best effort)
-2. During the rollback window, sources may temporarily have inconsistent values
-3. If rollback fails, the system logs the error but cannot guarantee consistency
+### Rollback is Best-Effort
 
-For use cases requiring strict atomicity across sources, consider:
-- Using a single source per transaction
-- Implementing application-level compensation logic
-- Using sources that support distributed transactions (2PC)
-
-This limitation is inherent to distributed systems without two-phase commit protocols.
+Rollback operations can also fail. If revert fails, `TransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case.
