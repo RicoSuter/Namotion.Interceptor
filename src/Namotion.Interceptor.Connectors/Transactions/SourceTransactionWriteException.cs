@@ -28,14 +28,14 @@ public class SourceTransactionWriteException : Exception
     public SourceTransactionWriteException(ISubjectSource source, IReadOnlyList<SubjectPropertyChange> failedChanges, Exception inner)
         : base($"Failed to write {failedChanges.Count} change(s) to source {source.GetType().Name}. See inner exception for details.", inner)
     {
-        Source = source;
+        FailedSource = source;
         FailedChanges = failedChanges;
     }
 
     /// <summary>
     /// Gets the external data source that failed to write changes.
     /// </summary>
-    public new ISubjectSource Source { get; }
+    public ISubjectSource FailedSource { get; }
 
     /// <summary>
     /// Gets the collection of property changes that failed to write to the source.

@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Connectors;

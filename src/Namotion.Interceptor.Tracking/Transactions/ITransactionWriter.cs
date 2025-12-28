@@ -18,7 +18,7 @@ public interface ITransactionWriter
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The result indicating which changes succeeded and which failed.</returns>
     Task<TransactionWriteResult> WriteChangesAsync(
-        IReadOnlyList<SubjectPropertyChange> changes,
+        ReadOnlyMemory<SubjectPropertyChange> changes,
         TransactionFailureHandling failureHandling,
         TransactionRequirement requirement,
         CancellationToken cancellationToken);

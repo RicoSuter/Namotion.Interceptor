@@ -11,13 +11,13 @@ namespace Namotion.Interceptor.Connectors.Transactions;
 internal sealed class SourceTransactionWriter : ITransactionWriter
 {
     public async Task<TransactionWriteResult> WriteChangesAsync(
-        IReadOnlyList<SubjectPropertyChange> changes,
+        ReadOnlyMemory<SubjectPropertyChange> changes,
         TransactionFailureHandling failureHandling,
         TransactionRequirement requirement,
         CancellationToken cancellationToken)
     {
         // 1. Separate source-bound vs local changes
-        var (localChanges, externalChangesBySource) = GroupChangesBySourceType(changes);
+        var (localChanges, externalChangesBySource) = GroupChangesBySourceType(changes.Span);
 
         // 2. Validate SingleWrite requirement (only applies to source-bound changes)
         if (requirement == TransactionRequirement.SingleWrite)
@@ -78,7 +78,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     /// Groups changes into local (no source) and external (has source) categories.
     /// </summary>
     private static (List<SubjectPropertyChange> Local, Dictionary<ISubjectSource, List<SubjectPropertyChange>> External)
-        GroupChangesBySourceType(IReadOnlyList<SubjectPropertyChange> changes)
+        GroupChangesBySourceType(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         var local = new List<SubjectPropertyChange>();
         var external = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>();

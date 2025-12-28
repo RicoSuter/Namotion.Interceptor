@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -58,7 +59,7 @@ public sealed class SubjectTransaction : IDisposable
     /// Last write wins if the same property is written multiple times.
     /// Thread-safe for concurrent property writes within the same transaction.
     /// </summary>
-    internal ConcurrentDictionary<PropertyReference, SubjectPropertyChange> PendingChanges { get; } = new();
+    internal ConcurrentDictionary<PropertyReference, SubjectPropertyChange> PendingChanges { get; } = new(PropertyReference.Comparer);
 
     /// <summary>
     /// Gets the pending changes as a read-only list.
@@ -194,16 +195,25 @@ public sealed class SubjectTransaction : IDisposable
             commitLock = await Interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        // Rent array from pool to avoid allocation
+        var changeCount = PendingChanges.Count;
+        var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
         try
         {
             _isCommitting = true;
 
-            var changes = PendingChanges.Values.ToList();
+            // Copy pending changes to rented array
+            var index = 0;
+            foreach (var change in PendingChanges.Values)
+            {
+                rentedArray[index++] = change;
+            }
+            var changes = rentedArray.AsMemory(0, changeCount);
 
             // 1. Conflict detection
             if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
             {
-                var conflictingProperties = DetectConflicts(changes);
+                var conflictingProperties = DetectConflicts(changes.Span);
                 if (conflictingProperties.Count > 0)
                 {
                     throw new TransactionConflictException(conflictingProperties);
@@ -244,7 +254,10 @@ public sealed class SubjectTransaction : IDisposable
             else
             {
                 // No writer: all changes are local
-                localChangesToApply.AddRange(changes);
+                foreach (var change in changes.Span)
+                {
+                    localChangesToApply.Add(change);
+                }
             }
 
             // 4. Apply local changes to in-process model
@@ -267,8 +280,9 @@ public sealed class SubjectTransaction : IDisposable
                     if (writeHandler != null && allSuccessfulChanges.Count > 0)
                     {
                         // Use BestEffort for rollback - we want to revert as much as possible
+                        var rollbackChanges = allSuccessfulChanges.ToRollbackChanges().ToArray();
                         var rollbackResult = await writeHandler.WriteChangesAsync(
-                            allSuccessfulChanges.ToRollbackChanges().ToList(),
+                            rollbackChanges.AsMemory(),
                             TransactionFailureHandling.BestEffort,
                             TransactionRequirement.None,
                             commitToken);
@@ -302,6 +316,8 @@ public sealed class SubjectTransaction : IDisposable
         finally
         {
             _isCommitting = false;
+            // Return the rented array to the pool
+            ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray);
             // Release the commit lock for Optimistic transactions
             commitLock?.Dispose();
         }
@@ -310,9 +326,9 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Detects conflicts by comparing captured OldValue with current actual value.
     /// </summary>
-    private static List<PropertyReference> DetectConflicts(IReadOnlyList<SubjectPropertyChange> changes)
+    private static List<PropertyReference> DetectConflicts(ReadOnlySpan<SubjectPropertyChange> changes)
     {
-        var conflictingProperties = new List<PropertyReference>();
+        List<PropertyReference>? conflictingProperties = null;
         foreach (var change in changes)
         {
             var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
@@ -320,10 +336,11 @@ public sealed class SubjectTransaction : IDisposable
 
             if (!Equals(currentValue, capturedOldValue))
             {
+                conflictingProperties ??= [];
                 conflictingProperties.Add(change.Property);
             }
         }
-        return conflictingProperties;
+        return conflictingProperties ?? [];
     }
 
     /// <summary>
