@@ -59,19 +59,48 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         allFailed.AddRange(applyFailed);
         allErrors.AddRange(applyErrors);
 
-        // If in-process apply failed and rollback mode, revert everything
-        if (failureHandling == TransactionFailureHandling.Rollback && applyFailed.Count > 0)
+        // If in-process apply failed, rollback sources to maintain consistency
+        if (applyFailed.Count > 0)
         {
-            // Revert successful in-process applies
-            TryRevertAppliedChanges(applied, allFailed, allErrors);
+            if (failureHandling == TransactionFailureHandling.Rollback)
+            {
+                // Rollback mode: revert everything (all-or-nothing)
+                TryRevertAppliedChanges(applied, allFailed, allErrors);
+                await TryRevertSourceWritesAsync(successfulBySource, allFailed, allErrors, cancellationToken);
+                return new TransactionWriteResult([], allFailed, allErrors, localChanges);
+            }
 
-            // Revert external source writes
-            await TryRevertSourceWritesAsync(successfulBySource, allFailed, allErrors, cancellationToken);
-
-            return new TransactionWriteResult([], allFailed, allErrors, localChanges);
+            // BestEffort mode: rollback only sources for failed local applies (keep each property in sync)
+            var sourcesToRollback = GroupChangesBySource(applyFailed);
+            if (sourcesToRollback.Count > 0)
+            {
+                await TryRevertSourceWritesAsync(sourcesToRollback, allFailed, allErrors, cancellationToken);
+            }
         }
 
         return new TransactionWriteResult(allSuccessful, allFailed, allErrors, localChanges);
+    }
+
+    /// <summary>
+    /// Groups changes by their associated source (ignores changes without sources).
+    /// </summary>
+    private static Dictionary<ISubjectSource, List<SubjectPropertyChange>> GroupChangesBySource(
+        IEnumerable<SubjectPropertyChange> changes)
+    {
+        var result = new Dictionary<ISubjectSource, List<SubjectPropertyChange>>();
+        foreach (var change in changes)
+        {
+            if (change.Property.TryGetSource(out var source))
+            {
+                if (!result.TryGetValue(source, out var list))
+                {
+                    list = [];
+                    result[source] = list;
+                }
+                list.Add(change);
+            }
+        }
+        return result;
     }
 
     /// <summary>
