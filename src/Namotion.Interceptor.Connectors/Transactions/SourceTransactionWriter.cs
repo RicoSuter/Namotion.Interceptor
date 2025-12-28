@@ -54,7 +54,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
 
         // 5. Apply source-bound values to in-process model
         var sourceBoundChanges = FlattenChanges(successfulBySource);
-        var (applied, applyFailed, applyErrors) = sourceBoundChanges.ApplyAll();
+        var (applied, applyFailed, applyErrors) = sourceBoundChanges.ApplyAllChanges();
         allSuccessful.AddRange(applied);
         allFailed.AddRange(applyFailed);
         allErrors.AddRange(applyErrors);
@@ -238,7 +238,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         List<SubjectPropertyChange> failedChanges,
         List<Exception> errors)
     {
-        var (_, revertFailed, revertErrors) = successfulChanges.ToRollbackChanges().ApplyAll();
+        var (_, revertFailed, revertErrors) = successfulChanges.ToRollbackChanges().ApplyAllChanges();
         failedChanges.AddRange(revertFailed);
         errors.AddRange(revertErrors);
     }
