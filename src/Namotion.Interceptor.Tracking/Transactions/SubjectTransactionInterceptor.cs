@@ -20,7 +20,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     /// Acquires the transaction lock for this context.
     /// Used by serialized transactions to ensure only one transaction executes at a time.
     /// </summary>
-    internal async ValueTask<IDisposable> AcquireExclusiveTransactionLockAsync(CancellationToken cancellationToken)
+    internal async ValueTask<IDisposable> AcquireTransactionLockAsync(CancellationToken cancellationToken)
     {
         await _exclusiveTransactionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         return new LockReleaser(_exclusiveTransactionLock);
