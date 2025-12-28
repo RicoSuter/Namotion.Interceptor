@@ -90,7 +90,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 index,
                 count,
                 firstAttach,
-                IsFinalDetach: false);
+                IsLastDetach: false);
 
             var properties = subject.Properties.Keys;
 

@@ -117,7 +117,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
             }
 
             // Only remove the subject from the registry when it's the final detachment
-            if (change.IsFinalDetach)
+            if (change.IsLastDetach)
             {
                 _knownSubjects.Remove(change.Subject);
             }

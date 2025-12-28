@@ -433,7 +433,7 @@ public class LifecycleEventsTests
         // Assert
         Assert.NotNull(capturedEvent);
         Assert.True(capturedEvent.Value.IsFirstAttach); // First attachment
-        Assert.False(capturedEvent.Value.IsFinalDetach); // Not detaching
+        Assert.False(capturedEvent.Value.IsLastDetach); // Not detaching
         Assert.Equal(0, capturedEvent.Value.ReferenceCount); // No property reference yet
         Assert.Null(capturedEvent.Value.Property); // Context-only, no property
     }
@@ -461,7 +461,7 @@ public class LifecycleEventsTests
         // Assert - Child should have IsFirstAttach=true
         var childEvent = attachedEvents.First(e => e.Subject == child);
         Assert.True(childEvent.IsFirstAttach); // First attachment for child
-        Assert.False(childEvent.IsFinalDetach);
+        Assert.False(childEvent.IsLastDetach);
         Assert.Equal(1, childEvent.ReferenceCount); // One property reference
         Assert.NotNull(childEvent.Property);
         Assert.Equal("Father", childEvent.Property.Value.Name);
@@ -492,13 +492,13 @@ public class LifecycleEventsTests
         // Assert - Second attachment should have IsFirstAttach=false
         Assert.Single(attachedEvents);
         Assert.False(attachedEvents[0].IsFirstAttach); // NOT first attachment
-        Assert.False(attachedEvents[0].IsFinalDetach);
+        Assert.False(attachedEvents[0].IsLastDetach);
         Assert.Equal(2, attachedEvents[0].ReferenceCount); // Two property references now
         Assert.Equal("Mother", attachedEvents[0].Property?.Name);
     }
 
     [Fact]
-    public void IsFinalDetach_FalseWhenOtherReferencesRemain()
+    public void IsLastDetach_FalseWhenOtherReferencesRemain()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -520,16 +520,16 @@ public class LifecycleEventsTests
         // Act - Remove first reference, but second remains
         person.Father = null;
 
-        // Assert - IsFinalDetach should be false (Mother reference still exists)
+        // Assert - IsLastDetach should be false (Mother reference still exists)
         Assert.Single(detachedEvents);
         Assert.False(detachedEvents[0].IsFirstAttach);
-        Assert.False(detachedEvents[0].IsFinalDetach); // NOT final detach
+        Assert.False(detachedEvents[0].IsLastDetach); // NOT final detach
         Assert.Equal(1, detachedEvents[0].ReferenceCount); // One reference remains
         Assert.Equal("Father", detachedEvents[0].Property?.Name);
     }
 
     [Fact]
-    public void IsFinalDetach_TrueWhenLastPropertyReferenceRemoved()
+    public void IsLastDetach_TrueWhenLastPropertyReferenceRemoved()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -550,16 +550,16 @@ public class LifecycleEventsTests
         // Act - Remove the only property reference
         person.Father = null;
 
-        // Assert - IsFinalDetach should be true (no more references)
+        // Assert - IsLastDetach should be true (no more references)
         Assert.Single(detachedEvents);
         Assert.False(detachedEvents[0].IsFirstAttach);
-        Assert.True(detachedEvents[0].IsFinalDetach); // Final detachment
+        Assert.True(detachedEvents[0].IsLastDetach); // Final detachment
         Assert.Equal(0, detachedEvents[0].ReferenceCount); // No references left
         Assert.Equal("Father", detachedEvents[0].Property?.Name);
     }
 
     [Fact]
-    public void IsFinalDetach_TrueWhenContextRemovedWithNoProperties()
+    public void IsLastDetach_TrueWhenContextRemovedWithNoProperties()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -577,10 +577,10 @@ public class LifecycleEventsTests
         // Act - Remove context (no property references exist)
         ((IInterceptorSubject)person).Context.RemoveFallbackContext(context);
 
-        // Assert - IsFinalDetach should be true
+        // Assert - IsLastDetach should be true
         Assert.Single(detachedEvents);
         Assert.False(detachedEvents[0].IsFirstAttach);
-        Assert.True(detachedEvents[0].IsFinalDetach); // Final detachment
+        Assert.True(detachedEvents[0].IsLastDetach); // Final detachment
         Assert.Equal(0, detachedEvents[0].ReferenceCount); // No property references
         Assert.Null(detachedEvents[0].Property); // Context-only detachment
     }
@@ -616,15 +616,15 @@ public class LifecycleEventsTests
         var parentSubject = (IInterceptorSubject)parent;
         var removed = childSubject.Context.RemoveFallbackContext(parentSubject.Context);
 
-        // Assert - Context should be removed, but IsFinalDetach should be FALSE
+        // Assert - Context should be removed, but IsLastDetach should be FALSE
         Assert.True(removed); // Context was removed
 
         // The child still has a property reference from parent.Father
-        // So IsFinalDetach should be FALSE even though context was removed
+        // So IsLastDetach should be FALSE even though context was removed
         if (detachedEvents.Any(e => e.Subject == child))
         {
             var childDetachEvent = detachedEvents.First(e => e.Subject == child);
-            Assert.False(childDetachEvent.IsFinalDetach); // Not final - property ref remains
+            Assert.False(childDetachEvent.IsLastDetach); // Not final - property ref remains
             Assert.Equal(1, childDetachEvent.ReferenceCount); // Property reference still exists
         }
     }
@@ -657,7 +657,7 @@ public class LifecycleEventsTests
         // Assert Step 1
         var contextAttach = attachedEvents.First(e => e.Subject == child);
         Assert.True(contextAttach.IsFirstAttach);
-        Assert.False(contextAttach.IsFinalDetach);
+        Assert.False(contextAttach.IsLastDetach);
         Assert.Equal(0, contextAttach.ReferenceCount);
         Assert.Null(contextAttach.Property);
 
@@ -669,17 +669,17 @@ public class LifecycleEventsTests
         // Assert Step 2
         var propertyAttach = attachedEvents.First(e => e.Subject == child);
         Assert.False(propertyAttach.IsFirstAttach); // Already attached via context
-        Assert.False(propertyAttach.IsFinalDetach);
+        Assert.False(propertyAttach.IsLastDetach);
         Assert.Equal(1, propertyAttach.ReferenceCount);
         Assert.Equal("Father", propertyAttach.Property?.Name);
 
         // Step 3: Property detachment
         parent.Father = null;
 
-        // Assert Step 3 - Single detachment event with IsFinalDetach=true when ReferenceCount hits 0
+        // Assert Step 3 - Single detachment event with IsLastDetach=true when ReferenceCount hits 0
         var propertyDetach = detachedEvents.First(e => e.Subject == child);
         Assert.False(propertyDetach.IsFirstAttach);
-        Assert.True(propertyDetach.IsFinalDetach); // Final when ReferenceCount = 0
+        Assert.True(propertyDetach.IsLastDetach); // Final when ReferenceCount = 0
         Assert.Equal(0, propertyDetach.ReferenceCount);
         Assert.Equal("Father", propertyDetach.Property?.Name);
     }

@@ -43,7 +43,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     {
         _logger ??= _loggerResolver();
 
-        if (change.IsFinalDetach)
+        if (change.IsLastDetach)
         {
             if (change.Subject is IHostedService hostedService)
             {

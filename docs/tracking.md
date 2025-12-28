@@ -328,11 +328,11 @@ public record struct SubjectLifecycleChange(
     object? Index,
     int ReferenceCount,                // Number of property references (0 for context-only)
     bool IsFirstAttach,                // True when subject first enters lifecycle
-    bool IsFinalDetach                 // True when ReferenceCount reaches 0 during property detachment
+    bool IsLastDetach                 // True when ReferenceCount reaches 0 during property detachment
 );
 ```
 
-**IsFinalDetach** is `true` when:
+**IsLastDetach** is `true` when:
 - The lifecycle set is completely empty, OR
 - A property is detached AND `ReferenceCount` becomes 0
 
@@ -352,7 +352,7 @@ lifecycleInterceptor.SubjectAttached += change =>
 
 lifecycleInterceptor.SubjectDetached += change =>
 {
-    if (change.IsFinalDetach)
+    if (change.IsLastDetach)
     {
         // Subject fully detached - safe to clean up
         CleanupResources(change.Subject);
