@@ -131,16 +131,18 @@ using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Ro
 
 | Value | Description |
 |-------|-------------|
-| `BestEffort` | Apply successful changes even if some fail. Failed changes are reported in `TransactionException`. |
-| `Rollback` | All-or-nothing with best-effort revert of successful writes when any fail. |
+| `BestEffort` | Apply successful changes, rollback failed ones to keep each property in sync with its source. |
+| `Rollback` | All-or-nothing across all properties - any failure reverts everything. |
 
 **Behavior comparison:**
 
 | Scenario | BestEffort | Rollback |
 |----------|------------|----------|
 | All succeed | All changes applied | All changes applied |
-| Partial failure | Successful changes applied, failed reported | All reverted (best effort) |
-| Use when | Partial progress acceptable | Consistency critical |
+| Source write fails | Successful applied, failed not applied | All reverted |
+| Local apply fails | Successful applied, failed sources rolled back | All reverted |
+| Consistency | Per-property (each stays in sync) | All-or-nothing |
+| Use when | Partial progress acceptable | Full atomicity required |
 
 ### Locking
 
@@ -242,13 +244,15 @@ When `WithSourceTransactions()` is configured, commits execute in three stages:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Rollback cascade on failure:**
+**Rollback behavior on failure:**
 
-| Failure Stage | What Gets Reverted |
-|---------------|-------------------|
-| External sources fail | Successful external source writes |
-| Source-bound apply fails | Source-bound properties + external sources |
-| Local properties fail | Local + source-bound + external sources |
+| Failure Stage | BestEffort | Rollback |
+|---------------|------------|----------|
+| External sources fail | Only successful ones applied | All sources reverted, nothing applied |
+| Source-bound apply fails | Successful applied, failed sources reverted | All reverted |
+| Local properties fail | Successful applied, failed sources reverted | All reverted |
+
+Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback).
 
 Revert operations call setters with old values, which also trigger `OnSet*` methods.
 
@@ -406,8 +410,8 @@ Task<SubjectTransaction> BeginTransactionAsync(
 ### Enums
 
 **TransactionFailureHandling:**
-- `BestEffort` - Apply successful changes even if some fail
-- `Rollback` - All-or-nothing with best-effort revert
+- `BestEffort` - Apply successful changes, rollback failed ones (per-property consistency)
+- `Rollback` - All-or-nothing across all properties
 
 **TransactionLocking:**
 - `Exclusive` - Lock at begin, hold until dispose
