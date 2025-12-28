@@ -45,7 +45,7 @@ public static class OpcUaSubjectExtensions
         return new OpcUaSubjectClientSource(subject, configuration, logger);
     }
 
-    public static IServiceCollection AddOpcUaSubjectClient<TSubject>(
+    public static IServiceCollection AddOpcUaSubjectClientSource<TSubject>(
         this IServiceCollection serviceCollection,
         string serverUrl,
         string sourceName,
@@ -53,7 +53,7 @@ public static class OpcUaSubjectExtensions
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
-        return serviceCollection.AddOpcUaSubjectClient(
+        return serviceCollection.AddOpcUaSubjectClientSource(
             serverUrl,
             sourceName,
             sp => sp.GetRequiredService<TSubject>(),
@@ -61,7 +61,7 @@ public static class OpcUaSubjectExtensions
             rootName);
     }
 
-    public static IServiceCollection AddOpcUaSubjectClient(
+    public static IServiceCollection AddOpcUaSubjectClientSource(
         this IServiceCollection serviceCollection,
         string serverUrl,
         string sourceName,
@@ -69,7 +69,7 @@ public static class OpcUaSubjectExtensions
         string? pathPrefix = null,
         string? rootName = null)
     {
-        return serviceCollection.AddOpcUaSubjectClient(subjectSelector, sp =>
+        return serviceCollection.AddOpcUaSubjectClientSource(subjectSelector, sp =>
         {
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
             var telemetryContext = DefaultTelemetry.Create(builder =>
@@ -88,7 +88,7 @@ public static class OpcUaSubjectExtensions
         });
     }
 
-    public static IServiceCollection AddOpcUaSubjectClient(
+    public static IServiceCollection AddOpcUaSubjectClientSource(
         this IServiceCollection serviceCollection,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
         Func<IServiceProvider, OpcUaClientConfiguration> configurationProvider)

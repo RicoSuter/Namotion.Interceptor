@@ -1,4 +1,3 @@
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -6,16 +5,10 @@ namespace Namotion.Interceptor.Connectors;
 /// <summary>
 /// Represents a source that synchronizes data FROM an external system to a subject.
 /// The external system is the source of truth; the C# object is a replica.
+/// Sources must claim ownership of properties by calling <c>SetSource(this)</c> during initialization.
 /// </summary>
 public interface ISubjectSource : ISubjectConnector
 {
-    /// <summary>
-    /// Checks whether the specified property is included in the source.
-    /// </summary>
-    /// <param name="property">The property.</param>
-    /// <returns>The result.</returns>
-    bool IsPropertyIncluded(RegisteredSubjectProperty property);
-
     /// <summary>
     /// Initializes the source and starts listening for external changes.
     /// </summary>
@@ -32,14 +25,19 @@ public interface ISubjectSource : ISubjectConnector
     public int WriteBatchSize { get; }
 
     /// <summary>
-    /// Applies a set of property changes to the source with all-or-nothing (transactional) semantics.
-    /// If any change fails, the entire batch should throw an exception and will be retried.
-    /// This method is designed to be called sequentially (not concurrently).
-    /// Concurrent calls are not supported and will result in undefined behavior.
+    /// Applies a set of property changes to the source.
+    /// Returns a <see cref="WriteResult"/> indicating which changes succeeded.
+    /// On partial failure, returns the subset of changes that were successfully written.
     /// </summary>
+    /// <remarks>
+    /// Thread-safety is handled automatically by <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/>,
+    /// which should be used by all callers instead of this method directly.
+    /// Implement <see cref="ISupportsConcurrentWrites"/> to opt-out of automatic synchronization.
+    /// </remarks>
     /// <param name="changes">The collection of subject property changes.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
+    /// <returns>A <see cref="WriteResult"/> containing successful changes and any error.</returns>
+    ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
 
     /// <summary>
     /// Loads the initial state from the external authoritative system and returns a delegate that applies it to the associated subject.
