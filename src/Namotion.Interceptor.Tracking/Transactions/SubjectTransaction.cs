@@ -176,11 +176,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <exception cref="TransactionException">Thrown when one or more external source writes failed.</exception>
     public async Task CommitAsync(CancellationToken cancellationToken)
     {
-        if (Volatile.Read(ref _isDisposed) != 0)
-            throw new ObjectDisposedException(nameof(SubjectTransaction));
-
-        if (_isCommitted)
-            throw new InvalidOperationException("Transaction has already been committed.");
+        ValidateCanCommit();
 
         if (PendingChanges.Count == 0)
         {
@@ -188,138 +184,205 @@ public sealed class SubjectTransaction : IDisposable
             return;
         }
 
-        // For Optimistic locking, acquire the lock now (for commit phase only)
-        IDisposable? commitLock = null;
-        if (_locking == TransactionLocking.Optimistic)
-        {
-            commitLock = await Interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
-        }
+        var commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken);
+        var (rentedArray, changes) = RentAndCopyChanges();
 
-        // Rent array from pool to avoid allocation
-        var changeCount = PendingChanges.Count;
-        var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
         try
         {
             _isCommitting = true;
 
-            // Copy pending changes to rented array
-            var index = 0;
-            foreach (var change in PendingChanges.Values)
-            {
-                rentedArray[index++] = change;
-            }
-            var changes = rentedArray.AsMemory(0, changeCount);
+            ThrowIfConflictsDetected(changes.Span);
 
-            // 1. Conflict detection
-            if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
-            {
-                var conflictingProperties = DetectConflicts(changes.Span);
-                if (conflictingProperties.Count > 0)
-                {
-                    throw new TransactionConflictException(conflictingProperties);
-                }
-            }
-
-            // 2. Create timeout-only token, ignoring user cancellation during commit
-            // Use Timeout.InfiniteTimeSpan to disable timeout entirely
-            using var timeoutCts = _commitTimeout == Timeout.InfiniteTimeSpan
-                ? null
-                : new CancellationTokenSource(_commitTimeout);
+            using var timeoutCts = CreateCommitTimeoutCts();
             var commitToken = timeoutCts?.Token ?? CancellationToken.None;
 
-            // 3. Call write handler and apply local changes
-            var allSuccessfulChanges = new List<SubjectPropertyChange>();
-            var allFailedChanges = new List<SubjectPropertyChange>();
-            var allErrors = new List<Exception>();
-            var localChangesToApply = new List<SubjectPropertyChange>();
+            var (successful, failed, errors) = await ExecuteWritesAsync(changes, commitToken);
 
-            var writeHandler = Context.TryGetService<ITransactionWriter>();
-            if (writeHandler != null)
-            {
-                // Writer handles source-bound changes and returns local changes for us to apply
-                var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, commitToken);
-                allSuccessfulChanges.AddRange(result.SuccessfulChanges);
-                allFailedChanges.AddRange(result.FailedChanges);
-                allErrors.AddRange(result.Errors);
-                localChangesToApply.AddRange(result.LocalChanges);
-
-                // If source writes failed in Rollback mode, don't apply local changes
-                if (_failureHandling == TransactionFailureHandling.Rollback && allFailedChanges.Count > 0)
-                {
-                    // Local changes are not applied - add them to failed for reporting
-                    allFailedChanges.AddRange(localChangesToApply);
-                    localChangesToApply.Clear();
-                }
-            }
-            else
-            {
-                // No writer: all changes are local
-                foreach (var change in changes.Span)
-                {
-                    localChangesToApply.Add(change);
-                }
-            }
-
-            // 4. Apply local changes to in-process model
-            if (localChangesToApply.Count > 0)
-            {
-                var (applied, applyFailed, applyErrors) = localChangesToApply.ApplyAll();
-                allSuccessfulChanges.AddRange(applied);
-                allFailedChanges.AddRange(applyFailed);
-                allErrors.AddRange(applyErrors);
-
-                // In Rollback mode, revert everything if local changes failed
-                if (_failureHandling == TransactionFailureHandling.Rollback && applyFailed.Count > 0)
-                {
-                    // Revert successful local applies
-                    var (_, localRevertFailed, localRevertErrors) = applied.ToRollbackChanges().ApplyAll();
-                    allFailedChanges.AddRange(localRevertFailed);
-                    allErrors.AddRange(localRevertErrors);
-
-                    // Revert source-bound changes by calling writer with rollback changes
-                    if (writeHandler != null && allSuccessfulChanges.Count > 0)
-                    {
-                        // Use BestEffort for rollback - we want to revert as much as possible
-                        var rollbackChanges = allSuccessfulChanges.ToRollbackChanges().ToArray();
-                        var rollbackResult = await writeHandler.WriteChangesAsync(
-                            rollbackChanges.AsMemory(),
-                            TransactionFailureHandling.BestEffort,
-                            TransactionRequirement.None,
-                            commitToken);
-
-                        allFailedChanges.AddRange(rollbackResult.FailedChanges);
-                        allErrors.AddRange(rollbackResult.Errors);
-                    }
-
-                    // Clear successful changes since we rolled back
-                    allSuccessfulChanges.Clear();
-                }
-            }
-
-            // 5. Cleanup
             PendingChanges.Clear();
             _isCommitted = true;
 
-            // 6. Throw if any writes failed
-            if (allFailedChanges.Count > 0)
-            {
-                var message = _failureHandling switch
-                {
-                    TransactionFailureHandling.BestEffort => "One or more changes failed. Successfully written changes have been applied.",
-                    TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the in-process model.",
-                    _ => "One or more changes failed."
-                };
-
-                throw new TransactionException(message, allSuccessfulChanges, allFailedChanges, allErrors);
-            }
+            ThrowIfFailed(successful, failed, errors);
         }
         finally
         {
             _isCommitting = false;
-            // Return the rented array to the pool
             ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray);
-            // Release the commit lock for Optimistic transactions
             commitLock?.Dispose();
+        }
+    }
+
+    private void ValidateCanCommit()
+    {
+        if (Volatile.Read(ref _isDisposed) != 0)
+            throw new ObjectDisposedException(nameof(SubjectTransaction));
+
+        if (_isCommitted)
+            throw new InvalidOperationException("Transaction has already been committed.");
+    }
+
+    private async ValueTask<IDisposable?> AcquireOptimisticLockIfNeededAsync(CancellationToken cancellationToken)
+    {
+        if (_locking == TransactionLocking.Optimistic)
+        {
+            return await Interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
+        }
+        return null;
+    }
+
+    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) RentAndCopyChanges()
+    {
+        var changeCount = PendingChanges.Count;
+        var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
+
+        var index = 0;
+        foreach (var change in PendingChanges.Values)
+        {
+            rentedArray[index++] = change;
+        }
+
+        return (rentedArray, rentedArray.AsMemory(0, changeCount));
+    }
+
+    private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
+        {
+            var conflictingProperties = DetectConflicts(changes);
+            if (conflictingProperties.Count > 0)
+            {
+                throw new TransactionConflictException(conflictingProperties);
+            }
+        }
+    }
+
+    private CancellationTokenSource? CreateCommitTimeoutCts()
+    {
+        return _commitTimeout == Timeout.InfiniteTimeSpan
+            ? null
+            : new CancellationTokenSource(_commitTimeout);
+    }
+
+    private async Task<(List<SubjectPropertyChange> Successful, List<SubjectPropertyChange> Failed, List<Exception> Errors)>
+        ExecuteWritesAsync(Memory<SubjectPropertyChange> changes, CancellationToken commitToken)
+    {
+        var allSuccessfulChanges = new List<SubjectPropertyChange>();
+        var allFailedChanges = new List<SubjectPropertyChange>();
+        var allErrors = new List<Exception>();
+        var localChangesToApply = new List<SubjectPropertyChange>();
+
+        var writeHandler = Context.TryGetService<ITransactionWriter>();
+        if (writeHandler != null)
+        {
+            await WriteToSourcesAsync(
+                writeHandler, changes, commitToken,
+                allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply);
+        }
+        else
+        {
+            foreach (var change in changes.Span)
+            {
+                localChangesToApply.Add(change);
+            }
+        }
+
+        if (localChangesToApply.Count > 0)
+        {
+            await ApplyLocalChangesAsync(
+                writeHandler, commitToken,
+                allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply);
+        }
+
+        return (allSuccessfulChanges, allFailedChanges, allErrors);
+    }
+
+    private async Task WriteToSourcesAsync(
+        ITransactionWriter writeHandler,
+        Memory<SubjectPropertyChange> changes,
+        CancellationToken commitToken,
+        List<SubjectPropertyChange> allSuccessfulChanges,
+        List<SubjectPropertyChange> allFailedChanges,
+        List<Exception> allErrors,
+        List<SubjectPropertyChange> localChangesToApply)
+    {
+        var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, commitToken);
+        allSuccessfulChanges.AddRange(result.SuccessfulChanges);
+        allFailedChanges.AddRange(result.FailedChanges);
+        allErrors.AddRange(result.Errors);
+        localChangesToApply.AddRange(result.LocalChanges);
+
+        if (_failureHandling == TransactionFailureHandling.Rollback && allFailedChanges.Count > 0)
+        {
+            allFailedChanges.AddRange(localChangesToApply);
+            localChangesToApply.Clear();
+        }
+    }
+
+    private async Task ApplyLocalChangesAsync(
+        ITransactionWriter? writeHandler,
+        CancellationToken commitToken,
+        List<SubjectPropertyChange> allSuccessfulChanges,
+        List<SubjectPropertyChange> allFailedChanges,
+        List<Exception> allErrors,
+        List<SubjectPropertyChange> localChangesToApply)
+    {
+        var (applied, applyFailed, applyErrors) = localChangesToApply.ApplyAll();
+        allSuccessfulChanges.AddRange(applied);
+        allFailedChanges.AddRange(applyFailed);
+        allErrors.AddRange(applyErrors);
+
+        if (_failureHandling == TransactionFailureHandling.Rollback && applyFailed.Count > 0)
+        {
+            await RollbackOnLocalFailureAsync(
+                writeHandler, commitToken,
+                allSuccessfulChanges, allFailedChanges, allErrors, applied);
+        }
+    }
+
+    private async Task RollbackOnLocalFailureAsync(
+        ITransactionWriter? writeHandler,
+        CancellationToken commitToken,
+        List<SubjectPropertyChange> allSuccessfulChanges,
+        List<SubjectPropertyChange> allFailedChanges,
+        List<Exception> allErrors,
+        List<SubjectPropertyChange> applied)
+    {
+        // Revert successful local applies
+        var (_, localRevertFailed, localRevertErrors) = applied.ToRollbackChanges().ApplyAll();
+        allFailedChanges.AddRange(localRevertFailed);
+        allErrors.AddRange(localRevertErrors);
+
+        // Revert source-bound changes by calling writer with rollback changes
+        if (writeHandler != null && allSuccessfulChanges.Count > 0)
+        {
+            var rollbackChanges = allSuccessfulChanges.ToRollbackChanges().ToArray();
+            var rollbackResult = await writeHandler.WriteChangesAsync(
+                rollbackChanges.AsMemory(),
+                TransactionFailureHandling.BestEffort,
+                TransactionRequirement.None,
+                commitToken);
+
+            allFailedChanges.AddRange(rollbackResult.FailedChanges);
+            allErrors.AddRange(rollbackResult.Errors);
+        }
+
+        allSuccessfulChanges.Clear();
+    }
+
+    private void ThrowIfFailed(
+        List<SubjectPropertyChange> successful,
+        List<SubjectPropertyChange> failed,
+        List<Exception> errors)
+    {
+        if (failed.Count > 0)
+        {
+            var message = _failureHandling switch
+            {
+                TransactionFailureHandling.BestEffort => "One or more changes failed. Successfully written changes have been applied.",
+                TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the in-process model.",
+                _ => "One or more changes failed."
+            };
+
+            throw new TransactionException(message, successful, failed, errors);
         }
     }
 

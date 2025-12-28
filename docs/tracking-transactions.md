@@ -423,6 +423,35 @@ Task<SubjectTransaction> BeginTransactionAsync(
 
 ## Limitations
 
+### Single Context Binding
+
+A transaction is bound to a single `IInterceptorSubjectContext`. Attempting to modify a property on a subject from a different context throws `InvalidOperationException`:
+
+```csharp
+var context1 = InterceptorSubjectContext.Create().WithTransactions();
+var context2 = InterceptorSubjectContext.Create().WithTransactions();
+
+var person1 = new Person(context1);
+var person2 = new Person(context2);
+
+using var tx = await context1.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+
+person1.FirstName = "John";  // OK - same context as transaction
+person2.FirstName = "Jane";  // THROWS InvalidOperationException:
+                              // "Cannot modify property 'FirstName': Transaction is bound to a different context."
+```
+
+### Nested Transactions
+
+Nested transactions are not supported. Attempting to start a transaction while one is already active in the same execution context throws `InvalidOperationException`:
+
+```csharp
+using var tx1 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+
+// THROWS: "Nested transactions are not supported."
+using var tx2 = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+```
+
 ### Optimistic Concurrency - ABA Problem
 
 `FailOnConflict` uses value-based detection. If a property changes A → B → A between start and commit, no conflict is detected. For strict version-based detection, implement external versioning.
