@@ -176,24 +176,23 @@ public class HostedServiceHandlerTests
 
     private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action)
     {
-        var cancellationTokenSource = new CancellationTokenSource();
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
         try
         {
-            var builder = Host.CreateApplicationBuilder();
-        
-            var context = InterceptorSubjectContext
-                .Create()
-                .WithLifecycle()
-                .WithHostedServices(builder.Services);
-
-            var host = builder.Build();
-            _ = host.RunAsync(cancellationTokenSource.Token);
-
             await action(context);
         }
         finally
         {
-            await cancellationTokenSource.CancelAsync();
+            await host.StopAsync();
         }
     }
 }
