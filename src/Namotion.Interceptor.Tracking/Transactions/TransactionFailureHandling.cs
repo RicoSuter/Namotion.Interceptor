@@ -6,9 +6,10 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 public enum TransactionFailureHandling
 {
     /// <summary>
-    /// Best-effort mode: Apply all successful changes to the in-process model, even if some sources fail.
-    /// Failed changes are not applied. A <see cref="TransactionException"/> is thrown containing all failures.
-    /// This maximizes successful writes but may result in partial updates.
+    /// Best-effort mode: Apply successful changes to the in-process model, rollback failed ones.
+    /// For each property, if the source write succeeds but local apply fails, the source is rolled back
+    /// to maintain per-property consistency. A <see cref="TransactionException"/> is thrown containing all failures.
+    /// This maximizes successful writes but may result in partial updates across properties.
     /// </summary>
     BestEffort,
 

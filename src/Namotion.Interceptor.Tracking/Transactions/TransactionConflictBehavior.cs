@@ -6,7 +6,8 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 public enum TransactionConflictBehavior
 {
     /// <summary>
-    /// Detect conflicts on read/write and throw TransactionConflictException.
+    /// Detect conflicts at commit time by comparing captured old values with current values.
+    /// Throws <see cref="TransactionConflictException"/> if any property was modified since the transaction started.
     /// Use for command-style transactions requiring consistency.
     /// </summary>
     FailOnConflict,

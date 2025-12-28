@@ -7,14 +7,12 @@ namespace Namotion.Interceptor.Connectors.Transactions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This exception is collected during the commit process. The transaction continues attempting to
-/// write to all sources even if some fail, maximizing the number of successful writes.
-/// A <see cref="Namotion.Interceptor.Tracking.Transactions.TransactionException"/> is thrown at the
-/// end containing all successful and failed changes.
+/// This exception is collected during the commit process and wrapped in a
+/// <see cref="Namotion.Interceptor.Tracking.Transactions.TransactionException"/> thrown at the end.
 /// </para>
 /// <para>
-/// Changes that failed to write are NOT applied to the in-process model to maintain consistency
-/// with the external system. Successfully written changes are applied even if other sources fail.
+/// In <c>BestEffort</c> mode: Successfully written changes are applied even if other sources fail.
+/// In <c>Rollback</c> mode: All successful source writes are reverted on any failure.
 /// </para>
 /// </remarks>
 public class SourceTransactionWriteException : Exception
