@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Dynamic;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -8,13 +9,28 @@ namespace Namotion.Interceptor.OpcUa.Client;
 public class OpcUaTypeResolver
 {
     private readonly ILogger _logger;
+    private readonly ConcurrentDictionary<(string NamespaceUri, object Identifier), Type?> _typeCache = new();
 
     public OpcUaTypeResolver(ILogger logger)
     {
         _logger = logger;
     }
-    
+
     public virtual async Task<Type?> TryGetTypeForNodeAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
+    {
+        // Check cache first
+        var cacheKey = (reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex), reference.NodeId.Identifier);
+        if (_typeCache.TryGetValue(cacheKey, out var cachedType))
+        {
+            return cachedType;
+        }
+
+        var type = await TryGetTypeForNodeWithoutCacheAsync(session, reference, cancellationToken).ConfigureAwait(false);
+        _typeCache.TryAdd(cacheKey, type);
+        return type;
+    }
+
+    private async Task<Type?> TryGetTypeForNodeWithoutCacheAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
     {
         var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
 
