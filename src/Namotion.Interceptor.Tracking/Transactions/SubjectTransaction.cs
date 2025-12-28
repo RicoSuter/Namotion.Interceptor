@@ -143,7 +143,7 @@ public sealed class SubjectTransaction : IDisposable
         // For Optimistic locking, skip the lock - we'll acquire it during commit only
         if (locking == TransactionLocking.Exclusive)
         {
-            transactionLock = await interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
+            transactionLock = await interceptor.AcquireTransactionLockAsync(cancellationToken).ConfigureAwait(false);
         }
 
         // Don't set CurrentTransaction.Value here because it won't flow to caller's context
@@ -224,7 +224,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         if (_locking == TransactionLocking.Optimistic)
         {
-            return await Interceptor.AcquireExclusiveTransactionLockAsync(cancellationToken).ConfigureAwait(false);
+            return await Interceptor.AcquireTransactionLockAsync(cancellationToken).ConfigureAwait(false);
         }
         return null;
     }
