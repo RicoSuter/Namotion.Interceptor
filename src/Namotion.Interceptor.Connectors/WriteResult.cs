@@ -25,16 +25,22 @@ public readonly struct WriteResult
     /// </summary>
     public bool IsFullySuccessful => Error is null;
 
-    private WriteResult(ImmutableArray<SubjectPropertyChange> failedChanges, Exception? error)
+    /// <summary>
+    /// Gets a value indicating whether some changes succeeded while others failed.
+    /// </summary>
+    public bool IsPartialFailure { get; }
+
+    private WriteResult(ImmutableArray<SubjectPropertyChange> failedChanges, Exception? error, bool isPartialFailure)
     {
         FailedChanges = failedChanges;
         Error = error;
+        IsPartialFailure = isPartialFailure;
     }
 
     /// <summary>
     /// Gets a successful result where all changes were written (zero allocation).
     /// </summary>
-    public static WriteResult Success { get; } = new([], null);
+    public static WriteResult Success { get; } = new([], null, false);
 
     /// <summary>
     /// Creates a failure result where all provided changes failed.
@@ -44,17 +50,17 @@ public readonly struct WriteResult
     public static WriteResult Failure(ReadOnlyMemory<SubjectPropertyChange> failedChanges, Exception error)
     {
         ArgumentNullException.ThrowIfNull(error);
-        return new([..failedChanges.Span], error);
+        return new([..failedChanges.Span], error, isPartialFailure: false);
     }
 
     /// <summary>
-    /// Creates a partial failure result with the specific changes that failed.
+    /// Creates a partial failure result where some changes succeeded and some failed.
     /// </summary>
     /// <param name="failedChanges">The changes that failed to write.</param>
     /// <param name="error">The error that occurred.</param>
     public static WriteResult PartialFailure(ReadOnlyMemory<SubjectPropertyChange> failedChanges, Exception error)
     {
         ArgumentNullException.ThrowIfNull(error);
-        return new([..failedChanges.Span], error);
+        return new([..failedChanges.Span], error, isPartialFailure: true);
     }
 }
