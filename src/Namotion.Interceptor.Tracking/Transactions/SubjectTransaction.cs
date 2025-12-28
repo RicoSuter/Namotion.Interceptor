@@ -326,7 +326,7 @@ public sealed class SubjectTransaction : IDisposable
         List<SubjectPropertyChange> localChangesToApply,
         CancellationToken cancellationToken)
     {
-        var (applied, applyFailed, applyErrors) = localChangesToApply.ApplyAll();
+        var (applied, applyFailed, applyErrors) = localChangesToApply.ApplyAllChanges();
         allSuccessfulChanges.AddRange(applied);
         allFailedChanges.AddRange(applyFailed);
         allErrors.AddRange(applyErrors);
@@ -347,7 +347,7 @@ public sealed class SubjectTransaction : IDisposable
         CancellationToken cancellationToken)
     {
         // Revert successful local applies
-        var (_, localRevertFailed, localRevertErrors) = applied.ToRollbackChanges().ApplyAll();
+        var (_, localRevertFailed, localRevertErrors) = applied.ToRollbackChanges().ApplyAllChanges();
         allFailedChanges.AddRange(localRevertFailed);
         allErrors.AddRange(localRevertErrors);
 
