@@ -263,7 +263,7 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     private async Task<(List<SubjectPropertyChange> Successful, List<SubjectPropertyChange> Failed, List<Exception> Errors)>
-        ExecuteWritesAsync(Memory<SubjectPropertyChange> changes, CancellationToken commitToken)
+        ExecuteWritesAsync(Memory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         var allSuccessfulChanges = new List<SubjectPropertyChange>();
         var allFailedChanges = new List<SubjectPropertyChange>();
@@ -274,8 +274,8 @@ public sealed class SubjectTransaction : IDisposable
         if (writeHandler != null)
         {
             await WriteToSourcesAsync(
-                writeHandler, changes, commitToken,
-                allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply);
+                writeHandler, changes,
+                allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply, cancellationToken);
         }
         else
         {
@@ -288,23 +288,22 @@ public sealed class SubjectTransaction : IDisposable
         if (localChangesToApply.Count > 0)
         {
             await ApplyLocalChangesAsync(
-                writeHandler, commitToken,
-                allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply);
+                writeHandler,
+                allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply, cancellationToken);
         }
 
         return (allSuccessfulChanges, allFailedChanges, allErrors);
     }
 
-    private async Task WriteToSourcesAsync(
-        ITransactionWriter writeHandler,
+    private async Task WriteToSourcesAsync(ITransactionWriter writeHandler,
         Memory<SubjectPropertyChange> changes,
-        CancellationToken commitToken,
         List<SubjectPropertyChange> allSuccessfulChanges,
         List<SubjectPropertyChange> allFailedChanges,
         List<Exception> allErrors,
-        List<SubjectPropertyChange> localChangesToApply)
+        List<SubjectPropertyChange> localChangesToApply,
+        CancellationToken cancellationToken)
     {
-        var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, commitToken);
+        var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, cancellationToken);
         allSuccessfulChanges.AddRange(result.SuccessfulChanges);
         allFailedChanges.AddRange(result.FailedChanges);
         allErrors.AddRange(result.Errors);
@@ -317,13 +316,12 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
-    private async Task ApplyLocalChangesAsync(
-        ITransactionWriter? writeHandler,
-        CancellationToken commitToken,
+    private async Task ApplyLocalChangesAsync(ITransactionWriter? writeHandler,
         List<SubjectPropertyChange> allSuccessfulChanges,
         List<SubjectPropertyChange> allFailedChanges,
         List<Exception> allErrors,
-        List<SubjectPropertyChange> localChangesToApply)
+        List<SubjectPropertyChange> localChangesToApply,
+        CancellationToken cancellationToken)
     {
         var (applied, applyFailed, applyErrors) = localChangesToApply.ApplyAll();
         allSuccessfulChanges.AddRange(applied);
@@ -333,18 +331,17 @@ public sealed class SubjectTransaction : IDisposable
         if (_failureHandling == TransactionFailureHandling.Rollback && applyFailed.Count > 0)
         {
             await RollbackOnLocalFailureAsync(
-                writeHandler, commitToken,
-                allSuccessfulChanges, allFailedChanges, allErrors, applied);
+                writeHandler,
+                allSuccessfulChanges, allFailedChanges, allErrors, applied, cancellationToken);
         }
     }
 
-    private async Task RollbackOnLocalFailureAsync(
-        ITransactionWriter? writeHandler,
-        CancellationToken commitToken,
+    private async Task RollbackOnLocalFailureAsync(ITransactionWriter? writeHandler,
         List<SubjectPropertyChange> allSuccessfulChanges,
         List<SubjectPropertyChange> allFailedChanges,
         List<Exception> allErrors,
-        List<SubjectPropertyChange> applied)
+        List<SubjectPropertyChange> applied,
+        CancellationToken cancellationToken)
     {
         // Revert successful local applies
         var (_, localRevertFailed, localRevertErrors) = applied.ToRollbackChanges().ApplyAll();
@@ -359,7 +356,7 @@ public sealed class SubjectTransaction : IDisposable
                 rollbackChanges.AsMemory(),
                 TransactionFailureHandling.BestEffort,
                 TransactionRequirement.None,
-                commitToken);
+                cancellationToken);
 
             allFailedChanges.AddRange(rollbackResult.FailedChanges);
             allErrors.AddRange(rollbackResult.Errors);
