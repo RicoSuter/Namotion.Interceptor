@@ -109,22 +109,21 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
         // Arrange
         var context = CreateContext();
 
-        // Assert - no transaction initially
-        Assert.False(SubjectTransaction.HasActiveTransaction);
+        // Note: We cannot assert HasActiveTransaction is false initially because
+        // other tests may be running in parallel with active transactions.
+        // We only verify that THIS execution context has no transaction.
         Assert.Null(SubjectTransaction.Current);
 
         // Act - start transaction
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
-            // Assert - transaction is active
+            // Assert - transaction is active in this context
             Assert.True(SubjectTransaction.HasActiveTransaction);
             Assert.NotNull(SubjectTransaction.Current);
             Assert.Same(transaction, SubjectTransaction.Current);
         }
 
-        // Assert - transaction is no longer active
-        // Note: HasActiveTransaction uses volatile read, may briefly return true due to memory visibility
-        // So we just check Current which is the authoritative source
+        // Assert - transaction is no longer active in this context
         Assert.Null(SubjectTransaction.Current);
     }
 
