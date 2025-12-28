@@ -16,9 +16,11 @@ public class WriteRetryQueueTests
         SubjectPropertyChange[]? writtenChanges = null;
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
-                writtenChanges = changes.ToArray())
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                writtenChanges = changes.ToArray();
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
 
         // Act
         queue.Enqueue(CreateChanges(3));
@@ -58,9 +60,11 @@ public class WriteRetryQueueTests
         SubjectPropertyChange[]? writtenChanges = null;
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
-                writtenChanges = changes.ToArray())
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                writtenChanges = changes.ToArray();
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
 
         // Act
         queue.Enqueue(CreateChanges(3, startId: 0));  // Items 0, 1, 2
@@ -90,7 +94,8 @@ public class WriteRetryQueueTests
 
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Connection failed"));
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(changes, new Exception("Connection failed"))));
 
         // Act
         queue.Enqueue(CreateChanges(3));
@@ -110,7 +115,8 @@ public class WriteRetryQueueTests
 
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Connection failed"));
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(changes, new Exception("Connection failed"))));
 
         // Act
         queue.Enqueue(CreateChanges(5)); // Fill to capacity
@@ -145,9 +151,11 @@ public class WriteRetryQueueTests
         var totalWritten = 0;
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
-                totalWritten += changes.Length)
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                totalWritten += changes.Length;
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
 
         // Act - enqueue more than MaxBatchSize (1024)
         queue.Enqueue(CreateChanges(1500));
@@ -194,10 +202,11 @@ public class WriteRetryQueueTests
 
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken ct) =>
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken ct) =>
             {
                 Interlocked.Increment(ref callCount);
                 await tcs.Task; // Block until released
+                return WriteResult.Success;
             });
 
         queue.Enqueue(CreateChanges(3));
@@ -227,9 +236,11 @@ public class WriteRetryQueueTests
         sourceMock.Setup(c => c.WriteBatchSize).Returns(2);
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
-                batchSizes.Add(changes.Length))
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                batchSizes.Add(changes.Length);
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
 
         // Act
         queue.Enqueue(CreateChanges(5));
@@ -271,7 +282,8 @@ public class WriteRetryQueueTests
 
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Success));
 
         // Act
         queue.Enqueue(CreateChanges(10));
@@ -292,9 +304,11 @@ public class WriteRetryQueueTests
         var totalWritten = 0;
         sourceMock
             .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
-                totalWritten += changes.Length)
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                totalWritten += changes.Length;
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
 
         // Act - enqueue exactly MaxBatchSize (1024)
         queue.Enqueue(CreateChanges(1024));

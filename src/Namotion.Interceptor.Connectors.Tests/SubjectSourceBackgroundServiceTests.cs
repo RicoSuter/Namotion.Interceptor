@@ -42,12 +42,13 @@ public class SubjectSourceBackgroundServiceTests
 
         subjectSourceMock
             .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Success));
 
         var cancellationTokenSource = new CancellationTokenSource();
 
         // Act
-        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, subjectContextMock.Object, NullLogger.Instance, null, null);
+        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, subjectContextMock.Object, NullLogger.Instance);
 
         await service.StartAsync(cancellationTokenSource.Token);
         await Task.Delay(1000, cancellationTokenSource.Token);
@@ -78,9 +79,8 @@ public class SubjectSourceBackgroundServiceTests
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
 
-        subjectSourceMock
-            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
-            .Returns(true);
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
@@ -94,13 +94,16 @@ public class SubjectSourceBackgroundServiceTests
 
         subjectSourceMock
             .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Callback((ReadOnlyMemory<SubjectPropertyChange> c, CancellationToken _) => changes = c.ToArray())
-            .Returns(ValueTask.CompletedTask);
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> c, CancellationToken _) =>
+            {
+                changes = c.ToArray();
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
 
         var cancellationTokenSource = new CancellationTokenSource();
 
         // Act
-        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance, null, null);
+        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance);
         await service.StartAsync(cancellationTokenSource.Token);
         
         var writeContext = new PropertyWriteContext<string?>(
@@ -131,9 +134,8 @@ public class SubjectSourceBackgroundServiceTests
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
 
-        subjectSourceMock
-            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
-            .Returns(true);
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
@@ -153,7 +155,7 @@ public class SubjectSourceBackgroundServiceTests
             });
 
         // Act
-        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance, null, null);
+        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance);
         await service.StartAsync(CancellationToken.None);
 
         var writeContext = new PropertyWriteContext<string?>(
@@ -181,9 +183,8 @@ public class SubjectSourceBackgroundServiceTests
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
 
-        subjectSourceMock
-            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
-            .Returns(true);
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
@@ -203,7 +204,7 @@ public class SubjectSourceBackgroundServiceTests
             });
 
         // Act
-        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance, null, null);
+        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance);
         await service.StartAsync(CancellationToken.None);
 
         var writeContext = new PropertyWriteContext<string?>(
@@ -231,9 +232,8 @@ public class SubjectSourceBackgroundServiceTests
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
 
-        subjectSourceMock
-            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
-            .Returns(true);
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
@@ -249,16 +249,16 @@ public class SubjectSourceBackgroundServiceTests
         var secondCallTcs = new TaskCompletionSource();
         subjectSourceMock
             .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 callCount++;
                 if (callCount == 1)
                 {
                     firstCallTcs.TrySetResult();
-                    throw new Exception("First call fails");
+                    return new ValueTask<WriteResult>(WriteResult.Failure(changes, new Exception("First call fails")));
                 }
                 secondCallTcs.TrySetResult();
-                return ValueTask.CompletedTask;
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         // Act
@@ -300,9 +300,8 @@ public class SubjectSourceBackgroundServiceTests
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
 
-        subjectSourceMock
-            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
-            .Returns(true);
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
@@ -350,9 +349,8 @@ public class SubjectSourceBackgroundServiceTests
         var subject = new Person(context);
         var subjectSourceMock = new Mock<ISubjectSource>();
 
-        subjectSourceMock
-            .Setup(s => s.IsPropertyIncluded(It.IsAny<RegisteredSubjectProperty>()))
-            .Returns(true);
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
 
         subjectSourceMock
             .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
@@ -367,16 +365,16 @@ public class SubjectSourceBackgroundServiceTests
         var secondCallTcs = new TaskCompletionSource();
         subjectSourceMock
             .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
             {
                 callCount++;
                 if (callCount == 1)
                 {
                     firstCallTcs.TrySetResult();
-                    throw new Exception("Connection failed");
+                    return new ValueTask<WriteResult>(WriteResult.Failure(changes, new Exception("Connection failed")));
                 }
                 secondCallTcs.TrySetResult();
-                return ValueTask.CompletedTask;
+                return new ValueTask<WriteResult>(WriteResult.Success);
             });
 
         // Act

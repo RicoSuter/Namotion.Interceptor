@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors.Transactions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -56,7 +57,7 @@ public class SubjectSourceBackgroundService : BackgroundService
                     using var processor = new ChangeQueueProcessor(
                         _source,
                         _context,
-                        prop => _source.IsPropertyIncluded(prop),
+                        property => property.Reference.TryGetSource(out var source) && source == _source,
                         WriteChangesAsync,
                         _bufferTime,
                         _logger);

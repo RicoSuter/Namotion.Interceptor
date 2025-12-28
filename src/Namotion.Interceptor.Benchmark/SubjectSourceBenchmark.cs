@@ -51,10 +51,11 @@ public class SubjectSourceBenchmark
             bufferTime: TimeSpan.FromMilliseconds(1),
             retryTime: TimeSpan.FromSeconds(1));
 
+        var registeredSubject = _car.TryGetRegisteredSubject()!;
         foreach (var name in _propertyNames)
         {
-            _car.TryGetRegisteredSubject()!
-                .AddProperty(name, typeof(string), static _ => "foo", static (_, _) => { });
+            var property = registeredSubject.AddProperty(name, typeof(string), static _ => "foo", static (_, _) => { });
+            property.Reference.SetSource(_source);
         }
 
         _cts = new CancellationTokenSource();
@@ -138,8 +139,6 @@ public class SubjectSourceBenchmark
             _signal.WaitOne();
         }
 
-        public bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
-
         public Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
         {
             PropertyWriter = propertyWriter;
@@ -153,7 +152,7 @@ public class SubjectSourceBenchmark
 
         public int WriteBatchSize => int.MaxValue;
 
-        public ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
             _count += changes.Length;
 
@@ -162,7 +161,7 @@ public class SubjectSourceBenchmark
                 _signal.Set();
             }
 
-            return ValueTask.CompletedTask;
+            return new ValueTask<WriteResult>(WriteResult.Success);
         }
     }
 }

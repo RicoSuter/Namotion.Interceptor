@@ -20,7 +20,7 @@ public static class MqttSubjectExtensions
     /// <param name="pathProviderName">The name to filter [Path] attributes by (e.g., "mqtt").</param>
     /// <param name="brokerPort">The MQTT broker port. Default is 1883.</param>
     /// <param name="topicPrefix">Optional topic prefix.</param>
-    public static IServiceCollection AddMqttSubjectClient<TSubject>(
+    public static IServiceCollection AddMqttSubjectClientSource<TSubject>(
         this IServiceCollection serviceCollection,
         string brokerHost,
         string pathProviderName,
@@ -28,7 +28,7 @@ public static class MqttSubjectExtensions
         string? topicPrefix = null)
         where TSubject : IInterceptorSubject
     {
-        return serviceCollection.AddMqttSubjectClient(
+        return serviceCollection.AddMqttSubjectClientSource(
             sp => sp.GetRequiredService<TSubject>(),
             _ => new MqttClientConfiguration
             {
@@ -42,7 +42,7 @@ public static class MqttSubjectExtensions
     /// <summary>
     /// Adds an MQTT client source with custom configuration.
     /// </summary>
-    public static IServiceCollection AddMqttSubjectClient(
+    public static IServiceCollection AddMqttSubjectClientSource(
         this IServiceCollection serviceCollection,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
         Func<IServiceProvider, MqttClientConfiguration> configurationProvider)

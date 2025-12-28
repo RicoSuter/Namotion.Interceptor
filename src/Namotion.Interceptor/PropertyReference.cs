@@ -50,6 +50,31 @@ public struct PropertyReference : IEquatable<PropertyReference>
         return Subject.Data.TryGetValue((Name, key), out value);
     }
 
+    /// <summary>
+    /// Gets an existing value for the specified key, or adds the value if the key doesn't exist.
+    /// This operation is atomic and thread-safe.
+    /// </summary>
+    /// <param name="key">The key to look up or add.</param>
+    /// <param name="value">The value to add if the key doesn't exist.</param>
+    /// <returns>The existing value if found, or the newly added value.</returns>
+    public object? GetOrSetPropertyData(string key, object? value)
+    {
+        return Subject.Data.GetOrAdd((Name, key), value);
+    }
+
+    /// <summary>
+    /// Removes the property data for the specified key only if it matches the expected value.
+    /// This operation is atomic and thread-safe.
+    /// </summary>
+    /// <param name="key">The key to remove.</param>
+    /// <param name="expectedValue">The value that must match for removal to succeed.</param>
+    /// <returns><c>true</c> if the key-value pair was removed; <c>false</c> if the key didn't exist or the value didn't match.</returns>
+    public bool TryRemovePropertyData(string key, object? expectedValue)
+    {
+        return ((ICollection<KeyValuePair<(string?, string), object?>>)Subject.Data)
+            .Remove(new KeyValuePair<(string?, string), object?>((Name, key), expectedValue));
+    }
+
     #region Equality
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

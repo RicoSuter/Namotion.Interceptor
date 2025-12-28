@@ -6,7 +6,6 @@ using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -18,13 +17,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
-    private readonly HashSet<PropertyReference> _propertiesWithOpcData = [];
+    private readonly SourceOwnershipManager _ownership;
 
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
 
-    private LifecycleInterceptor? _lifecycleInterceptor;
     private SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
 
@@ -35,6 +33,16 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private IReadOnlyList<MonitoredItem>? _initialMonitoredItems;
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
+
+    internal SourceOwnershipManager Ownership => _ownership;
+
+    internal bool IsReconnecting => _sessionManager?.IsReconnecting == true;
+
+    internal void RemoveItemsForSubject(IInterceptorSubject subject)
+    {
+        _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
+        _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
+    }
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
     {
@@ -48,16 +56,27 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _logger = logger;
         _configuration = configuration;
 
-        _subjectLoader = new OpcUaSubjectLoader(configuration, _propertiesWithOpcData, this, logger);
+        _ownership = new SourceOwnershipManager(
+            this,
+            onReleasing: property => property.RemovePropertyData(OpcUaNodeIdKey),
+            onSubjectDetaching: OnSubjectDetaching);
+        _subjectLoader = new OpcUaSubjectLoader(configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
+    }
+
+    private void OnSubjectDetaching(IInterceptorSubject subject)
+    {
+        // Skip cleanup during reconnection (subscriptions being transferred)
+        if (IsReconnecting)
+        {
+            return;
+        }
+
+        RemoveItemsForSubject(subject);
     }
 
     /// <inheritdoc />
     public IInterceptorSubject RootSubject => _subject;
-
-    /// <inheritdoc />
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
-        _configuration.PathProvider.IsPropertyIncluded(property);
 
     public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
@@ -66,15 +85,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
-        _lifecycleInterceptor = _subject.Context.TryGetLifecycleInterceptor();
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
-        }
-
         _sessionManager = new SessionManager(this, propertyWriter, _configuration, _logger);
 
-        var application = _configuration.CreateApplicationInstance();
+        var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
         var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Connected to OPC UA server successfully.");
@@ -270,7 +283,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             propertyWriter.StartBuffering();
 
             // Create new session (CreateSessionAsync disposes old session internally)
-            var application = _configuration.CreateApplicationInstance();
+            var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
             var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("New OPC UA session created successfully.");
 
@@ -310,87 +323,115 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     }
 
     /// <summary>
-    /// Writes changes to OPC UA server atomically (all-or-nothing).
-    /// Throws if any write fails, allowing the entire batch to be retried.
+    /// Writes changes to OPC UA server with per-node result tracking.
+    /// Returns a <see cref="WriteResult"/> indicating which nodes failed.
+    /// Zero-allocation on success path.
     /// </summary>
-    public async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        var session = _sessionManager?.CurrentSession;
-        if (session is null || !session.Connected)
+        try
         {
-            throw new InvalidOperationException("OPC UA session is not connected.");
-        }
+            var session = _sessionManager?.CurrentSession;
+            if (session is null || !session.Connected)
+            {
+                return WriteResult.Failure(changes, new InvalidOperationException("OPC UA session is not connected."));
+            }
 
-        var writeValues = CreateWriteValuesCollection(changes);
-        if (writeValues.Count is 0)
+            var writeValues = CreateWriteValuesCollection(changes);
+            if (writeValues.Count is 0)
+            {
+                return WriteResult.Success;
+            }
+
+            var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
+            return ProcessWriteResults(writeResponse.Results, changes);
+        }
+        catch (Exception ex)
         {
-            return;
+            return WriteResult.Failure(changes, ex);
         }
-
-        var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
-        ValidateWriteResults(writeResponse.Results);
     }
 
     /// <summary>
-    /// Validates write results and throws if any write failed (all-or-nothing semantics).
+    /// Processes write results. Zero-allocation on success path.
     /// </summary>
-    private void ValidateWriteResults(StatusCodeCollection results)
+    private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
     {
-        var transientFailureCount = 0;
-        var permanentFailureCount = 0;
-
+        // Fast path: check if all succeeded (common case)
+        var failureCount = 0;
         for (var i = 0; i < results.Count; i++)
         {
-            if (StatusCode.IsBad(results[i]))
+            if (!StatusCode.IsGood(results[i]))
             {
-                if (IsTransientWriteError(results[i]))
-                {
-                    transientFailureCount++;
-                }
-                else
-                {
-                    permanentFailureCount++;
-                }
+                failureCount++;
             }
         }
 
-        if (transientFailureCount > 0 || permanentFailureCount > 0)
+        if (failureCount == 0)
         {
-            _logger.LogWarning(
-                "OPC UA write batch failed: {TransientCount} transient, {PermanentCount} permanent failures out of {TotalCount} writes.",
-                transientFailureCount, permanentFailureCount, results.Count);
-
-            if (transientFailureCount > 0)
-            {
-                throw new InvalidOperationException(
-                    $"OPC UA write failed with {transientFailureCount} transient errors. Entire batch will be retried.");
-            }
-
-            // Only permanent errors, log but don't retry
-            _logger.LogError(
-                "OPC UA write batch had {PermanentCount} permanent failures. These changes will not be retried.",
-                permanentFailureCount);
+            return WriteResult.Success;
         }
+
+        // Failure case: re-scan to collect failed changes
+        var failedChanges = new List<SubjectPropertyChange>(failureCount);
+        var transientCount = 0;
+        var resultIndex = 0;
+        var span = allChanges.Span;
+        for (var i = 0; i < span.Length && resultIndex < results.Count; i++)
+        {
+            var change = span[i];
+            if (!IsWritableOpcUaProperty(change))
+                continue;
+
+            if (!StatusCode.IsGood(results[resultIndex]))
+            {
+                failedChanges.Add(change);
+                if (IsTransientWriteError(results[resultIndex]))
+                    transientCount++;
+            }
+            resultIndex++;
+        }
+
+        var successCount = results.Count - failedChanges.Count;
+        var permanentCount = failedChanges.Count - transientCount;
+
+        _logger.LogWarning(
+            "OPC UA write batch partial failure: {SuccessCount} succeeded, {TransientCount} transient, {PermanentCount} permanent out of {TotalCount}.",
+            successCount, transientCount, permanentCount, results.Count);
+
+        var error = new OpcUaWriteException(transientCount, permanentCount, results.Count);
+        return successCount > 0
+            ? WriteResult.PartialFailure(failedChanges.ToArray(), error)
+            : WriteResult.Failure(failedChanges.ToArray(), error);
+    }
+
+    private bool IsWritableOpcUaProperty(SubjectPropertyChange change)
+    {
+        return change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeId)
+            && nodeId is NodeId
+            && change.Property.TryGetRegisteredProperty() is { HasSetter: true };
     }
 
     private WriteValueCollection CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
         var span = changes.Span;
         var writeValues = new WriteValueCollection(span.Length);
+
         for (var i = 0; i < span.Length; i++)
         {
             var change = span[i];
+           
+            if (!IsWritableOpcUaProperty(change))
+            {
+                continue;
+            }
+
             if (!change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var v) || v is not NodeId nodeId)
             {
                 continue;
             }
 
             var registeredProperty = change.Property.GetRegisteredProperty();
-            if (!registeredProperty.HasSetter)
-            {
-                continue;
-            }
-
             var value = _configuration.ValueConverter.ConvertToNodeValue(
                 change.GetNewValue<object?>(),
                 registeredProperty);
@@ -467,11 +508,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             return; // Already disposed
         }
 
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
-        }
-
         var sessionManager = _sessionManager;
         if (sessionManager is not null)
         {
@@ -483,43 +519,15 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         // This ensures that property data associated with this OpcUaNodeIdKey is cleared
         // even if properties are reused across multiple source instances
         CleanupPropertyData();
+        _ownership.Dispose();
         Dispose();
     }
 
     private void CleanupPropertyData()
     {
-        foreach (var property in _propertiesWithOpcData)
+        foreach (var property in _ownership.Properties)
         {
             property.RemovePropertyData(OpcUaNodeIdKey);
-        }
-
-        _propertiesWithOpcData.Clear();
-    }
-
-    private void OnSubjectDetached(SubjectLifecycleChange change)
-    {
-        // Skip cleanup during reconnection (subscriptions being transferred)
-        if (_sessionManager?.IsReconnecting == true)
-        {
-            return;
-        }
-
-        _sessionManager?.SubscriptionManager.RemoveItemsForSubject(change.Subject);
-        _sessionManager?.PollingManager?.RemoveItemsForSubject(change.Subject);
-        
-        CleanupPropertyDataForSubject(change.Subject);
-    }
-
-    private void CleanupPropertyDataForSubject(IInterceptorSubject subject)
-    {
-        var toRemove = _propertiesWithOpcData
-            .Where(p => p.Subject == subject)
-            .ToList();
-
-        foreach (var property in toRemove)
-        {
-            property.RemovePropertyData(OpcUaNodeIdKey);
-            _propertiesWithOpcData.Remove(property);
         }
     }
 }
