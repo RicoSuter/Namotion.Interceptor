@@ -265,10 +265,13 @@ public sealed class SubjectTransaction : IDisposable
     private async Task<(List<SubjectPropertyChange> Successful, List<SubjectPropertyChange> Failed, List<Exception> Errors)>
         ExecuteWritesAsync(Memory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        var allSuccessfulChanges = new List<SubjectPropertyChange>();
-        var allFailedChanges = new List<SubjectPropertyChange>();
-        var allErrors = new List<Exception>();
-        var localChangesToApply = new List<SubjectPropertyChange>();
+        var changeCount = changes.Length;
+        
+        var allSuccessfulChanges = new List<SubjectPropertyChange>(changeCount);
+        var allFailedChanges = new List<SubjectPropertyChange>();  // Rare, keep small initial capacity
+        var allErrors = new List<Exception>();  // Rare, keep small initial capacity
+
+        var localChangesToApply = new List<SubjectPropertyChange>(changeCount);
 
         var writeHandler = Context.TryGetService<ITransactionWriter>();
         if (writeHandler != null)

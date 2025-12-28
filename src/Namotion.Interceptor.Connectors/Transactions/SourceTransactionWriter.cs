@@ -25,7 +25,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
             var validationError = ValidateSingleWriteRequirement(externalChangesBySource);
             if (validationError != null)
             {
-                var allSourceChanges = externalChangesBySource.Values.SelectMany(c => c).ToList();
+                var allSourceChanges = FlattenChanges(externalChangesBySource);
                 return new TransactionWriteResult([], allSourceChanges, [validationError], localChanges);
             }
         }
@@ -53,7 +53,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         }
 
         // 5. Apply source-bound values to in-process model
-        var sourceBoundChanges = successfulBySource.Values.SelectMany(c => c).ToList();
+        var sourceBoundChanges = FlattenChanges(successfulBySource);
         var (applied, applyFailed, applyErrors) = sourceBoundChanges.ApplyAll();
         allSuccessful.AddRange(applied);
         allFailed.AddRange(applyFailed);
@@ -144,14 +144,15 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         var failed = new List<SubjectPropertyChange>();
         var errors = new List<Exception>();
 
-        var writeTasks = changesBySource.Select(async kvp =>
+        var taskIndex = 0;
+        var writeTasks = new Task<(ISubjectSource Source, (List<SubjectPropertyChange> Successful, List<SubjectPropertyChange> Failed, Exception? Error) Result)>[changesBySource.Count];
+        foreach (var kvp in changesBySource)
         {
-            var (source, sourceChanges) = (kvp.Key, kvp.Value);
-            var result = await TryWriteToSourceAsync(source, sourceChanges, cancellationToken);
-            return (source, result);
-        });
+            writeTasks[taskIndex++] = WriteToSourceWithResultAsync(kvp.Key, kvp.Value, cancellationToken);
+        }
 
         var results = await Task.WhenAll(writeTasks);
+
         foreach (var (source, (successList, failList, error)) in results)
         {
             if (successList.Count > 0)
@@ -183,7 +184,14 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         if (result.Error is not null)
         {
             var failedSet = new HashSet<SubjectPropertyChange>(result.FailedChanges);
-            var written = sourceChanges.Where(c => !failedSet.Contains(c)).ToList();
+            var written = new List<SubjectPropertyChange>(sourceChanges.Count);
+            foreach (var change in sourceChanges)
+            {
+                if (!failedSet.Contains(change))
+                {
+                    written.Add(change);
+                }
+            }
             var error = new SourceTransactionWriteException(source, [.. result.FailedChanges], result.Error);
             return (written, [.. result.FailedChanges], error);
         }
@@ -246,15 +254,28 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
 
         if (externalChangesBySource.Count > 1)
         {
-            var sourceNames = string.Join(", ", externalChangesBySource.Select(kvp => kvp.Key.GetType().Name));
+            var sourceNames = new string[externalChangesBySource.Count];
+            var nameIndex = 0;
+            foreach (var kvp in externalChangesBySource)
+            {
+                sourceNames[nameIndex++] = kvp.Key.GetType().Name;
+            }
             return new InvalidOperationException(
-                $"SingleWrite requirement violated: Transaction spans {externalChangesBySource.Count} sources ({sourceNames}), but only 1 is allowed.");
+                $"SingleWrite requirement violated: Transaction spans {externalChangesBySource.Count} sources ({string.Join(", ", sourceNames)}), but only 1 is allowed.");
         }
 
-        var (source, sourceChanges) = externalChangesBySource.First();
-        var batchSize = source.WriteBatchSize;
+        ISubjectSource? source = null;
+        List<SubjectPropertyChange>? sourceChanges = null;
+        foreach (var kvp in externalChangesBySource)
+        {
+            source = kvp.Key;
+            sourceChanges = kvp.Value;
+            break;
+        }
 
-        if (batchSize > 0 && sourceChanges.Count > batchSize)
+        // source is always non-null here since we checked Count == 0 above
+        var batchSize = source!.WriteBatchSize;
+        if (batchSize > 0 && sourceChanges!.Count > batchSize)
         {
             return new InvalidOperationException(
                 $"SingleWrite requirement violated: Transaction contains {sourceChanges.Count} changes for source '{source.GetType().Name}', " +
@@ -262,5 +283,40 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Flattens changes from multiple sources into a single list.
+    /// Avoids LINQ SelectMany allocation.
+    /// </summary>
+    private static List<SubjectPropertyChange> FlattenChanges(
+        Dictionary<ISubjectSource, List<SubjectPropertyChange>> changesBySource)
+    {
+        var totalCount = 0;
+        foreach (var list in changesBySource.Values)
+        {
+            totalCount += list.Count;
+        }
+
+        var result = new List<SubjectPropertyChange>(totalCount);
+        foreach (var list in changesBySource.Values)
+        {
+            result.AddRange(list);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Wraps TryWriteToSourceAsync to include source in result for parallel execution.
+    /// </summary>
+    private static async Task<(ISubjectSource Source, (List<SubjectPropertyChange> Successful, List<SubjectPropertyChange> Failed, Exception? Error) Result)>
+        WriteToSourceWithResultAsync(
+            ISubjectSource source,
+            List<SubjectPropertyChange> sourceChanges,
+            CancellationToken cancellationToken)
+    {
+        var result = await TryWriteToSourceAsync(source, sourceChanges, cancellationToken);
+        return (source, result);
     }
 }
