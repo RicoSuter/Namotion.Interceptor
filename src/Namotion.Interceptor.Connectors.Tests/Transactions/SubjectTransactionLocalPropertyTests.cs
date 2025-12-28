@@ -329,4 +329,98 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         Assert.False(device.PropertyA); // Not applied due to failure + rollback
         Assert.Contains("Rollback was attempted", exception.Message);
     }
+
+    [Fact]
+    public async Task BestEffortMode_SourceBoundPropertyOnSetThrows_RevertsFailedSourceOnly()
+    {
+        // Arrange - BestEffort mode should rollback failed property's source to maintain per-property consistency
+        var context = CreateContext();
+        var device = new ThrowingDevice(context);
+
+        var sourceAWriteCount = 0;
+        var sourceBWriteCount = 0;
+
+        var sourceA = new Mock<ISubjectSource>();
+        sourceA.Setup(s => s.WriteBatchSize).Returns(0);
+        sourceA.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Callback(() => sourceAWriteCount++)
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Success));
+
+        var sourceB = new Mock<ISubjectSource>();
+        sourceB.Setup(s => s.WriteBatchSize).Returns(0);
+        sourceB.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Callback(() => sourceBWriteCount++)
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Success));
+
+        // Bind properties to different sources
+        new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).SetSource(sourceA.Object);
+        new PropertyReference(device, nameof(ThrowingDevice.PropertyB)).SetSource(sourceB.Object);
+
+        // Only PropertyA will throw during local apply
+        device.ShouldThrow = prop => prop == nameof(ThrowingDevice.PropertyA);
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        device.PropertyA = true;  // Source-bound, OnSet* will throw
+        device.PropertyB = true;  // Source-bound, OnSet* will succeed
+
+        device.ThrowingEnabled = true;
+
+        var exception = await Assert.ThrowsAsync<TransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+
+        // Assert
+        // PropertyA: source written (1) + rolled back (2) = 2 calls
+        Assert.Equal(2, sourceAWriteCount);
+        Assert.False(device.PropertyA); // Not applied, source rolled back
+
+        // PropertyB: source written (1), no rollback needed = 1 call
+        Assert.Equal(1, sourceBWriteCount);
+        Assert.True(device.PropertyB); // Successfully applied
+
+        // Exception reports partial success
+        Assert.Single(exception.AppliedChanges);
+        Assert.Single(exception.FailedChanges);
+    }
+
+    [Fact]
+    public async Task BestEffortMode_SourceBoundPropertyOnSetThrows_MaintainsPerPropertyConsistency()
+    {
+        // Arrange - Verifies that each property stays in sync with its source
+        var context = CreateContext();
+        var device = new ThrowingDevice(context);
+
+        var writtenValues = new List<(string Property, bool Value)>();
+        var successSource = new Mock<ISubjectSource>();
+        successSource.Setup(s => s.WriteBatchSize).Returns(0);
+        successSource.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    writtenValues.Add((change.Property.Name, change.GetNewValue<bool>()));
+                }
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).SetSource(successSource.Object);
+        device.ShouldThrow = prop => prop == nameof(ThrowingDevice.PropertyA);
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        device.PropertyA = true;
+
+        device.ThrowingEnabled = true;
+
+        await Assert.ThrowsAsync<TransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+
+        // Assert - Source was written with true, then rolled back with false
+        Assert.Equal(2, writtenValues.Count);
+        Assert.Equal(("PropertyA", true), writtenValues[0]);   // Initial write
+        Assert.Equal(("PropertyA", false), writtenValues[1]);  // Rollback write
+
+        // In-process model matches source (both have false)
+        Assert.False(device.PropertyA);
+    }
 }
