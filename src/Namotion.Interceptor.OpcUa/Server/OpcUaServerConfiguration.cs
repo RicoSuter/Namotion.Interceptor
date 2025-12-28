@@ -59,9 +59,21 @@ public class OpcUaServerConfiguration
     /// </summary>
     public string BaseAddress { get; init; } = "opc.tcp://localhost:4840/";
 
-    public virtual ApplicationInstance CreateApplicationInstance()
+    /// <summary>
+    /// Gets or sets the telemetry context for OPC UA operations.
+    /// Defaults to NullTelemetryContext for minimal overhead.
+    /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
+    /// </summary>
+    public ITelemetryContext TelemetryContext { get; init; } = NullTelemetryContext.Instance;
+
+    /// <summary>
+    /// Creates and configures an OPC UA application instance for the server.
+    /// Override this method to customize application configuration, security settings, or certificate handling.
+    /// </summary>
+    /// <returns>A configured <see cref="ApplicationInstance"/> ready for hosting an OPC UA server.</returns>
+    public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
-        var application = new ApplicationInstance
+        var application = new ApplicationInstance(TelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Server
@@ -174,11 +186,11 @@ public class OpcUaServerConfiguration
                 TraceMasks = 519, // Security, errors, service result exceptions & trace
                 DeleteOnLoad = true
             },
-            CertificateValidator = new CertificateValidator()
+            CertificateValidator = new CertificateValidator(TelemetryContext)
         };
 
         // Register the certificate validator with the configuration.
-        config.CertificateValidator.Update(config);
+        await config.CertificateValidator.UpdateAsync(config).ConfigureAwait(false);
 
         application.ApplicationConfiguration = config;
         return application;

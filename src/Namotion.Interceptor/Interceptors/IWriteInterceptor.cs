@@ -1,7 +1,16 @@
 ﻿namespace Namotion.Interceptor.Interceptors;
 
+/// <summary>
+/// Interceptor that can intercept and modify property write operations.
+/// </summary>
 public interface IWriteInterceptor
 {
+    /// <summary>
+    /// Intercepts a property write operation.
+    /// </summary>
+    /// <typeparam name="TProperty">The type of the property.</typeparam>
+    /// <param name="context">The write context containing the property reference and values.</param>
+    /// <param name="next">The next interceptor in the chain to call.</param>
     void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next);
 }
 

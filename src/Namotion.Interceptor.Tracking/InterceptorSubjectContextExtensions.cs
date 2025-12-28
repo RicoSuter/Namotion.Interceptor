@@ -4,6 +4,7 @@ using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Recorder;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking;
 
@@ -23,7 +24,18 @@ public static class InterceptorSubjectContextExtensions
             .WithPropertyChangeQueue()
             .WithContextInheritance();
     }
-    
+
+    /// <summary>
+    /// Enables transaction support for the context.
+    /// </summary>
+    /// <param name="context">The context.</param>
+    /// <returns>The context.</returns>
+    public static IInterceptorSubjectContext WithTransactions(this IInterceptorSubjectContext context)
+    {
+        context.TryAddService(() => new SubjectTransactionInterceptor(), _ => true);
+        return context;
+    }
+
     /// <summary>
     /// Registers an interceptor that checks if the new value is different from the current value and only calls inner interceptors when the property has changed.
     /// Uses EqualityComparer.Default for value types or strings and does nothing for reference types.

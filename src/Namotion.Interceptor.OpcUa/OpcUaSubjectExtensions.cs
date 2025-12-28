@@ -6,6 +6,7 @@ using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry.Paths;
+using Opc.Ua;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -44,7 +45,7 @@ public static class OpcUaSubjectExtensions
         return new OpcUaSubjectClientSource(subject, configuration, logger);
     }
 
-    public static IServiceCollection AddOpcUaSubjectClient<TSubject>(
+    public static IServiceCollection AddOpcUaSubjectClientSource<TSubject>(
         this IServiceCollection serviceCollection,
         string serverUrl,
         string sourceName,
@@ -52,7 +53,7 @@ public static class OpcUaSubjectExtensions
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
-        return serviceCollection.AddOpcUaSubjectClient(
+        return serviceCollection.AddOpcUaSubjectClientSource(
             serverUrl,
             sourceName,
             sp => sp.GetRequiredService<TSubject>(),
@@ -60,7 +61,7 @@ public static class OpcUaSubjectExtensions
             rootName);
     }
 
-    public static IServiceCollection AddOpcUaSubjectClient(
+    public static IServiceCollection AddOpcUaSubjectClientSource(
         this IServiceCollection serviceCollection,
         string serverUrl,
         string sourceName,
@@ -68,18 +69,26 @@ public static class OpcUaSubjectExtensions
         string? pathPrefix = null,
         string? rootName = null)
     {
-        return serviceCollection.AddOpcUaSubjectClient(subjectSelector, sp => new OpcUaClientConfiguration
+        return serviceCollection.AddOpcUaSubjectClientSource(subjectSelector, sp =>
         {
-            ServerUrl = serverUrl,
-            RootName = rootName,
-            PathProvider = new AttributeBasedPathProvider(sourceName),
-            TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
-            ValueConverter = new OpcUaValueConverter(),
-            SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+            var telemetryContext = DefaultTelemetry.Create(builder =>
+                builder.Services.AddSingleton(loggerFactory));
+
+            return new OpcUaClientConfiguration
+            {
+                ServerUrl = serverUrl,
+                RootName = rootName,
+                PathProvider = new AttributeBasedPathProvider(sourceName),
+                TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
+                ValueConverter = new OpcUaValueConverter(),
+                SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
+                TelemetryContext = telemetryContext
+            };
         });
     }
 
-    public static IServiceCollection AddOpcUaSubjectClient(
+    public static IServiceCollection AddOpcUaSubjectClientSource(
         this IServiceCollection serviceCollection,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
         Func<IServiceProvider, OpcUaClientConfiguration> configurationProvider)
@@ -132,11 +141,19 @@ public static class OpcUaSubjectExtensions
         string? pathPrefix = null,
         string? rootName = null)
     {
-        return serviceCollection.AddOpcUaSubjectServer(subjectSelector, _ => new OpcUaServerConfiguration
+        return serviceCollection.AddOpcUaSubjectServer(subjectSelector, sp =>
         {
-            RootName = rootName,
-            PathProvider = new AttributeBasedPathProvider(sourceName),
-            ValueConverter = new OpcUaValueConverter()
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+            var telemetryContext = DefaultTelemetry.Create(builder =>
+                builder.Services.AddSingleton(loggerFactory));
+
+            return new OpcUaServerConfiguration
+            {
+                RootName = rootName,
+                PathProvider = new AttributeBasedPathProvider(sourceName),
+                ValueConverter = new OpcUaValueConverter(),
+                TelemetryContext = telemetryContext
+            };
         });
     }
 
