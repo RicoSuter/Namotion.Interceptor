@@ -91,21 +91,19 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
         lock (_knownSubjects)
         {
             var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
-            if (registeredSubject is null)
-            {
-                return;
-            }
 
             // Always update parent-child relationships when a property reference is removed,
             // regardless of reference count. This ensures the Children collection stays accurate
             // even when the subject has multiple references from different properties.
+            // Note: We call RemoveChild even if registeredSubject is null, because the subject
+            // may have been removed by a nested context-only detach triggered by ContextInheritanceHandler.
             if (change.Property is not null)
             {
                 var property = TryGetRegisteredProperty(change.Property.Value);
                 if (property is not null)
                 {
-                    // Remove parent relationship from the child subject
-                    registeredSubject.RemoveParent(property, change.Index);
+                    // Remove parent relationship from the child subject (if still tracked)
+                    registeredSubject?.RemoveParent(property, change.Index);
 
                     // Remove child from the parent property's Children collection
                     property.RemoveChild(new SubjectPropertyChild
@@ -117,7 +115,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
             }
 
             // Only remove the subject from the registry when it's the final detachment
-            if (change.IsLastDetach)
+            if (change.IsLastDetach && registeredSubject is not null)
             {
                 _knownSubjects.Remove(change.Subject);
             }
