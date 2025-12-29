@@ -14,7 +14,7 @@ public class LifecycleInterceptorTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -38,7 +38,7 @@ public class LifecycleInterceptorTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -63,7 +63,7 @@ public class LifecycleInterceptorTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -95,7 +95,7 @@ public class LifecycleInterceptorTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -122,7 +122,7 @@ public class LifecycleInterceptorTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -146,7 +146,7 @@ public class LifecycleInterceptorTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -172,7 +172,7 @@ public class LifecycleInterceptorTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -291,7 +291,7 @@ public class LifecycleInterceptorTests
         // Arrange - context-only attachment (property=null) should NOT increment reference count
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -312,7 +312,7 @@ public class LifecycleInterceptorTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -336,7 +336,7 @@ public class LifecycleInterceptorTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -369,7 +369,7 @@ public class LifecycleInterceptorTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()

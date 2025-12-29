@@ -206,7 +206,7 @@ This ensures that all objects in the subject graph share the same context, enabl
 
 ## Subject Lifecycle Tracking
 
-Track when subjects are attached to or detached from the subject graph:
+Track when subjects enter or leave the lifecycle system (used by registry, hosting, sources):
 
 ```csharp
 [InterceptorSubject]
@@ -219,13 +219,14 @@ public partial class Person
 var context = InterceptorSubjectContext
     .Create()
     .WithLifecycle()
+    .WithContextInheritance()
     .WithService(() => new MyLifecycleHandler());
 
 var person = new Person(context);
-var child = new Person(context) { Name = "Child" };
+var child = new Person { Name = "Child" }; // No context yet
 
-person.Children = [child]; // AttachSubject called for child
-person.Children = [];      // DetachSubject called for child
+person.Children = [child]; // AttachSubject called (IsFirstAttach=true)
+person.Children = [];      // DetachSubject called (IsLastDetach=true)
 
 public class MyLifecycleHandler : ILifecycleHandler
 {
@@ -286,11 +287,11 @@ lifecycleInterceptor.SubjectDetached += change =>
 This two-phase pattern is triggered by `ContextInheritanceHandler`, which automatically removes the fallback context when `ReferenceCount` reaches 0. Without context inheritance, only the property detach fires and `IsLastDetach` will be `false` (the subject remains tracked until manually detached).
 
 This pattern allows handlers to distinguish between:
-- Partial detachment (subject still attached to registry but has no reference)
-- Final cleanup (subject truly leaving the registry)
+- Property detachment (property reference removed, subject still tracked in lifecycle/registry)
+- Final detachment (subject being removed from lifecycle/registry)
 
 Events are useful for:
-- Cache invalidation when subjects are removed from the object graph
+- Cache invalidation when subjects leave the lifecycle (`IsLastDetach=true`)
 - Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
 - Integration packages (MQTT, OPC UA) that need to clean up internal state
 
@@ -347,12 +348,10 @@ public record struct SubjectLifecycleChange(
     PropertyReference? Property,      // null for context-only attachments
     object? Index,
     int ReferenceCount,                // Number of property references (0 for context-only)
-    bool IsFirstAttach,                // True when subject first enters lifecycle
-    bool IsLastDetach                 // True when ReferenceCount reaches 0 during property detachment
+    bool IsFirstAttach,                // True only on the first attachment (use to initialize resources)
+    bool IsLastDetach                  // True only on the final detachment (use to cleanup resources)
 );
 ```
-
-**IsLastDetach** is `true` when the lifecycle tracking set is completely empty (the subject truly leaves the lifecycle). When a subject has both context-only and property attachments, property detachment fires first with `IsLastDetach=false`, followed by a deferred context detachment with `IsLastDetach=true`.
 
 **Using semantic flags (recommended):**
 
@@ -387,13 +386,13 @@ if (change is { ReferenceCount: 1, Property: not null })
 }
 ```
 
-This enables proper cleanup when subjects are removed from all references, even when referenced by multiple properties or collections.
+This enables proper cleanup when subjects lose all property references and leave the lifecycle.
 
-### Lifecycle Event Flow Examples
+### Lifecycle Event Examples
 
-The following examples illustrate how lifecycle events fire in different attachment scenarios, using a `Person` subject with `Mother` and `Father` properties.
+The following examples illustrate how lifecycle events fire in different attachment scenarios.
 
-#### Scenario 1: Context-First Attachment
+#### Context-First Attachment
 
 When a subject is first attached via context, then assigned to a property:
 
@@ -415,21 +414,21 @@ parent.Mother = child;
 parent.Mother = null;
 ```
 
-| Step | Action                       | Set State | RefCount | Event | Property | IsFirstAttach | IsLastDetach |
-|------|------------------------------|-----------|----------|-------|----------|---------------|--------------|
-| 1    | `new Person(context)`        | `{ null }` | 0 | `SubjectAttached` | null | **true** | false |
-| 2    | `parent.Mother = child`      | `{ null, Mother }` | 1 | `SubjectAttached` | Mother | false | false |
-| 3    | `parent.Mother = null`       | `{ null }` | 0 | `SubjectDetached` | Mother | false | false |
-| 4    | *(from handler)*             | `{ }` | 0 | `SubjectDetached` | null | false | **true** |
+| Step | Action                       | Event | Property | RefCount | IsFirstAttach | IsLastDetach |
+|------|------------------------------|-------|----------|----------|---------------|--------------|
+| 1    | `new Person(context)`        | `SubjectAttached` | null | 0 | **true** | false |
+| 2    | `parent.Mother = child`      | `SubjectAttached` | Mother | 1 | false | false |
+| 3    | `parent.Mother = null`       | `SubjectDetached` | Mother | 0 | false | false |
+| 4    | *(context cleanup)*          | `SubjectDetached` | null | 0 | false | **true** |
 
-- **Step 1**: Context-only attachment creates entry with `Property=null`, `ReferenceCount=0`
-- **Step 2**: Property attachment adds second entry, increments `ReferenceCount` to 1
-- **Step 3**: Property detach event fires first with `IsLastDetach=false` (context entry still in set)
-- **Step 4**: Context detach fires after handler removes fallback context, with `IsLastDetach=true` (set now empty)
+- **Step 1**: Context-only attachment (`IsFirstAttach=true`, no property reference)
+- **Step 2**: Property attachment increments `ReferenceCount` to 1
+- **Step 3**: Property detach fires first (`IsLastDetach=false`)
+- **Step 4**: Context detach fires with `IsLastDetach=true` (subject leaves lifecycle)
 
-#### Scenario 2: Property-Direct Attachment (Most Common)
+#### Property-Direct Attachment
 
-When a subject is attached directly via property assignment, including multi-property scenarios:
+When a subject is attached directly via property (most common scenario):
 
 ```csharp
 var context = InterceptorSubjectContext
@@ -453,19 +452,17 @@ parent.Mother = null;
 parent.Father = null;
 ```
 
-| Step | Action | Set State | RefCount | Event | Property | IsFirstAttach | IsLastDetach |
-|------|--------|-----------|----------|-------|----------|---------------|--------------|
-| 1 | `parent.Mother = child` | `{ Mother }` | 1 | `SubjectAttached` | Mother | **true** | false |
-| 2 | `parent.Father = child` | `{ Mother, Father }` | 2 | `SubjectAttached` | Father | false | false |
-| 3 | `parent.Mother = null` | `{ Father }` | 1 | `SubjectDetached` | Mother | false | false |
-| 4a | `parent.Father = null` | `{ }` | 0 | `SubjectDetached` | Father | false | false |
-| 4b | *(from handler)* | `{ }` | 0 | `SubjectDetached` | null | false | **true** |
+| Step | Action | Event | Property | RefCount | IsFirstAttach | IsLastDetach |
+|------|--------|-------|----------|----------|---------------|--------------|
+| 1 | `parent.Mother = child` | `SubjectAttached` | Mother | 1 | **true** | false |
+| 2 | `parent.Father = child` | `SubjectAttached` | Father | 2 | false | false |
+| 3 | `parent.Mother = null` | `SubjectDetached` | Mother | 1 | false | false |
+| 4a | `parent.Father = null` | `SubjectDetached` | Father | 0 | false | false |
+| 4b | *(context cleanup)* | `SubjectDetached` | null | 0 | false | **true** |
 
-- **IsFirstAttach=true** only on Step 1 (first time entering lifecycle)
-- **IsLastDetach=true** only on Step 4b (the context-only detach after all property references are gone)
-- Steps 2, 3, and 4a are "intermediate" with both flags `false`
-
-Note: When the last property reference is removed (Step 4a), `ContextInheritanceHandler` triggers a context-only detach (Step 4b) because it added the parent's context as a fallback during Step 1. This two-phase detach pattern ensures handlers can distinguish between partial detachment (Step 4a, `IsLastDetach=false`) and final cleanup (Step 4b, `IsLastDetach=true`).
+- **Step 1**: First property attachment (`IsFirstAttach=true`)
+- **Steps 2-4a**: Intermediate events (both flags `false`)
+- **Step 4b**: Final context detach (`IsLastDetach=true`, subject leaves lifecycle)
 
 ## Parent-Child Relationship Tracking
 

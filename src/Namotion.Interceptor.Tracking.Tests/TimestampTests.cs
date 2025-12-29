@@ -13,7 +13,7 @@ public class TimestampTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
