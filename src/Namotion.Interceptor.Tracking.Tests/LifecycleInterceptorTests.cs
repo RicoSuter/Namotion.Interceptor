@@ -76,14 +76,17 @@ public class LifecycleInterceptorTests
         var mother3 = new Person { FirstName = "Mother3" };
 
         // Act & Assert
+        // mother2: single attach event (context-only is skipped when attached via property)
         mother1.Mother = mother2;
-        Assert.Equal(2, events.Count(e => e.StartsWith("Attached: ")));
+        Assert.Equal(2, events.Count(e => e.StartsWith("Attached: "))); // mother1 context + mother2 property
 
+        // mother3: single attach event
         mother2.Mother = mother3;
-        Assert.Equal(3, events.Count(e => e.StartsWith("Attached: ")));
+        Assert.Equal(3, events.Count(e => e.StartsWith("Attached: "))); // + mother3 property
 
+        // Detaching mother2 triggers: mother2 property, mother3 property, mother3 context, mother2 context
         mother1.Mother = null;
-        Assert.Equal(2, events.Count(e => e.StartsWith("Detached: ")));
+        Assert.Equal(4, events.Count(e => e.StartsWith("Detached: ")));
     }
 
     [Fact]
@@ -321,8 +324,9 @@ public class LifecycleInterceptorTests
         // Act - add child to dictionary
         container.Children = new Dictionary<string, Person> { { "key1", child } };
 
-        // Assert - child should be attached with reference count 1
-        var childAttachEvent = events.Single(e => e.Contains("{Child }") && e.StartsWith("Attached:"));
+        // Assert - child should be attached with reference count 1 (property attachment)
+        // Note: there's also a context-only attachment with count: 0 that happens first
+        var childAttachEvent = events.Single(e => e.Contains("{Child }") && e.StartsWith("Attached:") && e.Contains("at Children"));
         Assert.Contains("count: 1", childAttachEvent);
     }
 
@@ -347,8 +351,9 @@ public class LifecycleInterceptorTests
         // Act - remove child by assigning empty dictionary
         container.Children = new Dictionary<string, Person>();
 
-        // Assert - child should be detached with reference count 0
-        var childDetachEvent = events.Single(e => e.Contains("{Child }") && e.StartsWith("Detached:"));
+        // Assert - child should be detached with reference count 0 (property detachment)
+        // Note: there's also a context-only detachment with count: 0 that happens after
+        var childDetachEvent = events.Single(e => e.Contains("{Child }") && e.StartsWith("Detached:") && e.Contains("at Children"));
         Assert.Contains("count: 0", childDetachEvent);
     }
 
@@ -381,7 +386,8 @@ public class LifecycleInterceptorTests
         // Add to dictionary - should increment count to 1
         container.Children = new Dictionary<string, Person> { { "key1", child } };
 
-        var attachEvent = events.Single(e => e.Contains("{Child }") && e.StartsWith("Attached:"));
+        // Child was already attached via context, so only property attachment happens now
+        var attachEvent = events.Single(e => e.Contains("{Child }") && e.StartsWith("Attached:") && e.Contains("at Children"));
         Assert.Contains("count: 1", attachEvent);
 
         events.Clear();
@@ -389,8 +395,8 @@ public class LifecycleInterceptorTests
         // Act - remove from dictionary - should decrement count to 0
         container.Children = new Dictionary<string, Person>();
 
-        // Assert - reference count should be 0, not 1!
-        var detachEvent = events.Single(e => e.Contains("{Child }") && e.StartsWith("Detached:"));
+        // Assert - reference count should be 0, not 1! (property detachment)
+        var detachEvent = events.Single(e => e.Contains("{Child }") && e.StartsWith("Detached:") && e.Contains("at Children"));
         Assert.Contains("count: 0", detachEvent);
     }
 }

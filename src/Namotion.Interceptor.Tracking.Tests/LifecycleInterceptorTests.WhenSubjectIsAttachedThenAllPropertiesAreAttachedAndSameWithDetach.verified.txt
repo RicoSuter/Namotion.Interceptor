@@ -27,5 +27,6 @@
   Detached property: {Robert Smith}.Mother,
   Detached property: {Robert Smith}.Children,
   Detached property: {Robert Smith}.FooBar,
+  Detached: {Robert Smith},
   Detached: {Robert Smith}
 ]

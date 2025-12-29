@@ -2,7 +2,7 @@
 
 ## Overview
 
-Fixes for issues found during code review of the `feature/lifecycle-and-hosting-improvements` branch, specifically in how handlers consume the new `IsFirstAttach`/`IsFinalDetach` flags.
+Fixes for issues found during code review of the `feature/lifecycle-and-hosting-improvements` branch, specifically in how handlers consume the new `IsFirstAttach`/`IsLastDetach` flags.
 
 ---
 

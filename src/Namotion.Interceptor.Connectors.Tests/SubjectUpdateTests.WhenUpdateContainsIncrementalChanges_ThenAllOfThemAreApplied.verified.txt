@@ -33,6 +33,10 @@
         Collection: [
           {
             Index: 0,
+            Item: {}
+          },
+          {
+            Index: 1,
             Item: {
               Properties: {
                 firstName: {

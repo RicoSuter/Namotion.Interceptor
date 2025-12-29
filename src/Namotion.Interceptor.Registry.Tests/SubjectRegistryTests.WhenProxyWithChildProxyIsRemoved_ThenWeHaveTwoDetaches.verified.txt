@@ -2,6 +2,8 @@
   Attached:   at  with index , count: 0,
   Attached: Grandmother  at Mother with index , count: 1,
   Attached: Mother  at Mother with index , count: 1,
+  Detached: Grandmother  at  with index , count: 0,
   Detached: Grandmother  at Mother with index , count: 0,
+  Detached: Mother  at  with index , count: 0,
   Detached: Mother  at Mother with index , count: 0
 ]

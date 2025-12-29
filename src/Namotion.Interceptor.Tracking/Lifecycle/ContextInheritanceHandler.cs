@@ -18,7 +18,8 @@ public class ContextInheritanceHandler : ILifecycleHandler
 
     public void DetachSubject(SubjectLifecycleChange change)
     {
-        if (change.Property is not null)
+        // Only remove fallback context on last property detachment (symmetric with attach)
+        if (change is { Property: not null, ReferenceCount: 0 })
         {
             var parent = change.Property.Value.Subject;
             change.Subject.Context.RemoveFallbackContext(parent.Context);
