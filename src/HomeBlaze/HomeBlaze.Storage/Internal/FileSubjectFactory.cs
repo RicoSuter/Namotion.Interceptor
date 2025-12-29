@@ -16,7 +16,7 @@ internal sealed class FileSubjectFactory
 {
     private readonly SubjectTypeRegistry _typeRegistry;
     private readonly ConfigurableSubjectSerializer _serializer;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceProvider _subjectServiceProvider;
     private readonly ILogger? _logger;
 
     public FileSubjectFactory(
@@ -27,7 +27,9 @@ internal sealed class FileSubjectFactory
     {
         _typeRegistry = typeRegistry;
         _serializer = serializer;
-        _serviceProvider = serviceProvider;
+        // Use wrapper to exclude IInterceptorSubjectContext from DI resolution.
+        // Context will be attached later via ContextInheritanceHandler.
+        _subjectServiceProvider = new SubjectCreationServiceProvider(serviceProvider);
         _logger = logger;
     }
 
@@ -110,7 +112,7 @@ internal sealed class FileSubjectFactory
         {
             // ActivatorUtilities resolves DI services + passes explicit args
             return (IInterceptorSubject)ActivatorUtilities.CreateInstance(
-                _serviceProvider,
+                _subjectServiceProvider,
                 type,
                 storage,   // explicit arg
                 blobPath); // explicit arg
