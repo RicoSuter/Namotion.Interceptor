@@ -10,11 +10,13 @@ namespace HomeBlaze.Services;
 /// </summary>
 public class SubjectFactory
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceProvider _subjectServiceProvider;
 
     public SubjectFactory(IServiceProvider serviceProvider)
     {
-        _serviceProvider = serviceProvider;
+        // Use wrapper to exclude IInterceptorSubjectContext from DI resolution.
+        // Context will be attached later via ContextInheritanceHandler.
+        _subjectServiceProvider = new SubjectCreationServiceProvider(serviceProvider);
     }
 
     /// <summary>
@@ -22,7 +24,7 @@ public class SubjectFactory
     /// </summary>
     public IInterceptorSubject CreateSubject(Type type)
     {
-        var instance = ActivatorUtilities.CreateInstance(_serviceProvider, type);
+        var instance = ActivatorUtilities.CreateInstance(_subjectServiceProvider, type);
         if (instance is IInterceptorSubject subject)
         {
             return subject;

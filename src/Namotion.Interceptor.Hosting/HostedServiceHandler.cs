@@ -202,8 +202,6 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         {
             try
             {
-                await Task.Delay(50, token); // TODO: Fix small delay to let sync property assignments/deserialization complete
-
                 _logger?.LogInformation("Starting attached hosted service {Service}.", hostedService.ToString());
                 await hostedService.StartAsync(token);
                 tcs?.TrySetResult();
@@ -221,8 +219,6 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         {
             try
             {
-                await Task.Delay(50, token); // TODO: Fix small delay to let sync property assignments/deserialization complete
-
                 _logger?.LogInformation("Stopping detached hosted service {Service}.", hostedService.ToString());
                 await hostedService.StopAsync(token);
                 tcs?.TrySetResult();

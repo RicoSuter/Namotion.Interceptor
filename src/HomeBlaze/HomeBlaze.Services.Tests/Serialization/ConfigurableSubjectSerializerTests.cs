@@ -262,6 +262,41 @@ public class ConfigurableSubjectSerializerTests
     }
 
     [Fact]
+    public void Deserialize_WhenContextIsRegisteredInDI_StillUsesParameterlessConstructor()
+    {
+        // Arrange - This mimics production setup where IInterceptorSubjectContext IS registered
+        var context = InterceptorSubjectContext.Create();
+        var services = new ServiceCollection();
+        services.AddSingleton<IInterceptorSubjectContext>(context);
+        var serviceProvider = services.BuildServiceProvider();
+
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(TestSubject)]);
+
+        var serializer = new ConfigurableSubjectSerializer(typeProvider, serviceProvider);
+
+        var json = """
+        {
+            "$type": "HomeBlaze.Services.Tests.Serialization.TestSubject",
+            "configProperty": "test-value"
+        }
+        """;
+
+        // Act - Should NOT throw, should use parameterless constructor
+        var result = serializer.Deserialize(json);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.IsType<TestSubject>(result);
+        var testSubject = (TestSubject)result;
+        Assert.Equal("test-value", testSubject.ConfigProperty);
+
+        // The subject should NOT have a context attached yet
+        // (context will be attached later via ContextInheritanceHandler when assigned to a property)
+        Assert.Null(((IInterceptorSubject)testSubject).Context.TryGetService<IInterceptorSubjectContext>());
+    }
+
+    [Fact]
     public void Deserialize_SimpleSubject_PopulatesConfigProperties()
     {
         // Arrange
