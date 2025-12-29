@@ -32,9 +32,9 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 AttachHostedService(hostedService);
             }
 
-            foreach (var hostedService2 in change.Subject.GetAttachedHostedServices())
+            foreach (var attachedHostedService in change.Subject.GetAttachedHostedServices())
             {
-                AttachHostedService(hostedService2);
+                AttachHostedService(attachedHostedService);
             }
         }
     }
@@ -48,12 +48,10 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
             if (change.Subject is IHostedService hostedService)
             {
                 DetachHostedService(hostedService);
-                change.Subject.DetachHostedService(hostedService);
             }
 
-            foreach (var attachedHostedService in change.Subject.GetAttachedHostedServices().ToList())
+            foreach (var attachedHostedService in change.Subject.GetAttachedHostedServices())
             {
-                DetachHostedService(attachedHostedService);
                 change.Subject.DetachHostedService(attachedHostedService);
             }
         }

@@ -4,6 +4,7 @@ public static class LifecycleInterceptorExtensions
 {
     // Must match LifecycleInterceptor.ReferenceCountKey (private implementation detail)
     private const string ReferenceCountKey = "Namotion.Interceptor.Tracking.ReferenceCount";
+    private const string AttachedPropertiesKey = "Namotion.Interceptor.Tracking.AttachedProperties";
 
     /// <summary>
     /// Gets the lifecycle interceptor from the context, if configured.
@@ -43,7 +44,14 @@ public static class LifecycleInterceptorExtensions
     }
 
     public static void AttachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)
-    {            
+    {
+        // Check if this property is already attached (idempotent)
+        var attachedProperties = GetOrCreateAttachedPropertiesSet(subject);
+        if (!attachedProperties.Add(property.Name))
+        {
+            return; // Already attached
+        }
+
         var change = new SubjectPropertyLifecycleChange(subject, property);
 
         foreach (var handler in subject.Context.GetServices<IPropertyLifecycleHandler>())
@@ -56,9 +64,29 @@ public static class LifecycleInterceptorExtensions
             lifecycleHandler.AttachProperty(change);
         }
     }
+
+    private static HashSet<string> GetOrCreateAttachedPropertiesSet(IInterceptorSubject subject)
+    {
+        var key = (null as string, AttachedPropertiesKey);
+        if (subject.Data.TryGetValue(key, out var existing) && existing is HashSet<string> set)
+        {
+            return set;
+        }
+
+        var newSet = new HashSet<string>();
+        subject.Data.TryAdd(key, newSet);
+        return (HashSet<string>)subject.Data.GetOrAdd(key, newSet)!;
+    }
     
     public static void DetachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)
-    {            
+    {
+        // Remove from attached properties set
+        var key = (null as string, AttachedPropertiesKey);
+        if (subject.Data.TryGetValue(key, out var existing) && existing is HashSet<string> attachedSet)
+        {
+            attachedSet.Remove(property.Name);
+        }
+
         var change = new SubjectPropertyLifecycleChange(subject, property);
 
         foreach (var handler in subject.Context.GetServices<IPropertyLifecycleHandler>())

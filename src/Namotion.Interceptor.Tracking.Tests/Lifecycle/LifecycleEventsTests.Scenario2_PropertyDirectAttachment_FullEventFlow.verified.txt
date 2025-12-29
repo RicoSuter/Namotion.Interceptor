@@ -1,0 +1,34 @@
+﻿[
+  {
+    Event: SubjectAttached,
+    Name: Mother,
+    ReferenceCount: 1,
+    IsFirstAttach: true,
+    IsLastDetach: false
+  },
+  {
+    Event: SubjectAttached,
+    Name: Father,
+    ReferenceCount: 2,
+    IsFirstAttach: false,
+    IsLastDetach: false
+  },
+  {
+    Event: SubjectDetached,
+    Name: Mother,
+    ReferenceCount: 1,
+    IsFirstAttach: false,
+    IsLastDetach: false
+  },
+  {
+    Event: SubjectDetached,
+    Name: Father,
+    IsFirstAttach: false,
+    IsLastDetach: false
+  },
+  {
+    Event: SubjectDetached,
+    IsFirstAttach: false,
+    IsLastDetach: true
+  }
+]
