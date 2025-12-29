@@ -269,6 +269,26 @@ lifecycleInterceptor.SubjectDetached += change =>
 };
 ```
 
+**SubjectAttached** fires when:
+- A subject is created with a context (`new Person(context)`) - context-only attachment
+- A subject is assigned to an intercepted property (`parent.Child = child`) - property attachment
+- A subject is added to an intercepted collection (`parent.Children.Add(child)`) - property attachment with index
+
+**SubjectDetached** fires when:
+- A subject is removed from an intercepted property (`parent.Child = null`) - property detachment
+- A subject is removed from an intercepted collection - property detachment with index
+- A subject's fallback context is removed (triggered by `ContextInheritanceHandler`) - context-only detachment
+
+**Two-phase detachment** (requires `WithContextInheritance()`): When a subject loses its last property reference, two detach events fire in sequence:
+1. **Property detach** (`Property != null`, `IsLastDetach = false`) - the property reference is removed
+2. **Context-only detach** (`Property == null`, `IsLastDetach = true`) - the subject leaves lifecycle entirely
+
+This two-phase pattern is triggered by `ContextInheritanceHandler`, which automatically removes the fallback context when `ReferenceCount` reaches 0. Without context inheritance, only the property detach fires and `IsLastDetach` will be `false` (the subject remains tracked until manually detached).
+
+This pattern allows handlers to distinguish between:
+- Partial detachment (subject still attached to registry but has no reference)
+- Final cleanup (subject truly leaving the registry)
+
 Events are useful for:
 - Cache invalidation when subjects are removed from the object graph
 - Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
@@ -438,13 +458,14 @@ parent.Father = null;
 | 1 | `parent.Mother = child` | `{ Mother }` | 1 | `SubjectAttached` | Mother | **true** | false |
 | 2 | `parent.Father = child` | `{ Mother, Father }` | 2 | `SubjectAttached` | Father | false | false |
 | 3 | `parent.Mother = null` | `{ Father }` | 1 | `SubjectDetached` | Mother | false | false |
-| 4 | `parent.Father = null` | `{ }` | 0 | `SubjectDetached` | Father | false | **true** |
+| 4a | `parent.Father = null` | `{ }` | 0 | `SubjectDetached` | Father | false | false |
+| 4b | *(from handler)* | `{ }` | 0 | `SubjectDetached` | null | false | **true** |
 
 - **IsFirstAttach=true** only on Step 1 (first time entering lifecycle)
-- **IsLastDetach=true** only on Step 4 (last time leaving lifecycle)
-- Steps 2 and 3 are "intermediate" with both flags `false`
+- **IsLastDetach=true** only on Step 4b (the context-only detach after all property references are gone)
+- Steps 2, 3, and 4a are "intermediate" with both flags `false`
 
-Note: `ContextInheritanceHandler` adds the parent's context as a fallback during Step 1, but this does not create a separate lifecycle tracking entry because the child is already tracked via the property. This is also why it uses `ReferenceCount: 1` for attach and `ReferenceCount: 0` for detach - it only acts on the first/last property reference, not intermediate ones.
+Note: When the last property reference is removed (Step 4a), `ContextInheritanceHandler` triggers a context-only detach (Step 4b) because it added the parent's context as a fallback during Step 1. This two-phase detach pattern ensures handlers can distinguish between partial detachment (Step 4a, `IsLastDetach=false`) and final cleanup (Step 4b, `IsLastDetach=true`).
 
 ## Parent-Child Relationship Tracking
 
