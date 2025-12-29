@@ -1,4 +1,5 @@
-﻿@using HomeBlaze.Components.Abstractions.Pages
+﻿@using HomeBlaze.Authorization.Blazor.Components
+@using HomeBlaze.Components.Abstractions.Pages
 
 @inherits LayoutComponentBase
 
@@ -39,6 +40,8 @@
                            OnClick="@DeveloperMode.Toggle"
                            title="Toggle Developer Mode"/>
             <MudIconButton Icon="@(DarkLightModeButtonIcon)" Color="Color.Inherit" OnClick="@DarkModeToggle"/>
+            @* TODO: via slot and not direct reference *@
+            <UserMenu />
             <MudIconButton Icon="@Icons.Material.Filled.MoreVert" Color="Color.Inherit" Edge="Edge.End"/>
         </MudAppBar>
         <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">

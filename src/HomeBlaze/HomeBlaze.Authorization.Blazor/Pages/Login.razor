@@ -1,0 +1,76 @@
+@page "/login"
+@page "/login/{ReturnUrl}"
+
+@inject NavigationManager Navigation
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-8">
+    <MudCard>
+        <MudCardHeader>
+            <CardHeaderContent>
+                <MudText Typo="Typo.h5">Login</MudText>
+            </CardHeaderContent>
+        </MudCardHeader>
+        <MudCardContent>
+            @if (!string.IsNullOrEmpty(ErrorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-4">@ErrorMessage</MudAlert>
+            }
+
+            <form method="post" action="/api/auth/login">
+                <AntiforgeryToken />
+                <input type="hidden" name="ReturnUrl" value="@GetReturnUrl()" />
+                <input type="hidden" name="Username" value="@_username" />
+                <input type="hidden" name="Password" value="@_password" />
+                @if (_rememberMe)
+                {
+                    <input type="hidden" name="RememberMe" value="true" />
+                }
+
+                <MudTextField T="string"
+                              Label="Username"
+                              @bind-Value="_username"
+                              Immediate="true"
+                              Variant="Variant.Outlined"
+                              Required="true"
+                              Class="mb-4" />
+
+                <MudTextField T="string"
+                              Label="Password"
+                              @bind-Value="_password"
+                              Immediate="true"
+                              InputType="InputType.Password"
+                              Variant="Variant.Outlined"
+                              Class="mb-4" />
+
+                <MudCheckBox T="bool"
+                             @bind-Value="_rememberMe"
+                             Label="Remember me"
+                             Class="mb-4" />
+
+                <MudButton ButtonType="ButtonType.Submit"
+                           Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           FullWidth="true">
+                    Sign In
+                </MudButton>
+            </form>
+        </MudCardContent>
+    </MudCard>
+</MudContainer>
+
+@code {
+    [Parameter]
+    public string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrlQuery { get; set; }
+
+    [SupplyParameterFromQuery]
+    public string? ErrorMessage { get; set; }
+
+    private string _username = "";
+    private string _password = "";
+    private bool _rememberMe = false;
+
+    private string GetReturnUrl() => ReturnUrl ?? ReturnUrlQuery ?? "/";
+}

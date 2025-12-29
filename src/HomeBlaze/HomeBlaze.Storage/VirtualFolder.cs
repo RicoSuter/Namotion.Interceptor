@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Authorization;
 using HomeBlaze.Storage.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -90,6 +91,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// Opens the create subject wizard to add a new subject to this folder.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
+    [SubjectMethodAuthorize("Admin")]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
         => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 }

@@ -1,0 +1,541 @@
+@page "/admin/roles"
+@attribute [Authorize(Roles = "Admin")]
+
+@using HomeBlaze.Abstractions.Authorization
+@using HomeBlaze.Authorization.Blazor.Utilities
+
+@inject RoleManager<IdentityRole> RoleManager
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IRoleExpander RoleExpander
+@inject AuthorizationDbContext DbContext
+@inject HomeBlaze.Authorization.Configuration.AuthorizationOptions AuthOptions
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
+    <MudText Typo="Typo.h4" Class="mb-4">Role Management</MudText>
+
+    <MudGrid>
+        <!-- Roles List -->
+        <MudItem xs="12" md="5">
+            <MudPaper Class="pa-4">
+                <div class="d-flex justify-space-between align-center mb-4">
+                    <MudText Typo="Typo.h6">Roles</MudText>
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="OpenCreateRoleDialog">
+                        Add Role
+                    </MudButton>
+                </div>
+
+                @if (_loading)
+                {
+                    <MudProgressCircular Indeterminate="true" />
+                }
+                else
+                {
+                    <MudList T="RoleDto" @bind-SelectedValue="_selectedRole" SelectionMode="SelectionMode.SingleSelection">
+                        @foreach (var role in _roles)
+                        {
+                            <MudListItem T="RoleDto" Value="@role" OnClick="@(() => SelectRole(role))">
+                                <div class="d-flex justify-space-between align-center" style="width: 100%">
+                                    <div class="d-flex align-center">
+                                        <MudIcon Icon="@GetRoleIcon(role.Name)" Class="mr-2" Color="@GetRoleColor(role.Name)" />
+                                        <MudText>@role.Name</MudText>
+                                        @if (IsSystemRole(role.Name))
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Class="ml-2">System</MudChip>
+                                        }
+                                    </div>
+                                    @if (!IsSystemRole(role.Name))
+                                    {
+                                        <span @onclick="@(async () => await DeleteRole(role))" @onclick:stopPropagation="true">
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                           Size="Size.Small"
+                                                           Color="Color.Error" />
+                                        </span>
+                                    }
+                                </div>
+                            </MudListItem>
+                        }
+                    </MudList>
+                }
+            </MudPaper>
+        </MudItem>
+
+        <!-- Role Details -->
+        <MudItem xs="12" md="7">
+            <MudPaper Class="pa-4">
+                @if (_selectedRole != null)
+                {
+                    <div class="d-flex justify-space-between align-center mb-4">
+                        <MudText Typo="Typo.h6">@_selectedRole.Name</MudText>
+                        @if (!IsSystemRole(_selectedRole.Name))
+                        {
+                            <MudButton Variant="Variant.Outlined"
+                                       Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.Edit"
+                                       OnClick="OpenRenameDialog">
+                                Rename
+                            </MudButton>
+                        }
+                    </div>
+
+                    <!-- Includes (Subroles) Section -->
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Includes Roles</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">
+                        This role directly inherits permissions from these roles:
+                    </MudText>
+
+                    <div class="d-flex flex-wrap gap-2 mb-2">
+                        @foreach (var includedRole in _directIncludes)
+                        {
+                            <MudChip T="string"
+                                     Size="Size.Small"
+                                     Color="@GetRoleColor(includedRole)"
+                                     OnClose="@(() => RemoveIncludedRole(includedRole))">
+                                @includedRole
+                            </MudChip>
+                        }
+                        @if (!_directIncludes.Any())
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="font-italic">
+                                No roles included
+                            </MudText>
+                        }
+                    </div>
+
+                    <MudSelect T="string"
+                               Label="Add included role"
+                               Variant="Variant.Outlined"
+                               Dense="true"
+                               Class="mb-4"
+                               Value="@_selectedIncludeRole"
+                               ValueChanged="AddIncludedRole">
+                        <MudSelectItem T="string" Value="@string.Empty">-- Select a role --</MudSelectItem>
+                        @foreach (var role in GetAvailableRolesToInclude())
+                        {
+                            <MudSelectItem T="string" Value="@role">@role</MudSelectItem>
+                        }
+                    </MudSelect>
+
+                    <MudDivider Class="my-4" />
+
+                    <!-- Expanded Roles -->
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Effective Permissions (Inherited)</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">
+                        Users with this role will also have access to all permissions of:
+                    </MudText>
+                    <MudChipSet T="string" ReadOnly="true" Class="mb-4">
+                        @foreach (var expandedRole in GetExpandedRoles(_selectedRole.Name))
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="@GetRoleColor(expandedRole)">
+                                @expandedRole
+                            </MudChip>
+                        }
+                        @if (!GetExpandedRoles(_selectedRole.Name).Any())
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="font-italic">
+                                No inherited roles
+                            </MudText>
+                        }
+                    </MudChipSet>
+
+                    <MudDivider Class="my-4" />
+
+                    <!-- Default Permissions -->
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Default Permissions</MudText>
+                    <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+                        <thead>
+                            <tr>
+                                <th>Entity</th>
+                                <th>Action</th>
+                                <th>Access</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var permission in GetDefaultPermissions(_selectedRole.Name))
+                            {
+                                <tr>
+                                    <td>@permission.Entity</td>
+                                    <td>@permission.Action</td>
+                                    <td>
+                                        @if (permission.HasAccess)
+                                        {
+                                            <MudIcon Icon="@Icons.Material.Filled.Check" Color="Color.Success" Size="Size.Small" />
+                                        }
+                                        else
+                                        {
+                                            <MudIcon Icon="@Icons.Material.Filled.Close" Color="Color.Error" Size="Size.Small" />
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="text-center pa-8">
+                        Select a role to view and edit details
+                    </MudText>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+</MudContainer>
+
+@code {
+    private List<RoleDto> _roles = [];
+    private RoleDto? _selectedRole;
+    private bool _loading = true;
+    private List<string> _directIncludes = [];
+    private string _selectedIncludeRole = "";
+
+    private static string[] SystemRoles => DefaultRoles.AllRoles;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadRoles();
+    }
+
+    private async Task LoadRoles()
+    {
+        _loading = true;
+        try
+        {
+            var roles = await RoleManager.Roles
+                .OrderBy(r => r.Name)
+                .ToListAsync();
+
+            _roles = roles.Select(r => new RoleDto { Id = r.Id, Name = r.Name! }).ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading roles: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SelectRole(RoleDto role)
+    {
+        _selectedRole = role;
+        await LoadDirectIncludes(role.Name);
+    }
+
+    private async Task LoadDirectIncludes(string roleName)
+    {
+        try
+        {
+            _directIncludes = await DbContext.RoleCompositions
+                .Where(c => c.RoleName == roleName)
+                .Select(c => c.IncludesRole)
+                .OrderBy(r => r)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading role includes: {ex.Message}", Severity.Error);
+            _directIncludes = [];
+        }
+    }
+
+    private IEnumerable<string> GetAvailableRolesToInclude()
+    {
+        if (_selectedRole == null) return [];
+
+        // Cannot include self, already included roles, or roles that would create a cycle
+        var currentRole = _selectedRole.Name;
+        var alreadyIncluded = _directIncludes.ToHashSet();
+
+        return _roles
+            .Select(r => r.Name)
+            .Where(r => r != currentRole && !alreadyIncluded.Contains(r))
+            .OrderBy(r => r);
+    }
+
+    private async Task AddIncludedRole(string roleName)
+    {
+        if (string.IsNullOrEmpty(roleName) || _selectedRole == null) return;
+
+        try
+        {
+            // Check for potential circular reference
+            var targetExpanded = RoleExpander.ExpandRoles([roleName]);
+            if (targetExpanded.Contains(_selectedRole.Name))
+            {
+                Snackbar.Add($"Cannot add '{roleName}' - would create circular reference", Severity.Error);
+                _selectedIncludeRole = "";
+                return;
+            }
+
+            DbContext.RoleCompositions.Add(new RoleComposition
+            {
+                RoleName = _selectedRole.Name,
+                IncludesRole = roleName
+            });
+            await DbContext.SaveChangesAsync();
+
+            await RoleExpander.ReloadAsync();
+            await LoadDirectIncludes(_selectedRole.Name);
+
+            Snackbar.Add($"Added '{roleName}' to included roles", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error adding role: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _selectedIncludeRole = "";
+        }
+    }
+
+    private async Task RemoveIncludedRole(string roleName)
+    {
+        if (_selectedRole == null) return;
+
+        try
+        {
+            var composition = await DbContext.RoleCompositions
+                .FirstOrDefaultAsync(c => c.RoleName == _selectedRole.Name && c.IncludesRole == roleName);
+
+            if (composition != null)
+            {
+                DbContext.RoleCompositions.Remove(composition);
+                await DbContext.SaveChangesAsync();
+
+                await RoleExpander.ReloadAsync();
+                await LoadDirectIncludes(_selectedRole.Name);
+
+                Snackbar.Add($"Removed '{roleName}' from included roles", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error removing role: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private bool IsSystemRole(string roleName)
+    {
+        return SystemRoles.Contains(roleName);
+    }
+
+    private static string GetRoleIcon(string role) => RoleDisplayUtility.GetRoleIcon(role);
+
+    private static Color GetRoleColor(string role) => RoleDisplayUtility.GetRoleColor(role);
+
+    private IEnumerable<string> GetExpandedRoles(string roleName)
+    {
+        return RoleExpander.ExpandRoles([roleName]).Where(r => r != roleName).OrderBy(r => r);
+    }
+
+    private List<PermissionInfo> GetDefaultPermissions(string roleName)
+    {
+        var expandedRoles = RoleExpander.ExpandRoles([roleName]);
+        var permissions = new List<PermissionInfo>();
+
+        var entities = new[] { "State", "Configuration", "Query", "Operation" };
+        var actions = new Dictionary<string, string[]>
+        {
+            ["State"] = ["Read", "Write"],
+            ["Configuration"] = ["Read", "Write"],
+            ["Query"] = ["Invoke"],
+            ["Operation"] = ["Invoke"]
+        };
+
+        foreach (var entity in entities)
+        {
+            foreach (var action in actions[entity])
+            {
+                // Parse entity and action to enums to get default roles from options
+                var entityEnum = Enum.Parse<AuthorizationEntity>(entity);
+                var actionEnum = action == "Invoke" ? AuthorizationAction.Invoke :
+                    action == "Read" ? AuthorizationAction.Read : AuthorizationAction.Write;
+                var requiredRoles = AuthOptions.GetDefaultRoles(entityEnum, actionEnum);
+                var hasAccess = requiredRoles.Any(r => expandedRoles.Contains(r));
+
+                permissions.Add(new PermissionInfo
+                {
+                    Entity = entity,
+                    Action = action,
+                    HasAccess = hasAccess
+                });
+            }
+        }
+
+        return permissions;
+    }
+
+    private async Task OpenCreateRoleDialog()
+    {
+        var parameters = new DialogParameters<HomeBlaze.Authorization.Blazor.Components.InputDialog>
+        {
+            { x => x.Label, "Role Name" },
+            { x => x.Value, "" }
+        };
+
+        var dialog = await DialogService.ShowAsync<HomeBlaze.Authorization.Blazor.Components.InputDialog>("Create Role", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: string roleName } && !string.IsNullOrWhiteSpace(roleName))
+        {
+            try
+            {
+                var createResult = await RoleManager.CreateAsync(new IdentityRole(roleName));
+                if (createResult.Succeeded)
+                {
+                    await LoadRoles();
+                    Snackbar.Add("Role created successfully", Severity.Success);
+                }
+                else
+                {
+                    var errors = string.Join(", ", createResult.Errors.Select(e => e.Description));
+                    Snackbar.Add($"Failed to create role: {errors}", Severity.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private async Task OpenRenameDialog()
+    {
+        if (_selectedRole == null) return;
+
+        var parameters = new DialogParameters<HomeBlaze.Authorization.Blazor.Components.InputDialog>
+        {
+            { x => x.Label, "New Role Name" },
+            { x => x.Value, _selectedRole.Name }
+        };
+
+        var dialog = await DialogService.ShowAsync<HomeBlaze.Authorization.Blazor.Components.InputDialog>("Rename Role", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: string newName } && !string.IsNullOrWhiteSpace(newName) && newName != _selectedRole.Name)
+        {
+            try
+            {
+                var role = await RoleManager.FindByIdAsync(_selectedRole.Id);
+                if (role == null)
+                {
+                    Snackbar.Add("Role not found", Severity.Error);
+                    return;
+                }
+
+                var oldName = role.Name!;
+                role.Name = newName;
+                role.NormalizedName = newName.ToUpperInvariant();
+
+                var updateResult = await RoleManager.UpdateAsync(role);
+                if (updateResult.Succeeded)
+                {
+                    // Update role compositions that reference this role
+                    var compositions = await DbContext.RoleCompositions
+                        .Where(c => c.RoleName == oldName || c.IncludesRole == oldName)
+                        .ToListAsync();
+
+                    foreach (var comp in compositions)
+                    {
+                        if (comp.RoleName == oldName) comp.RoleName = newName;
+                        if (comp.IncludesRole == oldName) comp.IncludesRole = newName;
+                    }
+                    await DbContext.SaveChangesAsync();
+
+                    await RoleExpander.ReloadAsync();
+                    await LoadRoles();
+
+                    _selectedRole = _roles.FirstOrDefault(r => r.Name == newName);
+                    if (_selectedRole != null)
+                    {
+                        await LoadDirectIncludes(_selectedRole.Name);
+                    }
+
+                    Snackbar.Add("Role renamed successfully", Severity.Success);
+                }
+                else
+                {
+                    var errors = string.Join(", ", updateResult.Errors.Select(e => e.Description));
+                    Snackbar.Add($"Failed to rename role: {errors}", Severity.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private async Task DeleteRole(RoleDto role)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete Role",
+            $"Are you sure you want to delete role '{role.Name}'? This will also remove all role compositions.",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            try
+            {
+                if (IsSystemRole(role.Name))
+                {
+                    Snackbar.Add("Cannot delete system roles", Severity.Error);
+                    return;
+                }
+
+                var identityRole = await RoleManager.FindByIdAsync(role.Id);
+                if (identityRole == null)
+                {
+                    Snackbar.Add("Role not found", Severity.Error);
+                    return;
+                }
+
+                // Remove role compositions
+                var compositions = await DbContext.RoleCompositions
+                    .Where(c => c.RoleName == role.Name || c.IncludesRole == role.Name)
+                    .ToListAsync();
+                DbContext.RoleCompositions.RemoveRange(compositions);
+                await DbContext.SaveChangesAsync();
+
+                var deleteResult = await RoleManager.DeleteAsync(identityRole);
+                if (deleteResult.Succeeded)
+                {
+                    await RoleExpander.ReloadAsync();
+                    await LoadRoles();
+
+                    if (_selectedRole?.Id == role.Id)
+                    {
+                        _selectedRole = null;
+                        _directIncludes = [];
+                    }
+
+                    Snackbar.Add("Role deleted successfully", Severity.Success);
+                }
+                else
+                {
+                    var errors = string.Join(", ", deleteResult.Errors.Select(e => e.Description));
+                    Snackbar.Add($"Failed to delete role: {errors}", Severity.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private class PermissionInfo
+    {
+        public string Entity { get; set; } = "";
+        public string Action { get; set; } = "";
+        public bool HasAccess { get; set; }
+    }
+}

@@ -1,8 +1,10 @@
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Services;
 using HomeBlaze.Services.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
@@ -14,20 +16,35 @@ namespace HomeBlaze.Services;
 /// Uses "$type" discriminator for polymorphic serialization via System.Text.Json.
 /// Only serializes properties marked with [Configuration].
 /// Uses ActivatorUtilities for DI-aware construction during deserialization.
+/// Supports IAdditionalPropertiesSerializer for extensible "$" properties (e.g., $authorization).
 /// </summary>
 public class ConfigurableSubjectSerializer
 {
     private readonly TypeProvider _typeProvider;
     private readonly IServiceProvider _serviceProvider;
+    private readonly IEnumerable<IAdditionalPropertiesSerializer> _additionalPropertiesSerializers;
     private readonly JsonSerializerOptions _options;
+    private readonly JsonSerializerOptions _additionalPropertiesOptions;
 
-    public ConfigurableSubjectSerializer(TypeProvider typeProvider, IServiceProvider serviceProvider)
+    public ConfigurableSubjectSerializer(
+        TypeProvider typeProvider,
+        IServiceProvider serviceProvider,
+        IEnumerable<IAdditionalPropertiesSerializer> additionalPropertiesSerializers)
     {
         _typeProvider = typeProvider;
         _serviceProvider = serviceProvider;
+        _additionalPropertiesSerializers = additionalPropertiesSerializers;
         _options = new JsonSerializerOptions
         {
             TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider),
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            Converters = { new JsonStringEnumConverter() }
+        };
+        // Separate options for additional properties ($ prefixed) - no [Configuration] filtering
+        _additionalPropertiesOptions = new JsonSerializerOptions
+        {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -37,6 +54,7 @@ public class ConfigurableSubjectSerializer
 
     /// <summary>
     /// Serializes an IConfigurableSubject to JSON with $type discriminator.
+    /// Includes additional "$" properties from registered IAdditionalPropertiesSerializers.
     /// </summary>
     public string Serialize(IInterceptorSubject subject)
     {
@@ -47,12 +65,44 @@ public class ConfigurableSubjectSerializer
                 nameof(subject));
         }
 
-        return JsonSerializer.Serialize(configurableSubject, typeof(IConfigurableSubject), _options);
+        // First serialize the base subject to JSON
+        var baseJson = JsonSerializer.Serialize(configurableSubject, typeof(IConfigurableSubject), _options);
+
+        // If no additional properties serializers, return as-is
+        if (!_additionalPropertiesSerializers.Any())
+        {
+            return baseJson;
+        }
+
+        // Parse to JsonNode so we can add additional properties
+        var jsonNode = JsonNode.Parse(baseJson);
+        if (jsonNode is not JsonObject jsonObject)
+        {
+            return baseJson;
+        }
+
+        // Collect and add serializer data with "$" prefix
+        // Uses separate options without [Configuration] filtering
+        foreach (var serializer in _additionalPropertiesSerializers)
+        {
+            var additionalProperties = serializer.GetAdditionalProperties(subject);
+            if (additionalProperties != null)
+            {
+                foreach (var (key, value) in additionalProperties)
+                {
+                    var jsonValue = JsonSerializer.SerializeToNode(value, _additionalPropertiesOptions);
+                    jsonObject[$"${key}"] = jsonValue;
+                }
+            }
+        }
+
+        return jsonObject.ToJsonString(_options);
     }
 
     /// <summary>
     /// Deserializes JSON to an IConfigurableSubject using $type discriminator.
     /// Uses ActivatorUtilities for DI-aware construction.
+    /// Passes "$" properties to registered IAdditionalPropertiesSerializers.
     /// </summary>
     public IConfigurableSubject? Deserialize(string json)
     {
@@ -88,6 +138,29 @@ public class ConfigurableSubjectSerializer
         // Populate configuration properties from JSON using reflection
         // (can't use UpdateConfiguration because subject isn't registered in a context yet)
         PopulateConfigurationProperties(subject, type, root);
+
+        // Collect "$" properties (strip prefix) and pass to serializers
+        if (_additionalPropertiesSerializers.Any() && subject is IInterceptorSubject interceptorSubject)
+        {
+            var additionalProperties = new Dictionary<string, JsonElement>();
+            foreach (var property in root.EnumerateObject())
+            {
+                if (property.Name.StartsWith('$') && property.Name != "$type")
+                {
+                    var cleanKey = property.Name[1..]; // Remove "$" prefix
+                    additionalProperties[cleanKey] = property.Value.Clone();
+                }
+            }
+
+            if (additionalProperties.Count > 0)
+            {
+                foreach (var serializer in _additionalPropertiesSerializers)
+                {
+                    serializer.SetAdditionalProperties(interceptorSubject, additionalProperties);
+                }
+            }
+        }
+
         return subject;
     }
 

@@ -1,0 +1,458 @@
+@using HomeBlaze.Abstractions.Authorization
+@using HomeBlaze.Authorization.Blazor.Utilities
+@using HomeBlaze.Storage.Abstractions
+@using Microsoft.Extensions.DependencyInjection
+
+@inject IAuthorizationResolver AuthorizationResolver
+@inject RoleManager<IdentityRole> RoleManager
+@inject ISnackbar Snackbar
+@inject IServiceProvider ServiceProvider
+
+<MudDialog>
+    <DialogContent>
+        @if (Subject != null)
+        {
+            @if (!string.IsNullOrEmpty(PropertyName))
+            {
+                <MudText Typo="Typo.h6" Class="mb-4">Property Permissions: @PropertyName</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+                    Configure which roles can read/write this property.
+                </MudText>
+            }
+            else if (!string.IsNullOrEmpty(MethodName))
+            {
+                <MudText Typo="Typo.h6" Class="mb-4">Method Permissions: @MethodName</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+                    Configure which roles can invoke this method.
+                </MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.h6" Class="mb-4">Subject Permissions</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+                    Configure which roles can access this subject's properties and methods.
+                </MudText>
+            }
+
+            <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+                <thead>
+                    <tr>
+                        <th>Entity + Action</th>
+                        <th>Roles</th>
+                        <th>Source</th>
+                        <th style="width: 100px">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var permission in _permissions)
+                    {
+                        var isHighlighted = IsPermissionHighlighted(permission);
+                        <tr style="@(isHighlighted ? "font-weight: 600;" : "opacity: 0.85;")">
+                            <td>
+                                <span style="@(isHighlighted ? "font-weight: 600;" : "")">
+                                    @permission.Entity.@permission.Action
+                                </span>
+                            </td>
+                            <td>
+                                <MudChipSet T="string" ReadOnly="true">
+                                    @foreach (var role in permission.Roles.Take(3))
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="@GetRoleColor(role)">@role</MudChip>
+                                    }
+                                    @if (permission.Roles.Length > 3)
+                                    {
+                                        <MudChip T="string" Size="Size.Small">+@(permission.Roles.Length - 3)</MudChip>
+                                    }
+                                </MudChipSet>
+                            </td>
+                            <td>
+                                <MudChip T="string" Size="Size.Small"
+                                         Color="@(permission.Source == PermissionSource.Override ? Color.Warning :
+                                                  permission.Source == PermissionSource.Attribute ? Color.Info :
+                                                  permission.Source == PermissionSource.Inherited ? Color.Success : Color.Default)">
+                                    @permission.Source
+                                </MudChip>
+                            </td>
+                            <td>
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                               Size="Size.Small"
+                                               Color="Color.Default"
+                                               OnClick="@(() => EditPermission(permission))" />
+                                @if (permission.Source == PermissionSource.Override)
+                                {
+                                    <MudIconButton Icon="@Icons.Material.Filled.Undo"
+                                                   Size="Size.Small"
+                                                   Color="Color.Warning"
+                                                   OnClick="@(() => ClearOverride(permission))" />
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+
+            @if (_editingPermission != null)
+            {
+                <MudPaper Class="pa-4 mt-4" Elevation="2">
+                    <MudText Typo="Typo.subtitle1" Class="mb-2">
+                        Edit: @_editingPermission.Entity + @_editingPermission.Action
+                    </MudText>
+
+                    <MudCheckBox T="bool" @bind-Value="_overrideEnabled" Label="Override permissions" Class="mb-2" />
+
+                    @if (_overrideEnabled)
+                    {
+                        <MudSelect T="string"
+                                   Label="Select Roles"
+                                   MultiSelection="true"
+                                   SelectedValues="_selectedRoles"
+                                   SelectedValuesChanged="OnSelectedRolesChanged"
+                                   MultiSelectionTextFunc="@(values => string.Join(", ", values ?? []))">
+                            @foreach (var role in _availableRoles)
+                            {
+                                <MudSelectItem T="string" Value="@role">@role</MudSelectItem>
+                            }
+                        </MudSelect>
+
+                        <MudCheckBox T="bool" @bind-Value="_inheritRoles" Label="Inherit to child subjects" Class="mt-2" />
+                    }
+
+                    <div class="d-flex gap-2 mt-4">
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   Size="Size.Small"
+                                   OnClick="SavePermission"
+                                   Disabled="@(_overrideEnabled && !_selectedRoles.Any())">
+                            Save
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined"
+                                   Size="Size.Small"
+                                   OnClick="CancelEdit">
+                            Cancel
+                        </MudButton>
+                    </div>
+                </MudPaper>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    /// <summary>
+    /// If set, shows property-specific permissions (State Read/Write).
+    /// </summary>
+    [Parameter]
+    public string? PropertyName { get; set; }
+
+    /// <summary>
+    /// If set, shows method-specific permissions (Query/Operation Invoke).
+    /// </summary>
+    [Parameter]
+    public string? MethodName { get; set; }
+
+    /// <summary>
+    /// For methods: Query or Operation
+    /// </summary>
+    [Parameter]
+    public AuthorizationEntity? MethodEntity { get; set; }
+
+    /// <summary>
+    /// For properties: State or Configuration
+    /// </summary>
+    [Parameter]
+    public AuthorizationEntity? PropertyEntity { get; set; }
+
+    private List<PermissionInfo> _permissions = [];
+    private List<string> _availableRoles = [];
+    private PermissionInfo? _editingPermission;
+    private bool _overrideEnabled;
+    private bool _inheritRoles;
+    private IEnumerable<string> _selectedRoles = Array.Empty<string>();
+
+    /// <summary>
+    /// The data key tuple - uses PropertyName/MethodName if set, otherwise null for subject-level
+    /// </summary>
+    private string? DataKeyName => PropertyName ?? MethodName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadRoles();
+        LoadPermissions();
+    }
+
+    private async Task LoadRoles()
+    {
+        var roles = await RoleManager.Roles
+            .OrderBy(r => r.Name)
+            .ToListAsync();
+
+        _availableRoles = roles
+            .Where(r => r.Name != null)
+            .Select(r => r.Name!)
+            .ToList();
+    }
+
+    private void LoadPermissions()
+    {
+        if (Subject == null) return;
+
+        _permissions = [];
+
+        // Always show all entity+action combinations
+        var propertyEntities = new[] { AuthorizationEntity.State, AuthorizationEntity.Configuration };
+        var propertyActions = new[] { AuthorizationAction.Read, AuthorizationAction.Write };
+        var methodEntities = new[] { AuthorizationEntity.Query, AuthorizationEntity.Operation };
+
+        // State and Configuration permissions (Read/Write)
+        foreach (var entity in propertyEntities)
+        {
+            foreach (var action in propertyActions)
+            {
+                string[] roles;
+                PermissionSource source;
+
+                if (!string.IsNullOrEmpty(PropertyName))
+                {
+                    // For properties, resolve at property level
+                    roles = AuthorizationResolver.ResolvePropertyRoles(
+                        new PropertyReference(Subject, PropertyName), entity, action);
+                    source = DetermineSource(Subject, PropertyName, entity, action);
+                }
+                else
+                {
+                    // For subject or methods, resolve at subject level
+                    roles = AuthorizationResolver.ResolveSubjectRoles(Subject, entity, action);
+                    source = DetermineSource(Subject, null, entity, action);
+                }
+
+                _permissions.Add(new PermissionInfo
+                {
+                    Entity = entity,
+                    Action = action,
+                    Roles = roles,
+                    Source = source
+                });
+            }
+        }
+
+        // Query and Operation permissions (Invoke only)
+        foreach (var entity in methodEntities)
+        {
+            string[] roles;
+            PermissionSource source;
+
+            if (!string.IsNullOrEmpty(MethodName))
+            {
+                // For methods, resolve at method level
+                roles = AuthorizationResolver.ResolveMethodRoles(Subject, entity, MethodName);
+                source = DetermineSource(Subject, MethodName, entity, AuthorizationAction.Invoke);
+            }
+            else
+            {
+                // For subject or properties, resolve at subject level
+                roles = AuthorizationResolver.ResolveSubjectRoles(Subject, entity, AuthorizationAction.Invoke);
+                source = DetermineSource(Subject, null, entity, AuthorizationAction.Invoke);
+            }
+
+            _permissions.Add(new PermissionInfo
+            {
+                Entity = entity,
+                Action = AuthorizationAction.Invoke,
+                Roles = roles,
+                Source = source
+            });
+        }
+    }
+
+    private bool IsPermissionHighlighted(PermissionInfo permission)
+    {
+        // Highlight rows matching the specific entity being edited
+        if (!string.IsNullOrEmpty(PropertyName))
+        {
+            // For properties, highlight the specific entity (State or Configuration)
+            var targetEntity = PropertyEntity ?? AuthorizationEntity.State;
+            return permission.Entity == targetEntity;
+        }
+
+        if (!string.IsNullOrEmpty(MethodName))
+        {
+            // For methods, highlight the specific entity (Query or Operation)
+            var targetEntity = MethodEntity ?? AuthorizationEntity.Operation;
+            return permission.Entity == targetEntity;
+        }
+
+        // Subject-level: no highlighting
+        return false;
+    }
+
+    private PermissionSource DetermineSource(IInterceptorSubject subject, string? itemName, AuthorizationEntity entity, AuthorizationAction action)
+    {
+        var dataKey = AuthorizationDataProvider.GetDataKey(entity, action);
+
+        // Check item-specific override (property or method level)
+        if (subject.Data.TryGetValue((itemName, dataKey), out _))
+        {
+            return PermissionSource.Override;
+        }
+
+        // If checking property/method, also check subject-level as inherited
+        if (itemName != null && subject.Data.TryGetValue((null, dataKey), out _))
+        {
+            return PermissionSource.Inherited;
+        }
+
+        // Check for attribute (simplified - would need reflection)
+        var subjectType = subject.GetType();
+        var attrs = subjectType.GetCustomAttributes(typeof(SubjectAuthorizeAttribute), true);
+        if (attrs.Any(a => ((SubjectAuthorizeAttribute)a).Entity == entity && ((SubjectAuthorizeAttribute)a).Action == action))
+        {
+            return PermissionSource.Attribute;
+        }
+
+        // Check for inheritance from parent subjects
+        var parents = subject.GetParents();
+        if (parents.Count > 0)
+        {
+            return PermissionSource.Inherited;
+        }
+
+        return PermissionSource.Default;
+    }
+
+    private static Color GetRoleColor(string role) => RoleDisplayUtility.GetRoleColor(role);
+
+    private void OnSelectedRolesChanged(IEnumerable<string> values)
+    {
+        _selectedRoles = values?.ToArray() ?? Array.Empty<string>();
+        StateHasChanged();
+    }
+
+    private void EditPermission(PermissionInfo permission)
+    {
+        _editingPermission = permission;
+        _overrideEnabled = permission.Source == PermissionSource.Override;
+        _inheritRoles = false; // Default: children don't inherit this override
+
+        // When editing an existing override, show only the override's roles (not resolved/inherited)
+        if (Subject != null && permission.Source == PermissionSource.Override)
+        {
+            var dataKey = AuthorizationDataProvider.GetDataKey(permission.Entity, permission.Action);
+            if (Subject.Data.TryGetValue((DataKeyName, dataKey), out var overrideObj) && overrideObj is AuthorizationOverride authOverride)
+            {
+                _selectedRoles = authOverride.Roles.ToArray();
+                _inheritRoles = authOverride.Inherit;
+                return;
+            }
+        }
+
+        // For new overrides, start with empty selection
+        _selectedRoles = Array.Empty<string>();
+    }
+
+    private void CancelEdit()
+    {
+        _editingPermission = null;
+    }
+
+    private async Task SavePermission()
+    {
+        if (Subject == null || _editingPermission == null) return;
+
+        var dataKey = AuthorizationDataProvider.GetDataKey(_editingPermission.Entity, _editingPermission.Action);
+
+        if (_overrideEnabled)
+        {
+            var authOverride = new AuthorizationOverride
+            {
+                Inherit = _inheritRoles,
+                Roles = _selectedRoles.ToArray()
+            };
+
+            Subject.Data[(DataKeyName, dataKey)] = authOverride;
+            AuthorizationResolver.InvalidateCache(Subject);
+
+            await SaveConfigurationAsync();
+
+            var scopeText = DataKeyName != null ? $"for {DataKeyName}" : "at subject level";
+            Snackbar.Add($"Permission override saved {scopeText}", Severity.Success);
+        }
+        else
+        {
+            // If override disabled, remove it
+            if (Subject.Data.TryRemove((DataKeyName, dataKey), out _))
+            {
+                AuthorizationResolver.InvalidateCache(Subject);
+                await SaveConfigurationAsync();
+                Snackbar.Add("Permission override removed", Severity.Info);
+            }
+        }
+
+        LoadPermissions();
+        _editingPermission = null;
+    }
+
+    private async Task ClearOverride(PermissionInfo permission)
+    {
+        if (Subject == null) return;
+
+        var dataKey = AuthorizationDataProvider.GetDataKey(permission.Entity, permission.Action);
+        if (Subject.Data.TryRemove((DataKeyName, dataKey), out _))
+        {
+            AuthorizationResolver.InvalidateCache(Subject);
+            await SaveConfigurationAsync();
+            Snackbar.Add("Permission override cleared", Severity.Info);
+            LoadPermissions();
+        }
+    }
+
+    private async Task SaveConfigurationAsync()
+    {
+        // TODO: Move to storage and reuse in other places
+        if (Subject == null) return;
+
+        try
+        {
+            // Find the nearest configuration writer (traverse parents if needed)
+            var configWriter = Subject.FindNearestAncestor<IConfigurationWriter>()
+                ?? ServiceProvider.GetService<IConfigurationWriter>();
+            if (configWriter != null)
+            {
+                await configWriter.WriteConfigurationAsync(Subject, CancellationToken.None);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Warning: Could not persist changes: {ex.Message}", Severity.Warning);
+        }
+    }
+
+    private void Close()
+    {
+        MudDialog.Close();
+    }
+
+    private class PermissionInfo
+    {
+        public AuthorizationEntity Entity { get; set; }
+        public AuthorizationAction Action { get; set; }
+        public string[] Roles { get; set; } = [];
+        public PermissionSource Source { get; set; }
+    }
+
+    private enum PermissionSource
+    {
+        Default,
+        Inherited,
+        Attribute,
+        Override
+    }
+}

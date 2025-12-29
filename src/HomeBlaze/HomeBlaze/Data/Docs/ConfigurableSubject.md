@@ -5,23 +5,6 @@
 The `ConfigurableSubjectSerializer` persists subject configuration to JSON.
 It uses the `[Configuration]` attribute to determine which properties are saved.
 
-## Serialization Rules
-
-| Type | What Gets Serialized |
-|------|---------------------|
-| `IInterceptorSubject` | Only properties marked with `[Configuration]` |
-| Plain classes (value objects) | All public properties |
-
-## Why Two Rules?
-
-**Subjects** have mixed concerns:
-- `[Configuration]` - persisted settings (saved)
-- `[State]` - runtime values (not saved)
-- `[Derived]` - computed properties (not saved)
-
-**Value objects** referenced from `[Configuration]` properties are
-entirely configuration by definition - no need to annotate every field.
-
 ## Example
 
 ```csharp

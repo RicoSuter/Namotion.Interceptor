@@ -36,6 +36,8 @@
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor/HomeBlaze.Storage.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage/HomeBlaze.Storage.csproj" />
     <Project Path="HomeBlaze/HomeBlaze/HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Authorization/HomeBlaze.Authorization.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Authorization.Blazor/HomeBlaze.Authorization.Blazor.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Abstractions/">
     <Project Path="HomeBlaze/HomeBlaze.Abstractions/HomeBlaze.Abstractions.csproj" />
@@ -53,6 +55,7 @@
     <Project Path="HomeBlaze/HomeBlaze.Services.Tests/HomeBlaze.Services.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor.Tests/HomeBlaze.Storage.Blazor.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Tests/HomeBlaze.Storage.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Authorization.Tests/HomeBlaze.Authorization.Tests.csproj" />
   </Folder>
   <Folder Name="/Samples/">
     <Project Path="Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj" />
