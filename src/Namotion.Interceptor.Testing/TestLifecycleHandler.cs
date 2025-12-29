@@ -2,11 +2,11 @@
 
 namespace Namotion.Interceptor.Testing
 {
-    public class TestLifecyleHandler : ILifecycleHandler
+    public class TestLifecycleHandler : ILifecycleHandler
     {
         private readonly List<string> _events;
 
-        public TestLifecyleHandler(List<string> events)
+        public TestLifecycleHandler(List<string> events)
         {
             _events = events;
         }

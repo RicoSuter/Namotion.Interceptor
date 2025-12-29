@@ -15,7 +15,7 @@ public class SubjectRegistryTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -48,7 +48,7 @@ public class SubjectRegistryTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -81,7 +81,7 @@ public class SubjectRegistryTests
         // Arrange
         var events = new List<string>();
 
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler(events);
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()

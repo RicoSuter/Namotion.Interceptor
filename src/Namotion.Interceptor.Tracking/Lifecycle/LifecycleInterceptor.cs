@@ -60,14 +60,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
 
                 // Phase 2: Call AttachSubjectProperty for all newly attached subjects
-                // This happens after all subjects have context inheritance set up
-                foreach (var attachedSubject in newlyAttachedSubjects)
-                {
-                    foreach (var propertyName in attachedSubject.Properties.Keys)
-                    {
-                        attachedSubject.AttachSubjectProperty(new PropertyReference(attachedSubject, propertyName));
-                    }
-                }
+                AttachPropertiesForNewlyAttachedSubjects(newlyAttachedSubjects);
             }
         }
         finally
@@ -250,13 +243,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
 
                 // Phase 2: Call AttachSubjectProperty for all newly attached subjects
-                foreach (var attachedSubject in newlyAttachedSubjects)
-                {
-                    foreach (var propertyName in attachedSubject.Properties.Keys)
-                    {
-                        attachedSubject.AttachSubjectProperty(new PropertyReference(attachedSubject, propertyName));
-                    }
-                }
+                AttachPropertiesForNewlyAttachedSubjects(newlyAttachedSubjects);
             }
         }
         finally
@@ -328,6 +315,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     i++;
                 }
                 break;
+        }
+    }
+
+    private static void AttachPropertiesForNewlyAttachedSubjects(List<IInterceptorSubject> newlyAttachedSubjects)
+    {
+        foreach (var attachedSubject in newlyAttachedSubjects)
+        {
+            foreach (var propertyName in attachedSubject.Properties.Keys)
+            {
+                attachedSubject.AttachSubjectProperty(new PropertyReference(attachedSubject, propertyName));
+            }
         }
     }
 
