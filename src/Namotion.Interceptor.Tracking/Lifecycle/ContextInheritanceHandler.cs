@@ -1,27 +1,28 @@
-﻿namespace Namotion.Interceptor.Tracking.Lifecycle;
+namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 #pragma warning disable CS0659
 
 /// <summary>
 /// Automatically assigns or removes the parent context as fallback context to attached and detached subjects.
 /// </summary>
-public class ContextInheritanceHandler : ILifecycleHandler
+public class ContextInheritanceHandler : IReferenceLifecycleHandler
 {
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnSubjectAttachedToProperty(SubjectLifecycleChange change)
     {
-        if (change is { ReferenceCount: 1, Property: not null })
+        // Add context for first property reference
+        if (change.ReferenceCount == 1)
         {
-            var parent = change.Property.Value.Subject;
+            var parent = change.Property!.Value.Subject;
             change.Subject.Context.AddFallbackContext(parent.Context);
         }
     }
 
-    public void DetachSubject(SubjectLifecycleChange change)
+    public void OnSubjectDetachedFromProperty(SubjectLifecycleChange change)
     {
-        // Only remove fallback context on last property detachment (symmetric with attach)
-        if (change is { Property: not null, ReferenceCount: 0 })
+        // Remove context inheritance when last property reference is removed
+        if (change.ReferenceCount == 0)
         {
-            var parent = change.Property.Value.Subject;
+            var parent = change.Property!.Value.Subject;
             change.Subject.Context.RemoveFallbackContext(parent.Context);
         }
     }

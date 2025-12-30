@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Concurrent;
-using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
@@ -13,7 +12,7 @@ namespace HomeBlaze.Services;
 /// Supports both bracket notation (Children[key]) and slash notation (Children/key).
 /// Implements lifecycle handling to invalidate caches when subjects are attached/detached.
 /// </summary>
-public class SubjectPathResolver : ILifecycleHandler
+public class SubjectPathResolver : IReferenceLifecycleHandler
 {
     private readonly RootManager _rootManager;
 
@@ -154,17 +153,17 @@ public class SubjectPathResolver : ILifecycleHandler
     }
 
     /// <summary>
-    /// Invalidates caches when subject is attached.
+    /// Invalidates caches when subject is attached to a property.
     /// </summary>
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnSubjectAttachedToProperty(SubjectLifecycleChange change)
     {
         ClearCaches();
     }
 
     /// <summary>
-    /// Invalidates caches when subject is detached.
+    /// Invalidates caches when subject is detached from a property.
     /// </summary>
-    public void DetachSubject(SubjectLifecycleChange change)
+    public void OnSubjectDetachedFromProperty(SubjectLifecycleChange change)
     {
         ClearCaches();
     }

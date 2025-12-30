@@ -1,21 +1,21 @@
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
-/// A lifecycle handler that is called when a subject is attached/assigned ore detached/removed from the subject tree.
+/// A lifecycle handler that is called when a subject's own property is attached or detached from tracking.
 /// The handler can be registered in the subject context and applies to the subject and all its children.
-/// A subject can also implement this interface directly to handle its own lifecycle changes.
+/// A subject can also implement this interface directly to handle its own property lifecycle changes.
 /// </summary>
 public interface IPropertyLifecycleHandler
 {
     /// <summary>
-    /// Called when a subject is attached to the subject tree.
+    /// Called after a subject's property is attached to tracking.
     /// </summary>
-    /// <param name="change">The lifecycle change information.</param>
-    public void AttachProperty(SubjectPropertyLifecycleChange change);
+    /// <param name="change">The property lifecycle change information.</param>
+    void OnPropertyAttached(SubjectPropertyLifecycleChange change);
 
     /// <summary>
-    /// Called when a subject is detached from the subject tree.
+    /// Called after a subject's property is detached from tracking.
     /// </summary>
-    /// <param name="change">The lifecycle change information.</param>
-    public void DetachProperty(SubjectPropertyLifecycleChange change);
+    /// <param name="change">The property lifecycle change information.</param>
+    void OnPropertyDetached(SubjectPropertyLifecycleChange change);
 }

@@ -1,4 +1,4 @@
-﻿using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.SampleConsole
 
             context
                 .GetPropertyChangeObservable()
-                .Subscribe((change) => 
+                .Subscribe((change) =>
                     Console.WriteLine($"Property {change.Property.Name} changed from {change.GetOldValue<object?>()} to {change.GetNewValue<object?>()}."));
 
             var child1 = new Person { FirstName = "Child1" };
@@ -30,14 +30,14 @@ namespace Namotion.Interceptor.SampleConsole
                 {
                     FirstName = "Susi"
                 },
-                Children = 
+                Children =
                 [
                     child1,
                     child2
                 ]
             };
 
-            person.Children = 
+            person.Children =
             [
                 child1,
                 child2,
@@ -77,16 +77,26 @@ namespace Namotion.Interceptor.SampleConsole
         }
     }
 
-    public class LogPropertyChangesHandler : ILifecycleHandler
+    public class LogPropertyChangesHandler : ILifecycleHandler, IReferenceLifecycleHandler
     {
-        public void AttachSubject(SubjectLifecycleChange change)
+        public void OnSubjectAttached(SubjectLifecycleChange change)
         {
-            Console.WriteLine($"Attach: {change.Subject}");
+            Console.WriteLine($"Attached: {change.Subject}");
         }
 
-        public void DetachSubject(SubjectLifecycleChange change)
+        public void OnSubjectDetached(SubjectLifecycleChange change)
         {
-            Console.WriteLine($"Detach: {change.Subject}");
+            Console.WriteLine($"Detached: {change.Subject}");
+        }
+
+        public void OnSubjectAttachedToProperty(SubjectLifecycleChange change)
+        {
+            Console.WriteLine($"AttachedToProperty: {change.Subject} at {change.Property?.Name}");
+        }
+
+        public void OnSubjectDetachedFromProperty(SubjectLifecycleChange change)
+        {
+            Console.WriteLine($"DetachedFromProperty: {change.Subject} at {change.Property?.Name}");
         }
     }
 }

@@ -1,24 +1,18 @@
-﻿using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Parent;
 
 [RunsBefore(typeof(ContextInheritanceHandler))]
-public class ParentTrackingHandler : ILifecycleHandler
+public class ParentTrackingHandler : IReferenceLifecycleHandler
 {
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnSubjectAttachedToProperty(SubjectLifecycleChange change)
     {
-        if (change.Property.HasValue)
-        {
-            change.Subject.AddParent(change.Property.Value, change.Index);
-        }
+        change.Subject.AddParent(change.Property!.Value, change.Index);
     }
 
-    public void DetachSubject(SubjectLifecycleChange change)
+    public void OnSubjectDetachedFromProperty(SubjectLifecycleChange change)
     {
-        if (change.Property.HasValue)
-        {
-            change.Subject.RemoveParent(change.Property.Value, change.Index);
-        }
+        change.Subject.RemoveParent(change.Property!.Value, change.Index);
     }
 }

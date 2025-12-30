@@ -155,3 +155,28 @@ public partial decimal Temperature { get; set; }
 ```
 
 This pattern allows you to define reusable metadata behaviors that are automatically applied when subjects are registered.
+
+## Lifecycle Integration
+
+The `SubjectRegistry` integrates with the lifecycle system by implementing all three lifecycle handler interfaces:
+
+| Interface | Purpose |
+|-----------|---------|
+| `ILifecycleHandler` | Register subjects on attach, unregister on detach |
+| `IReferenceLifecycleHandler` | Track parent-child relationships via property references |
+| `IPropertyLifecycleHandler` | Initialize properties (call `ISubjectPropertyInitializer` attributes) |
+
+This means that when you enable the registry with `WithRegistry()`, subjects are automatically:
+- **Registered** when they enter the object graph (`OnSubjectAttached`)
+- **Unregistered** when they fully leave the object graph (`OnSubjectDetached`)
+- **Parent-child linked** when assigned to properties (`OnSubjectAttachedToProperty`/`OnSubjectDetachedFromProperty`)
+- **Property initialized** when properties are tracked (`OnPropertyAttached`)
+
+### Handler Order Considerations
+
+Because handlers are called in reverse order on detach, the registry properly handles cleanup:
+
+1. On attach: Registry registers the subject first, then other handlers can access it
+2. On detach: Other handlers (like `ContextInheritanceHandler`) run first in reverse order, then registry removes the subject last
+
+This ensures that handlers can still access the registry during their cleanup phase.

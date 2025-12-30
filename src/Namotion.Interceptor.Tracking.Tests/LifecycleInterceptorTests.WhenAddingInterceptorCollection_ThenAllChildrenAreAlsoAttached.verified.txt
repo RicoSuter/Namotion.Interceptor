@@ -1,5 +1,7 @@
-﻿[
-  Attached: {Mother2 } at Mother with index , count: 1,
-  Attached: {Mother3 } at Mother with index , count: 1,
-  Attached: {Mother1 } at  with index , count: 0
+[
+  Attached: {Mother2 } at Mother with index , count: 1, first,
+  AttachedToProperty: {Mother2 } at Mother with index , count: 1,
+  Attached: {Mother3 } at Mother with index , count: 1, first,
+  AttachedToProperty: {Mother3 } at Mother with index , count: 1,
+  Attached: {Mother1 } at  with index , count: 0, first
 ]

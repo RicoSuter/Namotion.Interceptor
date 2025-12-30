@@ -31,7 +31,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
 
     /// <inheritdoc />
-    public void AttachProperty(SubjectPropertyLifecycleChange change)
+    public void OnPropertyAttached(SubjectPropertyLifecycleChange change)
     {
         if (change.Property.Metadata.IsDerived)
         {
@@ -40,13 +40,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             var result = change.Property.Metadata.GetValue?.Invoke(change.Subject);
             change.Property.SetLastKnownValue(result);
             change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ChangedTimestamp);
-            
+
             StoreRecordedTouchedProperties(change.Property);
         }
     }
 
     /// <inheritdoc />
-    public void DetachProperty(SubjectPropertyLifecycleChange change)
+    public void OnPropertyDetached(SubjectPropertyLifecycleChange change)
     {
         // No cleanup needed - dependencies are managed per-property
     }

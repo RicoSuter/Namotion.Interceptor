@@ -1,5 +1,7 @@
 using System.Reflection;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Lifecycle;
@@ -9,33 +11,33 @@ namespace HomeBlaze.Services.Lifecycle;
 /// This enables the [PropertyAttribute] pattern to work with methods, allowing attributes
 /// like IsEnabled to be attached to method properties.
 /// </summary>
+[RunsAfter(typeof(SubjectRegistry))]
 public class MethodPropertyInitializer : ILifecycleHandler
 {
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnSubjectAttached(SubjectLifecycleChange change)
     {
-        // TODO: Replace with change.IsFirstAttach once PR #132 is merged
-        // https://github.com/RicoSuter/Namotion.Interceptor/pull/132
-        if (change.ReferenceCount == 1)
+        // Use change.Context (invoking context) to access the registry
+        // This works because SubjectRegistry has already registered the subject
+        var registry = change.Context.TryGetService<ISubjectRegistry>();
+        var registeredSubject = registry?.TryGetRegisteredSubject(change.Subject)
+                                ?? throw new InvalidOperationException("Subject not registered");
+
+        foreach (var method in registeredSubject.GetAllMethods())
         {
-            var registeredSubject = change.Subject.TryGetRegisteredSubject()
-                                    ?? throw new InvalidOperationException("Subject not registered");
+            var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
+            var methodMetadata = new MethodPropertyMetadata();
 
-            foreach (var method in registeredSubject.GetAllMethods())
-            {
-                var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
-                var methodMetadata = new MethodPropertyMetadata();
-
-                registeredSubject.AddProperty(
-                    methodName,
-                    typeof(MethodPropertyMetadata),
-                    _ => methodMetadata,
-                    null,
-                    [.. method.MethodInfo.GetCustomAttributes<Attribute>()]);
-            }
+            registeredSubject.AddProperty(
+                methodName,
+                typeof(MethodPropertyMetadata),
+                _ => methodMetadata,
+                null,
+                [.. method.MethodInfo.GetCustomAttributes<Attribute>()]);
         }
     }
 
-    public void DetachSubject(SubjectLifecycleChange change)
+    public void OnSubjectDetached(SubjectLifecycleChange change)
     {
+        // No cleanup needed
     }
 }
