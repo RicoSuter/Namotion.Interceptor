@@ -195,10 +195,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         // 2. Call reference handlers in REVERSE order (symmetrical to attach)
         if (property != null)
         {
-            // TODO: Use reverse for loop for better performance
-            foreach (var handler in context.GetServices<IReferenceLifecycleHandler>().Reverse())
+            var referenceHandlers = context.GetServices<IReferenceLifecycleHandler>();
+            for (var i = referenceHandlers.Length - 1; i >= 0; i--)
             {
-                handler.OnSubjectDetachedFromProperty(change);
+                referenceHandlers[i].OnSubjectDetachedFromProperty(change);
             }
 
             if (subject is IReferenceLifecycleHandler referenceHandler)
@@ -210,10 +210,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         // 3. Call detach handlers in REVERSE order (symmetrical to attach)
         if (isLastDetach)
         {
-            // TODO: Use reverse for loop for better performance
-            foreach (var handler in context.GetServices<ILifecycleHandler>().Reverse())
+            var lifecycleHandlers = context.GetServices<ILifecycleHandler>();
+            for (var i = lifecycleHandlers.Length - 1; i >= 0; i--)
             {
-                handler.OnSubjectDetached(change);
+                lifecycleHandlers[i].OnSubjectDetached(change);
             }
 
             if (subject is ILifecycleHandler lifecycleHandler)
