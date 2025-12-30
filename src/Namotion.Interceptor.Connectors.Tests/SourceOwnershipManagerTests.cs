@@ -253,7 +253,7 @@ internal static class LifecycleInterceptorExtensions
 
         if (eventField?.GetValue(interceptor) is Action<SubjectLifecycleChange> handler)
         {
-            handler.Invoke(new SubjectLifecycleChange(subject, null, null, 0, IsFirstAttach: false, IsLastDetach: true));
+            handler.Invoke(new SubjectLifecycleChange(subject.Context, subject, null, null, 0));
         }
     }
 }

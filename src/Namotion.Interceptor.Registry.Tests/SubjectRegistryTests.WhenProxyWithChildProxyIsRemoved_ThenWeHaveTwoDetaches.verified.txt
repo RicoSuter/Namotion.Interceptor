@@ -1,9 +1,11 @@
 ﻿[
-  Attached:   at  with index , count: 0,
-  Attached: Grandmother  at Mother with index , count: 1,
-  Attached: Mother  at Mother with index , count: 1,
-  Detached: Grandmother  at  with index , count: 0,
-  Detached: Grandmother  at Mother with index , count: 0,
-  Detached: Mother  at  with index , count: 0,
-  Detached: Mother  at Mother with index , count: 0
+  Attached:   at  with index , count: 0, first,
+  Attached: Mother  at Mother with index , count: 1, first,
+  Attached: Grandmother  at Mother with index , count: 1, first,
+  AttachedToProperty: Grandmother  at Mother with index , count: 1,
+  AttachedToProperty: Mother  at Mother with index , count: 1,
+  DetachedFromProperty: Mother  at Mother with index , count: 0,
+  DetachedFromProperty: Grandmother  at Mother with index , count: 0,
+  Detached: Grandmother  at  with index , count: 0, last,
+  Detached: Mother  at  with index , count: 0, last
 ]

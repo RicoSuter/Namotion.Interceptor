@@ -146,7 +146,7 @@ public static class InterceptorSubjectContextExtensions
     }
 
     /// <summary>
-    /// Adds support for <see cref="ILifecycleHandler"/> handlers.
+    /// Adds support for lifecycle handlers (<see cref="ILifecycleHandler"/>, <see cref="IReferenceLifecycleHandler"/>, <see cref="IPropertyLifecycleHandler"/>).
     /// </summary>
     /// <param name="context">The collection.</param>
     /// <returns>The collection.</returns>

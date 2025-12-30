@@ -109,32 +109,45 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             : subject.GetReferenceCount();
 
         // Create change for handlers and event
-        // IsFirstAttach=true on the very first attachment (whether property or context-only)
         var change = new SubjectLifecycleChange(
+            context,
             subject,
             property,
             index,
-            referenceCount,
-            isFirstAttach,
-            IsLastDetach: false);
+            referenceCount);
 
-        // Call handlers
-        foreach (var handler in context.GetServices<ILifecycleHandler>())
-        {
-            handler.AttachSubject(change);
-        }
-
-        if (subject is ILifecycleHandler lifecycleHandler)
-        {
-            lifecycleHandler.AttachSubject(change);
-        }
-
-        // Fire event
-        SubjectAttached?.Invoke(change);
-
-        // Track newly attached subjects for deferred AttachSubjectProperty
+        // 1. Call attach handlers first (when subject first enters graph)
         if (isFirstAttach)
         {
+            foreach (var handler in context.GetServices<ILifecycleHandler>())
+            {
+                handler.OnSubjectAttached(change);
+            }
+
+            if (subject is ILifecycleHandler lifecycleHandler)
+            {
+                lifecycleHandler.OnSubjectAttached(change);
+            }
+        }
+
+        // 2. Call reference handlers (when property reference is added)
+        if (property != null)
+        {
+            foreach (var handler in context.GetServices<IReferenceLifecycleHandler>())
+            {
+                handler.OnSubjectAttachedToProperty(change);
+            }
+
+            if (subject is IReferenceLifecycleHandler referenceHandler)
+            {
+                referenceHandler.OnSubjectAttachedToProperty(change);
+            }
+        }
+
+        // Fire event only on first attach
+        if (isFirstAttach)
+        {
+            SubjectAttached?.Invoke(change);
             newlyAttachedSubjects.Add(subject);
         }
     }
@@ -167,25 +180,49 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
 
         var change = new SubjectLifecycleChange(
+            context,
             subject,
             property,
             index,
-            referenceCount,
-            IsFirstAttach: false,
-            isLastDetach);
+            referenceCount);
 
-        // Fire event first (so property detach event fires before context-only detach)
-        SubjectDetached?.Invoke(change);
-
-        // Call handlers after event (they may trigger nested detach via ContextInheritanceHandler)
-        if (subject is ILifecycleHandler lifecycleHandler)
+        // 1. Fire event first on last detach (reverse of attach where event fires last)
+        if (isLastDetach)
         {
-            lifecycleHandler.DetachSubject(change);
+            SubjectDetached?.Invoke(change);
         }
 
-        foreach (var handler in context.GetServices<ILifecycleHandler>())
+        // 2. Call reference handlers in REVERSE order (symmetrical to attach)
+        if (property != null)
         {
-            handler.DetachSubject(change);
+            // TODO: Use reverse for loop for better performance
+            foreach (var handler in context.GetServices<IReferenceLifecycleHandler>().Reverse())
+            {
+                handler.OnSubjectDetachedFromProperty(change);
+            }
+
+            if (subject is IReferenceLifecycleHandler referenceHandler)
+            {
+                referenceHandler.OnSubjectDetachedFromProperty(change);
+            }
+        }
+
+        // 3. Call detach handlers in REVERSE order (symmetrical to attach)
+        if (isLastDetach)
+        {
+            // TODO: Use reverse for loop for better performance
+            foreach (var handler in context.GetServices<ILifecycleHandler>().Reverse())
+            {
+                handler.OnSubjectDetached(change);
+            }
+
+            if (subject is ILifecycleHandler lifecycleHandler)
+            {
+                lifecycleHandler.OnSubjectDetached(change);
+            }
+
+            // Return pooled reference counter after all handlers complete
+            subject.ReturnReferenceCounter();
         }
     }
 

@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Performance;
+
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public static class LifecycleInterceptorExtensions
@@ -5,6 +8,20 @@ public static class LifecycleInterceptorExtensions
     // Must match LifecycleInterceptor.ReferenceCountKey (private implementation detail)
     private const string ReferenceCountKey = "Namotion.Interceptor.Tracking.ReferenceCount";
     private const string AttachedPropertiesKey = "Namotion.Interceptor.Tracking.AttachedProperties";
+
+    // Pool for ReferenceCounter objects to avoid boxing allocations
+    private static readonly ObjectPool<ReferenceCounter> CounterPool = new(() => new ReferenceCounter());
+
+    /// <summary>
+    /// Pooled wrapper for reference count to avoid boxing int.
+    /// </summary>
+    private sealed class ReferenceCounter
+    {
+        public int Value;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Reset() => Value = 0;
+    }
 
     /// <summary>
     /// Gets the lifecycle interceptor from the context, if configured.
@@ -20,11 +37,10 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     public static int GetReferenceCount(this IInterceptorSubject subject)
     {
-        if (subject.Data.TryGetValue((null, ReferenceCountKey), out var count))
-        {
-            return (int)(count ?? 0);
-        }
-        return 0;
+        return subject.Data.TryGetValue((null, ReferenceCountKey), out var value)
+            && value is ReferenceCounter counter
+            ? counter.Value
+            : 0;
     }
 
     /// <summary>
@@ -32,7 +48,10 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     internal static int IncrementReferenceCount(this IInterceptorSubject subject)
     {
-        return (int)(subject.Data.AddOrUpdate((null, ReferenceCountKey), 1, (_, count) => (int)(count ?? 0) + 1) ?? 1);
+        var counter = (ReferenceCounter)subject.Data.GetOrAdd(
+            (null, ReferenceCountKey),
+            static _ => CounterPool.Rent())!;
+        return Interlocked.Increment(ref counter.Value);
     }
 
     /// <summary>
@@ -40,9 +59,37 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     internal static int DecrementReferenceCount(this IInterceptorSubject subject)
     {
-        return (int)(subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, (_, count) => Math.Max(0, (int)(count ?? 0) - 1)) ?? 0);
+        if (subject.Data.TryGetValue((null, ReferenceCountKey), out var value)
+            && value is ReferenceCounter counter)
+        {
+            var newValue = Interlocked.Decrement(ref counter.Value);
+            return Math.Max(0, newValue);
+        }
+        return 0;
     }
 
+    /// <summary>
+    /// Returns the pooled reference counter to the pool.
+    /// Called when a subject is fully detached (when OnSubjectDetached fires).
+    /// </summary>
+    internal static void ReturnReferenceCounter(this IInterceptorSubject subject)
+    {
+        if (subject.Data.TryRemove((null, ReferenceCountKey), out var value) && value is ReferenceCounter counter)
+        {
+            counter.Reset();
+            CounterPool.Return(counter);
+        }
+    }
+
+    /// <summary>
+    /// Attaches a property to the subject's lifecycle tracking.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="property">The property reference to attach.</param>
+    /// <remarks>
+    /// This method is not thread-safe by itself. It must be called within
+    /// the LifecycleInterceptor's lock to ensure thread safety.
+    /// </remarks>
     public static void AttachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)
     {
         // Check if this property is already attached (idempotent)
@@ -56,28 +103,30 @@ public static class LifecycleInterceptorExtensions
 
         foreach (var handler in subject.Context.GetServices<IPropertyLifecycleHandler>())
         {
-            handler.AttachProperty(change);
+            handler.OnPropertyAttached(change);
         }
 
         if (subject is IPropertyLifecycleHandler lifecycleHandler)
         {
-            lifecycleHandler.AttachProperty(change);
+            lifecycleHandler.OnPropertyAttached(change);
         }
     }
 
     private static HashSet<string> GetOrCreateAttachedPropertiesSet(IInterceptorSubject subject)
     {
         var key = (null as string, AttachedPropertiesKey);
-        if (subject.Data.TryGetValue(key, out var existing) && existing is HashSet<string> set)
-        {
-            return set;
-        }
-
-        var newSet = new HashSet<string>();
-        subject.Data.TryAdd(key, newSet);
-        return (HashSet<string>)subject.Data.GetOrAdd(key, newSet)!;
+        return (HashSet<string>)subject.Data.GetOrAdd(key, static _ => new HashSet<string>())!;
     }
     
+    /// <summary>
+    /// Detaches a property from the subject's lifecycle tracking.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="property">The property reference to detach.</param>
+    /// <remarks>
+    /// This method is not thread-safe by itself. It must be called within
+    /// the LifecycleInterceptor's lock to ensure thread safety.
+    /// </remarks>
     public static void DetachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)
     {
         // Remove from attached properties set
@@ -91,12 +140,12 @@ public static class LifecycleInterceptorExtensions
 
         foreach (var handler in subject.Context.GetServices<IPropertyLifecycleHandler>())
         {
-            handler.DetachProperty(change);
+            handler.OnPropertyDetached(change);
         }
 
         if (subject is IPropertyLifecycleHandler lifecycleHandler)
         {
-            lifecycleHandler.DetachProperty(change);
+            lifecycleHandler.OnPropertyDetached(change);
         }
     }
 }

@@ -235,10 +235,11 @@ public class ParentAccessDuringLifecycleTests
     }
 
     [Fact]
-    public void WhenComponentIsRoot_ThenNoParentIsFound()
+    public void WhenComponentIsRoot_ThenNoReferenceHandlerIsCalled()
     {
-        // When a component is created as a root (not attached to a parent),
-        // it should have no parents during AttachSubject
+        // When a component is created as a root (not attached via property reference),
+        // the IReferenceLifecycleHandler.OnReferenceAdded is NOT called since there's no property reference.
+        // Only IAttachLifecycleHandler.OnSubjectAttached would be called for context-only attachments.
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
@@ -247,11 +248,10 @@ public class ParentAccessDuringLifecycleTests
         // Component is created directly with context - it IS the root
         var component = new Component(context) { Name = "RootComponent" };
 
-        // Assert: No parents because it's the root
+        // Assert: OnReferenceAdded was never called (no property reference for root)
         Assert.Null(component.AttachException);
-        Assert.NotNull(component.ParentsFoundDuringAttach);
-        Assert.Empty(component.ParentsFoundDuringAttach);  // No parents!
-        Assert.Null(component.RootFoundDuringAttach);      // Can't find Simulation because there isn't one
+        Assert.Null(component.ParentsFoundDuringAttach);  // OnReferenceAdded wasn't called
+        Assert.Null(component.RootFoundDuringAttach);     // Can't find Simulation because there isn't one
     }
 
     [Fact]
@@ -278,7 +278,7 @@ public class ParentAccessDuringLifecycleTests
         Assert.Contains("TrackedChild.AttachSubject - HasParents: True", handlerCallOrder);
     }
 
-    private class OrderTrackingHandler : ILifecycleHandler
+    private class OrderTrackingHandler : ILifecycleHandler, IReferenceLifecycleHandler
     {
         private readonly List<string> _callOrder;
 
@@ -287,14 +287,24 @@ public class ParentAccessDuringLifecycleTests
             _callOrder = callOrder;
         }
 
-        public void AttachSubject(SubjectLifecycleChange change)
+        public void OnSubjectAttached(SubjectLifecycleChange change)
         {
-            _callOrder.Add($"OrderTrackingHandler.AttachSubject for {change.Subject.GetType().Name}");
+            _callOrder.Add($"OrderTrackingHandler.OnSubjectAttached for {change.Subject.GetType().Name}");
         }
 
-        public void DetachSubject(SubjectLifecycleChange change)
+        public void OnSubjectAttachedToProperty(SubjectLifecycleChange change)
         {
-            _callOrder.Add($"OrderTrackingHandler.DetachSubject for {change.Subject.GetType().Name}");
+            _callOrder.Add($"OrderTrackingHandler.OnSubjectAttachedToProperty for {change.Subject.GetType().Name}");
+        }
+
+        public void OnSubjectDetachedFromProperty(SubjectLifecycleChange change)
+        {
+            _callOrder.Add($"OrderTrackingHandler.OnSubjectDetachedFromProperty for {change.Subject.GetType().Name}");
+        }
+
+        public void OnSubjectDetached(SubjectLifecycleChange change)
+        {
+            _callOrder.Add($"OrderTrackingHandler.OnSubjectDetached for {change.Subject.GetType().Name}");
         }
     }
 }
@@ -319,7 +329,7 @@ public partial class RootWithTrackedChild
 /// A component that tracks the order of handler calls.
 /// </summary>
 [InterceptorSubject]
-public partial class TrackedChild : ILifecycleHandler
+public partial class TrackedChild : IReferenceLifecycleHandler
 {
     private readonly List<string> _callOrder;
 
@@ -331,13 +341,13 @@ public partial class TrackedChild : ILifecycleHandler
         Name = string.Empty;
     }
 
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnSubjectAttachedToProperty(SubjectLifecycleChange change)
     {
         var hasParents = this.GetParents().Count > 0;
         _callOrder.Add($"TrackedChild.AttachSubject - HasParents: {hasParents}");
     }
 
-    public void DetachSubject(SubjectLifecycleChange change)
+    public void OnSubjectDetachedFromProperty(SubjectLifecycleChange change)
     {
         _callOrder.Add("TrackedChild.DetachSubject");
     }
@@ -363,11 +373,11 @@ public partial class Simulation
 }
 
 /// <summary>
-/// A component that implements ILifecycleHandler and tries to access its parent during AttachSubject.
+/// A component that implements IReferenceLifecycleHandler and tries to access its parent during OnReferenceAdded.
 /// Used to test that parent tracking is set up before the subject's own lifecycle handler runs.
 /// </summary>
 [InterceptorSubject]
-public partial class Component : ILifecycleHandler
+public partial class Component : IReferenceLifecycleHandler
 {
     public partial string Name { get; set; }
 
@@ -382,25 +392,25 @@ public partial class Component : ILifecycleHandler
     }
 
     /// <summary>
-    /// Stores the root found during AttachSubject (if any).
+    /// Stores the root found during OnReferenceAdded (if any).
     /// </summary>
     public Simulation? RootFoundDuringAttach { get; private set; }
 
     /// <summary>
-    /// Stores any exception that occurred during AttachSubject.
+    /// Stores any exception that occurred during OnReferenceAdded.
     /// </summary>
     public Exception? AttachException { get; private set; }
 
     /// <summary>
-    /// Stores the parents found during AttachSubject.
+    /// Stores the parents found during OnReferenceAdded.
     /// </summary>
     public HashSet<SubjectParent>? ParentsFoundDuringAttach { get; private set; }
 
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnSubjectAttachedToProperty(SubjectLifecycleChange change)
     {
         try
         {
-            // Store the parents at the moment AttachSubject is called
+            // Store the parents at the moment OnSubjectAttachedToProperty is called
             ParentsFoundDuringAttach = new HashSet<SubjectParent>(this.GetParents());
 
             // Try to find the root simulation via parent traversal
@@ -412,7 +422,7 @@ public partial class Component : ILifecycleHandler
         }
     }
 
-    public void DetachSubject(SubjectLifecycleChange change)
+    public void OnSubjectDetachedFromProperty(SubjectLifecycleChange change)
     {
     }
 

@@ -1,5 +1,7 @@
 ﻿[
-  Attached:   at  with index , count: 0,
-  Attached: Grandmother  at Mother with index , count: 1,
-  Attached: Mother  at Mother with index , count: 1
+  Attached:   at  with index , count: 0, first,
+  Attached: Mother  at Mother with index , count: 1, first,
+  Attached: Grandmother  at Mother with index , count: 1, first,
+  AttachedToProperty: Grandmother  at Mother with index , count: 1,
+  AttachedToProperty: Mother  at Mother with index , count: 1
 ]

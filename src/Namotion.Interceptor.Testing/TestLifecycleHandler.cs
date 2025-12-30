@@ -1,8 +1,8 @@
-﻿using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Testing
 {
-    public class TestLifecycleHandler : ILifecycleHandler
+    public class TestLifecycleHandler : ILifecycleHandler, IReferenceLifecycleHandler
     {
         private readonly List<string> _events;
 
@@ -11,14 +11,24 @@ namespace Namotion.Interceptor.Testing
             _events = events;
         }
 
-        public void AttachSubject(SubjectLifecycleChange change)
+        public void OnSubjectAttached(SubjectLifecycleChange change)
         {
-            _events.Add($"Attached: {change.Subject} at {change.Property?.Name} with index {change.Index}, count: {change.ReferenceCount}");
+            _events.Add($"Attached: {change.Subject} at {change.Property?.Name} with index {change.Index}, count: {change.ReferenceCount}, first");
         }
 
-        public void DetachSubject(SubjectLifecycleChange change)
+        public void OnSubjectAttachedToProperty(SubjectLifecycleChange change)
         {
-            _events.Add($"Detached: {change.Subject} at {change.Property?.Name} with index {change.Index}, count: {change.ReferenceCount}");
+            _events.Add($"AttachedToProperty: {change.Subject} at {change.Property?.Name} with index {change.Index}, count: {change.ReferenceCount}");
+        }
+
+        public void OnSubjectDetachedFromProperty(SubjectLifecycleChange change)
+        {
+            _events.Add($"DetachedFromProperty: {change.Subject} at {change.Property?.Name} with index {change.Index}, count: {change.ReferenceCount}");
+        }
+
+        public void OnSubjectDetached(SubjectLifecycleChange change)
+        {
+            _events.Add($"Detached: {change.Subject} at {change.Property?.Name} with index {change.Index}, count: {change.ReferenceCount}, last");
         }
     }
 }
