@@ -1,1 +1,91 @@
-﻿
+﻿[
+  {
+    Event: Handler:OnSubjectAttached,
+    Name: Mother,
+    ReferenceCount: 1
+  },
+  {
+    Event: Handler:OnSubjectAttachedToProperty,
+    Name: Mother,
+    ReferenceCount: 1
+  },
+  {
+    Event: Event:SubjectAttached,
+    Name: Mother,
+    ReferenceCount: 1
+  },
+  {
+    Event: Handler:OnPropertyAttached,
+    Name: Id
+  },
+  {
+    Event: Handler:OnPropertyAttached,
+    Name: FirstName
+  },
+  {
+    Event: Handler:OnPropertyAttached,
+    Name: LastName
+  },
+  {
+    Event: Handler:OnPropertyAttached,
+    Name: FullName
+  },
+  {
+    Event: Handler:OnPropertyAttached,
+    Name: FullNameWithPrefix
+  },
+  {
+    Event: Handler:OnPropertyAttached,
+    Name: Father
+  },
+  {
+    Event: Handler:OnPropertyAttached,
+    Name: Mother
+  },
+  {
+    Event: Handler:OnPropertyAttached,
+    Name: Children
+  },
+  {
+    Event: Handler:OnSubjectDetachedFromProperty,
+    Name: Mother
+  },
+  {
+    Event: Handler:OnPropertyDetached,
+    Name: Id
+  },
+  {
+    Event: Handler:OnPropertyDetached,
+    Name: FirstName
+  },
+  {
+    Event: Handler:OnPropertyDetached,
+    Name: LastName
+  },
+  {
+    Event: Handler:OnPropertyDetached,
+    Name: FullName
+  },
+  {
+    Event: Handler:OnPropertyDetached,
+    Name: FullNameWithPrefix
+  },
+  {
+    Event: Handler:OnPropertyDetached,
+    Name: Father
+  },
+  {
+    Event: Handler:OnPropertyDetached,
+    Name: Mother
+  },
+  {
+    Event: Handler:OnPropertyDetached,
+    Name: Children
+  },
+  {
+    Event: Event:SubjectDetached
+  },
+  {
+    Event: Handler:OnSubjectDetached
+  }
+]
