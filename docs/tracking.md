@@ -288,12 +288,10 @@ lifecycleInterceptor.SubjectDetached += change =>
 
 **SubjectAttached** fires when:
 - A subject is created with a context (`new Person(context)`) - context-only attachment
-- A subject is assigned to an intercepted property (`parent.Child = child`) - property attachment
-- A subject is added to an intercepted collection (`parent.Children.Add(child)`) - property attachment with index
+- A subject is assigned to an intercepted property (e.g. `parent.Child = child`) - property attachment
 
 **SubjectDetached** fires when:
-- A subject is removed from an intercepted property (`parent.Child = null`) - property detachment
-- A subject is removed from an intercepted collection - property detachment with index
+- A subject is removed from an intercepted property (e.g. `parent.Child = null`) - property detachment
 - A subject's fallback context is removed (triggered by `ContextInheritanceHandler`) - context-only detachment
 
 **Two-phase detachment** (requires `WithContextInheritance()`): When a subject loses its last property reference, two detach events fire:
