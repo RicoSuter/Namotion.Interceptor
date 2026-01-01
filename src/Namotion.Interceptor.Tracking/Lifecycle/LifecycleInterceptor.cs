@@ -1,25 +1,19 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Runtime.CompilerServices;
-using Microsoft.Extensions.ObjectPool;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Performance;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
-    private const int PoolMaxSize = 256;
-
-    private static readonly ObjectPool<List<(IInterceptorSubject subject, PropertyReference property, object? index)>> ListPool =
-        new DefaultObjectPool<List<(IInterceptorSubject, PropertyReference, object?)>>(
-            new ListPoolPolicy<(IInterceptorSubject, PropertyReference, object?)>(), PoolMaxSize);
-
-    private static readonly ObjectPool<HashSet<IInterceptorSubject>> HashSetPool =
-        new DefaultObjectPool<HashSet<IInterceptorSubject>>(
-            new HashSetPoolPolicy<IInterceptorSubject>(), PoolMaxSize);
-
     private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference?>> _attachedSubjects = [];
+
+    [ThreadStatic]
+    private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
+
+    [ThreadStatic]
+    private static Stack<HashSet<IInterceptorSubject>>? _hashSetPool;
 
     /// <summary>
     /// Raised when a subject is attached to the object graph.
@@ -277,27 +271,29 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static List<(IInterceptorSubject subject, PropertyReference property, object? index)> GetList()
     {
-        return ListPool.Get();
+        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
+        return _listPool.Count > 0 ? _listPool.Pop() : [];
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static HashSet<IInterceptorSubject> GetHashSet()
     {
-        return HashSetPool.Get();
+        _hashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
+        return _hashSetPool.Count > 0 ? _hashSetPool.Pop() : [];
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ReturnList(List<(IInterceptorSubject, PropertyReference, object?)> list)
     {
         list.Clear();
-        ListPool.Return(list);
+        _listPool!.Push(list);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ReturnHashSet(HashSet<IInterceptorSubject> hashSet)
     {
         hashSet.Clear();
-        HashSetPool.Return(hashSet);
+        _hashSetPool!.Push(hashSet);
     }
 
     #endregion
