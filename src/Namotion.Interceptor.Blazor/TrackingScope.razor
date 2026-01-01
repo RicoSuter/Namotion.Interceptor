@@ -276,7 +276,7 @@ else
         {
             var current = queue.Dequeue();
 
-            HashSet<SubjectParent> parents;
+            IReadOnlyCollection<SubjectParent> parents;
             try
             {
                 parents = current.GetParents();
