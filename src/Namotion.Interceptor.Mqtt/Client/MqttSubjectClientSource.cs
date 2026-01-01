@@ -7,14 +7,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.ObjectPool;
 using MQTTnet;
 using MQTTnet.Packets;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Mqtt.Performance;
+using Namotion.Interceptor.Performance;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt.Client;
@@ -24,11 +23,9 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// </summary>
 internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
 {
-    private const int PoolMaxSize = 256;
-
     // Pool for UserProperties lists to avoid allocations on hot path
-    private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool =
-        new DefaultObjectPool<List<MqttUserProperty>>(new ListPoolPolicy<MqttUserProperty>(1), PoolMaxSize);
+    private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool
+        = new(() => new List<MqttUserProperty>(1));
 
     private readonly IInterceptorSubject _subject;
     private readonly MqttClientConfiguration _configuration;
@@ -202,7 +199,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
                     if (userPropertiesArray is not null)
                     {
-                        var userProps = UserPropertiesPool.Get();
+                        var userProps = UserPropertiesPool.Rent();
                         userProps.Clear();
                         userProps.Add(new MqttUserProperty(
                             _configuration.SourceTimestampPropertyName!,
