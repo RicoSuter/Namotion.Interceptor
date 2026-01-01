@@ -12,6 +12,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _visitedCache;
 
+    [ThreadStatic]
+    private static int _visitedDepth;
+
     private ConcurrentDictionary<Type, Delegate>? _readInterceptorFunction;
     private ConcurrentDictionary<Type, Delegate>? _writeInterceptorFunction;
     private ConcurrentDictionary<Type, object>? _serviceCache; // stores ImmutableArray<T> boxed
@@ -239,6 +242,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private TInterface[] GetServicesWithoutCache<TInterface>()
     {
         var visited = _visitedCache ??= [];
+        _visitedDepth++;
         try
         {
             return GetServicesWithoutCache(typeof(TInterface), visited)
@@ -247,7 +251,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
         finally
         {
-            visited.Clear();
+            if (--_visitedDepth == 0)
+            {
+                visited.Clear();
+            }
         }
     }
 
@@ -271,13 +278,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private void OnContextChanged()
     {
         var visited = _visitedCache ??= [];
+        _visitedDepth++;
         try
         {
             OnContextChanged(visited);
         }
         finally
         {
-            visited.Clear();
+            if (--_visitedDepth == 0)
+            {
+                visited.Clear();
+            }
         }
     }
 

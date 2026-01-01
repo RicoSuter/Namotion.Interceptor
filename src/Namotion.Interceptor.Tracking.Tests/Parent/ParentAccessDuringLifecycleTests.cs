@@ -333,7 +333,7 @@ public partial class TrackedChild : ILifecycleHandler
 
     public void AttachSubject(SubjectLifecycleChange change)
     {
-        var hasParents = this.GetParents().Count > 0;
+        var hasParents = this.GetParents().Length > 0;
         _callOrder.Add($"TrackedChild.AttachSubject - HasParents: {hasParents}");
     }
 

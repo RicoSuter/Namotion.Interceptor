@@ -276,7 +276,7 @@ else
         {
             var current = queue.Dequeue();
 
-            IReadOnlyCollection<SubjectParent> parents;
+            System.Collections.Immutable.ImmutableArray<SubjectParent> parents;
             try
             {
                 parents = current.GetParents();
