@@ -11,12 +11,10 @@ public sealed class ObjectPool<T> where T : class
 {
     private readonly ConcurrentBag<T> _objects = [];
     private readonly Func<T> _factory;
-    private readonly int _maxSize;
 
-    public ObjectPool(Func<T> factory, int maxSize = 64)
+    public ObjectPool(Func<T> factory)
     {
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
-        _maxSize = maxSize;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -28,9 +26,6 @@ public sealed class ObjectPool<T> where T : class
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Return(T item)
     {
-        if (_objects.Count < _maxSize)
-        {
-            _objects.Add(item);
-        }
+        _objects.Add(item);
     }
 }
