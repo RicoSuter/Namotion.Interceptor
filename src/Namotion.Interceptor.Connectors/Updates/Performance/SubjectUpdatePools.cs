@@ -1,5 +1,5 @@
 using System.Runtime.CompilerServices;
-using Namotion.Interceptor.Performance;
+using Namotion.Interceptor.Registry.Performance;
 
 namespace Namotion.Interceptor.Connectors.Updates.Performance;
 

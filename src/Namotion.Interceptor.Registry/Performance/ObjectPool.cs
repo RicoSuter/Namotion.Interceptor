@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 
-namespace Namotion.Interceptor.Performance;
+namespace Namotion.Interceptor.Registry.Performance;
 
 /// <summary>
 /// A simple thread-safe object pool using ConcurrentBag.
