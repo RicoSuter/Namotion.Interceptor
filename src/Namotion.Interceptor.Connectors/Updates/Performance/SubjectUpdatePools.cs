@@ -1,23 +1,29 @@
 using System.Runtime.CompilerServices;
-using Namotion.Interceptor.Performance;
+using Microsoft.Extensions.ObjectPool;
+using Namotion.Interceptor.Connectors.Performance;
 
 namespace Namotion.Interceptor.Connectors.Updates.Performance;
 
 internal static class SubjectUpdatePools
 {
-    private static readonly ObjectPool<Dictionary<IInterceptorSubject, SubjectUpdate>> KnownSubjectUpdatesPool
-        = new(() => new Dictionary<IInterceptorSubject, SubjectUpdate>());
+    private const int PoolMaxSize = 256;
 
-    private static readonly ObjectPool<Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>> PropertyUpdatesPool
-        = new(() => new Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>());
+    private static readonly ObjectPool<Dictionary<IInterceptorSubject, SubjectUpdate>> KnownSubjectUpdatesPool =
+        new DefaultObjectPool<Dictionary<IInterceptorSubject, SubjectUpdate>>(
+            new DictionaryPoolPolicy<IInterceptorSubject, SubjectUpdate>(), PoolMaxSize);
 
-    private static readonly ObjectPool<HashSet<IInterceptorSubject>> ProcessedParentPathsPool
-        = new(() => []);
+    private static readonly ObjectPool<Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>> PropertyUpdatesPool =
+        new DefaultObjectPool<Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>>(
+            new DictionaryPoolPolicy<SubjectPropertyUpdate, SubjectPropertyUpdateReference>(), PoolMaxSize);
+
+    private static readonly ObjectPool<HashSet<IInterceptorSubject>> ProcessedParentPathsPool =
+        new DefaultObjectPool<HashSet<IInterceptorSubject>>(
+            new HashSetPoolPolicy<IInterceptorSubject>(), PoolMaxSize);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Dictionary<IInterceptorSubject, SubjectUpdate> RentKnownSubjectUpdates()
     {
-        return KnownSubjectUpdatesPool.Rent();
+        return KnownSubjectUpdatesPool.Get();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -30,7 +36,7 @@ internal static class SubjectUpdatePools
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference> RentPropertyUpdates()
     {
-        return PropertyUpdatesPool.Rent();
+        return PropertyUpdatesPool.Get();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -46,7 +52,7 @@ internal static class SubjectUpdatePools
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static HashSet<IInterceptorSubject> RentProcessedParentPaths()
     {
-        return ProcessedParentPathsPool.Rent();
+        return ProcessedParentPathsPool.Get();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
