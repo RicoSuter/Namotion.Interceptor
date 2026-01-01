@@ -245,6 +245,19 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private TInterface[] GetServicesWithoutCache<TInterface>()
     {
+        // Fast path: single fallback, no local services - delegate to cached GetServices
+        var singleFallback = _noServicesSingleFallbackContext;
+        if (singleFallback is not null)
+        {
+            return [.. singleFallback.GetServices<TInterface>()];
+        }
+
+        // Fast path: no services and no fallbacks - return empty (common for fresh contexts)
+        if (_services.Count == 0 && _fallbackContexts.Count == 0)
+        {
+            return [];
+        }
+
         var visited = new HashSet<InterceptorSubjectContext>();
         return GetServicesWithoutCache(typeof(TInterface), visited)
             .OfType<TInterface>()
@@ -265,8 +278,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // Fast path: no local services, single fallback - just delegate
             if (_services.Count == 0 && _fallbackContexts.Count == 1)
             {
-                var singleFallback = _fallbackContexts.Single();
-                return singleFallback.GetServicesWithoutCache(type, visited);
+                return _fallbackContexts.First().GetServicesWithoutCache(type, visited);
             }
 
             fallbacks = [.. _fallbackContexts];
@@ -305,12 +317,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         lock (this)
         {
             _noServicesSingleFallbackContext = _services.Count == 0 && _fallbackContexts.Count == 1
-                ? _fallbackContexts.Single() : null;
+                ? _fallbackContexts.First() : null;
 
             // Avoid array allocation for common cases (0 or 1 parent)
             if (_usedByContexts.Count == 1)
             {
-                singleParent = _usedByContexts.Single();
+                singleParent = _usedByContexts.First();
             }
             else if (_usedByContexts.Count > 1)
             {
