@@ -1,4 +1,5 @@
-using System.Collections.Immutable;
+using System.Collections;
+using System.Collections.Concurrent;
 
 namespace Namotion.Interceptor.Tracking.Parent;
 
@@ -8,26 +9,42 @@ public static class ParentsHandlerExtensions
 
     internal static void AddParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
     {
-        subject.Data.AddOrUpdate(
-            (null, ParentsKey),
-            _ => ImmutableHashSet.Create(new SubjectParent(parent, index)),
-            (_, existing) => ((ImmutableHashSet<SubjectParent>)existing!).Add(new SubjectParent(parent, index)));
+        var parents = (ParentsSet)subject.Data.GetOrAdd((null, ParentsKey), _ => new ParentsSet())!;
+        parents.Add(new SubjectParent(parent, index));
     }
 
     internal static void RemoveParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
     {
-        subject.Data.AddOrUpdate(
-            (null, ParentsKey),
-            _ => ImmutableHashSet<SubjectParent>.Empty,
-            (_, existing) => ((ImmutableHashSet<SubjectParent>)existing!).Remove(new SubjectParent(parent, index)));
+        if (subject.Data.TryGetValue((null, ParentsKey), out var existing))
+        {
+            ((ParentsSet)existing!).Remove(new SubjectParent(parent, index));
+        }
     }
 
     public static IReadOnlyCollection<SubjectParent> GetParents(this IInterceptorSubject subject)
     {
         if (subject.Data.TryGetValue((null, ParentsKey), out var parents))
         {
-            return (ImmutableHashSet<SubjectParent>)parents!;
+            return (ParentsSet)parents!;
         }
-        return ImmutableHashSet<SubjectParent>.Empty;
+        return [];
+    }
+    
+    /// <summary>
+    /// Thread-safe collection for storing parent references using ConcurrentDictionary.
+    /// </summary>
+    private sealed class ParentsSet : IReadOnlyCollection<SubjectParent>
+    {
+        private readonly ConcurrentDictionary<SubjectParent, byte> _dict = new();
+
+        public int Count => _dict.Count;
+
+        public bool Add(SubjectParent parent) => _dict.TryAdd(parent, 0);
+
+        public bool Remove(SubjectParent parent) => _dict.TryRemove(parent, out _);
+
+        public IEnumerator<SubjectParent> GetEnumerator() => _dict.Keys.GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }
