@@ -9,6 +9,9 @@ namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
+    [ThreadStatic]
+    private static HashSet<InterceptorSubjectContext>? _visitedCache;
+
     private ConcurrentDictionary<Type, Delegate>? _readInterceptorFunction;
     private ConcurrentDictionary<Type, Delegate>? _writeInterceptorFunction;
     private ConcurrentDictionary<Type, object>? _serviceCache; // stores ImmutableArray<T> boxed
@@ -235,9 +238,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private TInterface[] GetServicesWithoutCache<TInterface>()
     {
-        return GetServicesWithoutCache(typeof(TInterface), [])
-            .OfType<TInterface>()
-            .ToArray();
+        var visited = _visitedCache ??= [];
+        try
+        {
+            return GetServicesWithoutCache(typeof(TInterface), visited)
+                .OfType<TInterface>()
+                .ToArray();
+        }
+        finally
+        {
+            visited.Clear();
+        }
     }
 
     private IEnumerable<object> GetServicesWithoutCache(Type type, HashSet<InterceptorSubjectContext> visited)
@@ -259,7 +270,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void OnContextChanged()
     {
-        OnContextChanged([]);
+        var visited = _visitedCache ??= [];
+        try
+        {
+            OnContextChanged(visited);
+        }
+        finally
+        {
+            visited.Clear();
+        }
     }
 
     private void OnContextChanged(HashSet<InterceptorSubjectContext> visited)
