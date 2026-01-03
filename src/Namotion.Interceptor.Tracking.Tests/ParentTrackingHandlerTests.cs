@@ -26,7 +26,7 @@ public class ParentTrackingHandlerTests
 
         // Assert
         var parents = parent.GetParents();
-        Assert.Equal(2, parents.Count);
+        Assert.Equal(2, parents.Length);
     }
 
     [Fact]
@@ -80,6 +80,6 @@ public class ParentTrackingHandlerTests
 
         // Assert
         var parents = mother.GetParents();
-        Assert.Equal(2, parents.Count);
+        Assert.Equal(2, parents.Length);
     }
 }
