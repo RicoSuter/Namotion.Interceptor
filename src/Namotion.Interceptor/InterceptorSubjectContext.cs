@@ -9,6 +9,14 @@ namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
+    [ThreadStatic]
+    private static HashSet<InterceptorSubjectContext>? _contextChangeVisited;
+
+    [ThreadStatic]
+    private static HashSet<InterceptorSubjectContext>? _serviceQueryVisited;
+
+    private readonly object _lock = new();
+
     private ConcurrentDictionary<Type, Delegate>? _readInterceptorFunction;
     private ConcurrentDictionary<Type, Delegate>? _writeInterceptorFunction;
     private ConcurrentDictionary<Type, object>? _serviceCache; // stores ImmutableArray<T> boxed
@@ -42,7 +50,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             services = _serviceCache!.GetOrAdd(typeof(TInterface), _ =>
             {
-                lock (this)
+                lock (_lock)
                 {
                     return GetServicesWithoutCache<TInterface>().ToImmutableArray();
                 }
@@ -57,7 +65,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     {
         if (_serviceCache is null)
         {
-            lock (this)
+            lock (_lock)
             {
                 _serviceCache = new ConcurrentDictionary<Type, object>();
                 _readInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
@@ -69,7 +77,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     public virtual bool AddFallbackContext(IInterceptorSubjectContext context)
     {
         var contextImpl = (InterceptorSubjectContext)context;
-        lock (this)
+        lock (_lock)
         {
             if (_fallbackContexts.Add(contextImpl))
             {
@@ -94,14 +102,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     protected bool HasFallbackContext(IInterceptorSubjectContext context)
     {
-        lock (this)
+        lock (_lock)
             return _fallbackContexts.Contains(context);
     }
 
     public virtual bool RemoveFallbackContext(IInterceptorSubjectContext context)
     {
         var contextImpl = (InterceptorSubjectContext)context;
-        lock (this)
+        lock (_lock)
         {
             if (_fallbackContexts.Remove(contextImpl))
             {
@@ -116,7 +124,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
     {
-        lock (this)
+        lock (_lock)
         {
             if (GetServicesWithoutCache<TService>().Any(exists))
             {
@@ -131,7 +139,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     public void AddService<TService>(TService service)
     {
-        lock (this)
+        lock (_lock)
         {
             _services.Add(service!);
             OnContextChanged();
@@ -229,7 +237,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             return (InvokeFunc)_methodInvocationFunction;
         }
 
-        lock (this)
+        lock (_lock)
         {
             if (_methodInvocationFunction is not null)
             {
@@ -258,10 +266,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             return [];
         }
 
-        var visited = new HashSet<InterceptorSubjectContext>();
-        return GetServicesWithoutCache(typeof(TInterface), visited)
-            .OfType<TInterface>()
-            .ToArray();
+        var visited = _serviceQueryVisited ??= [];
+        try
+        {
+            return GetServicesWithoutCache(typeof(TInterface), visited)
+                .OfType<TInterface>()
+                .ToArray();
+        }
+        finally
+        {
+            visited.Clear();
+        }
     }
 
     private IEnumerable<object> GetServicesWithoutCache(Type type, HashSet<InterceptorSubjectContext> visited)
@@ -271,18 +286,28 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             return [];
         }
 
-        InterceptorSubjectContext[] fallbacks;
-        object[] localServices;
-        lock (this)
+        InterceptorSubjectContext? delegateTo = null;
+        InterceptorSubjectContext[] fallbacks = [];
+        object[] localServices = [];
+
+        lock (_lock)
         {
             // Fast path: no local services, single fallback - just delegate
             if (_services.Count == 0 && _fallbackContexts.Count == 1)
             {
-                return _fallbackContexts.First().GetServicesWithoutCache(type, visited);
+                delegateTo = _fallbackContexts.First();
             }
+            else
+            {
+                fallbacks = [.. _fallbackContexts];
+                localServices = _services.Where(type.IsInstanceOfType).ToArray();
+            }
+        }
 
-            fallbacks = [.. _fallbackContexts];
-            localServices = _services.Where(type.IsInstanceOfType).ToArray();
+        // Recursive calls OUTSIDE the lock to prevent deadlock
+        if (delegateTo is not null)
+        {
+            return delegateTo.GetServicesWithoutCache(type, visited);
         }
 
         var services = localServices
@@ -296,8 +321,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void OnContextChanged()
     {
-        var visited = new HashSet<InterceptorSubjectContext>();
-        OnContextChanged(visited);
+        var visited = _contextChangeVisited ??= new HashSet<InterceptorSubjectContext>();
+        try
+        {
+            OnContextChanged(visited);
+        }
+        finally
+        {
+            visited.Clear();
+        }
     }
 
     private void OnContextChanged(HashSet<InterceptorSubjectContext> visited)
@@ -314,7 +346,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         InterceptorSubjectContext? singleParent = null;
         InterceptorSubjectContext[]? parents = null;
-        lock (this)
+        lock (_lock)
         {
             _noServicesSingleFallbackContext = _services.Count == 0 && _fallbackContexts.Count == 1
                 ? _fallbackContexts.First() : null;
