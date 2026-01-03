@@ -205,7 +205,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
                 _monitoredItems.TryRemove(monitoredItem.ClientHandle, out _);
 
-                var statusCode = monitoredItem.Status?.Error?.StatusCode ?? StatusCodes.Good;
+                var statusCode = monitoredItem.Status.Error?.StatusCode ?? StatusCodes.Good;
 
                 // Check if we should fall back to polling for this item
                 if (_configuration.EnablePollingFallback &&

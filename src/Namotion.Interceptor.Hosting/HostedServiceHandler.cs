@@ -140,7 +140,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     
     internal void AttachHostedService(IHostedService hostedService)
     {
-        lock (hostedService)
+        lock (_hostedServices)
         {
             if (_hostedServices.Add(hostedService))
             {

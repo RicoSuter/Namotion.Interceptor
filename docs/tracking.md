@@ -345,7 +345,7 @@ var tire = new Tire(context);
 
 car.Tires = [tire];
 
-var parents = tire.GetParents(); // Returns [(car, "Tires", 0)]
+var parents = tire.GetParents(); // Returns ImmutableArray with [(car, "Tires", 0)]
 ```
 
 This enables scenarios like:

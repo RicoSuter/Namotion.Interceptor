@@ -218,10 +218,10 @@ while (queue.Count > 0)
     var current = queue.Dequeue();
     foreach (var parent in current.GetParents())
     {
-        if (trackedSubjects.Contains(parent.Subject))
+        if (trackedSubjects.Contains(parent.Property.Subject))
             return true;  // Found tracked ancestor
-        if (visited.Add(parent.Subject))
-            queue.Enqueue(parent.Subject);  // Continue BFS
+        if (visited.Add(parent.Property.Subject))
+            queue.Enqueue(parent.Property.Subject);  // Continue BFS
     }
 }
 ```
