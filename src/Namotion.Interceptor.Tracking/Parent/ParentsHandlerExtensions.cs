@@ -38,7 +38,7 @@ public static class ParentsHandlerExtensions
     /// </summary>
     private sealed class ParentsSet
     {
-        private readonly object _lock = new();
+        private readonly Lock _lock = new();
         private readonly HashSet<SubjectParent> _set = [];
         private volatile ImmutableArray<SubjectParent>[]? _cache; // Box in array for volatile
 
@@ -82,6 +82,13 @@ public static class ParentsHandlerExtensions
                 if (cached is not null)
                 {
                     return cached[0];
+                }
+
+                // Fast path: avoid allocation for empty set
+                if (_set.Count == 0)
+                {
+                    _cache = [ImmutableArray<SubjectParent>.Empty];
+                    return ImmutableArray<SubjectParent>.Empty;
                 }
 
                 ImmutableArray<SubjectParent> array = [.. _set];
