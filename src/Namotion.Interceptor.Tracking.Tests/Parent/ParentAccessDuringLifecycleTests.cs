@@ -343,7 +343,7 @@ public partial class TrackedChild : IReferenceLifecycleHandler
 
     public void OnSubjectAttachedToProperty(SubjectLifecycleChange change)
     {
-        var hasParents = this.GetParents().Count > 0;
+        var hasParents = this.GetParents().Length > 0;
         _callOrder.Add($"TrackedChild.AttachSubject - HasParents: {hasParents}");
     }
 

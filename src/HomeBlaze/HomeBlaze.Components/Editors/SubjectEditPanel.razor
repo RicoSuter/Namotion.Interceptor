@@ -164,13 +164,13 @@
             }
 
             var parents = current.GetParents();
-            if (parents.Count == 0)
+            if (parents.Length == 0)
             {
                 break;
             }
 
             // Get the first parent's subject
-            var parentSubject = parents.First().Property.Subject;
+            var parentSubject = parents[0].Property.Subject;
             if (parentSubject is T parentWriter)
             {
                 return parentWriter;

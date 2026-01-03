@@ -49,7 +49,8 @@ public static class SubjectRegistryJsonExtensions
                     (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
                     (path is not null ? $".{path}" : string.Empty);
 
-                parent = parent.Property.Subject.GetParents().FirstOrDefault();
+                var subjectParents = parent.Property.Subject.GetParents();
+                parent = subjectParents.Length > 0 ? subjectParents[0] : default;
             }
             while (parent.Property.Subject is not null);
 
@@ -81,7 +82,8 @@ public static class SubjectRegistryJsonExtensions
                     (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
                     (path is not null ? $".{path}" : string.Empty);
 
-                parent = parent.Property.Subject.GetParents().FirstOrDefault();
+                var parentSubjects = parent.Property.Subject.GetParents();
+                parent = parentSubjects.Length > 0 ? parentSubjects[0] : default;
             }
             while (parent.Property.Subject is not null);
 

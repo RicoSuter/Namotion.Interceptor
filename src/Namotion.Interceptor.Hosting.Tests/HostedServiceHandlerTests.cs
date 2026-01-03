@@ -185,7 +185,6 @@ public class HostedServiceHandlerTests
 
         var host = builder.Build();
         await host.StartAsync();
-
         try
         {
             await action(context);

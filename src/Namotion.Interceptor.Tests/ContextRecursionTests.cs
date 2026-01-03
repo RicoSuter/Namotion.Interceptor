@@ -1,25 +1,25 @@
 using Xunit;
 
-namespace Namotion.Interceptor.Tests
+namespace Namotion.Interceptor.Tests;
+
+public class ContextRecursionTests
 {
-    public class ContextRecursionTests
+    [Fact]
+    public void WhenContextsHaveCircularDependency_ThenOnContextChangedDoesNotStackOverflow()
     {
-        [Fact]
-        public void WhenContextsHaveCircularDependency_ThenOnContextChangedDoesNotStackOverflow()
-        {
-            var ctx1 = new InterceptorSubjectContext();
-            var ctx2 = new InterceptorSubjectContext();
+        // Arrange
+        var context1 = new InterceptorSubjectContext();
+        var context2 = new InterceptorSubjectContext();
 
-            // Create circular dependency
-            ctx1.AddFallbackContext(ctx2);
-            ctx2.AddFallbackContext(ctx1);
+        // Create circular dependency
+        context1.AddFallbackContext(context2);
+        context2.AddFallbackContext(context1);
 
-            // Trigger OnContextChanged
-            ctx1.AddService("test");
-            
-            // Verify GetServices also works
-            var services = ctx1.GetServices<string>();
-            Assert.Contains("test", services);
-        }
+        // Act - This would cause stack overflow before the fix
+        context1.AddService("test");
+
+        // Assert - Verify GetServices also works with circular dependency
+        var services = context1.GetServices<string>();
+        Assert.Contains("test", services);
     }
 }
