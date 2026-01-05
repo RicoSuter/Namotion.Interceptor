@@ -81,12 +81,12 @@ namespace Namotion.Interceptor.SampleConsole
     {
         public void OnLifecycleEvent(SubjectLifecycleChange change)
         {
-            if (change.IsAttached)
+            if (change.IsContextAttach)
             {
                 Console.WriteLine($"Attach: {change.Subject}");
             }
 
-            if (change.IsDetached)
+            if (change.IsContextDetach)
             {
                 Console.WriteLine($"Detach: {change.Subject}");
             }

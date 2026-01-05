@@ -28,12 +28,12 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
 
         public void OnLifecycleEvent(SubjectLifecycleChange change)
         {
-            if (change.IsAttached)
+            if (change.IsContextAttach)
             {
                 Attachements.Add(change);
             }
 
-            if (change.IsDetached)
+            if (change.IsContextDetach)
             {
                 Detachements.Add(change);
             }

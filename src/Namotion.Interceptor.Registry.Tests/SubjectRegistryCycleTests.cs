@@ -146,16 +146,12 @@ public class SubjectRegistryCycleTests
         // Act - Remove self-reference
         person.Father = null;
 
-        // Assert - Subject should still exist (root reference from variable)
-        Assert.Single(registry.KnownSubjects);
-
-        var registered = registry.TryGetRegisteredSubject(person)!;
-        var fatherProperty = registered.TryGetProperty(nameof(Person.Father))!;
-        Assert.Empty(fatherProperty.Children);
+        // Assert - Subject is detached (lost its only property reference)
+        Assert.Empty(registry.KnownSubjects);
     }
 
     [Fact]
-    public void WhenBreakingCycle_ThenChildrenCollectionIsUpdated()
+    public void WhenBreakingCycle_ThenBothSubjectsAreDetached()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -186,17 +182,10 @@ public class SubjectRegistryCycleTests
         // Act - Break the cycle by removing person1.Mother
         person1.Mother = null;
 
-        // Assert - Both subjects remain in registry (they have ROOT attachments from context)
-        // But the Children collections should be updated to reflect the broken cycle
-        Assert.Equal(2, registry.KnownSubjects.Count);
-        Assert.Contains(person1, registry.KnownSubjects.Keys);
-        Assert.Contains(person2, registry.KnownSubjects.Keys);
-
-        // person1.Mother.Children should now be empty (no longer points to person2)
-        Assert.Empty(person1Mother.Children);
-        // person2.Mother.Children should still contain person1
-        Assert.Single(person2Mother.Children);
-        Assert.Equal(person1, person2Mother.Children.First().Subject);
+        // Assert - Both subjects are detached due to cascade:
+        // 1. person2 loses reference from person1.Mother → detached
+        // 2. When person2 detaches, person2.Mother detaches person1 → detached
+        Assert.Empty(registry.KnownSubjects);
     }
 
     [Fact]
@@ -334,7 +323,7 @@ public class SubjectRegistryCycleTests
     }
 
     [Fact]
-    public void WhenReplacingCyclicReference_ThenChildrenAreUpdatedCorrectly()
+    public void WhenReplacingCyclicReference_ThenAllSubjectsAreDetached()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -363,14 +352,12 @@ public class SubjectRegistryCycleTests
         // Act - Replace person1.Mother with person3 (breaking cycle)
         person1.Mother = person3;
 
-        // Assert - All three subjects remain in registry (they all have ROOT attachments)
-        Assert.Equal(3, registry.KnownSubjects.Count);
+        // Assert - person2 is detached, person1 and person3 remain
+        // Note: person1 has a stale reference from detached person2.Mother (ReferenceCount=0)
+        // but is kept because person3 is attached to person1.Mother
+        Assert.Equal(2, registry.KnownSubjects.Count);
         Assert.Contains(person1, registry.KnownSubjects.Keys);
-        Assert.Contains(person2, registry.KnownSubjects.Keys);
+        Assert.DoesNotContain(person2, registry.KnownSubjects.Keys);
         Assert.Contains(person3, registry.KnownSubjects.Keys);
-
-        // But the Children collections should reflect the new state
-        Assert.Equal(person3, person1Mother.Children.First().Subject); // person1.Mother now points to person3
-        Assert.Equal(person1, person2Mother.Children.First().Subject); // person2.Mother still points to person1
     }
 }

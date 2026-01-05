@@ -227,7 +227,7 @@ public class LifecycleInterceptorTests
     [Fact]
     public Task WhenAddingPropertyInLifecycleHandlerAttach_ThenItIsAttachedOnlyOnce()
     {
-        // When a ILifecycleHandler adds a property in AttachSubject, the property should be attached only once
+        // When a ILifecycleHandler adds a property in AttachSubjectToContext, the property should be attached only once
         
         // Arrange
         var events = new List<string>();
@@ -238,7 +238,7 @@ public class LifecycleInterceptorTests
         var person = new Person(context);
         
         // Assert
-        Assert.Single(events, e => e == "Attached property: { }.FooBar"); // should attach FooBar only once
+        Assert.Single(events, e => e == "ContextAttached property: { }.FooBar"); // should attach FooBar only once
         return Verify(events);
     }
 
@@ -246,7 +246,7 @@ public class LifecycleInterceptorTests
     {
         public void OnLifecycleEvent(SubjectLifecycleChange change)
         {
-            if (change.IsAttached)
+            if (change.IsContextAttach)
             {
                 change.Subject.TryGetRegisteredSubject()!.AddProperty("FooBar", typeof(string), _ => "MyValue", null);
             }
@@ -260,17 +260,17 @@ public class LifecycleInterceptorTests
             .Setup(h => h.OnLifecycleEvent(It.IsAny<SubjectLifecycleChange>()))
             .Callback((SubjectLifecycleChange h) =>
             {
-                if (h.IsAttached) events.Add($"OnAttached: {h.Subject}");
-                if (h.IsDetached) events.Add($"OnDetached: {h.Subject}");
+                if (h.IsContextAttach) events.Add($"OnAttached: {h.Subject}");
+                if (h.IsContextDetach) events.Add($"OnDetached: {h.Subject}");
             });
         
         var propertyHandlerMock = new Mock<IPropertyLifecycleHandler>();
         propertyHandlerMock
             .Setup(h => h.AttachProperty(It.IsAny<SubjectPropertyLifecycleChange>()))
-            .Callback((SubjectPropertyLifecycleChange h) => events.Add($"Attached property: {h.Subject}.{h.Property.Name}"));
+            .Callback((SubjectPropertyLifecycleChange h) => events.Add($"ContextAttached property: {h.Subject}.{h.Property.Name}"));
         propertyHandlerMock
             .Setup(h => h.DetachProperty(It.IsAny<SubjectPropertyLifecycleChange>()))
-            .Callback((SubjectPropertyLifecycleChange h) => events.Add($"Detached property: {h.Subject}.{h.Property.Name}"));
+            .Callback((SubjectPropertyLifecycleChange h) => events.Add($"ContextDetached property: {h.Subject}.{h.Property.Name}"));
 
         var context = InterceptorSubjectContext
             .Create()

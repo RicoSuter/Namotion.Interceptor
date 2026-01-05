@@ -1,5 +1,5 @@
 ﻿[
   OnAttached: {Mother2 } at Mother with index , count: 1,
   OnAttached: {Mother3 } at Mother with index , count: 1,
-  OnAttached: {Mother1 } at  with index , count: 1
+  OnAttached: {Mother1 } at  with index , count: 0
 ]

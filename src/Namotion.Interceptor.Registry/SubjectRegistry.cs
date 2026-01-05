@@ -35,7 +35,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
         lock (_knownSubjects)
         {
             // Handle attach: register subject and add parent-child relationship
-            if (change.IsAttached || change.IsReferenceAdded)
+            if (change.IsContextAttach || change.IsPropertyReferenceAdded)
             {
                 // Single lookup - reuse for both attach and reference added
                 if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
@@ -44,7 +44,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                 }
 
                 // Add parent-child relationship when reference is added
-                if (change is { IsReferenceAdded: true, Property: not null })
+                if (change is { IsPropertyReferenceAdded: true, Property: not null })
                 {
                     if (!_knownSubjects.TryGetValue(change.Property.Value.Subject, out var parentRegisteredSubject))
                     {
@@ -66,13 +66,10 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                 return;
             }
 
-            // Handle detach: remove parent-child relationship and unregister
-            if (change.IsReferenceRemoved || change.IsDetached)
+            if (change.IsPropertyReferenceRemoved)
             {
                 var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
-
-                // Remove parent-child relationship when reference is removed
-                if (change.IsReferenceRemoved && change.Property is not null && registeredSubject is not null)
+                if (registeredSubject is not null && change.Property is not null)
                 {
                     var property = TryGetRegisteredPropertyLocked(change.Property.Value);
                     if (property is not null)
@@ -85,12 +82,11 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                         });
                     }
                 }
-
-                // Unregister subject on detach
-                if (change.IsDetached)
-                {
-                    _knownSubjects.Remove(change.Subject);
-                }
+            }
+            
+            if (change.IsContextDetach)
+            {
+                _knownSubjects.Remove(change.Subject);
             }
         }
     }

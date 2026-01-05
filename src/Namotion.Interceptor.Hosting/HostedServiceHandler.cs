@@ -25,7 +25,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     {
         _logger ??= _loggerResolver();
 
-        if (change.IsAttached)
+        if (change.IsContextAttach)
         {
             if (change.Subject is IHostedService hostedService)
             {
@@ -37,7 +37,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 AttachHostedService(hostedService2);
             }
         }
-        else if (change.IsDetached)
+        else if (change.IsContextDetach)
         {
             if (change.Subject is IHostedService hostedService)
             {

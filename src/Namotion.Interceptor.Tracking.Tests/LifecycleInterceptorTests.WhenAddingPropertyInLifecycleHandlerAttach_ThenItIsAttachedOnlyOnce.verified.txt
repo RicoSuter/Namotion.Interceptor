@@ -1,12 +1,12 @@
 ﻿[
   OnAttached: { },
-  Attached property: { }.FooBar,
-  Attached property: { }.Id,
-  Attached property: { }.FirstName,
-  Attached property: { }.LastName,
-  Attached property: { }.FullName,
-  Attached property: { }.FullNameWithPrefix,
-  Attached property: { }.Father,
-  Attached property: { }.Mother,
-  Attached property: { }.Children
+  ContextAttached property: { }.FooBar,
+  ContextAttached property: { }.Id,
+  ContextAttached property: { }.FirstName,
+  ContextAttached property: { }.LastName,
+  ContextAttached property: { }.FullName,
+  ContextAttached property: { }.FullNameWithPrefix,
+  ContextAttached property: { }.Father,
+  ContextAttached property: { }.Mother,
+  ContextAttached property: { }.Children
 ]

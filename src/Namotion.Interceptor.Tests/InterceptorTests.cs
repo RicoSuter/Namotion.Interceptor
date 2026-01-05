@@ -115,12 +115,12 @@ public class InterceptorTests
             _logs = logs;
         }
 
-        public void AttachTo(IInterceptorSubject subject)
+        public void AttachSubjectToContext(IInterceptorSubject subject)
         {
             _logs.Add($"{_name}: Attached");
         }
 
-        public void DetachFrom(IInterceptorSubject subject)
+        public void DetachSubjectFromContext(IInterceptorSubject subject)
         {
             _logs.Add($"{_name}: Detached");
         }
