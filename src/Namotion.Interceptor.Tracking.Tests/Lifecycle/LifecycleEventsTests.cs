@@ -60,6 +60,8 @@ public class LifecycleEventsTests
         Assert.NotNull(capturedEvent);
         Assert.Equal(child, capturedEvent.Value.Subject);
         Assert.Equal(0, capturedEvent.Value.ReferenceCount);
+        Assert.NotNull(capturedEvent.Value.Property);
+        Assert.Equal("Father", capturedEvent.Value.Property.Value.Name);
     }
 
     [Fact]
@@ -110,6 +112,7 @@ public class LifecycleEventsTests
         Assert.Single(detachedEvents);
         Assert.Equal(parent, detachedEvents[0].Subject);
         Assert.Equal(0, detachedEvents[0].ReferenceCount);
+        Assert.Equal("Mother", detachedEvents[0].Property?.Name);
     }
 
     [Fact]

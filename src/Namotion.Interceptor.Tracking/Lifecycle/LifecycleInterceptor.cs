@@ -197,8 +197,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
 
         var isLastDetach = set.Count == 0;
+
+        // Collect children before detaching (for cascade)
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
         if (isLastDetach)
         {
+            children = GetList();
+            FindSubjectsInProperties(subject, children, null);
+
             _attachedSubjects.Remove(subject);
 
             foreach (var propertyName in subject.Properties.Keys)
@@ -226,6 +232,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         if (isLastDetach)
         {
             SubjectDetached?.Invoke(change);
+
+            // Cascade detach to children
+            if (children is not null)
+            {
+                foreach (var child in children)
+                {
+                    DetachFromProperty(child.subject, context, child.property, child.index);
+                }
+
+                ReturnList(children);
+            }
         }
     }
 

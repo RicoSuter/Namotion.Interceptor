@@ -1,0 +1,6 @@
+﻿[
+  + Person (attached, refs: 0),
+  + Person (attached, refs: 0),
+  + Alice.Mother -> Bob (refs: 1),
+  + Bob.Mother -> Alice (refs: 1)
+]
