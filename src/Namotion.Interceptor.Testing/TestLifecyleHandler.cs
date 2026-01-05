@@ -13,12 +13,12 @@ namespace Namotion.Interceptor.Testing
 
         public void OnLifecycleEvent(SubjectLifecycleChange change)
         {
-            if (change.IsAttached)
+            if (change.IsContextAttach)
             {
                 _events.Add($"OnAttached: {change.Subject} at {change.Property?.Name} with index {change.Index}, count: {change.ReferenceCount}");
             }
 
-            if (change.IsDetached)
+            if (change.IsContextDetach)
             {
                 _events.Add($"OnDetached: {change.Subject} at {change.Property?.Name} with index {change.Index}, count: {change.ReferenceCount}");
             }

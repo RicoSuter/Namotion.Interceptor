@@ -45,7 +45,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         {
             foreach (var interceptor in context.GetServices<ILifecycleInterceptor>())
             {
-                interceptor.AttachTo(_subject);
+                interceptor.AttachSubjectToContext(_subject);
             }
         }
 
@@ -58,7 +58,7 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         {
             foreach (var interceptor in context.GetServices<ILifecycleInterceptor>())
             {
-                interceptor.DetachFrom(_subject);
+                interceptor.DetachSubjectFromContext(_subject);
             }
 
             return base.RemoveFallbackContext(context);

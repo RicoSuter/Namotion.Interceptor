@@ -9,10 +9,10 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 internal enum LifecycleEventFlags : byte
 {
     None = 0,
-    Attached = 1,
-    ReferenceAdded = 2,
-    ReferenceRemoved = 4,
-    Detached = 8
+    ContextAttached = 1,
+    PropertyReferenceAdded = 2,
+    PropertyReferenceRemoved = 4,
+    ContextDetached = 8
 }
 
 /// <summary>
@@ -35,31 +35,31 @@ public readonly struct SubjectLifecycleChange
     public readonly int ReferenceCount;
 
     /// <summary>True when the subject first entered the graph.</summary>
-    public bool IsAttached
+    public bool IsContextAttach
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => (_flags & LifecycleEventFlags.Attached) != 0;
+        get => (_flags & LifecycleEventFlags.ContextAttached) != 0;
     }
 
     /// <summary>True when a property reference to the subject was added.</summary>
-    public bool IsReferenceAdded
+    public bool IsPropertyReferenceAdded
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => (_flags & LifecycleEventFlags.ReferenceAdded) != 0;
+        get => (_flags & LifecycleEventFlags.PropertyReferenceAdded) != 0;
     }
 
     /// <summary>True when a property reference to the subject was removed.</summary>
-    public bool IsReferenceRemoved
+    public bool IsPropertyReferenceRemoved
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => (_flags & LifecycleEventFlags.ReferenceRemoved) != 0;
+        get => (_flags & LifecycleEventFlags.PropertyReferenceRemoved) != 0;
     }
 
     /// <summary>True when the subject is leaving the graph.</summary>
-    public bool IsDetached
+    public bool IsContextDetach
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => (_flags & LifecycleEventFlags.Detached) != 0;
+        get => (_flags & LifecycleEventFlags.ContextDetached) != 0;
     }
 
     /// <summary>

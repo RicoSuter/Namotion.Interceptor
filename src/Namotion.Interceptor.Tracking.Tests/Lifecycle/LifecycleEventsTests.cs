@@ -39,7 +39,8 @@ public class LifecycleEventsTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle();
+            .WithLifecycle()
+            .WithContextInheritance();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
         Assert.NotNull(lifecycleInterceptor);
@@ -59,8 +60,6 @@ public class LifecycleEventsTests
         Assert.NotNull(capturedEvent);
         Assert.Equal(child, capturedEvent.Value.Subject);
         Assert.Equal(0, capturedEvent.Value.ReferenceCount);
-        Assert.NotNull(capturedEvent.Value.Property);
-        Assert.Equal("Father", capturedEvent.Value.Property.Value.Name);
     }
 
     [Fact]
@@ -69,7 +68,8 @@ public class LifecycleEventsTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle();
+            .WithLifecycle()
+            .WithContextInheritance();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
         Assert.NotNull(lifecycleInterceptor);
@@ -110,7 +110,6 @@ public class LifecycleEventsTests
         Assert.Single(detachedEvents);
         Assert.Equal(parent, detachedEvents[0].Subject);
         Assert.Equal(0, detachedEvents[0].ReferenceCount);
-        Assert.Equal("Mother", detachedEvents[0].Property?.Name);
     }
 
     [Fact]
@@ -119,7 +118,8 @@ public class LifecycleEventsTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle();
+            .WithLifecycle()
+            .WithContextInheritance();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
         Assert.NotNull(lifecycleInterceptor);
@@ -316,7 +316,7 @@ public class LifecycleEventsTests
         // Assert
         Assert.Single(attachedEvents);
         Assert.Equal(person, attachedEvents[0].Subject);
-        Assert.Equal(1, attachedEvents[0].ReferenceCount);
+        Assert.Equal(0, attachedEvents[0].ReferenceCount); // Root subjects have no property references
         Assert.Null(attachedEvents[0].Property); // Root subject has no parent property
     }
 
@@ -382,7 +382,8 @@ public class LifecycleEventsTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle();
+            .WithLifecycle()
+            .WithContextInheritance();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
         Assert.NotNull(lifecycleInterceptor);
@@ -394,19 +395,19 @@ public class LifecycleEventsTests
 
         var events = new List<(string type, IInterceptorSubject subject, int count)>();
         lifecycleInterceptor.SubjectAttached += change =>
-            events.Add(("Attached", change.Subject, change.ReferenceCount));
+            events.Add(("ContextAttached", change.Subject, change.ReferenceCount));
         lifecycleInterceptor.SubjectDetached += change =>
-            events.Add(("Detached", change.Subject, change.ReferenceCount));
+            events.Add(("ContextDetached", change.Subject, change.ReferenceCount));
 
         // Act - Replace child1 with child2
         person.Father = child2;
 
         // Assert - Detach of old value happens before attach of new value
         Assert.Equal(2, events.Count);
-        Assert.Equal("Detached", events[0].type);
+        Assert.Equal("ContextDetached", events[0].type);
         Assert.Equal(child1, events[0].subject);
         Assert.Equal(0, events[0].count);
-        Assert.Equal("Attached", events[1].type);
+        Assert.Equal("ContextAttached", events[1].type);
         Assert.Equal(child2, events[1].subject);
         Assert.Equal(1, events[1].count);
     }

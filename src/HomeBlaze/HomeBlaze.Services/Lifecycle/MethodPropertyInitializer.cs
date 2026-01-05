@@ -13,10 +13,10 @@ public class MethodPropertyInitializer : ILifecycleHandler
 {
     public void OnLifecycleEvent(SubjectLifecycleChange change)
     {
-        if (change.IsAttached)
+        if (change.IsContextAttach)
         {
             var registeredSubject = change.Subject.TryGetRegisteredSubject()
-                                    ?? throw new InvalidOperationException("Subject not registered");
+                ?? throw new InvalidOperationException("Subject not registered");
 
             foreach (var method in registeredSubject.GetAllMethods())
             {

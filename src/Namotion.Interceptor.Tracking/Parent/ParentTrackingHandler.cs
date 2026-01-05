@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -16,14 +16,14 @@ public class ParentTrackingHandler : ILifecycleHandler
         }
 
         // Add parent on attach or reference added
-        if (change.IsAttached || change.IsReferenceAdded)
+        if (change.IsContextAttach || change.IsPropertyReferenceAdded)
         {
             change.Subject.AddParent(change.Property.Value, change.Index);
             return;
         }
 
         // Remove parent on reference removed
-        if (change.IsReferenceRemoved)
+        if (change.IsPropertyReferenceRemoved)
         {
             change.Subject.RemoveParent(change.Property.Value, change.Index);
         }
