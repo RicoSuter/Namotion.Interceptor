@@ -12,26 +12,16 @@ public class ContextInheritanceHandler : ILifecycleHandler
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void OnLifecycleEvent(SubjectLifecycleChange change)
     {
-        if (!change.Property.HasValue)
+        if (change.Property.HasValue)
         {
-            return;
-        }
-
-        var parent = change.Property.Value.Subject;
-
-        // Add fallback context only on first attach (ReferenceCount == 1)
-        // This matches master behavior: if (change is { ReferenceCount: 1, Property: not null })
-        if (change.ReferenceCount == 1 && change.IsAttached)
-        {
-            change.Subject.Context.AddFallbackContext(parent.Context);
-            return;
-        }
-
-        // Remove fallback context on any reference removal (not just last detach)
-        // This matches master behavior: always remove when detaching from a property
-        if (change.IsReferenceRemoved)
-        {
-            change.Subject.Context.RemoveFallbackContext(parent.Context);
+            if (change is { ReferenceCount: 1, IsAttached: true })
+            {
+                change.Subject.Context.AddFallbackContext(change.Property.Value.Subject.Context);
+            }
+            else if (change is { ReferenceCount: 0, IsReferenceRemoved: true })
+            {
+                change.Subject.Context.RemoveFallbackContext(change.Property.Value.Subject.Context);
+            }
         }
     }
 
