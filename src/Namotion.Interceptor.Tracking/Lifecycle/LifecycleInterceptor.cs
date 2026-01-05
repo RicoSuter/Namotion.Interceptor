@@ -89,10 +89,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
 
         var count = subject.GetReferenceCount();
+        var change = new SubjectLifecycleChange
+        {
+            Subject = subject,
+            ReferenceCount = count,
+            IsContextAttach = true
+        };
 
-        var change = new SubjectLifecycleChange(subject, null, null, count, LifecycleEventFlags.ContextAttached);
         var properties = subject.Properties.Keys;
-        
         foreach (var handler in context.GetServices<ILifecycleHandler>())
         {
             handler.OnLifecycleEvent(change);
@@ -124,12 +128,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
 
         var count = subject.IncrementReferenceCount();
-        var flags = LifecycleEventFlags.PropertyReferenceAdded;
-        if (isFirstAttach) flags |= LifecycleEventFlags.ContextAttached;
-
-        var change = new SubjectLifecycleChange(subject, property, index, count, flags);
+        var change = new SubjectLifecycleChange
+        {
+            Subject = subject,
+            Property = property,
+            Index = index,
+            ReferenceCount = count,
+            IsContextAttach = isFirstAttach,
+            IsPropertyReferenceAdded = true
+        };
+       
         var properties = subject.Properties.Keys;
-
         foreach (var handler in context.GetServices<ILifecycleHandler>())
         {
             handler.OnLifecycleEvent(change);
@@ -168,7 +177,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
 
         var count = subject.GetReferenceCount();
-        var change = new SubjectLifecycleChange(subject, null, null, count, LifecycleEventFlags.ContextDetached);
+        var change = new SubjectLifecycleChange
+        {
+            Subject = subject,
+            ReferenceCount = count,
+            IsContextDetach = true
+        };
 
         if (subject is ILifecycleHandler subjectHandler)
         {
@@ -214,10 +228,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
 
         var count = subject.DecrementReferenceCount();
-        var flags = LifecycleEventFlags.PropertyReferenceRemoved;
-        if (isLastDetach) flags |= LifecycleEventFlags.ContextDetached;
-
-        var change = new SubjectLifecycleChange(subject, property, index, count, flags);
+        var change = new SubjectLifecycleChange
+        {
+            Subject = subject,
+            Property = property,
+            Index = index,
+            ReferenceCount = count,
+            IsPropertyReferenceRemoved = true,
+            IsContextDetach = isLastDetach
+        };
 
         if (subject is ILifecycleHandler subjectHandler)
         {
