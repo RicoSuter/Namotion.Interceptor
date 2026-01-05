@@ -1,5 +1,5 @@
 ﻿[
-  Attached: {John Doe},
+  OnAttached: {John Doe},
   Attached property: {John Doe}.Id,
   Attached property: {John Doe}.FirstName,
   Attached property: {John Doe}.LastName,
@@ -8,7 +8,7 @@
   Attached property: {John Doe}.Father,
   Attached property: {John Doe}.Mother,
   Attached property: {John Doe}.Children,
-  Attached: {Robert Smith},
+  OnAttached: {Robert Smith},
   Attached property: {Robert Smith}.Id,
   Attached property: {Robert Smith}.FirstName,
   Attached property: {Robert Smith}.LastName,
@@ -27,5 +27,5 @@
   Detached property: {Robert Smith}.Mother,
   Detached property: {Robert Smith}.Children,
   Detached property: {Robert Smith}.FooBar,
-  Detached: {Robert Smith}
+  OnDetached: {Robert Smith}
 ]

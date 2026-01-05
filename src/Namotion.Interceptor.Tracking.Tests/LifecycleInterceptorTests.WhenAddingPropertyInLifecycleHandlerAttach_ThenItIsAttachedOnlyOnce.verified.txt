@@ -1,5 +1,5 @@
 ﻿[
-  Attached: { },
+  OnAttached: { },
   Attached property: { }.FooBar,
   Attached property: { }.Id,
   Attached property: { }.FirstName,

@@ -11,14 +11,17 @@ namespace Namotion.Interceptor.Testing
             _events = events;
         }
 
-        public void AttachSubject(SubjectLifecycleChange change)
+        public void OnLifecycleEvent(SubjectLifecycleChange change)
         {
-            _events.Add($"Attached: {change.Subject} at {change.Property?.Name} with index {change.Index}, count: {change.ReferenceCount}");
-        }
+            if (change.IsAttached)
+            {
+                _events.Add($"OnAttached: {change.Subject} at {change.Property?.Name} with index {change.Index}, count: {change.ReferenceCount}");
+            }
 
-        public void DetachSubject(SubjectLifecycleChange change)
-        {
-            _events.Add($"Detached: {change.Subject} at {change.Property?.Name} with index {change.Index}, count: {change.ReferenceCount}");
+            if (change.IsDetached)
+            {
+                _events.Add($"OnDetached: {change.Subject} at {change.Property?.Name} with index {change.Index}, count: {change.ReferenceCount}");
+            }
         }
     }
 }

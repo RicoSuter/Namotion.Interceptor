@@ -75,67 +75,92 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AttachTo(IInterceptorSubject subject, IInterceptorSubjectContext context,
         PropertyReference? property, object? index)
     {
-        var firstAttach = _attachedSubjects.TryAdd(subject, []);
-        if (_attachedSubjects[subject].Add(property))
+        // Match master's pattern: TryAdd returns true if added (first attach)
+        var isFirstAttach = _attachedSubjects.TryAdd(subject, []);
+        if (!_attachedSubjects[subject].Add(property))
         {
-            var count = subject.IncrementReferenceCount();
-            var change = new SubjectLifecycleChange(subject, property, index, count);
+            return;
+        }
 
-            var properties = subject.Properties.Keys;
+        var count = subject.IncrementReferenceCount();
 
-            foreach (var handler in context.GetServices<ILifecycleHandler>())
-            {
-                handler.AttachSubject(change);
-            }
+        // Build flags efficiently
+        var flags = property.HasValue ? LifecycleEventFlags.ReferenceAdded : LifecycleEventFlags.None;
+        if (isFirstAttach) flags |= LifecycleEventFlags.Attached;
 
-            if (subject is ILifecycleHandler lifecycleHandler)
-            {
-                lifecycleHandler.AttachSubject(change);
-            }
+        var change = new SubjectLifecycleChange(subject, property, index, count, flags);
 
+        // Capture properties BEFORE calling handlers (handlers may add new properties)
+        var properties = subject.Properties.Keys;
+
+        foreach (var handler in context.GetServices<ILifecycleHandler>())
+        {
+            handler.OnLifecycleEvent(change);
+        }
+
+        if (subject is ILifecycleHandler subjectHandler)
+        {
+            subjectHandler.OnLifecycleEvent(change);
+        }
+
+        if (isFirstAttach)
+        {
             SubjectAttached?.Invoke(change);
 
-            if (firstAttach)
+            foreach (var propertyName in properties)
             {
-                foreach (var propertyName in properties)
-                {
-                    subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
-                }
+                subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
             }
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void DetachFrom(IInterceptorSubject subject, IInterceptorSubjectContext context,
         PropertyReference? property, object? index)
     {
-        if (_attachedSubjects.TryGetValue(subject, out var set) && set.Remove(property))
+        if (!_attachedSubjects.TryGetValue(subject, out var set) || !set.Remove(property))
         {
-            if (set.Count == 0)
+            return;
+        }
+
+        var isLastDetach = set.Count == 0;
+        if (isLastDetach)
+        {
+            _attachedSubjects.Remove(subject);
+
+            foreach (var propertyName in subject.Properties.Keys)
             {
-                _attachedSubjects.Remove(subject);
-
-                foreach (var propertyName in subject.Properties.Keys)
-                {
-                    subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
-                }
+                subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
             }
+        }
 
-            var count = subject.DecrementReferenceCount();
+        var count = subject.DecrementReferenceCount();
 
-            var change = new SubjectLifecycleChange(subject, property, index, count);
-            if (subject is ILifecycleHandler lifecycleHandler)
-            {
-                lifecycleHandler.DetachSubject(change);
-            }
+        // Build flags
+        var flags = LifecycleEventFlags.None;
+        if (property.HasValue) flags |= LifecycleEventFlags.ReferenceRemoved;
+        if (isLastDetach) flags |= LifecycleEventFlags.Detached;
 
-            foreach (var handler in context.GetServices<ILifecycleHandler>())
-            {
-                handler.DetachSubject(change);
-            }
+        var change = new SubjectLifecycleChange(subject, property, index, count, flags);
 
+        // Single call per handler with flags
+        if (subject is ILifecycleHandler subjectHandler)
+        {
+            subjectHandler.OnLifecycleEvent(change);
+        }
+
+        var handlers = context.GetServices<ILifecycleHandler>();
+        foreach (var handler in handlers)
+        {
+            handler.OnLifecycleEvent(change);
+        }
+
+        if (isLastDetach)
+        {
             SubjectDetached?.Invoke(change);
         }
     }

@@ -11,11 +11,9 @@ namespace HomeBlaze.Services.Lifecycle;
 /// </summary>
 public class MethodPropertyInitializer : ILifecycleHandler
 {
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnLifecycleEvent(SubjectLifecycleChange change)
     {
-        // TODO: Replace with change.IsFirstAttach once PR #132 is merged
-        // https://github.com/RicoSuter/Namotion.Interceptor/pull/132
-        if (change.ReferenceCount == 1)
+        if (change.IsAttached)
         {
             var registeredSubject = change.Subject.TryGetRegisteredSubject()
                                     ?? throw new InvalidOperationException("Subject not registered");
@@ -33,9 +31,5 @@ public class MethodPropertyInitializer : ILifecycleHandler
                     [.. method.MethodInfo.GetCustomAttributes<Attribute>()]);
             }
         }
-    }
-
-    public void DetachSubject(SubjectLifecycleChange change)
-    {
     }
 }

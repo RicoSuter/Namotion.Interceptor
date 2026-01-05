@@ -287,14 +287,17 @@ public class ParentAccessDuringLifecycleTests
             _callOrder = callOrder;
         }
 
-        public void AttachSubject(SubjectLifecycleChange change)
+        public void OnLifecycleEvent(SubjectLifecycleChange change)
         {
-            _callOrder.Add($"OrderTrackingHandler.AttachSubject for {change.Subject.GetType().Name}");
-        }
+            if (change.IsAttached)
+            {
+                _callOrder.Add($"OrderTrackingHandler.OnAttached for {change.Subject.GetType().Name}");
+            }
 
-        public void DetachSubject(SubjectLifecycleChange change)
-        {
-            _callOrder.Add($"OrderTrackingHandler.DetachSubject for {change.Subject.GetType().Name}");
+            if (change.IsDetached)
+            {
+                _callOrder.Add($"OrderTrackingHandler.OnDetached for {change.Subject.GetType().Name}");
+            }
         }
     }
 }
@@ -331,15 +334,18 @@ public partial class TrackedChild : ILifecycleHandler
         Name = string.Empty;
     }
 
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnLifecycleEvent(SubjectLifecycleChange change)
     {
-        var hasParents = this.GetParents().Length > 0;
-        _callOrder.Add($"TrackedChild.AttachSubject - HasParents: {hasParents}");
-    }
+        if (change.IsAttached)
+        {
+            var hasParents = this.GetParents().Length > 0;
+            _callOrder.Add($"TrackedChild.AttachSubject - HasParents: {hasParents}");
+        }
 
-    public void DetachSubject(SubjectLifecycleChange change)
-    {
-        _callOrder.Add("TrackedChild.DetachSubject");
+        if (change.IsDetached)
+        {
+            _callOrder.Add("TrackedChild.DetachSubject");
+        }
     }
 }
 
@@ -396,24 +402,23 @@ public partial class Component : ILifecycleHandler
     /// </summary>
     public HashSet<SubjectParent>? ParentsFoundDuringAttach { get; private set; }
 
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnLifecycleEvent(SubjectLifecycleChange change)
     {
-        try
+        if (change.IsAttached)
         {
-            // Store the parents at the moment AttachSubject is called
-            ParentsFoundDuringAttach = new HashSet<SubjectParent>(this.GetParents());
+            try
+            {
+                // Store the parents at the moment OnAttached is called
+                ParentsFoundDuringAttach = new HashSet<SubjectParent>(this.GetParents());
 
-            // Try to find the root simulation via parent traversal
-            RootFoundDuringAttach = this.TryGetFirstParent<Simulation>();
+                // Try to find the root simulation via parent traversal
+                RootFoundDuringAttach = this.TryGetFirstParent<Simulation>();
+            }
+            catch (Exception ex)
+            {
+                AttachException = ex;
+            }
         }
-        catch (Exception ex)
-        {
-            AttachException = ex;
-        }
-    }
-
-    public void DetachSubject(SubjectLifecycleChange change)
-    {
     }
 
     /// <summary>

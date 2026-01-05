@@ -1,27 +1,24 @@
 ﻿namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
-/// A lifecycle handler that is called when a subject is attached/assigned ore detached/removed from the subject tree.
-/// The handler can be registered in the subject context and applies to the subject and all its children.
-/// A subject can also implement this interface directly to handle its own lifecycle changes.
+/// A lifecycle handler that is called when a subject enters/leaves the object graph
+/// and when property references are added/removed.
 /// </summary>
+/// <remarks>
+/// The change struct contains bool flags indicating which events occurred:
+/// - IsAttached: Subject first entered the graph
+/// - IsReferenceAdded: Property reference was added
+/// - IsReferenceRemoved: Property reference was removed
+/// - IsDetached: Subject is leaving the graph
+///
+/// Multiple flags can be true simultaneously (e.g., IsAttached + IsReferenceAdded on first attach via property).
+/// </remarks>
 public interface ILifecycleHandler
 {
     /// <summary>
-    /// Called when a subject is attached to the subject tree.
+    /// Called when a lifecycle event occurs for a subject.
+    /// Check the IsAttached, IsReferenceAdded, IsReferenceRemoved, and IsDetached flags
+    /// to determine which events occurred.
     /// </summary>
-    /// <param name="change">The lifecycle change information.</param>
-    public void AttachSubject(SubjectLifecycleChange change)
-    {
-    }
-    
-    // TODO: Change interface and call AttachSubject only for first attach and add a ReferenceCountChanged(change) with empty default implementation
-
-    /// <summary>
-    /// Called when a subject is detached from the subject tree.
-    /// </summary>
-    /// <param name="change">The lifecycle change information.</param>
-    public void DetachSubject(SubjectLifecycleChange change)
-    {
-    }
+    void OnLifecycleEvent(SubjectLifecycleChange change);
 }

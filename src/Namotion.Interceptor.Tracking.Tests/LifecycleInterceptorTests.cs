@@ -77,13 +77,13 @@ public class LifecycleInterceptorTests
 
         // Act & Assert
         mother1.Mother = mother2;
-        Assert.Equal(2, events.Count(e => e.StartsWith("Attached: ")));
+        Assert.Equal(2, events.Count(e => e.StartsWith("OnAttached: ")));
 
         mother2.Mother = mother3;
-        Assert.Equal(3, events.Count(e => e.StartsWith("Attached: ")));
+        Assert.Equal(3, events.Count(e => e.StartsWith("OnAttached: ")));
 
         mother1.Mother = null;
-        Assert.Equal(2, events.Count(e => e.StartsWith("Detached: ")));
+        Assert.Equal(2, events.Count(e => e.StartsWith("OnDetached: ")));
     }
 
     [Fact]
@@ -244,13 +244,12 @@ public class LifecycleInterceptorTests
 
     public class AddPropertyToSubjectHandler : ILifecycleHandler
     {
-        public void AttachSubject(SubjectLifecycleChange change)
+        public void OnLifecycleEvent(SubjectLifecycleChange change)
         {
-            change.Subject.TryGetRegisteredSubject()!.AddProperty("FooBar", typeof(string), _ => "MyValue", null);
-        }
-
-        public void DetachSubject(SubjectLifecycleChange change)
-        {
+            if (change.IsAttached)
+            {
+                change.Subject.TryGetRegisteredSubject()!.AddProperty("FooBar", typeof(string), _ => "MyValue", null);
+            }
         }
     }
 
@@ -258,11 +257,12 @@ public class LifecycleInterceptorTests
     {
         var subjectHandlerMock = new Mock<ILifecycleHandler>();
         subjectHandlerMock
-            .Setup(h => h.AttachSubject(It.IsAny<SubjectLifecycleChange>()))
-            .Callback((SubjectLifecycleChange h) => events.Add($"Attached: {h.Subject}"));
-        subjectHandlerMock
-            .Setup(h => h.DetachSubject(It.IsAny<SubjectLifecycleChange>()))
-            .Callback((SubjectLifecycleChange h) => events.Add($"Detached: {h.Subject}"));
+            .Setup(h => h.OnLifecycleEvent(It.IsAny<SubjectLifecycleChange>()))
+            .Callback((SubjectLifecycleChange h) =>
+            {
+                if (h.IsAttached) events.Add($"OnAttached: {h.Subject}");
+                if (h.IsDetached) events.Add($"OnDetached: {h.Subject}");
+            });
         
         var propertyHandlerMock = new Mock<IPropertyLifecycleHandler>();
         propertyHandlerMock

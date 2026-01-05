@@ -1,7 +1,7 @@
 ﻿[
-  Attached:   at  with index , count: 1,
-  Attached: Grandmother  at Mother with index , count: 1,
-  Attached: Mother  at Mother with index , count: 1,
-  Detached: Grandmother  at Mother with index , count: 0,
-  Detached: Mother  at Mother with index , count: 0
+  OnAttached:   at  with index , count: 1,
+  OnAttached: Grandmother  at Mother with index , count: 1,
+  OnAttached: Mother  at Mother with index , count: 1,
+  OnDetached: Grandmother  at Mother with index , count: 0,
+  OnDetached: Mother  at Mother with index , count: 0
 ]

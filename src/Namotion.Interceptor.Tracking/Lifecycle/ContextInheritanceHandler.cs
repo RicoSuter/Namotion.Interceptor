@@ -1,4 +1,6 @@
-﻿namespace Namotion.Interceptor.Tracking.Lifecycle;
+﻿using System.Runtime.CompilerServices;
+
+namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 #pragma warning disable CS0659
 
@@ -7,20 +9,28 @@
 /// </summary>
 public class ContextInheritanceHandler : ILifecycleHandler
 {
-    public void AttachSubject(SubjectLifecycleChange change)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void OnLifecycleEvent(SubjectLifecycleChange change)
     {
-        if (change is { ReferenceCount: 1, Property: not null })
+        if (!change.Property.HasValue)
         {
-            var parent = change.Property.Value.Subject;
-            change.Subject.Context.AddFallbackContext(parent.Context);
+            return;
         }
-    }
 
-    public void DetachSubject(SubjectLifecycleChange change)
-    {
-        if (change.Property is not null)
+        var parent = change.Property.Value.Subject;
+
+        // Add fallback context only on first attach (ReferenceCount == 1)
+        // This matches master behavior: if (change is { ReferenceCount: 1, Property: not null })
+        if (change.ReferenceCount == 1 && change.IsAttached)
         {
-            var parent = change.Property.Value.Subject;
+            change.Subject.Context.AddFallbackContext(parent.Context);
+            return;
+        }
+
+        // Remove fallback context on any reference removal (not just last detach)
+        // This matches master behavior: always remove when detaching from a property
+        if (change.IsReferenceRemoved)
+        {
             change.Subject.Context.RemoveFallbackContext(parent.Context);
         }
     }

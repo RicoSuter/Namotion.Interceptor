@@ -21,11 +21,11 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         _loggerResolver = loggerResolver;
     }
 
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnLifecycleEvent(SubjectLifecycleChange change)
     {
         _logger ??= _loggerResolver();
-        
-        if (change.ReferenceCount == 1)
+
+        if (change.IsAttached)
         {
             if (change.Subject is IHostedService hostedService)
             {
@@ -37,13 +37,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 AttachHostedService(hostedService2);
             }
         }
-    }
-
-    public void DetachSubject(SubjectLifecycleChange change)
-    {
-        _logger ??= _loggerResolver();
-
-        if (change.ReferenceCount == 0)
+        else if (change.IsDetached)
         {
             if (change.Subject is IHostedService hostedService)
             {
