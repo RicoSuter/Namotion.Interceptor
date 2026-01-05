@@ -34,16 +34,13 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     {
         lock (_knownSubjects)
         {
-            // Handle attach: register subject and add parent-child relationship
             if (change.IsContextAttach || change.IsPropertyReferenceAdded)
             {
-                // Single lookup - reuse for both attach and reference added
                 if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
                 {
                     registeredSubject = RegisterSubject(change.Subject);
                 }
 
-                // Add parent-child relationship when reference is added
                 if (change is { IsPropertyReferenceAdded: true, Property: not null })
                 {
                     if (!_knownSubjects.TryGetValue(change.Property.Value.Subject, out var parentRegisteredSubject))
@@ -55,7 +52,6 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                         throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
 
                     registeredSubject.AddParent(property, change.Index);
-
                     property.AddChild(new SubjectPropertyChild
                     {
                         Index = change.Index,
@@ -71,7 +67,10 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                 var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
                 if (registeredSubject is not null && change.Property is not null)
                 {
-                    var property = TryGetRegisteredPropertyLocked(change.Property.Value);
+                    var property = _knownSubjects
+                        .GetValueOrDefault(change.Property.Value.Subject)?
+                        .TryGetProperty(change.Property.Value.Name);
+
                     if (property is not null)
                     {
                         registeredSubject.RemoveParent(property, change.Index);
@@ -125,12 +124,5 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)
     {
         return TryGetRegisteredSubject(property.Subject)?.TryGetProperty(property.Name);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private RegisteredSubjectProperty? TryGetRegisteredPropertyLocked(PropertyReference property)
-    {
-        // Use when already inside lock - avoids double locking
-        return _knownSubjects.GetValueOrDefault(property.Subject)?.TryGetProperty(property.Name);
     }
 }

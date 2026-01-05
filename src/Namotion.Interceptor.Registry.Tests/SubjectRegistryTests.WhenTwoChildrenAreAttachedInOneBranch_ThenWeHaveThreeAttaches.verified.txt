@@ -1,5 +1,0 @@
-﻿[
-  OnAttached:   at  with index , count: 0,
-  OnAttached: Grandmother  at Mother with index , count: 1,
-  OnAttached: Mother  at Mother with index , count: 1
-]

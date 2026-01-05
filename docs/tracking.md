@@ -206,7 +206,7 @@ This ensures that all objects in the subject graph share the same context, enabl
 
 ## Subject Lifecycle Tracking
 
-Track when subjects are attached to or detached from the subject graph:
+Track when subjects enter or leave the object graph, and when property references are added or removed:
 
 ```csharp
 [InterceptorSubject]
@@ -222,24 +222,43 @@ var context = InterceptorSubjectContext
     .WithService(() => new MyLifecycleHandler());
 
 var person = new Person(context);
-var child = new Person(context) { Name = "Child" };
+var child = new Person { Name = "Child" };
 
-person.Children = [child]; // AttachSubject called for child
-person.Children = [];      // DetachSubject called for child
+person.Children = [child]; // OnLifecycleEvent: IsContextAttach + IsPropertyReferenceAdded
+person.Children = [];      // OnLifecycleEvent: IsPropertyReferenceRemoved + IsContextDetach
 
 public class MyLifecycleHandler : ILifecycleHandler
 {
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnLifecycleEvent(SubjectLifecycleChange change)
     {
-        Console.WriteLine($"Attached: {change.Subject} via property {change.Property?.Name}");
-    }
-
-    public void DetachSubject(SubjectLifecycleChange change)
-    {
-        Console.WriteLine($"Detached: {change.Subject} via property {change.Property?.Name}");
+        if (change.IsContextAttach)
+        {
+            Console.WriteLine($"Attached: {change.Subject} via {change.Property?.Name}");
+        }
+        if (change.IsContextDetach)
+        {
+            Console.WriteLine($"Detached: {change.Subject} via {change.Property?.Name}");
+        }
     }
 }
 ```
+
+### SubjectLifecycleChange Flags
+
+The `OnLifecycleEvent` method receives a `SubjectLifecycleChange` with flags indicating what happened:
+
+| Flag | Description |
+|------|-------------|
+| `IsContextAttach` | Subject **first entered** the graph (first property reference) |
+| `IsPropertyReferenceAdded` | A property reference to the subject was added |
+| `IsPropertyReferenceRemoved` | A property reference to the subject was removed |
+| `IsContextDetach` | Subject is **leaving** the graph (last reference removed) |
+
+Flags can be combined. For example, when a child is first assigned to a property:
+- `IsContextAttach = true` and `IsPropertyReferenceAdded = true`
+
+When the same subject is assigned to a second property:
+- `IsContextAttach = false` (already in graph) and `IsPropertyReferenceAdded = true`
 
 **Lifecycle tracking is used by:**
 - **Hosting package**: Start/stop `IHostedService` implementations when attached/detached
@@ -268,6 +287,11 @@ lifecycleInterceptor.SubjectDetached += change =>
     Console.WriteLine($"Subject detached: {change.Subject}");
 };
 ```
+
+**Important distinction:**
+- `ILifecycleHandler.OnLifecycleEvent`: Called for **every** lifecycle change (context attach, property add, property remove, context detach)
+- `SubjectAttached` event: Fires **once** when subject first enters the graph
+- `SubjectDetached` event: Fires **once** when subject leaves the graph
 
 Events are useful for:
 - Cache invalidation when subjects are removed from the object graph
@@ -304,7 +328,7 @@ lifecycleInterceptor.SubjectDetached += async change =>
 
 ### Reference Counting
 
-Each subject tracks how many parent references point to it via `GetReferenceCount()`:
+Each subject tracks how many property references point to it via `GetReferenceCount()`:
 
 ```csharp
 var referenceCount = subject.GetReferenceCount();
@@ -312,24 +336,72 @@ var referenceCount = subject.GetReferenceCount();
 // Returns 0 if not attached or lifecycle tracking is disabled
 ```
 
-The reference count is managed internally by the library:
-- `SubjectAttached` fires on **every** attachment (after count is incremented)
-- `SubjectDetached` fires on **every** detachment (after count is decremented)
+**Important notes:**
+- Subjects created directly with context (root subjects) have `refs: 0` - they have no property references pointing to them
+- Subjects attached via properties have their reference count incremented/decremented on add/remove
+- `GetReferenceCount()` returns property reference count, not total attachment count
 
-The `SubjectLifecycleChange` record includes `ReferenceCount` with the updated count after the increment/decrement. Handlers can check this to determine if this is a first attachment (count == 1) or last detachment (count == 0):
+The `SubjectLifecycleChange` includes `ReferenceCount` after the operation. Use the flags to determine the event type:
 
 ```csharp
-lifecycleInterceptor.SubjectDetached += change =>
+handler.OnLifecycleEvent = change =>
 {
-    if (change.ReferenceCount == 0)
+    if (change.IsContextDetach)
     {
-        // Fully detached - safe to clean up
+        // Subject leaving graph - safe to clean up
         CleanupResources(change.Subject);
     }
 };
 ```
 
 This enables proper cleanup when subjects are removed from all parent references, even when referenced by multiple properties or collections.
+
+### Object Graph Behavior
+
+Understanding how the lifecycle system handles different graph topologies:
+
+**Hierarchies (Trees)**
+
+When a branch is removed, the entire subtree cascades detachment:
+
+```
+Root
+  ├── Device1  ← stays attached
+  └── Device2  ← detached when Root.Device2 = null
+       ├── Child1  ← cascade detached
+       └── Child2  ← cascade detached
+```
+
+Siblings are protected - removing Device2 doesn't affect Device1.
+
+**DAGs (Directed Acyclic Graphs)**
+
+Shared nodes stay attached if they have remaining references:
+
+```
+Root
+  ├── A ──┐
+  └── B ──┴── Shared (refs: 2)
+```
+
+Removing A reduces Shared's refs to 1 - it stays attached via B.
+Removing B after A detaches Shared (refs: 0).
+
+**Cycles (Limitation)**
+
+Nodes that only reference each other stay attached due to reference counting:
+
+```
+Root → A → B ↔ C (internal cycle)
+```
+
+If `Root.A = null`:
+- A detaches (lost reference from Root)
+- B and C **stay attached** (they keep each other alive with refs: 1 each)
+
+This is the classic reference counting limitation. **Workarounds:**
+1. Call `DetachSubjectFromContext(subject)` explicitly
+2. Break all cycle references before removing the parent
 
 ## Parent-Child Relationship Tracking
 
