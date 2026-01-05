@@ -30,32 +30,67 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     }
 
     /// <inheritdoc />
-    void ILifecycleHandler.AttachSubject(SubjectLifecycleChange change)
+    void ILifecycleHandler.OnLifecycleEvent(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {
-            if (!_knownSubjects.TryGetValue(change.Subject, out var subject))
+            // Handle attach: register subject and add parent-child relationship
+            if (change.IsAttached || change.IsReferenceAdded)
             {
-                subject = RegisterSubject(change.Subject);
-            }
-
-            if (change.Property is not null)
-            {
-                if (!_knownSubjects.TryGetValue(change.Property.Value.Subject, out var registeredSubject))
+                // Single lookup - reuse for both attach and reference added
+                if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
                 {
-                    registeredSubject = RegisterSubject(change.Property.Value.Subject);
+                    registeredSubject = RegisterSubject(change.Subject);
                 }
 
-                var property = registeredSubject.TryGetProperty(change.Property.Value.Name) ??
-                    throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
-
-                subject.AddParent(property, change.Index);
-
-                property.AddChild(new SubjectPropertyChild
+                // Add parent-child relationship when reference is added
+                if (change is { IsReferenceAdded: true, Property: not null })
                 {
-                    Index = change.Index,
-                    Subject = change.Subject,
-                });
+                    if (!_knownSubjects.TryGetValue(change.Property.Value.Subject, out var parentRegisteredSubject))
+                    {
+                        parentRegisteredSubject = RegisterSubject(change.Property.Value.Subject);
+                    }
+
+                    var property = parentRegisteredSubject.TryGetProperty(change.Property.Value.Name) ??
+                        throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
+
+                    registeredSubject.AddParent(property, change.Index);
+
+                    property.AddChild(new SubjectPropertyChild
+                    {
+                        Index = change.Index,
+                        Subject = change.Subject,
+                    });
+                }
+
+                return;
+            }
+
+            // Handle detach: remove parent-child relationship and unregister
+            if (change.IsReferenceRemoved || change.IsDetached)
+            {
+                var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
+
+                // Remove parent-child relationship when reference is removed
+                if (change.IsReferenceRemoved && change.Property is not null && registeredSubject is not null)
+                {
+                    var property = TryGetRegisteredPropertyLocked(change.Property.Value);
+                    if (property is not null)
+                    {
+                        registeredSubject.RemoveParent(property, change.Index);
+                        property.RemoveChild(new SubjectPropertyChild
+                        {
+                            Subject = change.Subject,
+                            Index = change.Index
+                        });
+                    }
+                }
+
+                // Unregister subject on detach
+                if (change.IsDetached)
+                {
+                    _knownSubjects.Remove(change.Subject);
+                }
             }
         }
     }
@@ -86,44 +121,6 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
         return registeredSubject;
     }
 
-    void ILifecycleHandler.DetachSubject(SubjectLifecycleChange change)
-    {
-        lock (_knownSubjects)
-        {
-            var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
-            if (registeredSubject is null)
-            {
-                return;
-            }
-
-            // Always update parent-child relationships when a property reference is removed,
-            // regardless of reference count. This ensures the Children collection stays accurate
-            // even when the subject has multiple references from different properties.
-            if (change.Property is not null)
-            {
-                var property = TryGetRegisteredProperty(change.Property.Value);
-                if (property is not null)
-                {
-                    // Remove parent relationship from the child subject
-                    registeredSubject.RemoveParent(property, change.Index);
-
-                    // Remove child from the parent property's Children collection
-                    property.RemoveChild(new SubjectPropertyChild
-                    {
-                        Subject = change.Subject,
-                        Index = change.Index
-                    });
-                }
-            }
-
-            // Only remove the subject from the registry when its reference count reaches zero
-            if (change.ReferenceCount == 0)
-            {
-                _knownSubjects.Remove(change.Subject);
-            }
-        }
-    }
-
     void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
     {
     }
@@ -132,5 +129,12 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)
     {
         return TryGetRegisteredSubject(property.Subject)?.TryGetProperty(property.Name);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private RegisteredSubjectProperty? TryGetRegisteredPropertyLocked(PropertyReference property)
+    {
+        // Use when already inside lock - avoids double locking
+        return _knownSubjects.GetValueOrDefault(property.Subject)?.TryGetProperty(property.Name);
     }
 }

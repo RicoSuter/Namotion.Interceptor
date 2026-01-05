@@ -64,7 +64,7 @@ public class LifecycleEventsTests
     }
 
     [Fact]
-    public void MultipleReferences_EventsFireWithIncrementingAndDecrementingCounts()
+    public void MultipleReferences_EventsFireOnceForAttachAndDetach()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -87,32 +87,30 @@ public class LifecycleEventsTests
         person.Father = parent;
         person.Mother = parent;
 
-        // Assert - SubjectAttached fires twice with incrementing counts
-        // Note: attachedEvents[0] is for 'person' itself, [1] and [2] are for 'parent'
+        // Assert - SubjectAttached fires once (on first attach)
         var parentAttachEvents = attachedEvents.Where(e => e.Subject == parent).ToList();
-        Assert.Equal(2, parentAttachEvents.Count);
+        Assert.Single(parentAttachEvents);
         Assert.Equal(1, parentAttachEvents[0].ReferenceCount);
-        Assert.Equal(2, parentAttachEvents[1].ReferenceCount);
         Assert.Equal("Father", parentAttachEvents[0].Property?.Name);
-        Assert.Equal("Mother", parentAttachEvents[1].Property?.Name);
 
-        // Act - Detach one reference
+        // Verify reference count is updated
+        Assert.Equal(2, parent.GetReferenceCount());
+
+        // Act - Detach one reference (subject still in graph)
         person.Father = null;
 
-        // Assert - SubjectDetached fires with count 1
-        Assert.Single(detachedEvents);
-        Assert.Equal(parent, detachedEvents[0].Subject);
-        Assert.Equal(1, detachedEvents[0].ReferenceCount);
-        Assert.Equal("Father", detachedEvents[0].Property?.Name);
+        // Assert - SubjectDetached does NOT fire yet (still has one reference)
+        Assert.Empty(detachedEvents);
+        Assert.Equal(1, parent.GetReferenceCount());
 
-        // Act - Detach second reference
+        // Act - Detach second reference (subject leaves graph)
         person.Mother = null;
 
-        // Assert - SubjectDetached fires with count 0
-        Assert.Equal(2, detachedEvents.Count);
-        Assert.Equal(parent, detachedEvents[1].Subject);
-        Assert.Equal(0, detachedEvents[1].ReferenceCount);
-        Assert.Equal("Mother", detachedEvents[1].Property?.Name);
+        // Assert - SubjectDetached fires once (on last detach)
+        Assert.Single(detachedEvents);
+        Assert.Equal(parent, detachedEvents[0].Subject);
+        Assert.Equal(0, detachedEvents[0].ReferenceCount);
+        Assert.Equal("Mother", detachedEvents[0].Property?.Name);
     }
 
     [Fact]

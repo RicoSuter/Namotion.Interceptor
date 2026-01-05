@@ -1,6 +1,6 @@
 ﻿[
-  Attached: { } at  with index , count: 1,
-  Attached: {Child1 } at Children with index 0, count: 1,
-  Attached: {Child2 } at Children with index 1, count: 1,
-  Detached: {Child2 } at Children with index 1, count: 0
+  OnAttached: { } at  with index , count: 1,
+  OnAttached: {Child1 } at Children with index 0, count: 1,
+  OnAttached: {Child2 } at Children with index 1, count: 1,
+  OnDetached: {Child2 } at Children with index 1, count: 0
 ]
