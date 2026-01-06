@@ -23,10 +23,10 @@ public partial class CanvasLayout : IConfigurableSubject, ITitleProvider
     public partial int? MinHeight { get; set; }  // Optional minimum height in pixels
 
     [Configuration]
-    public partial bool SnapEnabled { get; set; }  // Enable 100px grid snap
+    public partial bool IsSnapToGridEnabled { get; set; }  // Enable 100px grid snap
 
     [Configuration]
-    public partial int SnapSize { get; set; }  // Default: 100
+    public partial int GridSize { get; set; }  // Default: 100
 
     [Configuration]
     public partial IList<CanvasNode> Nodes { get; set; }
@@ -138,7 +138,7 @@ This reuses the existing `Widget` subject for path resolution - no duplication o
 - Resize via property editor only (no drag handles)
 - Visible borders on nodes for drag affordance
 - Click empty area to add (opens SubjectPickerDialog)
-- Snap to grid when SnapEnabled (100px default)
+- Snap to grid when IsSnapToGridEnabled (100px default)
 
 ### GridLayoutWidget
 
@@ -344,10 +344,10 @@ This reuses the existing `Widget` subject for path resolution - no duplication o
 ║  Optional. Leave empty for auto height.                       ║
 ║                                                               ║
 ║  ┌────┐                                                       ║
-║  │ ✓  │  Enable Grid Snap                                     ║
+║  │ ✓  │  Snap to Grid                                     ║
 ║  └────┘                                                       ║
 ║                                                               ║
-║  Snap Size (pixels)                                           ║
+║  Grid Size (pixels)                                           ║
 ║  ┌────────────────────────────────────────┐                   ║
 ║  │ [100                               ]   │                   ║
 ║  └────────────────────────────────────────┘                   ║
@@ -551,7 +551,7 @@ Grid containing a Canvas:
       "Row": 1, "Column": 0,
       "Child": {
         "$type": "HomeBlaze.Components.CanvasLayout",
-        "SnapEnabled": true,
+        "IsSnapToGridEnabled": true,
         "Nodes": [
           { "X": 50, "Y": 50, "Width": 200, "Height": 150, "Child": { "$type": "..." } }
         ]
@@ -835,7 +835,7 @@ public abstract class LayoutWidgetBase : ComponentBase, ISubjectComponent
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(CanvasLayout))]
 
 <div class="layout-container canvas-layout"
-     style="width: 100%; min-height: @(Canvas?.MinHeight ?? 300)px;"
+     style="width: 100%; min-height: @(Canvas?.MinHeight ?? 400)px;"
      @onclick="OnCanvasClick"
      @onclick:stopPropagation="true">
 
@@ -893,9 +893,9 @@ public abstract class LayoutWidgetBase : ComponentBase, ISubjectComponent
 
     private void OnPositionChanged(CanvasNode node, int x, int y)
     {
-        if (Canvas?.SnapEnabled == true)
+        if (Canvas?.IsSnapToGridEnabled == true)
         {
-            var snap = Canvas.SnapSize > 0 ? Canvas.SnapSize : 100;
+            var snap = Canvas.GridSize > 0 ? Canvas.GridSize : 100;
             x = (int)Math.Round((double)x / snap) * snap;
             y = (int)Math.Round((double)y / snap) * snap;
         }
@@ -911,9 +911,9 @@ public abstract class LayoutWidgetBase : ComponentBase, ISubjectComponent
 
     private async Task AddNodeAt(int x, int y)
     {
-        if (Canvas?.SnapEnabled == true)
+        if (Canvas?.IsSnapToGridEnabled == true)
         {
-            var snap = Canvas.SnapSize > 0 ? Canvas.SnapSize : 100;
+            var snap = Canvas.GridSize > 0 ? Canvas.GridSize : 100;
             x = (int)Math.Round((double)x / snap) * snap;
             y = (int)Math.Round((double)y / snap) * snap;
         }
@@ -950,7 +950,7 @@ public abstract class LayoutWidgetBase : ComponentBase, ISubjectComponent
      style="display: grid;
             grid-template-rows: repeat(@(Grid?.Rows ?? 1), 1fr);
             grid-template-columns: repeat(@(Grid?.Columns ?? 1), 1fr);
-            gap: 8px; padding: 8px; min-height: 200px;">
+            gap: 8px; padding: 8px; min-height: 400px;">
 
     @if (IsEditing)
     {
@@ -1153,10 +1153,10 @@ public partial class CanvasLayout : IConfigurableSubject, ITitleProvider
     public partial int? MinHeight { get; set; }
 
     [Configuration]
-    public partial bool SnapEnabled { get; set; }
+    public partial bool IsSnapToGridEnabled { get; set; }
 
     [Configuration]
-    public partial int SnapSize { get; set; }
+    public partial int GridSize { get; set; }
 
     [Configuration]
     public partial List<CanvasNode> Nodes { get; set; }
@@ -1165,7 +1165,7 @@ public partial class CanvasLayout : IConfigurableSubject, ITitleProvider
 
     public CanvasLayout()
     {
-        SnapSize = 100;
+        GridSize = 100;
         Nodes = new List<CanvasNode>();
     }
 
@@ -1419,9 +1419,9 @@ public partial class GridCell : IConfigurableSubject
 
     private void OnNodePositionChanged(CanvasNode node, int x, int y)
     {
-        if (Canvas?.SnapEnabled == true)
+        if (Canvas?.IsSnapToGridEnabled == true)
         {
-            var snapSize = Canvas.SnapSize > 0 ? Canvas.SnapSize : 100;
+            var snapSize = Canvas.GridSize > 0 ? Canvas.GridSize : 100;
             x = (int)Math.Round((double)x / snapSize) * snapSize;
             y = (int)Math.Round((double)y / snapSize) * snapSize;
         }
@@ -1440,9 +1440,9 @@ public partial class GridCell : IConfigurableSubject
 
     private async Task AddNodeAtPosition(int x, int y)
     {
-        if (Canvas?.SnapEnabled == true)
+        if (Canvas?.IsSnapToGridEnabled == true)
         {
-            var snapSize = Canvas.SnapSize > 0 ? Canvas.SnapSize : 100;
+            var snapSize = Canvas.GridSize > 0 ? Canvas.GridSize : 100;
             x = (int)Math.Round((double)x / snapSize) * snapSize;
             y = (int)Math.Round((double)y / snapSize) * snapSize;
         }
@@ -1521,7 +1521,7 @@ Node resizing is handled via the property editor (CanvasNodeEditComponent) rathe
             grid-template-columns: repeat(@(Grid?.Columns ?? 1), 1fr);
             gap: 8px;
             width: 100%;
-            min-height: 200px;
+            min-height: 400px;
             position: relative;">
 
     @* Layout edit button - top right of container *@
@@ -1743,14 +1743,14 @@ Node resizing is handled via the property editor (CanvasNodeEditComponent) rathe
                      Class="mb-4" />
 
     <MudSwitch @bind-Value="_snapEnabled"
-               Label="Enable Grid Snap"
+               Label="Snap to Grid"
                Color="Color.Primary"
                Class="mb-4" />
 
     @if (_snapEnabled)
     {
         <MudNumericField @bind-Value="_snapSize"
-                         Label="Snap Size (pixels)"
+                         Label="Grid Size (pixels)"
                          Min="10"
                          Max="500"
                          Class="mb-4" />
@@ -1775,13 +1775,13 @@ Node resizing is handled via the property editor (CanvasNodeEditComponent) rathe
     private int _snapSize;
 
     private int? _originalMinHeight;
-    private bool _originalSnapEnabled;
-    private int _originalSnapSize;
+    private bool _originalIsSnapToGridEnabled;
+    private int _originalGridSize;
 
     public bool IsValid => true;
     public bool IsDirty => _minHeight != _originalMinHeight
-                        || _snapEnabled != _originalSnapEnabled
-                        || _snapSize != _originalSnapSize;
+                        || _snapEnabled != _originalIsSnapToGridEnabled
+                        || _snapSize != _originalGridSize;
 
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
@@ -1791,12 +1791,12 @@ Node resizing is handled via the property editor (CanvasNodeEditComponent) rathe
         if (Canvas != null)
         {
             _minHeight = Canvas.MinHeight;
-            _snapEnabled = Canvas.SnapEnabled;
-            _snapSize = Canvas.SnapSize;
+            _snapEnabled = Canvas.IsSnapToGridEnabled;
+            _snapSize = Canvas.GridSize;
 
             _originalMinHeight = _minHeight;
-            _originalSnapEnabled = _snapEnabled;
-            _originalSnapSize = _snapSize;
+            _originalIsSnapToGridEnabled = _snapEnabled;
+            _originalGridSize = _snapSize;
         }
     }
 
@@ -1805,12 +1805,12 @@ Node resizing is handled via the property editor (CanvasNodeEditComponent) rathe
         if (Canvas != null)
         {
             Canvas.MinHeight = _minHeight;
-            Canvas.SnapEnabled = _snapEnabled;
-            Canvas.SnapSize = _snapSize;
+            Canvas.IsSnapToGridEnabled = _snapEnabled;
+            Canvas.GridSize = _snapSize;
 
             _originalMinHeight = _minHeight;
-            _originalSnapEnabled = _snapEnabled;
-            _originalSnapSize = _snapSize;
+            _originalIsSnapToGridEnabled = _snapEnabled;
+            _originalGridSize = _snapSize;
 
             IsDirtyChanged?.Invoke(false);
         }
@@ -2166,7 +2166,7 @@ Node resizing is handled via the property editor (CanvasNodeEditComponent) rathe
 
 1. **Container sizing**: The diagram requires a non-zero height parent container
    ```html
-   <div style="min-height: 300px;">
+   <div style="min-height: 400px;">
        <Diagram>...</Diagram>
    </div>
    ```
