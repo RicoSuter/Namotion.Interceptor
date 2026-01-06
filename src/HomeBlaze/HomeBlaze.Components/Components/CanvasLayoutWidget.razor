@@ -1,0 +1,182 @@
+@using Excubo.Blazor.Diagrams
+@using HomeBlaze.Components.Dialogs
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(CanvasLayout))]
+@implements ISubjectComponent
+
+@inject IDialogService DialogService
+@inject SubjectFactory SubjectFactory
+@inject SubjectComponentRegistry ComponentRegistry
+
+<div class="canvas-layout-container"
+     style="position: relative; width: 100%; min-height: @(Canvas?.MinHeight ?? 400)px;"
+     @onclick="OnCanvasClick"
+     @onclick:stopPropagation="true">
+
+    @* Layout edit button - top right of container *@
+    @if (IsEditing)
+    {
+        <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                       Size="Size.Small"
+                       Color="Color.Primary"
+                       Class="layout-edit-button"
+                       title="Edit Layout"
+                       OnClick="EditLayout" />
+    }
+
+    <Diagram @ref="_diagram">
+        <Nodes>
+            @if (Canvas?.Nodes != null)
+            {
+                @foreach (var node in Canvas.Nodes)
+                {
+                    <Node @key="node"
+                          Id="@GetNodeId(node)"
+                          X="@node.X"
+                          Y="@node.Y"
+                          Draggable="@IsEditing"
+                          XChanged="@(x => OnNodePositionChanged(node, (int)x, node.Y))"
+                          YChanged="@(y => OnNodePositionChanged(node, node.X, (int)y))">
+                        <div class="canvas-node @(IsEditing ? "editing" : "")"
+                             style="width: @(node.Width)px; height: @(node.Height)px;">
+                            <div class="canvas-node-content">
+                                <SubjectComponent Subject="@node.Child"
+                                                  Type="SubjectComponentType.Widget">
+                                    <ActionButtons>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                                                       Size="Size.Small"
+                                                       title="Edit Node"
+                                                       OnClick="() => EditNode(node)" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Size="Size.Small"
+                                                       Color="Color.Error"
+                                                       title="Delete"
+                                                       OnClick="() => DeleteNode(node)" />
+                                    </ActionButtons>
+                                </SubjectComponent>
+                            </div>
+                        </div>
+                    </Node>
+                }
+            }
+        </Nodes>
+    </Diagram>
+</div>
+
+<style>
+    .canvas-layout-container {
+        background: rgba(0,0,0,0.02);
+        border: 1px dashed rgba(128,128,128,0.3);
+    }
+
+    .layout-edit-button {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        z-index: 20;
+        background: rgba(255,255,255,0.9);
+        border-radius: 4px;
+    }
+
+    .canvas-node {
+        background: var(--mud-palette-surface);
+        border: 1px solid rgba(128,128,128,0.2);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    /* In edit mode: disable widget interaction, show drag cursor */
+    .canvas-node.editing {
+        cursor: move;
+        border: 2px dashed var(--mud-palette-primary);
+    }
+
+    .canvas-node.editing .canvas-node-content {
+        pointer-events: none;  /* Disable all widget interaction */
+    }
+
+    .canvas-node-content {
+        width: 100%;
+        height: 100%;
+    }
+</style>
+
+@code {
+    private Diagram? _diagram;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    private CanvasLayout? Canvas => Subject as CanvasLayout;
+
+    private string GetNodeId(CanvasNode node) => node.GetHashCode().ToString();
+
+    private void OnNodePositionChanged(CanvasNode node, int x, int y)
+    {
+        if (Canvas?.IsSnapToGridEnabled == true)
+        {
+            var snapSize = Canvas.GridSize > 0 ? Canvas.GridSize : 100;
+            x = (int)Math.Round((double)x / snapSize) * snapSize;
+            y = (int)Math.Round((double)y / snapSize) * snapSize;
+        }
+
+        node.X = x;
+        node.Y = y;
+    }
+
+    private async Task OnCanvasClick(MouseEventArgs e)
+    {
+        if (!IsEditing) return;
+
+        // Add node at click position
+        await AddNodeAtPosition((int)e.OffsetX, (int)e.OffsetY);
+    }
+
+    private async Task AddNodeAtPosition(int x, int y)
+    {
+        if (Canvas?.IsSnapToGridEnabled == true)
+        {
+            var snapSize = Canvas.GridSize > 0 ? Canvas.GridSize : 100;
+            x = (int)Math.Round((double)x / snapSize) * snapSize;
+            y = (int)Math.Round((double)y / snapSize) * snapSize;
+        }
+
+        var result = await SubjectSetupDialog.ShowAsync(DialogService);
+        if (result?.Subject == null) return;
+
+        var node = SubjectFactory.CreateSubject<CanvasNode>();
+        node.X = x;
+        node.Y = y;
+        node.Child = result.Subject;
+
+        Canvas?.Nodes.Add(node);
+    }
+
+    private async Task EditLayout()
+    {
+        if (Canvas == null) return;
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Canvas, "Edit Canvas Layout");
+    }
+
+    private async Task EditNode(CanvasNode node)
+    {
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, node, "Edit Node");
+    }
+
+    private async Task DeleteNode(CanvasNode node)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete Node",
+            "Are you sure you want to delete this node?",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            Canvas?.Nodes.Remove(node);
+        }
+    }
+}
