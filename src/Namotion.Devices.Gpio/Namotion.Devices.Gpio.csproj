@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.*" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.*" />
     <PackageReference Include="System.Device.Gpio" Version="3.*" />
     <PackageReference Include="Iot.Device.Bindings" Version="3.*" />
@@ -21,6 +22,7 @@
     <ProjectReference Include="..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
     <ProjectReference Include="..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
     <ProjectReference Include="..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Namotion.Interceptor.Hosting\Namotion.Interceptor.Hosting.csproj" />
     <ProjectReference Include="..\HomeBlaze\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
   </ItemGroup>
 
