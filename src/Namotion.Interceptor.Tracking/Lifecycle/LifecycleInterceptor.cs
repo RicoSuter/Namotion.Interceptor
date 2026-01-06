@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
@@ -63,7 +63,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 FindSubjectsInProperties(subject, collectedSubjects, null);
 
                 DetachFromContext(subject, subject.Context);
-               
+
                 foreach (var child in collectedSubjects)
                 {
                     DetachFromProperty(child.subject, subject.Context, child.property, child.index);
@@ -137,7 +137,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             IsContextAttach = isFirstAttach,
             IsPropertyReferenceAdded = true
         };
-       
+
         var properties = subject.Properties.Keys;
         foreach (var handler in context.GetServices<ILifecycleHandler>())
         {
@@ -253,15 +253,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             SubjectDetached?.Invoke(change);
 
             // Cascade detach to children
-            if (children is not null)
+            foreach (var child in children!)
             {
-                foreach (var child in children)
-                {
-                    DetachFromProperty(child.subject, context, child.property, child.index);
-                }
-
-                ReturnList(children);
+                DetachFromProperty(child.subject, context, child.property, child.index);
             }
+
+            ReturnList(children);
         }
     }
 
@@ -332,9 +329,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         foreach (var property in subject.Properties)
         {
             var metadata = property.Value;
-            if (metadata.IsDerived || 
+            if (metadata.IsDerived ||
                 metadata.IsIntercepted == false ||
-                metadata.Type.IsValueType || 
+                metadata.Type.IsValueType ||
                 metadata.Type == typeof(string))
             {
                 continue;
