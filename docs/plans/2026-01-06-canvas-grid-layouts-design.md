@@ -714,6 +714,354 @@ Add to `src/HomeBlaze/HomeBlaze.Components/_Imports.razor`:
 
 ---
 
+## Shared Base Class
+
+Extract common functionality to reduce duplication:
+
+### LayoutWidgetBase.cs
+
+```csharp
+using HomeBlaze.Components.Abstractions;
+using HomeBlaze.Components.Dialogs;
+using HomeBlaze.Services;
+using Microsoft.AspNetCore.Components;
+using MudBlazor;
+using Namotion.Interceptor;
+
+namespace HomeBlaze.Components;
+
+public abstract class LayoutWidgetBase : ComponentBase, ISubjectComponent
+{
+    [Inject] protected IDialogService DialogService { get; set; } = null!;
+    [Inject] protected SubjectFactory SubjectFactory { get; set; } = null!;
+    [Inject] protected SubjectComponentRegistry ComponentRegistry { get; set; } = null!;
+
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    protected async Task EditSubjectAsync(IInterceptorSubject subject, string title)
+    {
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, subject, title);
+    }
+
+    protected async Task<bool> ConfirmDeleteAsync(string itemType)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            $"Delete {itemType}",
+            $"Are you sure you want to delete this {itemType.ToLower()}?",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        return confirmed == true;
+    }
+
+    protected async Task<IInterceptorSubject?> ShowCreateDialogAsync()
+    {
+        var result = await SubjectSetupDialog.ShowAsync(DialogService);
+        return result?.Subject;
+    }
+
+    protected T CreateSubject<T>() where T : class, IInterceptorSubject
+    {
+        return SubjectFactory.CreateSubject<T>();
+    }
+}
+```
+
+### Shared CSS (_LayoutWidgets.css or in site.css)
+
+```css
+/* Shared layout widget styles */
+.layout-edit-button {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    z-index: 20;
+    background: rgba(255,255,255,0.9);
+    border-radius: 4px;
+}
+
+.layout-container {
+    position: relative;
+    background: rgba(0,0,0,0.02);
+    border: 1px dashed rgba(128,128,128,0.3);
+}
+
+.layout-item {
+    background: var(--mud-palette-surface);
+    border: 1px solid rgba(128,128,128,0.2);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.layout-item.editing {
+    border: 2px dashed var(--mud-palette-primary);
+}
+
+.layout-item.editing .layout-item-content {
+    pointer-events: none;
+}
+
+.layout-item-content {
+    width: 100%;
+    height: 100%;
+}
+
+.layout-item.empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-style: dashed;
+}
+
+.layout-item.empty:hover {
+    background: rgba(var(--mud-palette-primary-rgb), 0.1);
+}
+
+.add-icon {
+    opacity: 0.5;
+}
+```
+
+### Simplified CanvasLayoutWidget.razor
+
+```razor
+@inherits LayoutWidgetBase
+@using Excubo.Blazor.Diagrams
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(CanvasLayout))]
+
+<div class="layout-container canvas-layout"
+     style="width: 100%; min-height: @(Canvas?.MinHeight ?? 300)px;"
+     @onclick="OnCanvasClick"
+     @onclick:stopPropagation="true">
+
+    @if (IsEditing)
+    {
+        <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                       Size="Size.Small"
+                       Color="Color.Primary"
+                       Class="layout-edit-button"
+                       Title="Edit Layout"
+                       OnClick="EditLayout" />
+    }
+
+    <Diagram @ref="_diagram">
+        <Nodes>
+            @if (Canvas?.Nodes != null)
+            {
+                @foreach (var node in Canvas.Nodes)
+                {
+                    <Node @key="node"
+                          Id="@node.GetHashCode().ToString()"
+                          X="@node.X" Y="@node.Y"
+                          Draggable="@IsEditing"
+                          XChanged="@(x => OnPositionChanged(node, (int)x, node.Y))"
+                          YChanged="@(y => OnPositionChanged(node, node.X, (int)y))">
+                        <div class="layout-item @(IsEditing ? "editing" : "")"
+                             style="width: @(node.Width)px; height: @(node.Height)px;">
+                            <div class="layout-item-content">
+                                <SubjectComponent Subject="@node.Child" Type="SubjectComponentType.Widget">
+                                    <ActionButtons>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small"
+                                                       Title="Edit Node" OnClick="() => EditNode(node)" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                                       Color="Color.Error" Title="Delete" OnClick="() => DeleteNode(node)" />
+                                    </ActionButtons>
+                                </SubjectComponent>
+                            </div>
+                        </div>
+                    </Node>
+                }
+            }
+        </Nodes>
+    </Diagram>
+</div>
+
+<style>
+    .canvas-layout.editing {
+        cursor: crosshair;
+    }
+</style>
+
+@code {
+    private Diagram? _diagram;
+    private CanvasLayout? Canvas => Subject as CanvasLayout;
+
+    private void OnPositionChanged(CanvasNode node, int x, int y)
+    {
+        if (Canvas?.SnapEnabled == true)
+        {
+            var snap = Canvas.SnapSize > 0 ? Canvas.SnapSize : 100;
+            x = (int)Math.Round((double)x / snap) * snap;
+            y = (int)Math.Round((double)y / snap) * snap;
+        }
+        node.X = x;
+        node.Y = y;
+    }
+
+    private async Task OnCanvasClick(MouseEventArgs e)
+    {
+        if (!IsEditing) return;
+        await AddNodeAt((int)e.OffsetX, (int)e.OffsetY);
+    }
+
+    private async Task AddNodeAt(int x, int y)
+    {
+        if (Canvas?.SnapEnabled == true)
+        {
+            var snap = Canvas.SnapSize > 0 ? Canvas.SnapSize : 100;
+            x = (int)Math.Round((double)x / snap) * snap;
+            y = (int)Math.Round((double)y / snap) * snap;
+        }
+
+        var child = await ShowCreateDialogAsync();
+        if (child == null) return;
+
+        var node = CreateSubject<CanvasNode>();
+        node.X = x;
+        node.Y = y;
+        node.Child = child;
+        Canvas?.Nodes.Add(node);
+    }
+
+    private Task EditLayout() => EditSubjectAsync(Canvas!, "Edit Canvas Layout");
+    private Task EditNode(CanvasNode node) => EditSubjectAsync(node, "Edit Node");
+
+    private async Task DeleteNode(CanvasNode node)
+    {
+        if (await ConfirmDeleteAsync("Node"))
+            Canvas?.Nodes.Remove(node);
+    }
+}
+```
+
+### Simplified GridLayoutWidget.razor
+
+```razor
+@inherits LayoutWidgetBase
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(GridLayout))]
+
+<div class="layout-container grid-layout"
+     style="display: grid;
+            grid-template-rows: repeat(@(Grid?.Rows ?? 1), 1fr);
+            grid-template-columns: repeat(@(Grid?.Columns ?? 1), 1fr);
+            gap: 8px; padding: 8px; min-height: 200px;">
+
+    @if (IsEditing)
+    {
+        <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                       Size="Size.Small"
+                       Color="Color.Primary"
+                       Class="layout-edit-button"
+                       Title="Edit Layout"
+                       OnClick="EditLayout" />
+    }
+
+    @if (Grid?.Cells != null)
+    {
+        foreach (var cell in Grid.Cells)
+        {
+            <div class="layout-item @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
+                <div class="layout-item-content">
+                    <SubjectComponent Subject="@cell.Child" Type="SubjectComponentType.Widget">
+                        <ActionButtons>
+                            <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small"
+                                           Title="Edit Cell" OnClick="() => EditCell(cell)" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                           Color="Color.Error" Title="Delete" OnClick="() => DeleteCell(cell)" />
+                        </ActionButtons>
+                    </SubjectComponent>
+                </div>
+            </div>
+        }
+    }
+
+    @if (IsEditing)
+    {
+        @foreach (var (row, col) in GetEmptyCells())
+        {
+            <div class="layout-item empty"
+                 style="grid-row: @(row + 1); grid-column: @(col + 1);"
+                 @onclick="() => AddCellAt(row, col)">
+                <MudIcon Icon="@Icons.Material.Filled.Add" Color="Color.Default" Class="add-icon" />
+            </div>
+        }
+    }
+</div>
+
+<style>
+    .grid-layout {
+        padding: 8px;
+    }
+    .grid-layout .layout-item {
+        min-height: 100px;
+    }
+</style>
+
+@code {
+    private GridLayout? Grid => Subject as GridLayout;
+
+    private string GetCellStyle(GridCell cell)
+    {
+        var styles = new List<string>();
+        if (cell.Row.HasValue)
+            styles.Add($"grid-row: {cell.Row.Value + 1} / span {cell.RowSpan}");
+        if (cell.Column.HasValue)
+            styles.Add($"grid-column: {cell.Column.Value + 1} / span {cell.ColumnSpan}");
+        return string.Join("; ", styles);
+    }
+
+    private IEnumerable<(int row, int col)> GetEmptyCells()
+    {
+        if (Grid == null) yield break;
+
+        var occupied = new HashSet<(int, int)>();
+        foreach (var cell in Grid.Cells.Where(c => c.Row.HasValue && c.Column.HasValue))
+            for (int r = 0; r < cell.RowSpan; r++)
+                for (int c = 0; c < cell.ColumnSpan; c++)
+                    occupied.Add((cell.Row!.Value + r, cell.Column!.Value + c));
+
+        for (int r = 0; r < Grid.Rows; r++)
+            for (int c = 0; c < Grid.Columns; c++)
+                if (!occupied.Contains((r, c)))
+                    yield return (r, c);
+    }
+
+    private async Task AddCellAt(int row, int column)
+    {
+        var child = await ShowCreateDialogAsync();
+        if (child == null) return;
+
+        var cell = CreateSubject<GridCell>();
+        cell.Row = row;
+        cell.Column = column;
+        cell.Child = child;
+        Grid?.Cells.Add(cell);
+    }
+
+    private Task EditLayout() => EditSubjectAsync(Grid!, "Edit Grid Layout");
+    private Task EditCell(GridCell cell) => EditSubjectAsync(cell, "Edit Cell");
+
+    private async Task DeleteCell(GridCell cell)
+    {
+        if (await ConfirmDeleteAsync("Cell"))
+            Grid?.Cells.Remove(cell);
+    }
+}
+```
+
+**Summary of shared code:**
+- `LayoutWidgetBase.cs` - ~50 lines of shared logic
+- Shared CSS - ~50 lines
+- Each widget reduced to ~70-90 lines (from ~120)
+
+---
+
 ## File Structure
 
 ```
@@ -723,7 +1071,11 @@ src/HomeBlaze/
 │   ├── CanvasNode.cs                # Subject class
 │   ├── GridLayout.cs                # Subject class
 │   ├── GridCell.cs                  # Subject class
+│   ├── LayoutWidgetBase.cs          # Shared base class for layout widgets
 │   ├── Widget.cs                    # (existing)
+│   ├── wwwroot/
+│   │   └── css/
+│   │       └── layout-widgets.css   # Shared CSS for layouts
 │   └── Components/
 │       ├── CanvasLayoutWidget.razor
 │       ├── CanvasLayoutEditComponent.razor
@@ -737,6 +1089,8 @@ src/HomeBlaze/
 
 | File | Full Path |
 |------|-----------|
+| LayoutWidgetBase.cs | `src/HomeBlaze/HomeBlaze.Components/LayoutWidgetBase.cs` |
+| layout-widgets.css | `src/HomeBlaze/HomeBlaze.Components/wwwroot/css/layout-widgets.css` |
 | CanvasLayout.cs | `src/HomeBlaze/HomeBlaze.Components/CanvasLayout.cs` |
 | CanvasNode.cs | `src/HomeBlaze/HomeBlaze.Components/CanvasNode.cs` |
 | GridLayout.cs | `src/HomeBlaze/HomeBlaze.Components/GridLayout.cs` |
@@ -983,24 +1337,27 @@ public partial class GridCell : IConfigurableSubject
                           Id="@GetNodeId(node)"
                           X="@node.X"
                           Y="@node.Y"
+                          Draggable="@IsEditing"
                           XChanged="@(x => OnNodePositionChanged(node, (int)x, node.Y))"
                           YChanged="@(y => OnNodePositionChanged(node, node.X, (int)y))">
-                        <div class="canvas-node"
+                        <div class="canvas-node @(IsEditing ? "editing" : "")"
                              style="width: @(node.Width)px; height: @(node.Height)px;">
-                            <SubjectComponent Subject="@node.Child"
-                                              Type="SubjectComponentType.Widget">
-                                <ActionButtons>
-                                    <MudIconButton Icon="@Icons.Material.Filled.Settings"
-                                                   Size="Size.Small"
-                                                   Title="Edit Node"
-                                                   OnClick="() => EditNode(node)" />
-                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                   Size="Size.Small"
-                                                   Color="Color.Error"
-                                                   Title="Delete"
-                                                   OnClick="() => DeleteNode(node)" />
-                                </ActionButtons>
-                            </SubjectComponent>
+                            <div class="canvas-node-content">
+                                <SubjectComponent Subject="@node.Child"
+                                                  Type="SubjectComponentType.Widget">
+                                    <ActionButtons>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                                                       Size="Size.Small"
+                                                       Title="Edit Node"
+                                                       OnClick="() => EditNode(node)" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Size="Size.Small"
+                                                       Color="Color.Error"
+                                                       Title="Delete"
+                                                       OnClick="() => DeleteNode(node)" />
+                                    </ActionButtons>
+                                </SubjectComponent>
+                            </div>
                         </div>
                     </Node>
                 }
@@ -1029,6 +1386,21 @@ public partial class GridCell : IConfigurableSubject
         border: 1px solid rgba(128,128,128,0.2);
         border-radius: 4px;
         overflow: hidden;
+    }
+
+    /* In edit mode: disable widget interaction, show drag cursor */
+    .canvas-node.editing {
+        cursor: move;
+        border: 2px dashed var(--mud-palette-primary);
+    }
+
+    .canvas-node.editing .canvas-node-content {
+        pointer-events: none;  /* Disable all widget interaction */
+    }
+
+    .canvas-node-content {
+        width: 100%;
+        height: 100%;
     }
 </style>
 
@@ -1113,6 +1485,17 @@ public partial class GridCell : IConfigurableSubject
 }
 ```
 
+**Interaction modes:**
+
+| Mode | Widget Content | Node Dragging | Action Buttons |
+|------|---------------|---------------|----------------|
+| View | ✅ Fully interactive (buttons, inputs work) | ❌ Disabled | ❌ Hidden |
+| Edit | ❌ Disabled (`pointer-events: none`) | ✅ Enabled | ✅ Visible |
+
+This ensures:
+- In view mode: users can interact with widget UIs normally
+- In edit mode: dragging works without accidentally triggering widget buttons
+
 **Note on resizing:**
 Node resizing is handled via the property editor (CanvasNodeEditComponent) rather than drag handles. This avoids JavaScript interop complexity while still providing full control over width/height values.
 
@@ -1157,21 +1540,23 @@ Node resizing is handled via the property editor (CanvasNodeEditComponent) rathe
     {
         foreach (var cell in Grid.Cells)
         {
-            <div class="grid-cell" style="@GetCellStyle(cell)">
-                <SubjectComponent Subject="@cell.Child"
-                                  Type="SubjectComponentType.Widget">
-                    <ActionButtons>
-                        <MudIconButton Icon="@Icons.Material.Filled.Settings"
-                                       Size="Size.Small"
-                                       Title="Edit Cell"
-                                       OnClick="() => EditCell(cell)" />
-                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                       Size="Size.Small"
-                                       Color="Color.Error"
-                                       Title="Delete"
-                                       OnClick="() => DeleteCell(cell)" />
-                    </ActionButtons>
-                </SubjectComponent>
+            <div class="grid-cell @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
+                <div class="grid-cell-content">
+                    <SubjectComponent Subject="@cell.Child"
+                                      Type="SubjectComponentType.Widget">
+                        <ActionButtons>
+                            <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                                           Size="Size.Small"
+                                           Title="Edit Cell"
+                                           OnClick="() => EditCell(cell)" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                           Size="Size.Small"
+                                           Color="Color.Error"
+                                           Title="Delete"
+                                           OnClick="() => DeleteCell(cell)" />
+                        </ActionButtons>
+                    </SubjectComponent>
+                </div>
             </div>
         }
     }
@@ -1214,6 +1599,20 @@ Node resizing is handled via the property editor (CanvasNodeEditComponent) rathe
         border-radius: 4px;
         min-height: 100px;
         overflow: hidden;
+    }
+
+    /* In edit mode: disable widget interaction */
+    .grid-cell.editing {
+        border: 2px dashed var(--mud-palette-primary);
+    }
+
+    .grid-cell.editing .grid-cell-content {
+        pointer-events: none;  /* Disable all widget interaction */
+    }
+
+    .grid-cell-content {
+        width: 100%;
+        height: 100%;
     }
 
     .grid-cell.empty {
