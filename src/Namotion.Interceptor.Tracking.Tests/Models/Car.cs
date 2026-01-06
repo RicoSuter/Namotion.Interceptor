@@ -26,7 +26,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
 
         public List<SubjectLifecycleChange> Detachements { get; } = new();
 
-        public void OnLifecycleEvent(SubjectLifecycleChange change)
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
             if (change.IsContextAttach)
             {

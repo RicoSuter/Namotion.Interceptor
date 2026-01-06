@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 public class ContextInheritanceHandler : ILifecycleHandler
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void OnLifecycleEvent(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         if (change.Property.HasValue)
         {

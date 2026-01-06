@@ -21,7 +21,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         _loggerResolver = loggerResolver;
     }
 
-    public void OnLifecycleEvent(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         _logger ??= _loggerResolver();
 

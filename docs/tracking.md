@@ -224,12 +224,12 @@ var context = InterceptorSubjectContext
 var person = new Person(context);
 var child = new Person { Name = "Child" };
 
-person.Children = [child]; // OnLifecycleEvent: IsContextAttach + IsPropertyReferenceAdded
-person.Children = [];      // OnLifecycleEvent: IsPropertyReferenceRemoved + IsContextDetach
+person.Children = [child]; // HandleLifecycleChange: IsContextAttach + IsPropertyReferenceAdded
+person.Children = [];      // HandleLifecycleChange: IsPropertyReferenceRemoved + IsContextDetach
 
 public class MyLifecycleHandler : ILifecycleHandler
 {
-    public void OnLifecycleEvent(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         if (change.IsContextAttach)
         {
@@ -245,7 +245,7 @@ public class MyLifecycleHandler : ILifecycleHandler
 
 ### SubjectLifecycleChange Flags
 
-The `OnLifecycleEvent` method receives a `SubjectLifecycleChange` with flags indicating what happened:
+The `HandleLifecycleChange` method receives a `SubjectLifecycleChange` with flags indicating what happened:
 
 | Flag | Description |
 |------|-------------|
@@ -289,13 +289,13 @@ lifecycleInterceptor.SubjectDetaching += change =>
 ```
 
 **Important distinction:**
-- `ILifecycleHandler.OnLifecycleEvent`: Called for **every** lifecycle change (context attach, property add, property remove, context detach)
+- `ILifecycleHandler.HandleLifecycleChange`: Called for **every** lifecycle change (context attach, property add, property remove, context detach)
 - `SubjectAttached` event: Fires **once** when subject first enters the graph
 - `SubjectDetaching` event: Fires **once** when subject is about to leave the graph
 
 **Event timing (symmetry):**
-- `SubjectAttached` fires **after** `ILifecycleHandler.OnLifecycleEvent(attach)` - all handlers have initialized
-- `SubjectDetaching` fires **before** `ILifecycleHandler.OnLifecycleEvent(detach)` - handlers can still access full graph
+- `SubjectAttached` fires **after** `ILifecycleHandler.HandleLifecycleChange(attach)` - all handlers have initialized
+- `SubjectDetaching` fires **before** `ILifecycleHandler.HandleLifecycleChange(detach)` - handlers can still access full graph
 
 This symmetry ensures that both events fire when the full object graph is accessible, which is useful for handlers that need to traverse relationships or access child subjects during cleanup.
 
@@ -350,7 +350,7 @@ var referenceCount = subject.GetReferenceCount();
 The `SubjectLifecycleChange` includes `ReferenceCount` after the operation. Use the flags to determine the event type:
 
 ```csharp
-handler.OnLifecycleEvent = change =>
+handler.HandleLifecycleChange = change =>
 {
     if (change.IsContextDetach)
     {

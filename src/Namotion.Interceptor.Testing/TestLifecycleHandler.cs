@@ -18,7 +18,7 @@ public class TestLifecycleHandler : ILifecycleHandler, IPropertyLifecycleHandler
         _trackProperties = trackProperties;
     }
 
-    public void OnLifecycleEvent(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         var subject = GetSubjectName(change.Subject);
 

@@ -437,7 +437,7 @@ public class LifecycleEventsTests
         // Act - attach
         var person = new Person(context) { FirstName = "TestPerson" };
 
-        // Assert - SubjectAttached fires AFTER OnLifecycleEvent(attach)
+        // Assert - SubjectAttached fires AFTER HandleLifecycleChange(attach)
         Assert.Equal(2, events.Count);
         Assert.Equal("Handler", events[0].source);
         Assert.Equal("attached", events[0].eventType);
@@ -451,7 +451,7 @@ public class LifecycleEventsTests
         // Act - detach
         ((IInterceptorSubject)person).Context.RemoveFallbackContext(context);
 
-        // Assert - SubjectDetaching fires BEFORE OnLifecycleEvent(detach)
+        // Assert - SubjectDetaching fires BEFORE HandleLifecycleChange(detach)
         Assert.Equal(2, events.Count);
         Assert.Equal("Event", events[0].source);
         Assert.Equal("Detaching", events[0].eventType);
@@ -467,7 +467,7 @@ public class LifecycleEventsTests
 
         public EventOrderTracker(List<(string source, string eventType, IInterceptorSubject subject)> events) => _events = events;
 
-        public void OnLifecycleEvent(SubjectLifecycleChange change)
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
             var type = change.IsContextAttach ? "attached" : change.IsContextDetach ? "detached" : null;
             if (type is not null)

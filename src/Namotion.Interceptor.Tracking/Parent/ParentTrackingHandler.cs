@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Tracking.Parent;
 public class ParentTrackingHandler : ILifecycleHandler
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void OnLifecycleEvent(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         if (!change.Property.HasValue)
         {

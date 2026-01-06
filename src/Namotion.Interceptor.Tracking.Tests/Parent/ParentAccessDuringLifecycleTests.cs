@@ -287,7 +287,7 @@ public class ParentAccessDuringLifecycleTests
             _callOrder = callOrder;
         }
 
-        public void OnLifecycleEvent(SubjectLifecycleChange change)
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
             if (change.IsContextAttach)
             {
@@ -334,7 +334,7 @@ public partial class TrackedChild : ILifecycleHandler
         Name = string.Empty;
     }
 
-    public void OnLifecycleEvent(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         if (change.IsContextAttach)
         {
@@ -402,7 +402,7 @@ public partial class Component : ILifecycleHandler
     /// </summary>
     public HashSet<SubjectParent>? ParentsFoundDuringAttach { get; private set; }
 
-    public void OnLifecycleEvent(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         if (change.IsContextAttach)
         {

@@ -11,7 +11,7 @@ namespace HomeBlaze.Services.Lifecycle;
 /// </summary>
 public class MethodPropertyInitializer : ILifecycleHandler
 {
-    public void OnLifecycleEvent(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         if (change.IsContextAttach)
         {
