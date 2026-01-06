@@ -11,5 +11,5 @@ public interface ILifecycleHandler
     /// Check the IsAttached, IsPropertyReferenceAdded, IsPropertyReferenceRemoved, and IsDetached flags
     /// to determine which events occurred.
     /// </summary>
-    void OnLifecycleEvent(SubjectLifecycleChange change);
+    void HandleLifecycleChange(SubjectLifecycleChange change);
 }

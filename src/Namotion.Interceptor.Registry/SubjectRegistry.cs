@@ -30,7 +30,7 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     }
 
     /// <inheritdoc />
-    void ILifecycleHandler.OnLifecycleEvent(SubjectLifecycleChange change)
+    void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {

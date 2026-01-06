@@ -79,7 +79,7 @@ namespace Namotion.Interceptor.SampleConsole
 
     public class LogPropertyChangesHandler : ILifecycleHandler
     {
-        public void OnLifecycleEvent(SubjectLifecycleChange change)
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
             if (change.IsContextAttach)
             {

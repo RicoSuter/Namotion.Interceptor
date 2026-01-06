@@ -236,7 +236,7 @@ public class LifecycleInterceptorTests
 
     public class AddPropertyToSubjectHandler : ILifecycleHandler
     {
-        public void OnLifecycleEvent(SubjectLifecycleChange change)
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
             if (change.IsContextAttach)
             {

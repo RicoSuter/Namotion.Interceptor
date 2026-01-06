@@ -23,7 +23,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     /// <summary>
     /// Raised when a subject is about to be detached from the object graph.
-    /// Fires BEFORE ILifecycleHandler.OnLifecycleEvent (symmetric with SubjectAttached which fires AFTER).
+    /// Fires BEFORE ILifecycleHandler.HandleLifecycleChange (symmetric with SubjectAttached which fires AFTER).
     /// At this point, the full object graph is still accessible.
     /// Handlers must be exception-free and fast (invoked inside lock).
     /// </summary>
@@ -101,12 +101,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         var properties = subject.Properties.Keys;
         foreach (var handler in context.GetServices<ILifecycleHandler>())
         {
-            handler.OnLifecycleEvent(change);
+            handler.HandleLifecycleChange(change);
         }
 
         if (subject is ILifecycleHandler subjectHandler)
         {
-            subjectHandler.OnLifecycleEvent(change);
+            subjectHandler.HandleLifecycleChange(change);
         }
 
         SubjectAttached?.Invoke(change);
@@ -143,12 +143,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         var properties = subject.Properties.Keys;
         foreach (var handler in context.GetServices<ILifecycleHandler>())
         {
-            handler.OnLifecycleEvent(change);
+            handler.HandleLifecycleChange(change);
         }
 
         if (subject is ILifecycleHandler subjectHandler)
         {
-            subjectHandler.OnLifecycleEvent(change);
+            subjectHandler.HandleLifecycleChange(change);
         }
 
         if (isFirstAttach)
@@ -190,12 +190,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         if (subject is ILifecycleHandler subjectHandler)
         {
-            subjectHandler.OnLifecycleEvent(change);
+            subjectHandler.HandleLifecycleChange(change);
         }
 
         foreach (var handler in context.GetServices<ILifecycleHandler>())
         {
-            handler.OnLifecycleEvent(change);
+            handler.HandleLifecycleChange(change);
         }
     }
 
@@ -247,12 +247,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         if (subject is ILifecycleHandler subjectHandler)
         {
-            subjectHandler.OnLifecycleEvent(change);
+            subjectHandler.HandleLifecycleChange(change);
         }
 
         foreach (var handler in context.GetServices<ILifecycleHandler>())
         {
-            handler.OnLifecycleEvent(change);
+            handler.HandleLifecycleChange(change);
         }
 
         if (isLastDetach)

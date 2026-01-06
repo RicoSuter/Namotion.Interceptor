@@ -156,7 +156,7 @@ public class SubjectPathResolver : ILifecycleHandler
     /// <summary>
     /// Invalidates caches when subject graph changes.
     /// </summary>
-    public void OnLifecycleEvent(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         // Clear caches on any graph change (attach, detach, reference added/removed)
         ClearCaches();
