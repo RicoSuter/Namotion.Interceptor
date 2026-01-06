@@ -41,7 +41,7 @@ public class SubjectRegistryTests
     }
 
     [Fact]
-    public Task WhenProxyWithChildProxyIsRemoved_ThenWeHaveTwoDetaches()
+    public Task WhenRemovingSubjectWithChild_ThenBothDetach()
     {
         // Arrange
         var handler = new TestLifecycleHandler();
