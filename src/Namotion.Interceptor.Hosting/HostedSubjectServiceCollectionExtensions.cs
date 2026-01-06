@@ -31,14 +31,17 @@ public static class HostedSubjectServiceCollectionExtensions
     {
         services.TryAddSingleton<T>(serviceProvider =>
         {
-            var context = contextResolver != null
-                ? contextResolver(serviceProvider)
-                : serviceProvider.GetService<IInterceptorSubjectContext>();
-
             T instance;
-            if (context != null && HasContextConstructor<T>())
+         
+            if (HasContextConstructor<T>())
             {
-                instance = ActivatorUtilities.CreateInstance<T>(serviceProvider, context);
+                var context = contextResolver != null
+                    ? contextResolver(serviceProvider)
+                    : serviceProvider.GetService<IInterceptorSubjectContext>();
+
+                instance = context is not null ?
+                    ActivatorUtilities.CreateInstance<T>(serviceProvider, context) :
+                    ActivatorUtilities.CreateInstance<T>(serviceProvider);
             }
             else
             {
