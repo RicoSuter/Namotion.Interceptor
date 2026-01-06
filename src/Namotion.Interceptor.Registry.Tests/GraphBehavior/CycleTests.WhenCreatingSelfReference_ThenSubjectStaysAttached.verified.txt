@@ -1,4 +1,4 @@
 ﻿[
-  + Person (attached, refs: 0),
+  + NA (attached, refs: 0),
   + Narcissus.Father -> Narcissus (refs: 1)
 ]

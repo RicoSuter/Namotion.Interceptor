@@ -1,7 +1,7 @@
 ﻿[
-  OnAttached:   at  with index , count: 0,
-  OnAttached: Grandmother  at Mother with index , count: 1,
-  OnAttached: Mother  at Mother with index , count: 1,
-  OnDetached: Grandmother  at Mother with index , count: 0,
-  OnDetached: Mother  at Mother with index , count: 0
+  + NA (attached, refs: 0),
+  + Mother.Mother -> Grandmother (refs: 1, attached),
+  + Child.Mother -> Mother (refs: 1, attached),
+  - Mother.Mother -> Grandmother (refs: 0, detached),
+  - Child.Mother -> Mother (refs: 0, detached)
 ]

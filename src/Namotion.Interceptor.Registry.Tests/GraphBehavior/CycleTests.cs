@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Registry.Tests.Models;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Registry.Tests.GraphBehavior;
 
@@ -11,7 +12,7 @@ public class CycleTests
     public Task WhenCreatingSelfReference_ThenSubjectStaysAttached()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -29,7 +30,7 @@ public class CycleTests
     public Task WhenCreatingDirectCycle_ThenBothAttached()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -50,7 +51,7 @@ public class CycleTests
     public Task WhenBreakingCycle_ThenBothDetach()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -75,7 +76,7 @@ public class CycleTests
     public Task WhenCycleProtectedByExternalRef_ThenCycleStays()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -106,7 +107,7 @@ public class CycleTests
     public Task WhenInternalCycleOrphaned_ThenCycleStaysAttached_Limitation()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()

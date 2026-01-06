@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Registry.Tests.Models;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Registry.Tests.GraphBehavior;
 
@@ -11,7 +12,7 @@ public class DagTests
     public Task WhenSharedNodeHasMultipleParents_ThenAllReferencesTracked()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -50,7 +51,7 @@ public class DagTests
     public Task WhenRemovingOneParentOfSharedNode_ThenSharedNodeStays()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -88,7 +89,7 @@ public class DagTests
     public Task WhenRemovingAllParentsOfSharedNode_ThenSharedNodeDetaches()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -127,7 +128,7 @@ public class DagTests
     public Task WhenReplacingSharedNodeReference_ThenCountUpdatesCorrectly()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
