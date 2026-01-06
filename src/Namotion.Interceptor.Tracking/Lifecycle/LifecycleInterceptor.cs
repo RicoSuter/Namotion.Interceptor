@@ -22,10 +22,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public event Action<SubjectLifecycleChange>? SubjectAttached;
 
     /// <summary>
-    /// Raised when a subject is detached from the object graph.
+    /// Raised when a subject is about to be detached from the object graph.
+    /// Fires BEFORE ILifecycleHandler.OnLifecycleEvent (symmetric with SubjectAttached which fires AFTER).
+    /// At this point, the full object graph is still accessible.
     /// Handlers must be exception-free and fast (invoked inside lock).
     /// </summary>
-    public event Action<SubjectLifecycleChange>? SubjectDetached;
+    public event Action<SubjectLifecycleChange>? SubjectDetaching;
 
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
@@ -184,6 +186,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             IsContextDetach = true
         };
 
+        SubjectDetaching?.Invoke(change);
+
         if (subject is ILifecycleHandler subjectHandler)
         {
             subjectHandler.OnLifecycleEvent(change);
@@ -193,8 +197,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             handler.OnLifecycleEvent(change);
         }
-
-        SubjectDetached?.Invoke(change);
     }
 
     /// <summary>
@@ -238,6 +240,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             IsContextDetach = isLastDetach
         };
 
+        if (isLastDetach)
+        {
+            SubjectDetaching?.Invoke(change);
+        }
+
         if (subject is ILifecycleHandler subjectHandler)
         {
             subjectHandler.OnLifecycleEvent(change);
@@ -250,8 +257,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         if (isLastDetach)
         {
-            SubjectDetached?.Invoke(change);
-
             foreach (var child in children!)
             {
                 DetachFromProperty(child.subject, context, child.property, child.index);

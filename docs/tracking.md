@@ -282,16 +282,22 @@ lifecycleInterceptor.SubjectAttached += change =>
     Console.WriteLine($"Subject attached: {change.Subject}");
 };
 
-lifecycleInterceptor.SubjectDetached += change =>
+lifecycleInterceptor.SubjectDetaching += change =>
 {
-    Console.WriteLine($"Subject detached: {change.Subject}");
+    Console.WriteLine($"Subject detaching: {change.Subject}");
 };
 ```
 
 **Important distinction:**
 - `ILifecycleHandler.OnLifecycleEvent`: Called for **every** lifecycle change (context attach, property add, property remove, context detach)
 - `SubjectAttached` event: Fires **once** when subject first enters the graph
-- `SubjectDetached` event: Fires **once** when subject leaves the graph
+- `SubjectDetaching` event: Fires **once** when subject is about to leave the graph
+
+**Event timing (symmetry):**
+- `SubjectAttached` fires **after** `ILifecycleHandler.OnLifecycleEvent(attach)` - all handlers have initialized
+- `SubjectDetaching` fires **before** `ILifecycleHandler.OnLifecycleEvent(detach)` - handlers can still access full graph
+
+This symmetry ensures that both events fire when the full object graph is accessible, which is useful for handlers that need to traverse relationships or access child subjects during cleanup.
 
 Events are useful for:
 - Cache invalidation when subjects are removed from the object graph
@@ -310,13 +316,13 @@ Events are useful for:
 
 ```csharp
 // Good: Fast dispatch to queue
-lifecycleInterceptor.SubjectDetached += change =>
+lifecycleInterceptor.SubjectDetaching += change =>
 {
     _cleanupQueue.Enqueue(change.Subject); // Returns immediately
 };
 
 // Bad: Blocking I/O in handler
-lifecycleInterceptor.SubjectDetached += async change =>
+lifecycleInterceptor.SubjectDetaching += async change =>
 {
     await database.DeleteAsync(change.Subject); // Blocks the lock!
 };
