@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Registry.Tests.Models;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Registry.Tests.GraphBehavior;
 
@@ -8,7 +9,7 @@ public class HierarchyTests
     public Task WhenAttachingNestedSubjects_ThenAllAreAttached()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -36,7 +37,7 @@ public class HierarchyTests
     public Task WhenRemovingBranch_ThenBranchIsDetached()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -68,7 +69,7 @@ public class HierarchyTests
     public Task WhenRemovingMiddleElement_ThenOnlyChildrenAreDetached()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -99,7 +100,7 @@ public class HierarchyTests
     public Task WhenRemovingOneSibling_ThenOtherSiblingStays()
     {
         // Arrange
-        var helper = new GraphTestHelper();
+        var helper = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()

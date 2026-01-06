@@ -1,5 +1,5 @@
 ﻿[
-  OnAttached:   at  with index , count: 0,
-  OnAttached: Grandmother  at Mother with index , count: 1,
-  OnAttached: Mother  at Mother with index , count: 1
+  + NA (attached, refs: 0),
+  + Mother.Mother -> Grandmother (refs: 1, attached),
+  + Child.Mother -> Mother (refs: 1, attached)
 ]

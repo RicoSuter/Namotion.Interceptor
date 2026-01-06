@@ -1,8 +1,8 @@
 ﻿[
-  OnAttached: { } at  with index , count: 0,
-  OnAttached: {Child1 } at Children with index 0, count: 1,
-  OnAttached: {Child2 } at Children with index 1, count: 1,
-  OnDetached: {Mother } at  with index , count: 0,
-  OnDetached: {Child1 } at Children with index 0, count: 0,
-  OnDetached: {Child2 } at Children with index 1, count: 0
+  + NA (attached, refs: 0),
+  + Mother.Children[0] -> Child1 (refs: 1, attached),
+  + Mother.Children[1] -> Child2 (refs: 1, attached),
+  - Mother (detached, refs: 0),
+  - Mother.Children[0] -> Child1 (refs: 0, detached),
+  - Mother.Children[1] -> Child2 (refs: 0, detached)
 ]
