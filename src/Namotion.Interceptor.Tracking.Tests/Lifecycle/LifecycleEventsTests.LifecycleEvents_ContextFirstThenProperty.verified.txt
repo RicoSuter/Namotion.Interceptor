@@ -1,0 +1,8 @@
+﻿[
+  {
+    Event: SubjectAttached
+  },
+  {
+    Event: SubjectDetached
+  }
+]

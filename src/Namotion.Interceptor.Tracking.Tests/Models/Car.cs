@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
         public partial string Name { get; set; }
 
         public partial Tire[] Tires { get; set; }
-        
+
         [Derived]
         public decimal AveragePressure => Tires.Average(t => t.Pressure);
 
@@ -23,15 +23,15 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
         }
 
         public List<SubjectLifecycleChange> Attachements { get; } = new();
-        
+
         public List<SubjectLifecycleChange> Detachements { get; } = new();
 
-        public void AttachSubject(SubjectLifecycleChange change)
+        public void OnSubjectAttached(SubjectLifecycleChange change)
         {
             Attachements.Add(change);
         }
-        
-        public void DetachSubject(SubjectLifecycleChange change)
+
+        public void OnSubjectDetached(SubjectLifecycleChange change)
         {
             Detachements.Add(change);
         }

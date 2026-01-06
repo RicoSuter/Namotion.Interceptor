@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
@@ -7,13 +7,16 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
-    private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference?>> _attachedSubjects = [];
+    private readonly HashSet<IInterceptorSubject> _attachedSubjects = [];
 
     [ThreadStatic]
     private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
 
     [ThreadStatic]
     private static Stack<HashSet<IInterceptorSubject>>? _hashSetPool;
+
+    [ThreadStatic]
+    private static Stack<List<IInterceptorSubject>>? _subjectListPool;
 
     /// <summary>
     /// Raised when a subject is attached to the object graph.
@@ -30,26 +33,40 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public void AttachTo(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
+        var newlyAttachedSubjects = GetSubjectList();
         try
         {
             lock (_attachedSubjects)
             {
+                // Check if root subject is already attached (via property attachment)
+                var rootAlreadyAttached = _attachedSubjects.Contains(subject);
+
                 FindSubjectsInProperties(subject, collectedSubjects, null);
 
+                // Attach children first (bottom-up order: children before parent)
                 foreach (var child in collectedSubjects)
                 {
-                    AttachTo(child.subject, subject.Context, child.property, child.index);
+                    // Skip if child is already attached (was already processed by WriteProperty or earlier)
+                    if (!_attachedSubjects.Contains(child.subject))
+                    {
+                        AttachSubject(child.subject, subject.Context, child.property, child.index, newlyAttachedSubjects);
+                    }
                 }
 
-                if (!_attachedSubjects.ContainsKey(subject))
+                // Then attach root subject (context-only, only if not already attached via property)
+                if (!rootAlreadyAttached)
                 {
-                    AttachTo(subject, subject.Context, null, null);
+                    AttachSubject(subject, subject.Context, null, null, newlyAttachedSubjects);
                 }
+
+                // Phase 2: Call AttachSubjectProperty for all newly attached subjects
+                AttachPropertiesForNewlyAttachedSubjects(newlyAttachedSubjects);
             }
         }
         finally
         {
             ReturnList(collectedSubjects);
+            ReturnSubjectList(newlyAttachedSubjects);
         }
     }
 
@@ -62,11 +79,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             {
                 FindSubjectsInProperties(subject, collectedSubjects, null);
 
-                DetachFrom(subject, subject.Context, null, null);
-                foreach (var child in collectedSubjects)
+                // Detach children first (in reverse order)
+                for (var i = collectedSubjects.Count - 1; i >= 0; i--)
                 {
-                    DetachFrom(child.subject, subject.Context, child.property, child.index);
+                    var child = collectedSubjects[i];
+                    DetachSubject(child.subject, subject.Context, child.property, child.index);
                 }
+
+                // Then detach root subject (context-only)
+                DetachSubject(subject, subject.Context, null, null);
             }
         }
         finally
@@ -75,68 +96,133 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
-    private void AttachTo(IInterceptorSubject subject, IInterceptorSubjectContext context,
-        PropertyReference? property, object? index)
+    private void AttachSubject(IInterceptorSubject subject, IInterceptorSubjectContext context,
+        PropertyReference? property, object? index,
+        List<IInterceptorSubject> newlyAttachedSubjects)
     {
-        var firstAttach = _attachedSubjects.TryAdd(subject, []);
-        if (_attachedSubjects[subject].Add(property))
+        // Check if subject is already attached
+        var isFirstAttach = _attachedSubjects.Add(subject);
+
+        // Increment reference count for property attachments
+        var referenceCount = property != null
+            ? subject.IncrementReferenceCount()
+            : subject.GetReferenceCount();
+
+        // Create change for handlers and event
+        var change = new SubjectLifecycleChange(
+            context,
+            subject,
+            property,
+            index,
+            referenceCount);
+
+        // 1. Call attach handlers first (when subject first enters graph)
+        if (isFirstAttach)
         {
-            var count = subject.IncrementReferenceCount();
-            var change = new SubjectLifecycleChange(subject, property, index, count);
-
-            var properties = subject.Properties.Keys;
-
             foreach (var handler in context.GetServices<ILifecycleHandler>())
             {
-                handler.AttachSubject(change);
+                handler.OnSubjectAttached(change);
             }
 
             if (subject is ILifecycleHandler lifecycleHandler)
             {
-                lifecycleHandler.AttachSubject(change);
+                lifecycleHandler.OnSubjectAttached(change);
             }
+        }
 
-            SubjectAttached?.Invoke(change);
-
-            if (firstAttach)
+        // 2. Call reference handlers (when property reference is added)
+        if (property != null)
+        {
+            foreach (var handler in context.GetServices<IReferenceLifecycleHandler>())
             {
-                foreach (var propertyName in properties)
-                {
-                    subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
-                }
+                handler.OnSubjectAttachedToProperty(change);
             }
+
+            if (subject is IReferenceLifecycleHandler referenceHandler)
+            {
+                referenceHandler.OnSubjectAttachedToProperty(change);
+            }
+        }
+
+        // Fire event only on first attach
+        if (isFirstAttach)
+        {
+            SubjectAttached?.Invoke(change);
+            newlyAttachedSubjects.Add(subject);
         }
     }
 
-    private void DetachFrom(IInterceptorSubject subject, IInterceptorSubjectContext context,
+    private void DetachSubject(IInterceptorSubject subject, IInterceptorSubjectContext context,
         PropertyReference? property, object? index)
     {
-        if (_attachedSubjects.TryGetValue(subject, out var set) && set.Remove(property))
+        if (!_attachedSubjects.Contains(subject))
         {
-            if (set.Count == 0)
-            {
-                _attachedSubjects.Remove(subject);
+            return; // Not attached
+        }
 
-                foreach (var propertyName in subject.Properties.Keys)
-                {
-                    subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
-                }
+        // Decrement reference count for property detachments
+        var referenceCount = property != null
+            ? subject.DecrementReferenceCount()
+            : subject.GetReferenceCount();
+
+        // IsLastDetach is true ONLY for context-only detach (property == null) when ref count is 0
+        // Property detach fires first (IsLastDetach=false), then ContextInheritanceHandler triggers
+        // context-only detach (IsLastDetach=true)
+        var isLastDetach = property == null && referenceCount == 0;
+        if (isLastDetach)
+        {
+            _attachedSubjects.Remove(subject);
+
+            foreach (var propertyName in subject.Properties.Keys)
+            {
+                subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
+            }
+        }
+
+        var change = new SubjectLifecycleChange(
+            context,
+            subject,
+            property,
+            index,
+            referenceCount);
+
+        // 1. Fire event first on last detach (reverse of attach where event fires last)
+        if (isLastDetach)
+        {
+            SubjectDetached?.Invoke(change);
+        }
+
+        // 2. Call reference handlers in REVERSE order (symmetrical to attach)
+        if (property != null)
+        {
+            var referenceHandlers = context.GetServices<IReferenceLifecycleHandler>();
+            for (var i = referenceHandlers.Length - 1; i >= 0; i--)
+            {
+                referenceHandlers[i].OnSubjectDetachedFromProperty(change);
             }
 
-            var count = subject.DecrementReferenceCount();
+            if (subject is IReferenceLifecycleHandler referenceHandler)
+            {
+                referenceHandler.OnSubjectDetachedFromProperty(change);
+            }
+        }
 
-            var change = new SubjectLifecycleChange(subject, property, index, count);
+        // 3. Call detach handlers in REVERSE order (symmetrical to attach)
+        if (isLastDetach)
+        {
+            var lifecycleHandlers = context.GetServices<ILifecycleHandler>();
+            for (var i = lifecycleHandlers.Length - 1; i >= 0; i--)
+            {
+                lifecycleHandlers[i].OnSubjectDetached(change);
+            }
+
             if (subject is ILifecycleHandler lifecycleHandler)
             {
-                lifecycleHandler.DetachSubject(change);
+                lifecycleHandler.OnSubjectDetached(change);
             }
 
-            foreach (var handler in context.GetServices<ILifecycleHandler>())
-            {
-                handler.DetachSubject(change);
-            }
-
-            SubjectDetached?.Invoke(change);
+            // Return pooled reference counter after all handlers complete
+            subject.ReturnReferenceCounter();
         }
     }
 
@@ -164,6 +250,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         var newCollectedSubjects = GetList();
         var oldTouchedSubjects = GetHashSet();
         var newTouchedSubjects = GetHashSet();
+        var newlyAttachedSubjects = GetSubjectList();
 
         try
         {
@@ -172,23 +259,28 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 FindSubjectsInProperty(context.Property, currentValue, null, oldCollectedSubjects, oldTouchedSubjects);
                 FindSubjectsInProperty(context.Property, newValue, null, newCollectedSubjects, newTouchedSubjects);
 
+                // Detach old subjects (in reverse order)
                 for (var i = oldCollectedSubjects.Count - 1; i >= 0; i--)
                 {
                     var d = oldCollectedSubjects[i];
                     if (!newTouchedSubjects.Contains(d.subject))
                     {
-                        DetachFrom(d.subject, context.Property.Subject.Context, d.property, d.index);
+                        DetachSubject(d.subject, context.Property.Subject.Context, d.property, d.index);
                     }
                 }
 
+                // Attach new subjects
                 for (var i = 0; i < newCollectedSubjects.Count; i++)
                 {
                     var d = newCollectedSubjects[i];
                     if (!oldTouchedSubjects.Contains(d.subject))
                     {
-                        AttachTo(d.subject, context.Property.Subject.Context, d.property, d.index);
+                        AttachSubject(d.subject, context.Property.Subject.Context, d.property, d.index, newlyAttachedSubjects);
                     }
                 }
+
+                // Phase 2: Call AttachSubjectProperty for all newly attached subjects
+                AttachPropertiesForNewlyAttachedSubjects(newlyAttachedSubjects);
             }
         }
         finally
@@ -197,6 +289,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             ReturnList(newCollectedSubjects);
             ReturnHashSet(oldTouchedSubjects);
             ReturnHashSet(newTouchedSubjects);
+            ReturnSubjectList(newlyAttachedSubjects);
         }
     }
 
@@ -207,9 +300,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         foreach (var property in subject.Properties)
         {
             var metadata = property.Value;
-            if (metadata.IsDerived || 
+            if (metadata.IsDerived ||
                 metadata.IsIntercepted == false ||
-                metadata.Type.IsValueType || 
+                metadata.Type.IsValueType ||
                 metadata.Type == typeof(string))
             {
                 continue;
@@ -247,10 +340,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
                 break;
 
-            // TODO: Support more enumerations with high performance here (immutable arrays, lists, ...)
-            // case string collection: break;
-            // case IEnumerable collection:
-
             case ICollection collection:
                 var i = 0;
                 foreach (var item in collection)
@@ -263,6 +352,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     i++;
                 }
                 break;
+        }
+    }
+
+    private static void AttachPropertiesForNewlyAttachedSubjects(List<IInterceptorSubject> newlyAttachedSubjects)
+    {
+        foreach (var attachedSubject in newlyAttachedSubjects)
+        {
+            foreach (var propertyName in attachedSubject.Properties.Keys)
+            {
+                attachedSubject.AttachSubjectProperty(new PropertyReference(attachedSubject, propertyName));
+            }
         }
     }
 
@@ -294,6 +394,20 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         hashSet.Clear();
         _hashSetPool!.Push(hashSet);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static List<IInterceptorSubject> GetSubjectList()
+    {
+        _subjectListPool ??= new Stack<List<IInterceptorSubject>>();
+        return _subjectListPool.Count > 0 ? _subjectListPool.Pop() : [];
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ReturnSubjectList(List<IInterceptorSubject> list)
+    {
+        list.Clear();
+        _subjectListPool!.Push(list);
     }
 
     #endregion

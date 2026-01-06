@@ -206,7 +206,7 @@ This ensures that all objects in the subject graph share the same context, enabl
 
 ## Subject Lifecycle Tracking
 
-Track when subjects are attached to or detached from the subject graph:
+Track when subjects enter or leave the lifecycle system (used by registry, hosting, sources):
 
 ```csharp
 [InterceptorSubject]
@@ -219,22 +219,23 @@ public partial class Person
 var context = InterceptorSubjectContext
     .Create()
     .WithLifecycle()
+    .WithContextInheritance()
     .WithService(() => new MyLifecycleHandler());
 
 var person = new Person(context);
-var child = new Person(context) { Name = "Child" };
+var child = new Person { Name = "Child" }; // No context yet
 
-person.Children = [child]; // AttachSubject called for child
-person.Children = [];      // DetachSubject called for child
+person.Children = [child]; // OnSubjectAttached and OnSubjectAttachedToProperty called
+person.Children = [];      // OnSubjectDetachedFromProperty and OnSubjectDetached called
 
 public class MyLifecycleHandler : ILifecycleHandler
 {
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnSubjectAttached(SubjectLifecycleChange change)
     {
         Console.WriteLine($"Attached: {change.Subject} via property {change.Property?.Name}");
     }
 
-    public void DetachSubject(SubjectLifecycleChange change)
+    public void OnSubjectDetached(SubjectLifecycleChange change)
     {
         Console.WriteLine($"Detached: {change.Subject} via property {change.Property?.Name}");
     }
@@ -247,9 +248,25 @@ public class MyLifecycleHandler : ILifecycleHandler
 - **Sources package**: Subscribe/unsubscribe from external data sources
 - **Derived property detection**: Initialize derived properties on attach
 
+### Handler Interfaces
+
+The lifecycle system provides three handler interfaces for different tracking needs:
+
+| Interface | Methods | When Called |
+|-----------|---------|-------------|
+| `ILifecycleHandler` | `OnSubjectAttached`, `OnSubjectDetached` | First entry / Final exit from object graph |
+| `IReferenceLifecycleHandler` | `OnSubjectAttachedToProperty`, `OnSubjectDetachedFromProperty` | Each property assignment / removal |
+| `IPropertyLifecycleHandler` | `OnPropertyAttached`, `OnPropertyDetached` | Subject's own properties tracked |
+
+**Handler Ordering:**
+- **Attach**: Handlers called in registration (forward) order
+- **Detach**: Handlers called in **reverse** order for symmetry
+
+This symmetrical ordering ensures cleanup handlers run in the opposite order of initialization handlers.
+
 ### Lifecycle Events
 
-In addition to `ILifecycleHandler`, the `LifecycleInterceptor` provides events for dynamic subscribers:
+In addition to handler interfaces, the `LifecycleInterceptor` provides events for dynamic subscribers:
 
 ```csharp
 var context = InterceptorSubjectContext
@@ -269,8 +286,38 @@ lifecycleInterceptor.SubjectDetached += change =>
 };
 ```
 
+**SubjectAttached** fires when:
+- A subject is created with a context (`new Person(context)`) - context-only attachment
+- A subject is assigned to an intercepted property (e.g. `parent.Child = child`) - property attachment
+
+**SubjectDetached** fires when:
+- A subject is removed from an intercepted property (e.g. `parent.Child = null`) - property detachment
+- A subject's fallback context is removed (triggered by `ContextInheritanceHandler`) - context-only detachment
+
+**Two-phase detachment** (requires `WithContextInheritance()`): When a subject loses its last property reference, two detach events fire:
+1. **Context-only detach** (`Property == null`) - the subject leaves lifecycle entirely, triggered by `ContextInheritanceHandler`
+2. **Property detach** (`Property != null`) - the property reference is removed
+
+This two-phase pattern is triggered by `ContextInheritanceHandler`, which automatically removes the fallback context when `ReferenceCount` reaches 0. Without context inheritance, only the property detach fires.
+
+**Event Order During Attach:**
+1. `ILifecycleHandler.OnSubjectAttached()` - handlers in forward order
+2. `IReferenceLifecycleHandler.OnSubjectAttachedToProperty()` - handlers in forward order
+3. `SubjectAttached` event fires
+4. `IPropertyLifecycleHandler.OnPropertyAttached()` - for each property
+
+**Event Order During Detach:**
+1. `IReferenceLifecycleHandler.OnSubjectDetachedFromProperty()` - handlers in reverse order
+2. `IPropertyLifecycleHandler.OnPropertyDetached()` - for each property (if last detach)
+3. `SubjectDetached` event fires (if last detach)
+4. `ILifecycleHandler.OnSubjectDetached()` - handlers in reverse order (if last detach)
+
+This pattern allows handlers to distinguish between:
+- Property detachment (property reference removed, subject may still be referenced elsewhere)
+- Final detachment (subject being removed from lifecycle/registry)
+
 Events are useful for:
-- Cache invalidation when subjects are removed from the object graph
+- Cache invalidation when subjects leave the lifecycle
 - Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
 - Integration packages (MQTT, OPC UA) that need to clean up internal state
 
@@ -304,32 +351,144 @@ lifecycleInterceptor.SubjectDetached += async change =>
 
 ### Reference Counting
 
-Each subject tracks how many parent references point to it via `GetReferenceCount()`:
+Each subject tracks how many **property references** point to it via `GetReferenceCount()`:
 
 ```csharp
 var referenceCount = subject.GetReferenceCount();
 // Returns the number of properties referencing this subject
-// Returns 0 if not attached or lifecycle tracking is disabled
+// Context-only attachments do NOT increment this count
+// Returns 0 for subjects created with context but not assigned to any property
 ```
 
 The reference count is managed internally by the library:
-- `SubjectAttached` fires on **every** attachment (after count is incremented)
-- `SubjectDetached` fires on **every** detachment (after count is decremented)
+- **Only property attachments** increment/decrement the reference count
+- **Context-only attachments** (when subject is created with a context) do NOT affect the count
+- `OnSubjectAttached`/`OnSubjectDetached` fire only on first entry / final exit from the graph
+- `OnSubjectAttachedToProperty`/`OnSubjectDetachedFromProperty` fire on every property assignment/removal
 
-The `SubjectLifecycleChange` record includes `ReferenceCount` with the updated count after the increment/decrement. Handlers can check this to determine if this is a first attachment (count == 1) or last detachment (count == 0):
+The `SubjectLifecycleChange` record structure:
 
 ```csharp
-lifecycleInterceptor.SubjectDetached += change =>
+public record struct SubjectLifecycleChange(
+    IInterceptorSubjectContext Context,  // Context used to invoke handlers (parent's context)
+    IInterceptorSubject Subject,         // The subject being attached/detached
+    PropertyReference? Property,         // null for context-only changes
+    object? Index,                       // for collection/dictionary items
+    int ReferenceCount);                 // refs after this change
+```
+
+**Accessing services from handlers:**
+
+```csharp
+public void OnSubjectAttached(SubjectLifecycleChange change)
+{
+    // Use change.Context (invoking context) to access services
+    var registry = change.Context.TryGetService<ISubjectRegistry>();
+    // NOT: change.Subject.Context (child may not have services yet)
+}
+```
+
+**Using reference count for specific scenarios:**
+
+```csharp
+// Example: Context inheritance only for first property attachment
+public void OnSubjectAttachedToProperty(SubjectLifecycleChange change)
+{
+    if (change.ReferenceCount == 1)
+    {
+        // This is the first property referencing this subject
+        AddFallbackContext(change.Subject, change.Property.Value.Subject.Context);
+    }
+}
+
+public void OnSubjectDetachedFromProperty(SubjectLifecycleChange change)
 {
     if (change.ReferenceCount == 0)
     {
-        // Fully detached - safe to clean up
-        CleanupResources(change.Subject);
+        // Last property reference removed
+        RemoveFallbackContext(change.Subject);
     }
-};
+}
 ```
 
-This enables proper cleanup when subjects are removed from all parent references, even when referenced by multiple properties or collections.
+This enables proper cleanup when subjects lose all property references and leave the lifecycle.
+
+### Lifecycle Event Examples
+
+The following examples illustrate how lifecycle events fire in different attachment scenarios.
+
+#### Context-First Attachment
+
+When a subject is first attached via context, then assigned to a property:
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithLifecycle()
+    .WithContextInheritance();
+
+var parent = new Person(context);
+
+// Step 1: Create child with context directly
+var child = new Person(context);
+
+// Step 2: Assign child to property
+parent.Mother = child;
+
+// Step 3: Remove child from property
+parent.Mother = null;
+```
+
+| Step | Action | Handler Method | Property | RefCount |
+|------|--------|----------------|----------|----------|
+| 1 | `new Person(context)` | `OnSubjectAttached` | null | 0 |
+| 2a | `parent.Mother = child` | `OnSubjectAttachedToProperty` | Mother | 1 |
+| 3a | `parent.Mother = null` | `OnSubjectDetached` | null | 0 |
+| 3b | *(continue)* | `OnSubjectDetachedFromProperty` | Mother | 0 |
+
+- **Step 1**: Context-only attachment (no property reference)
+- **Step 2a**: Property attachment increments `ReferenceCount` to 1
+- **Step 3a**: Context-only detach fires via `ContextInheritanceHandler`
+- **Step 3b**: Property detach completes
+
+#### Property-Direct Attachment
+
+When a subject is attached directly via property (most common scenario):
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithLifecycle()
+    .WithContextInheritance();
+
+var parent = new Person(context);
+var child = new Person();
+
+// Step 1: Assign child to Mother (first attachment)
+parent.Mother = child;
+
+// Step 2: Assign same child to Father (second attachment)
+parent.Father = child;
+
+// Step 3: Remove from Mother (partial detachment)
+parent.Mother = null;
+
+// Step 4: Remove from Father (final detachment)
+parent.Father = null;
+```
+
+| Step | Action | Handler Method | Property | RefCount |
+|------|--------|----------------|----------|----------|
+| 1a | `parent.Mother = child` | `OnSubjectAttached` | Mother | 1 |
+| 1b | *(continue)* | `OnSubjectAttachedToProperty` | Mother | 1 |
+| 2 | `parent.Father = child` | `OnSubjectAttachedToProperty` | Father | 2 |
+| 3 | `parent.Mother = null` | `OnSubjectDetachedFromProperty` | Mother | 1 |
+| 4a | `parent.Father = null` | `OnSubjectDetached` | null | 0 |
+| 4b | *(continue)* | `OnSubjectDetachedFromProperty` | Father | 0 |
+
+- **Step 1**: First property attachment triggers both `OnSubjectAttached` and `OnSubjectAttachedToProperty`
+- **Steps 2-3**: Intermediate changes only trigger reference handlers
+- **Step 4**: Final detachment triggers both handlers (context-only detach via `ContextInheritanceHandler`)
 
 ## Parent-Child Relationship Tracking
 
@@ -375,6 +534,8 @@ var accessedProperties = scope.GetPropertiesAndDispose();
 This is primarily used internally by the derived property change detection system but can also be used for custom scenarios.
 
 ## Thread Safety and Synchronization
+
+**Parent Tracking**: `GetParents()` is thread-safe and returns an immutable snapshot (`IReadOnlyCollection<SubjectParent>`) of the parent references.
 
 **Observable**: Thread-safe through `Subject.Synchronize()`, but observers may receive events on different threads.
 

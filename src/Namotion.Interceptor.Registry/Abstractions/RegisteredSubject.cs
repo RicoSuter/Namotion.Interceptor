@@ -1,6 +1,6 @@
-﻿using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -10,9 +10,23 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubject
 {
+    private sealed class PropertyStorage
+    {
+        public readonly Dictionary<string, RegisteredSubjectProperty> Dictionary;
+        public readonly ImmutableArray<RegisteredSubjectProperty> Array;
+
+        public PropertyStorage(
+            Dictionary<string, RegisteredSubjectProperty> dictionary,
+            ImmutableArray<RegisteredSubjectProperty> array)
+        {
+            Dictionary = dictionary;
+            Array = array;
+        }
+    }
+
     private readonly Lock _parentsLock = new();
 
-    private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
+    private volatile PropertyStorage _storage;
     private ImmutableArray<SubjectPropertyParent> _parents = [];
 
     [JsonIgnore] public IInterceptorSubject Subject { get; }
@@ -36,14 +50,23 @@ public class RegisteredSubject
         }
     }
 
-    public ImmutableArray<RegisteredSubjectProperty> Properties => _properties.Values;
+    /// <summary>
+    /// Gets all registered properties of the subject.
+    /// Allocation-free: Returns cached ImmutableArray.
+    /// </summary>
+    public ImmutableArray<RegisteredSubjectProperty> Properties
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _storage.Array;
+    }
 
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
     public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
     {
-        foreach (var property in _properties.Values)
+        var storage = _storage;
+        foreach (var property in storage.Array)
         {
             if (property.IsAttribute && property.AttributeMetadata.PropertyName == propertyName)
             {
@@ -60,7 +83,8 @@ public class RegisteredSubject
     /// <returns>The attribute property.</returns>
     public RegisteredSubjectProperty? TryGetPropertyAttribute(string propertyName, string attributeName)
     {
-        foreach (var property in _properties.Values)
+        var storage = _storage;
+        foreach (var property in storage.Array)
         {
             if (property.IsAttribute &&
                 property.AttributeMetadata.PropertyName == propertyName &&
@@ -80,18 +104,26 @@ public class RegisteredSubject
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty? TryGetProperty(string propertyName)
     {
-        return _properties.GetValueOrDefault(propertyName);
+        return _storage.Dictionary.GetValueOrDefault(propertyName);
     }
 
     public RegisteredSubject(IInterceptorSubject subject)
     {
         Subject = subject;
-        _properties = subject
-            .Properties
-            .ToFrozenDictionary(
-                p => p.Key,
-                p => new RegisteredSubjectProperty(
-                    this, p.Key, p.Value.Type, p.Value.Attributes));
+
+        var count = subject.Properties.Count;
+        var array = new RegisteredSubjectProperty[count];
+        var dictionary = new Dictionary<string, RegisteredSubjectProperty>(count);
+
+        var index = 0;
+        foreach (var p in subject.Properties)
+        {
+            var prop = new RegisteredSubjectProperty(this, p.Key, p.Value.Type, p.Value.Attributes);
+            array[index++] = prop;
+            dictionary[p.Key] = prop;
+        }
+
+        _storage = new PropertyStorage(dictionary, ImmutableCollectionsMarshal.AsImmutableArray(array));
     }
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
@@ -118,14 +150,14 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddDerivedProperty<TProperty>(string name, 
+    public RegisteredSubjectProperty AddDerivedProperty<TProperty>(string name,
         Func<IInterceptorSubject, TProperty?>? getValue,
         Action<IInterceptorSubject, TProperty?>? setValue = null,
         params Attribute[] attributes)
     {
-        return AddProperty(name, typeof(TProperty), 
-            getValue is not null ? x => (TProperty)getValue(x)! : null, 
-            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null, 
+        return AddProperty(name, typeof(TProperty),
+            getValue is not null ? x => (TProperty)getValue(x)! : null,
+            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null,
             attributes.Concat([new DerivedAttribute()]).ToArray());
     }
 
@@ -137,14 +169,14 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddProperty<TProperty>(string name, 
+    public RegisteredSubjectProperty AddProperty<TProperty>(string name,
         Func<IInterceptorSubject, TProperty?>? getValue,
         Action<IInterceptorSubject, TProperty?>? setValue = null,
         params Attribute[] attributes)
     {
-        return AddProperty(name, typeof(TProperty), 
-            getValue is not null ? x => (TProperty)getValue(x)! : null, 
-            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null, 
+        return AddProperty(name, typeof(TProperty),
+            getValue is not null ? x => (TProperty)getValue(x)! : null,
+            setValue is not null ? (x, y) => setValue(x, (TProperty)y!) : null,
             attributes);
     }
 
@@ -157,7 +189,7 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
-    public RegisteredSubjectProperty AddDerivedProperty(string name, 
+    public RegisteredSubjectProperty AddDerivedProperty(string name,
         Type type,
         Func<IInterceptorSubject, object?>? getValue,
         Action<IInterceptorSubject, object?>? setValue = null,
@@ -177,7 +209,7 @@ public class RegisteredSubject
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
     public RegisteredSubjectProperty AddProperty(
-        string name, 
+        string name,
         Type type,
         Func<IInterceptorSubject, object?>? getValue,
         Action<IInterceptorSubject, object?>? setValue,
@@ -205,13 +237,16 @@ public class RegisteredSubject
     {
         var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
 
-        var newProperties = _properties
-            .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
-            .ToFrozenDictionary(p => p.Key, p => p.Value);
+        var currentStorage = _storage;
+        var newDictionary = new Dictionary<string, RegisteredSubjectProperty>(currentStorage.Dictionary)
+        {
+            [subjectProperty.Name] = subjectProperty
+        };
+        var newArray = currentStorage.Array.Add(subjectProperty);
 
-        _properties = newProperties;
+        _storage = new PropertyStorage(newDictionary, newArray);
 
-        foreach (var property in newProperties.Values)
+        foreach (var property in newArray)
         {
             property.AttributesCache = null;
         }

@@ -133,10 +133,12 @@ public class ContextInheritanceHandlerTests
         child2.Mother = child3;
         child3.Mother = child1;
 
-        // Assert
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child1.GetServices<ILifecycleInterceptor>());
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child2.GetServices<ILifecycleInterceptor>());
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child3.GetServices<ILifecycleInterceptor>());
+        // Assert - All children should have access to the same LifecycleInterceptor through context inheritance
+        var expectedInterceptor = context.GetServices<ILifecycleInterceptor>().FirstOrDefault();
+        Assert.NotNull(expectedInterceptor);
+        Assert.Same(expectedInterceptor, child1.GetServices<ILifecycleInterceptor>().FirstOrDefault());
+        Assert.Same(expectedInterceptor, child2.GetServices<ILifecycleInterceptor>().FirstOrDefault());
+        Assert.Same(expectedInterceptor, child3.GetServices<ILifecycleInterceptor>().FirstOrDefault());
     }
     
     [Fact]

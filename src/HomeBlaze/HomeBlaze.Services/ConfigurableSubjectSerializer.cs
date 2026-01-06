@@ -18,13 +18,15 @@ namespace HomeBlaze.Services;
 public class ConfigurableSubjectSerializer
 {
     private readonly TypeProvider _typeProvider;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceProvider _subjectServiceProvider;
     private readonly JsonSerializerOptions _options;
 
     public ConfigurableSubjectSerializer(TypeProvider typeProvider, IServiceProvider serviceProvider)
     {
         _typeProvider = typeProvider;
-        _serviceProvider = serviceProvider;
+        // Use wrapper to exclude IInterceptorSubjectContext from DI resolution.
+        // Context will be attached later via ContextInheritanceHandler.
+        _subjectServiceProvider = new SubjectCreationServiceProvider(serviceProvider);
         _options = new JsonSerializerOptions
         {
             TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider),
@@ -79,7 +81,7 @@ public class ConfigurableSubjectSerializer
         }
 
         // Create instance using ActivatorUtilities for DI-aware construction
-        var subject = ActivatorUtilities.CreateInstance(_serviceProvider, type) as IConfigurableSubject;
+        var subject = ActivatorUtilities.CreateInstance(_subjectServiceProvider, type) as IConfigurableSubject;
         if (subject == null)
         {
             return null;

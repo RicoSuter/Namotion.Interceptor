@@ -1,0 +1,10 @@
+﻿[
+  {
+    Event: SubjectAttached,
+    Name: Mother,
+    ReferenceCount: 1
+  },
+  {
+    Event: SubjectDetached
+  }
+]

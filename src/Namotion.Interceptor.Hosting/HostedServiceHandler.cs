@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks.Dataflow;
+using System.Threading.Tasks.Dataflow;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -21,39 +21,33 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         _loggerResolver = loggerResolver;
     }
 
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void OnSubjectAttached(SubjectLifecycleChange change)
     {
         _logger ??= _loggerResolver();
-        
-        if (change.ReferenceCount == 1)
-        {
-            if (change.Subject is IHostedService hostedService)
-            {
-                AttachHostedService(hostedService);
-            }
 
-            foreach (var hostedService2 in change.Subject.GetAttachedHostedServices())
-            {
-                AttachHostedService(hostedService2);
-            }
+        if (change.Subject is IHostedService hostedService)
+        {
+            AttachHostedService(hostedService);
+        }
+
+        foreach (var attachedHostedService in change.Subject.GetAttachedHostedServices())
+        {
+            AttachHostedService(attachedHostedService);
         }
     }
 
-    public void DetachSubject(SubjectLifecycleChange change)
+    public void OnSubjectDetached(SubjectLifecycleChange change)
     {
         _logger ??= _loggerResolver();
 
-        if (change.ReferenceCount == 0)
+        if (change.Subject is IHostedService hostedService)
         {
-            if (change.Subject is IHostedService hostedService)
-            {
-                DetachHostedService(hostedService);
-            }
+            DetachHostedService(hostedService);
+        }
 
-            foreach (var attachedHostedService in change.Subject.GetAttachedHostedServices())
-            {
-                change.Subject.DetachHostedService(attachedHostedService);
-            }
+        foreach (var attachedHostedService in change.Subject.GetAttachedHostedServices())
+        {
+            change.Subject.DetachHostedService(attachedHostedService);
         }
     }
 
@@ -63,7 +57,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         {
             return _executeTask.IsCompleted ? _executeTask : Task.CompletedTask;
         }
-        
+
         _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _executeTask = ExecuteAsync(_stoppingCts.Token);
         return _executeTask.IsCompleted ? _executeTask : Task.CompletedTask;
@@ -103,7 +97,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
             {
                 await _stoppingCts.CancelAsync();
             }
-            
+
             Task[] tasks;
             lock (_hostedServices)
             {
@@ -124,10 +118,10 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                         }
                     })
                     .ToArray();
-                
+
                 _hostedServices.Clear();
             }
-            
+
             await Task.WhenAll(tasks);
         }
         finally
@@ -137,7 +131,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         }
     }
-    
+
     internal void AttachHostedService(IHostedService hostedService)
     {
         lock (_hostedServices)
@@ -177,7 +171,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
 
         await tcs.Task.WaitAsync(cancellationToken);
     }
-    
+
     internal async Task DetachHostedServiceAsync(IHostedService hostedService, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource();
@@ -202,8 +196,6 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         {
             try
             {
-                await Task.Delay(50, token); // TODO: Fix small delay to let sync property assignments/deserialization complete
-
                 _logger?.LogInformation("Starting attached hosted service {Service}.", hostedService.ToString());
                 await hostedService.StartAsync(token);
                 tcs?.TrySetResult();
@@ -221,8 +213,6 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         {
             try
             {
-                await Task.Delay(50, token); // TODO: Fix small delay to let sync property assignments/deserialization complete
-
                 _logger?.LogInformation("Stopping detached hosted service {Service}.", hostedService.ToString());
                 await hostedService.StopAsync(token);
                 tcs?.TrySetResult();
