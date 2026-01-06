@@ -1,0 +1,126 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(GridCell))]
+@implements ISubjectEditComponent
+@implements IDisposable
+
+<MudForm>
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Position (leave empty for auto-flow)</MudText>
+
+    <MudGrid>
+        <MudItem xs="6">
+            <MudNumericField @bind-Value="_row"
+                             Label="Row"
+                             Min="0"
+                             Clearable="true" />
+        </MudItem>
+        <MudItem xs="6">
+            <MudNumericField @bind-Value="_column"
+                             Label="Column"
+                             Min="0"
+                             Clearable="true" />
+        </MudItem>
+    </MudGrid>
+
+    <MudText Typo="Typo.subtitle2" Class="mt-4 mb-2">Span</MudText>
+
+    <MudGrid>
+        <MudItem xs="6">
+            <MudNumericField @bind-Value="_rowSpan"
+                             Label="Row Span"
+                             Min="1"
+                             Max="10" />
+        </MudItem>
+        <MudItem xs="6">
+            <MudNumericField @bind-Value="_columnSpan"
+                             Label="Column Span"
+                             Min="1"
+                             Max="10" />
+        </MudItem>
+    </MudGrid>
+
+    <MudDivider Class="my-4" />
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Child Widget</MudText>
+    @if (Cell?.Child != null)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true">
+            @Cell.Child.GetType().Name
+        </MudAlert>
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true">
+            No child widget assigned
+        </MudAlert>
+    }
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private GridCell? Cell => Subject as GridCell;
+
+    private int? _row;
+    private int? _column;
+    private int _rowSpan;
+    private int _columnSpan;
+
+    private int? _originalRow;
+    private int? _originalColumn;
+    private int _originalRowSpan;
+    private int _originalColumnSpan;
+
+    public bool IsValid => _rowSpan >= 1 && _columnSpan >= 1;
+    public bool IsDirty => _row != _originalRow
+                        || _column != _originalColumn
+                        || _rowSpan != _originalRowSpan
+                        || _columnSpan != _originalColumnSpan;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (Cell != null)
+        {
+            _row = Cell.Row;
+            _column = Cell.Column;
+            _rowSpan = Cell.RowSpan;
+            _columnSpan = Cell.ColumnSpan;
+
+            _originalRow = _row;
+            _originalColumn = _column;
+            _originalRowSpan = _rowSpan;
+            _originalColumnSpan = _columnSpan;
+        }
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Cell != null)
+        {
+            Cell.Row = _row;
+            Cell.Column = _column;
+            Cell.RowSpan = _rowSpan;
+            Cell.ColumnSpan = _columnSpan;
+
+            _originalRow = _row;
+            _originalColumn = _column;
+            _originalRowSpan = _rowSpan;
+            _originalColumnSpan = _columnSpan;
+
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        IsValidChanged = null;
+        IsDirtyChanged = null;
+    }
+}

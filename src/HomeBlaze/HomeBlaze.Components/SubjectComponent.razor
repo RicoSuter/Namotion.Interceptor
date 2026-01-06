@@ -7,14 +7,22 @@
     if (registration?.ComponentType != null)
     {
         <div class="subject-component-wrapper" style="position: relative;">
-            @if (IsEditing && Type == SubjectComponentType.Widget && HasEditComponent)
+            @if (IsEditing && Type == SubjectComponentType.Widget && (ActionButtons != null || HasEditComponent))
             {
                 <div class="subject-edit-overlay">
-                    <MudIconButton Icon="@Icons.Material.Filled.Edit"
-                                   Size="Size.Small"
-                                   Color="Color.Primary"
-                                   OnClick="OpenEditDialog"
-                                   data-testid="edit-subject-button" />
+                    @* Built-in edit button (if edit component exists) *@
+                    @if (HasEditComponent)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                       Size="Size.Small"
+                                       Color="Color.Primary"
+                                       title="Edit"
+                                       OnClick="OpenEditDialog"
+                                       data-testid="edit-subject-button" />
+                    }
+
+                    @* Additional action buttons from parent *@
+                    @ActionButtons
                 </div>
             }
             <DynamicComponent Type="registration.ComponentType"
@@ -36,10 +44,19 @@
         top: 4px;
         right: 4px;
         z-index: 10;
-        opacity: 0.8;
+        display: flex;
+        gap: 2px;
+        background: rgba(255,255,255,0.95);
+        border-radius: 4px;
+        padding: 2px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        opacity: 0.9;
     }
     .subject-edit-overlay:hover {
         opacity: 1;
+    }
+    .subject-edit-overlay .mud-icon-button {
+        padding: 4px;
     }
 </style>
 
@@ -51,6 +68,13 @@
 
     [Parameter]
     public SubjectComponentType Type { get; set; }
+
+    /// <summary>
+    /// Additional action buttons to display in the edit overlay.
+    /// Rendered after the built-in edit button.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? ActionButtons { get; set; }
 
     /// <summary>
     /// Additional parameters to pass to the rendered component (e.g., IsCreating).
