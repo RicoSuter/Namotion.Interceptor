@@ -960,12 +960,12 @@ Create `src/HomeBlaze/HomeBlaze.Components/Components/CanvasLayoutEditComponent.
                      HelperText="Optional. Leave empty for default (400px)."
                      Class="mb-4" />
 
-    <MudSwitch @bind-Value="_snapEnabled"
+    <MudSwitch @bind-Value="_isSnapToGridEnabled"
                Label="Snap to Grid"
                Color="Color.Primary"
                Class="mb-4" />
 
-    @if (_snapEnabled)
+    @if (_isSnapToGridEnabled)
     {
         <MudNumericField @bind-Value="_gridSize"
                          Label="Grid Size (pixels)"
@@ -989,16 +989,16 @@ Create `src/HomeBlaze/HomeBlaze.Components/Components/CanvasLayoutEditComponent.
     private CanvasLayout? Canvas => Subject as CanvasLayout;
 
     private int? _minHeight;
-    private bool _snapEnabled;
+    private bool _isSnapToGridEnabled;
     private int _gridSize;
 
     private int? _originalMinHeight;
-    private bool _originalSnapEnabled;
+    private bool _originalIsSnapToGridEnabled;
     private int _originalGridSize;
 
     public bool IsValid => true;
     public bool IsDirty => _minHeight != _originalMinHeight
-                        || _snapEnabled != _originalSnapEnabled
+                        || _isSnapToGridEnabled != _originalIsSnapToGridEnabled
                         || _gridSize != _originalGridSize;
 
     public event Action<bool>? IsValidChanged;
@@ -1009,11 +1009,11 @@ Create `src/HomeBlaze/HomeBlaze.Components/Components/CanvasLayoutEditComponent.
         if (Canvas != null)
         {
             _minHeight = Canvas.MinHeight;
-            _snapEnabled = Canvas.IsSnapToGridEnabled;
+            _isSnapToGridEnabled = Canvas.IsSnapToGridEnabled;
             _gridSize = Canvas.GridSize;
 
             _originalMinHeight = _minHeight;
-            _originalSnapEnabled = _snapEnabled;
+            _originalIsSnapToGridEnabled = _isSnapToGridEnabled;
             _originalGridSize = _gridSize;
         }
     }
@@ -1023,11 +1023,11 @@ Create `src/HomeBlaze/HomeBlaze.Components/Components/CanvasLayoutEditComponent.
         if (Canvas != null)
         {
             Canvas.MinHeight = _minHeight;
-            Canvas.IsSnapToGridEnabled = _snapEnabled;
+            Canvas.IsSnapToGridEnabled = _isSnapToGridEnabled;
             Canvas.GridSize = _gridSize;
 
             _originalMinHeight = _minHeight;
-            _originalSnapEnabled = _snapEnabled;
+            _originalIsSnapToGridEnabled = _isSnapToGridEnabled;
             _originalGridSize = _gridSize;
 
             IsDirtyChanged?.Invoke(false);
