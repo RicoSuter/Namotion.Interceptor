@@ -185,7 +185,7 @@ This reuses the existing `Widget` subject for path resolution - no duplication o
 ```
 ┌─────────────────────────────────────────────────────────────[⚙]─┐ ← Edit Layout button
 │  ┌───────────────────┐  ┌───────────────────┐  ┌─────────────┐  │   (rows, columns)
-│  │ [⚙][🗑][✎]        │  │ [⚙][🗑][✎]        │  │ [⚙][🗑][✎] │  │
+│  │ [✎][⚙][🗑]        │  │ [✎][⚙][🗑]        │  │ [✎][⚙][🗑] │  │
 │  │   Motor Widget    │  │   Motor Widget    │  │   Sensor    │  │
 │  │   ┌──────────┐    │  │   ┌──────────┐    │  │   Widget    │  │
 │  │   │ ⚙ Motor1 │    │  │   │ ⚙ Motor2 │    │  │             │  │
@@ -194,7 +194,7 @@ This reuses the existing `Widget` subject for path resolution - no duplication o
 │  │                   │  │                   │  │             │  │
 │  └───────────────────┘  └───────────────────┘  └─────────────┘  │
 │  ┌───────────────────┐  ╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮  ╭┄┄┄┄┄┄┄┄┄┄┄┄┄╮  │
-│  │ [⚙][🗑][✎]        │  ┆                   ┆  ┆             ┆  │
+│  │ [✎][⚙][🗑]        │  ┆                   ┆  ┆             ┆  │
 │  │   Status Widget   │  ┆                   ┆  ┆             ┆  │
 │  │   ✓ All systems   │  ┆        [+]        ┆  ┆     [+]     ┆  │
 │  │     operational   │  ┆    click to add   ┆  ┆             ┆  │
@@ -207,9 +207,9 @@ This reuses the existing `Widget` subject for path resolution - no duplication o
   [⚙] = Edit Layout (rows, columns)  → opens GridLayoutEditComponent dialog
 
   Cell Buttons (top-right of each cell, via SubjectComponent ActionButtons):
+  [✎] = Edit Widget (from SubjectComponent) → opens child's edit dialog
   [⚙] = Edit Cell (row, column, spans) → opens GridCellEditComponent dialog
   [🗑] = Delete Cell                    → shows confirmation, removes cell
-  [✎] = Edit Widget (from SubjectComponent) → opens child's edit dialog
 ```
 
 ### CanvasLayout - View Mode
@@ -241,15 +241,15 @@ This reuses the existing `Widget` subject for path resolution - no duplication o
 ┌─────────────────────────────────────────────────────────────[⚙]─┐ ← Edit Layout button
 │ · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · │   (snap, min height)
 │ ·   ┌──────────────┐ ·                                        · │ ← snap grid dots
-│ ·   │[⚙][🗑][✎]    │ ·        ┌─────────────────────┐         · │   (when enabled)
-│ ·   │ Motor Widget │ ·        │[⚙][🗑][✎]           │         · │
+│ ·   │[✎][⚙][🗑]    │ ·        ┌─────────────────────┐         · │   (when enabled)
+│ ·   │ Motor Widget │ ·        │[✎][⚙][🗑]           │         · │
 │ ·   │   ⚙ Motor1   │ ·        │   Status Dashboard  │         · │
 │ ·   │   1500 RPM   │ ·        │   ┌───┐ ┌───┐ ┌───┐ │         · │
 │ ·   └──────────────┘ ·        │   │ ✓ │ │ ✓ │ │ ! │ │         · │
 │ · · · · · · · · · · · ·       │   └───┘ └───┘ └───┘ │         · │
 │ ·                     ·       └─────────────────────┘         · │
 │ ·        ┌────────────────────┐                               · │
-│ ·        │[⚙][🗑][✎]          │    ← drag node body to move   · │
+│ ·        │[✎][⚙][🗑]          │    ← drag node body to move   · │
 │ ·        │   Sensor Widget    │                                · │
 │ ·        │     Temperature    │                                · │
 │ ·        │      25.3°C        │                                · │
@@ -263,9 +263,9 @@ This reuses the existing `Widget` subject for path resolution - no duplication o
   [⚙] = Edit Layout (min height, snap settings) → opens CanvasLayoutEditComponent dialog
 
   Node Buttons (top-right of each node, via SubjectComponent ActionButtons):
+  [✎] = Edit Widget (from SubjectComponent) → opens child's edit dialog
   [⚙] = Edit Node (x, y, width, height) → opens CanvasNodeEditComponent dialog
   [🗑] = Delete Node                     → shows confirmation, removes node
-  [✎] = Edit Widget (from SubjectComponent) → opens child's edit dialog
 ```
 
 ### SubjectSetupDialog (when clicking empty cell/area)
@@ -489,7 +489,7 @@ This reuses the existing `Widget` subject for path resolution - no duplication o
 **Each Node/Cell (top-right corner, via SubjectComponent ActionButtons):**
 ```
 ┌─────────────────────────────┐
-│ [⚙][🗑][✎]                  │
+│ [✎][⚙][🗑]                  │
 │                             │
 │   Widget Content            │
 │                             │
@@ -498,9 +498,9 @@ This reuses the existing `Widget` subject for path resolution - no duplication o
 
 | Button | Icon | Source | Action |
 |--------|------|--------|--------|
+| Edit Widget | ✎ (Edit) | SubjectComponent | Opens dialog to edit the child widget's properties |
 | Edit Node/Cell | ⚙ (Settings) | ActionButtons | Opens dialog to edit position/size (canvas) or row/column/spans (grid) |
 | Delete | 🗑 (Delete) | ActionButtons | Shows confirmation dialog, then removes the node/cell |
-| Edit Widget | ✎ (Edit) | SubjectComponent | Opens dialog to edit the child widget's properties |
 
 **No selection state needed** - all actions are directly on the element via buttons.
 **Reuses SubjectComponent's edit button** - no duplicate "Edit Widget" button needed.
@@ -582,9 +582,6 @@ Extend `SubjectComponent` to accept additional action buttons:
             @if (IsEditing && Type == SubjectComponentType.Widget && (ActionButtons != null || HasEditComponent))
             {
                 <div class="subject-edit-overlay">
-                    @* Additional action buttons from parent *@
-                    @ActionButtons
-
                     @* Built-in edit button (if edit component exists) *@
                     @if (HasEditComponent)
                     {
@@ -595,6 +592,9 @@ Extend `SubjectComponent` to accept additional action buttons:
                                        OnClick="OpenEditDialog"
                                        data-testid="edit-subject-button" />
                     }
+
+                    @* Additional action buttons from parent *@
+                    @ActionButtons
                 </div>
             }
             <DynamicComponent Type="registration.ComponentType"
@@ -675,7 +675,7 @@ Extend `SubjectComponent` to accept additional action buttons:
 - Added `ActionButtons` RenderFragment parameter
 - Updated `.subject-edit-overlay` to use flexbox for multiple buttons
 - Overlay now shows even without edit component (if ActionButtons provided)
-- ActionButtons render before the built-in edit button
+- Built-in edit button renders first, then ActionButtons (order: Edit Widget → Edit Node/Cell → Delete)
 
 ---
 
@@ -1817,9 +1817,9 @@ Buttons are rendered via the extended `SubjectComponent.ActionButtons` RenderFra
 
 | Button | Icon | Source | Action |
 |--------|------|--------|--------|
+| Edit Widget | Edit (✎) | Built-in to SubjectComponent | Opens dialog with `node.Child` or `cell.Child` |
 | Edit Node/Cell | Settings (⚙) | Layout widget passes via ActionButtons | Opens dialog with `CanvasNode` or `GridCell` |
 | Delete | Delete (🗑) | Layout widget passes via ActionButtons | Shows confirmation, removes node/cell |
-| Edit Widget | Edit (✎) | Built-in to SubjectComponent | Opens dialog with `node.Child` or `cell.Child` |
 
 Each layout container also displays an Edit Layout button (⚙) in the top-right corner to edit layout-level settings (rows/columns for grid, snap settings for canvas).
 
