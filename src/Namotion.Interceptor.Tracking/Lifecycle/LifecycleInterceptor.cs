@@ -62,12 +62,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             {
                 FindSubjectsInProperties(subject, collectedSubjects, null);
 
-                DetachFromContext(subject, subject.Context);
-
                 foreach (var child in collectedSubjects)
                 {
                     DetachFromProperty(child.subject, subject.Context, child.property, child.index);
                 }
+
+                DetachFromContext(subject, subject.Context);
             }
         }
         finally
@@ -252,7 +252,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             SubjectDetached?.Invoke(change);
 
-            // Cascade detach to children
             foreach (var child in children!)
             {
                 DetachFromProperty(child.subject, context, child.property, child.index);
