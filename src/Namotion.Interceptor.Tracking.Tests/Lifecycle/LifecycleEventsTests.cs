@@ -394,19 +394,19 @@ public class LifecycleEventsTests
 
         var events = new List<(string type, IInterceptorSubject subject, int count)>();
         lifecycleInterceptor.SubjectAttached += change =>
-            events.Add(("ContextAttached", change.Subject, change.ReferenceCount));
+            events.Add(("Subject Attached", change.Subject, change.ReferenceCount));
         lifecycleInterceptor.SubjectDetaching += change =>
-            events.Add(("ContextDetaching", change.Subject, change.ReferenceCount));
+            events.Add(("Subject Detaching", change.Subject, change.ReferenceCount));
 
         // Act - Replace child1 with child2
         person.Father = child2;
 
         // Assert - Detach of old value happens before attach of new value
         Assert.Equal(2, events.Count);
-        Assert.Equal("ContextDetaching", events[0].type);
+        Assert.Equal("Subject Detaching", events[0].type);
         Assert.Equal(child1, events[0].subject);
         Assert.Equal(0, events[0].count);
-        Assert.Equal("ContextAttached", events[1].type);
+        Assert.Equal("Subject Attached", events[1].type);
         Assert.Equal(child2, events[1].subject);
         Assert.Equal(1, events[1].count);
     }
