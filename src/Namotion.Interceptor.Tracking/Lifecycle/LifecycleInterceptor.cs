@@ -99,15 +99,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        foreach (var handler in context.GetServices<ILifecycleHandler>())
-        {
-            handler.HandleLifecycleChange(change);
-        }
-
-        if (subject is ILifecycleHandler subjectHandler)
-        {
-            subjectHandler.HandleLifecycleChange(change);
-        }
+        InvokeAddedLifecycleHandlers(subject, context, change);
 
         SubjectAttached?.Invoke(change);
         foreach (var propertyName in properties)
@@ -141,15 +133,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        foreach (var handler in context.GetServices<ILifecycleHandler>())
-        {
-            handler.HandleLifecycleChange(change);
-        }
-
-        if (subject is ILifecycleHandler subjectHandler)
-        {
-            subjectHandler.HandleLifecycleChange(change);
-        }
+        InvokeAddedLifecycleHandlers(subject, context, change);
 
         if (isFirstAttach)
         {
@@ -159,6 +143,19 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             {
                 subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
             }
+        }
+    }
+    
+    private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
+    {
+        foreach (var handler in context.GetServices<ILifecycleHandler>())
+        {
+            handler.HandleLifecycleChange(change);
+        }
+
+        if (subject is ILifecycleHandler subjectHandler)
+        {
+            subjectHandler.HandleLifecycleChange(change);
         }
     }
 
@@ -187,16 +184,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         SubjectDetaching?.Invoke(change);
-
-        if (subject is ILifecycleHandler subjectHandler)
-        {
-            subjectHandler.HandleLifecycleChange(change);
-        }
-
-        foreach (var handler in context.GetServices<ILifecycleHandler>())
-        {
-            handler.HandleLifecycleChange(change);
-        }
+        InvokeRemovedLifecycleHandlers(subject, context, change);
     }
 
     /// <summary>
@@ -245,15 +233,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             SubjectDetaching?.Invoke(change);
         }
 
-        if (subject is ILifecycleHandler subjectHandler)
-        {
-            subjectHandler.HandleLifecycleChange(change);
-        }
-
-        foreach (var handler in context.GetServices<ILifecycleHandler>())
-        {
-            handler.HandleLifecycleChange(change);
-        }
+        InvokeRemovedLifecycleHandlers(subject, context, change);
 
         if (isLastDetach)
         {
@@ -263,6 +243,19 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
 
             ReturnList(children);
+        }
+    }
+
+    private static void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
+    {
+        if (subject is ILifecycleHandler subjectHandler)
+        {
+            subjectHandler.HandleLifecycleChange(change);
+        }
+
+        foreach (var handler in context.GetServices<ILifecycleHandler>())
+        {
+            handler.HandleLifecycleChange(change);
         }
     }
 
