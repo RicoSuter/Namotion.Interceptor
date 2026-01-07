@@ -146,7 +146,7 @@ public class SubjectTransactionOptimisticLockingTests
 
         // Act
         // Wait a bit - tx2 should still be waiting
-        await Task.Delay(50);
+        await Task.Delay(500);
         Assert.False(tx2Task.IsCompleted, "tx2 should wait for tx1 to complete");
 
         // Wait for tx1 to complete
