@@ -19,10 +19,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         new DefaultObjectPool<HashSet<IInterceptorSubject>>(
             new HashSetPoolPolicy<IInterceptorSubject>(8), 256);
 
-    private static readonly ObjectPool<HashSet<PropertyReference>> PropertyHashSetPool =
-        new DefaultObjectPool<HashSet<PropertyReference>>(
-            new HashSetPoolPolicy<PropertyReference>(8), 256);
-
     /// <summary>
     /// Raised when a subject is attached to the object graph.
     /// Handlers must be exception-free and fast (invoked inside lock).
@@ -92,7 +88,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AttachToContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        var isFirstAttach = _attachedSubjects.TryAdd(subject, PropertyHashSetPool.Get());
+        var isFirstAttach = _attachedSubjects.TryAdd(subject, []);
         if (!isFirstAttach)
         {
             return;
@@ -175,12 +171,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void DetachFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        if (!_attachedSubjects.Remove(subject, out var hs))
+        if (!_attachedSubjects.Remove(subject))
         {
             return;
         }
-
-        PropertyHashSetPool.Return(hs);
 
         foreach (var propertyName in subject.Properties.Keys)
         {
@@ -220,12 +214,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             children = ListPool.Get();
             FindSubjectsInProperties(subject, children, null);
-
-            if (_attachedSubjects.Remove(subject, out var hs))
-            {
-                PropertyHashSetPool.Return(hs);
-            }
-
+            
+            _attachedSubjects.Remove(subject);
+            
             foreach (var propertyName in subject.Properties.Keys)
             {
                 subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
@@ -406,5 +397,4 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 break;
         }
     }
-
 }
