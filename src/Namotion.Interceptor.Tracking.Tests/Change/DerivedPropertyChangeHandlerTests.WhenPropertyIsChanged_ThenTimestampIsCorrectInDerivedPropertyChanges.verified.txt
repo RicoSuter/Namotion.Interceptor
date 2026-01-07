@@ -1,14 +1,14 @@
 ﻿{
   Update1: [
-    2024-01-01T00:00:00.0000000+00:00: Parent.Mother = {Mother MyMotherLN},
+    2024-01-01T00:00:00.0000000+00:00: Parent.Mother = Mother MyMotherLN,
     2024-01-01T00:00:00.0000000+00:00: Mother.LastName = MyMotherLN,
     2024-01-01T00:00:00.0000000+00:00: Mother.FullName = Mother MyMotherLN,
     2024-01-01T00:00:00.0000000+00:00: Mother.FullNameWithPrefix = Mr. Mother MyMotherLN
   ],
   Update2: [
     2024-01-01T00:00:01.0000000+00:00: Parent-Updated.FirstName = Parent-Updated,
-    2024-01-01T00:00:01.0000000+00:00: Parent-Updated.FullName = Parent-Updated ,
-    2024-01-01T00:00:01.0000000+00:00: Parent-Updated.FullNameWithPrefix = Mr. Parent-Updated ,
+    2024-01-01T00:00:01.0000000+00:00: Parent-Updated.FullName = Parent-Updated,
+    2024-01-01T00:00:01.0000000+00:00: Parent-Updated.FullNameWithPrefix = Mr. Parent-Updated,
     2024-01-01T00:00:01.0000000+00:00: Parent-Updated.Mother = 
   ]
 }

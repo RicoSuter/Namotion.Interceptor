@@ -19,7 +19,9 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
         public partial string? LastName { get; set; }
 
         [Derived]
-        public string FullName => $"{FirstName} {LastName}";
+        public string FullName => FirstName is null && LastName is null
+            ? "NA"
+            : $"{FirstName} {LastName}".Trim();
 
         [Derived]
         public string FullNameWithPrefix => $"Mr. {FullName}";
@@ -30,6 +32,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
 
         public partial Person[] Children { get; set; }
 
-        public override string ToString() => $"{{{FullName}}}";
+        public override string ToString() => FullName;
     }
 }
