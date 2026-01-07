@@ -80,7 +80,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
         if (_lifecycleInterceptor is not null)
         {
-            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
+            _lifecycleInterceptor.SubjectDetaching += OnSubjectDetaching;
         }
 
         var optionsBuilder = new MqttServerOptionsBuilder()
@@ -415,7 +415,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         return Task.CompletedTask;
     }
 
-    private void OnSubjectDetached(SubjectLifecycleChange change)
+    private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
         // TODO(perf): O(n) scan over all cached entries per detached subject.
         // Consider adding a reverse index (Dictionary<IInterceptorSubject, List<PropertyReference>>) for O(1) cleanup
@@ -447,7 +447,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
         if (_lifecycleInterceptor is not null)
         {
-            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
+            _lifecycleInterceptor.SubjectDetaching -= OnSubjectDetaching;
         }
 
         var server = _mqttServer;

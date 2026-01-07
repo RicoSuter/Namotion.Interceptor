@@ -78,7 +78,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
         if (_lifecycleInterceptor is not null)
         {
-            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
+            _lifecycleInterceptor.SubjectDetaching += OnSubjectDetaching;
         }
 
         try
@@ -89,7 +89,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         {
             if (_lifecycleInterceptor is not null)
             {
-                _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
+                _lifecycleInterceptor.SubjectDetaching -= OnSubjectDetaching;
             }
         }
     }
@@ -210,7 +210,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         }
     }
 
-    private void OnSubjectDetached(SubjectLifecycleChange change)
+    private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
         _server?.RemoveSubjectNodes(change.Subject);
     }
