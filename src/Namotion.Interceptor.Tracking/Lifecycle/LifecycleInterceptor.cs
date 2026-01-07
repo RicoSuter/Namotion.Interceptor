@@ -429,21 +429,24 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private static void ReturnList(List<(IInterceptorSubject, PropertyReference, object?)> list)
     {
         list.Clear();
-        _listPool!.Push(list);
+        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
+        _listPool.Push(list);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ReturnSubjectHashSet(HashSet<IInterceptorSubject> hashSet)
     {
         hashSet.Clear();
-        _subjectHashSetPool!.Push(hashSet);
+        _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
+        _subjectHashSetPool.Push(hashSet);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ReturnPropertyHashSet(HashSet<PropertyReference> hashSet)
     {
         hashSet.Clear();
-        _propertyHashSetPool!.Push(hashSet);
+        _propertyHashSetPool ??= new Stack<HashSet<PropertyReference>>();
+        _propertyHashSetPool.Push(hashSet);
     }
 
     #endregion
