@@ -132,16 +132,16 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             IsPropertyReferenceAdded = true
         };
 
-        var properties = subject.Properties;
+        var properties = subject.Properties.Keys;
         InvokeAddedLifecycleHandlers(subject, context, change);
 
         if (isFirstAttach)
         {
             SubjectAttached?.Invoke(change);
 
-            foreach (var subjectProperty in properties)
+            foreach (var propertyName in properties)
             {
-                subject.AttachSubjectProperty(new PropertyReference(subject, subjectProperty.Key));
+                subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
             }
         }
     }
@@ -172,9 +172,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
-        foreach (var property in subject.Properties)
+        foreach (var propertyName in subject.Properties.Keys)
         {
-            subject.DetachSubjectProperty(new PropertyReference(subject, property.Key));
+            subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
         }
 
         var count = subject.GetReferenceCount();
