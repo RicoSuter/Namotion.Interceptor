@@ -33,11 +33,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// <inheritdoc />
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
-        if (change.Property.Metadata.IsDerived)
+        var metadata = change.Property.Metadata;
+        if (metadata.IsDerived)
         {
             StartRecordingTouchedProperties();
 
-            var result = change.Property.Metadata.GetValue?.Invoke(change.Subject);
+            var result = metadata.GetValue?.Invoke(change.Subject);
             change.Property.SetLastKnownValue(result);
             change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ChangedTimestamp);
             

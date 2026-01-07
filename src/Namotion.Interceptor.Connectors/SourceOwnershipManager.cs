@@ -49,7 +49,7 @@ public class SourceOwnershipManager : IDisposable
                 $"LifecycleInterceptor not configured for {source.GetType().Name}. " +
                 "Call WithLifecycle() on the context to enable automatic cleanup when subjects are detached.");
 
-        _lifecycle.SubjectDetached += OnSubjectDetached;
+        _lifecycle.SubjectDetaching += OnSubjectDetaching;
     }
 
     /// <summary>
@@ -104,7 +104,7 @@ public class SourceOwnershipManager : IDisposable
         }
     }
 
-    private void OnSubjectDetached(SubjectLifecycleChange change)
+    private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
         _onSubjectDetaching?.Invoke(change.Subject);
 
@@ -133,7 +133,7 @@ public class SourceOwnershipManager : IDisposable
 
         _disposed = true;
 
-        _lifecycle.SubjectDetached -= OnSubjectDetached;
+        _lifecycle.SubjectDetaching -= OnSubjectDetaching;
 
         lock (_lock)
         {

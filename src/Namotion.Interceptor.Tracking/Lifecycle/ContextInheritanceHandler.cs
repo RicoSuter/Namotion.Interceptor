@@ -1,4 +1,6 @@
-﻿namespace Namotion.Interceptor.Tracking.Lifecycle;
+﻿using System.Runtime.CompilerServices;
+
+namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 #pragma warning disable CS0659
 
@@ -7,21 +9,21 @@
 /// </summary>
 public class ContextInheritanceHandler : ILifecycleHandler
 {
-    public void AttachSubject(SubjectLifecycleChange change)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        if (change is { ReferenceCount: 1, Property: not null })
+        if (change.Property.HasValue)
         {
-            var parent = change.Property.Value.Subject;
-            change.Subject.Context.AddFallbackContext(parent.Context);
-        }
-    }
-
-    public void DetachSubject(SubjectLifecycleChange change)
-    {
-        if (change.Property is not null)
-        {
-            var parent = change.Property.Value.Subject;
-            change.Subject.Context.RemoveFallbackContext(parent.Context);
+            // Only add fallback when subject first enters the graph via property reference
+            // (IsContextAttach ensures we don't add fallback for subjects already in graph via context)
+            if (change is { ReferenceCount: 1, IsContextAttach: true })
+            {
+                change.Subject.Context.AddFallbackContext(change.Property.Value.Subject.Context);
+            }
+            else if (change is { ReferenceCount: 0, IsPropertyReferenceRemoved: true })
+            {
+                change.Subject.Context.RemoveFallbackContext(change.Property.Value.Subject.Context);
+            }
         }
     }
 
