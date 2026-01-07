@@ -62,30 +62,34 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                 return;
             }
 
-            if (change.IsPropertyReferenceRemoved)
+            if (change.IsPropertyReferenceRemoved || change.IsContextDetach)
             {
                 var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
-                if (registeredSubject is not null && change.Property is not null)
+                if (registeredSubject is not null)
                 {
-                    var property = _knownSubjects
-                        .GetValueOrDefault(change.Property.Value.Subject)?
-                        .TryGetProperty(change.Property.Value.Name);
-
-                    if (property is not null)
+                    if (change is { IsPropertyReferenceRemoved: true, Property: not null })
                     {
-                        registeredSubject.RemoveParent(property, change.Index);
-                        property.RemoveChild(new SubjectPropertyChild
+                        var property = _knownSubjects
+                            .GetValueOrDefault(change.Property.Value.Subject)?
+                            .TryGetProperty(change.Property.Value.Name);
+
+                        if (property is not null)
                         {
-                            Subject = change.Subject,
-                            Index = change.Index
-                        });
+                            registeredSubject.RemoveParent(property, change.Index);
+                         
+                            property.RemoveChild(new SubjectPropertyChild
+                            {
+                                Subject = change.Subject,
+                                Index = change.Index
+                            });
+                        }
+                    }
+                    
+                    if (change.IsContextDetach)
+                    {
+                        _knownSubjects.Remove(change.Subject);
                     }
                 }
-            }
-            
-            if (change.IsContextDetach)
-            {
-                _knownSubjects.Remove(change.Subject);
             }
         }
     }
