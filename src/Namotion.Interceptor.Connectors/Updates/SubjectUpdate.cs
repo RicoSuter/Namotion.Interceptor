@@ -1,15 +1,28 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
-using Namotion.Interceptor.Connectors.Updates.Performance;
+using Microsoft.Extensions.ObjectPool;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Performance;
 
 namespace Namotion.Interceptor.Connectors.Updates;
 
 public class SubjectUpdate
 {
+    private static readonly ObjectPool<Dictionary<IInterceptorSubject, SubjectUpdate>> KnownSubjectUpdatesPool =
+        new DefaultObjectPool<Dictionary<IInterceptorSubject, SubjectUpdate>>(
+            new DictionaryPoolPolicy<IInterceptorSubject, SubjectUpdate>(), 256);
+
+    private static readonly ObjectPool<Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>> PropertyUpdatesPool =
+        new DefaultObjectPool<Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>>(
+            new DictionaryPoolPolicy<SubjectPropertyUpdate, SubjectPropertyUpdateReference>(), 256);
+
+    private static readonly ObjectPool<HashSet<IInterceptorSubject>> ProcessedParentPathsPool =
+        new DefaultObjectPool<HashSet<IInterceptorSubject>>(
+            new HashSetPoolPolicy<IInterceptorSubject>(), 256);
+
     /// <summary>
     /// Gets or sets the unique ID of the subject (only set if there is a reference pointing to it).
     /// </summary>
@@ -41,12 +54,12 @@ public class SubjectUpdate
     public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates = null;
-        var knownSubjectUpdates = SubjectUpdatePools.RentKnownSubjectUpdates();
+        var knownSubjectUpdates = KnownSubjectUpdatesPool.Get();
         try
         {
             if (processors.Length > 0)
             {
-                propertyUpdates = SubjectUpdatePools.RentPropertyUpdates();
+                propertyUpdates = PropertyUpdatesPool.Get();
             }
 
             var update = GetOrCreateCompleteUpdate(subject, createReferenceUpdate: true, processors, knownSubjectUpdates, propertyUpdates);
@@ -59,8 +72,11 @@ public class SubjectUpdate
         }
         finally
         {
-            SubjectUpdatePools.ReturnPropertyUpdates(propertyUpdates);
-            SubjectUpdatePools.ReturnKnownSubjectUpdates(knownSubjectUpdates);
+            if (propertyUpdates is not null)
+            {
+                PropertyUpdatesPool.Return(propertyUpdates);
+            }
+            KnownSubjectUpdatesPool.Return(knownSubjectUpdates);
         }
     }
 
@@ -132,9 +148,9 @@ public class SubjectUpdate
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
         ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
-        var propertyUpdates = processors.Length > 0 ? SubjectUpdatePools.RentPropertyUpdates() : null;
-        var knownSubjectUpdates = SubjectUpdatePools.RentKnownSubjectUpdates();
-        var processedParentPaths = SubjectUpdatePools.RentProcessedParentPaths();
+        var propertyUpdates = processors.Length > 0 ? PropertyUpdatesPool.Get() : null;
+        var knownSubjectUpdates = KnownSubjectUpdatesPool.Get();
+        var processedParentPaths = ProcessedParentPathsPool.Get();
         try
         {
             var update = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
@@ -189,9 +205,12 @@ public class SubjectUpdate
         }
         finally
         {
-            SubjectUpdatePools.ReturnPropertyUpdates(propertyUpdates);
-            SubjectUpdatePools.ReturnProcessedParentPaths(processedParentPaths);
-            SubjectUpdatePools.ReturnKnownSubjectUpdates(knownSubjectUpdates);
+            if (propertyUpdates is not null)
+            {
+                PropertyUpdatesPool.Return(propertyUpdates);
+            }
+            ProcessedParentPathsPool.Return(processedParentPaths);
+            KnownSubjectUpdatesPool.Return(knownSubjectUpdates);
         }
     }
 
