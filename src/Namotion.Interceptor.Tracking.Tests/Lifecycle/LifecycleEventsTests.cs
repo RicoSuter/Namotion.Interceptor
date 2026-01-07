@@ -39,8 +39,7 @@ public class LifecycleEventsTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
         Assert.NotNull(lifecycleInterceptor);
@@ -70,8 +69,7 @@ public class LifecycleEventsTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
         Assert.NotNull(lifecycleInterceptor);
@@ -121,8 +119,7 @@ public class LifecycleEventsTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
         Assert.NotNull(lifecycleInterceptor);
@@ -385,8 +382,7 @@ public class LifecycleEventsTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
         Assert.NotNull(lifecycleInterceptor);
