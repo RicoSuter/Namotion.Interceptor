@@ -41,18 +41,18 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                     registeredSubject = RegisterSubject(change.Subject);
                 }
 
-                if (change is { IsPropertyReferenceAdded: true, Property: not null })
+                if (change is { IsPropertyReferenceAdded: true, Property: { } property })
                 {
-                    if (!_knownSubjects.TryGetValue(change.Property.Value.Subject, out var parentRegisteredSubject))
+                    if (!_knownSubjects.TryGetValue(property.Subject, out var parentRegisteredSubject))
                     {
-                        parentRegisteredSubject = RegisterSubject(change.Property.Value.Subject);
+                        parentRegisteredSubject = RegisterSubject(property.Subject);
                     }
 
-                    var property = parentRegisteredSubject.TryGetProperty(change.Property.Value.Name) ??
-                        throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
+                    var registeredProperty = parentRegisteredSubject.TryGetProperty(property.Name) ??
+                        throw new InvalidOperationException($"Property '{property.Name}' not found.");
 
-                    registeredSubject.AddParent(property, change.Index);
-                    property.AddChild(new SubjectPropertyChild
+                    registeredSubject.AddParent(registeredProperty, change.Index);
+                    registeredProperty.AddChild(new SubjectPropertyChild
                     {
                         Index = change.Index,
                         Subject = change.Subject,
