@@ -43,8 +43,10 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         var result = base.AddFallbackContext(context);
         if (result)
         {
-            foreach (var interceptor in context.GetServices<ILifecycleInterceptor>())
+            var array = context.GetServices<ILifecycleInterceptor>();
+            for (var index = 0; index < array.Length; index++)
             {
+                var interceptor = array[index];
                 interceptor.AttachSubjectToContext(_subject);
             }
         }
@@ -56,8 +58,10 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
     {
         if (HasFallbackContext(context))
         {
-            foreach (var interceptor in context.GetServices<ILifecycleInterceptor>())
+            var array = context.GetServices<ILifecycleInterceptor>();
+            for (var index = 0; index < array.Length; index++)
             {
+                var interceptor = array[index];
                 interceptor.DetachSubjectFromContext(_subject);
             }
 

@@ -132,24 +132,26 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             IsPropertyReferenceAdded = true
         };
 
-        var properties = subject.Properties.Keys;
+        var properties = subject.Properties;
         InvokeAddedLifecycleHandlers(subject, context, change);
 
         if (isFirstAttach)
         {
             SubjectAttached?.Invoke(change);
 
-            foreach (var propertyName in properties)
+            foreach (var subjectProperty in properties)
             {
-                subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
+                subject.AttachSubjectProperty(new PropertyReference(subject, subjectProperty.Key));
             }
         }
     }
     
     private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
     {
-        foreach (var handler in context.GetServices<ILifecycleHandler>())
+        var array = context.GetServices<ILifecycleHandler>();
+        for (var index = 0; index < array.Length; index++)
         {
+            var handler = array[index];
             handler.HandleLifecycleChange(change);
         }
 
@@ -170,9 +172,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
-        foreach (var propertyName in subject.Properties.Keys)
+        foreach (var property in subject.Properties)
         {
-            subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
+            subject.DetachSubjectProperty(new PropertyReference(subject, property.Key));
         }
 
         var count = subject.GetReferenceCount();
@@ -253,8 +255,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             subjectHandler.HandleLifecycleChange(change);
         }
 
-        foreach (var handler in context.GetServices<ILifecycleHandler>())
+        var array = context.GetServices<ILifecycleHandler>();
+        for (var index = 0; index < array.Length; index++)
         {
+            var handler = array[index];
             handler.HandleLifecycleChange(change);
         }
     }
