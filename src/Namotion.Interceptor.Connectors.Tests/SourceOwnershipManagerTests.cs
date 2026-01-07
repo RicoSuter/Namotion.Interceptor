@@ -137,7 +137,7 @@ public class SourceOwnershipManagerTests
     }
 
     [Fact]
-    public void SubjectDetached_ReleasesPropertiesForSubject()
+    public void SubjectDetaching_ReleasesPropertiesForSubject()
     {
         // Arrange
         var releasedProperties = new List<PropertyReference>();
@@ -160,7 +160,7 @@ public class SourceOwnershipManagerTests
         manager.ClaimSource(property3);
 
         // Act - Detach subject1
-        lifecycleInterceptor.RaiseSubjectDetached(subject1Mock.Object);
+        lifecycleInterceptor.RaiseSubjectDetaching(subject1Mock.Object);
 
         // Assert
         Assert.Single(detachedSubjects);
@@ -245,15 +245,15 @@ public class SourceOwnershipManagerTests
 // Extension for testing - expose method to raise event
 internal static class LifecycleInterceptorExtensions
 {
-    public static void RaiseSubjectDetached(this LifecycleInterceptor interceptor, IInterceptorSubject subject)
+    public static void RaiseSubjectDetaching(this LifecycleInterceptor interceptor, IInterceptorSubject subject)
     {
         // Use reflection to raise the event since it's internal
         var eventField = typeof(LifecycleInterceptor)
-            .GetField("SubjectDetached", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+            .GetField("SubjectDetaching", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
 
         if (eventField?.GetValue(interceptor) is Action<SubjectLifecycleChange> handler)
         {
-            handler.Invoke(new SubjectLifecycleChange(subject, null, null, 0));
+            handler.Invoke(new SubjectLifecycleChange { Subject = subject, ReferenceCount = 0 });
         }
     }
 }

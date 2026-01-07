@@ -30,32 +30,66 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     }
 
     /// <inheritdoc />
-    void ILifecycleHandler.AttachSubject(SubjectLifecycleChange change)
+    void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
         {
-            if (!_knownSubjects.TryGetValue(change.Subject, out var subject))
+            if (change.IsContextAttach || change.IsPropertyReferenceAdded)
             {
-                subject = RegisterSubject(change.Subject);
-            }
-
-            if (change.Property is not null)
-            {
-                if (!_knownSubjects.TryGetValue(change.Property.Value.Subject, out var registeredSubject))
+                if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
                 {
-                    registeredSubject = RegisterSubject(change.Property.Value.Subject);
+                    registeredSubject = RegisterSubject(change.Subject);
                 }
 
-                var property = registeredSubject.TryGetProperty(change.Property.Value.Name) ??
-                    throw new InvalidOperationException($"Property '{change.Property.Value.Name}' not found.");
-
-                subject.AddParent(property, change.Index);
-
-                property.AddChild(new SubjectPropertyChild
+                if (change is { IsPropertyReferenceAdded: true, Property: { } property })
                 {
-                    Index = change.Index,
-                    Subject = change.Subject,
-                });
+                    if (!_knownSubjects.TryGetValue(property.Subject, out var parentRegisteredSubject))
+                    {
+                        parentRegisteredSubject = RegisterSubject(property.Subject);
+                    }
+
+                    var registeredProperty = parentRegisteredSubject.TryGetProperty(property.Name) ??
+                        throw new InvalidOperationException($"Property '{property.Name}' not found.");
+
+                    registeredSubject.AddParent(registeredProperty, change.Index);
+                    registeredProperty.AddChild(new SubjectPropertyChild
+                    {
+                        Index = change.Index,
+                        Subject = change.Subject,
+                    });
+                }
+
+                return;
+            }
+
+            if (change.IsPropertyReferenceRemoved || change.IsContextDetach)
+            {
+                var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
+                if (registeredSubject is not null)
+                {
+                    if (change is { IsPropertyReferenceRemoved: true, Property: not null })
+                    {
+                        var property = _knownSubjects
+                            .GetValueOrDefault(change.Property.Value.Subject)?
+                            .TryGetProperty(change.Property.Value.Name);
+
+                        if (property is not null)
+                        {
+                            registeredSubject.RemoveParent(property, change.Index);
+                         
+                            property.RemoveChild(new SubjectPropertyChild
+                            {
+                                Subject = change.Subject,
+                                Index = change.Index
+                            });
+                        }
+                    }
+                    
+                    if (change.IsContextDetach)
+                    {
+                        _knownSubjects.Remove(change.Subject);
+                    }
+                }
             }
         }
     }
@@ -84,44 +118,6 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
         var registeredSubject = new RegisteredSubject(subject);
         _knownSubjects[subject] = registeredSubject;
         return registeredSubject;
-    }
-
-    void ILifecycleHandler.DetachSubject(SubjectLifecycleChange change)
-    {
-        lock (_knownSubjects)
-        {
-            var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
-            if (registeredSubject is null)
-            {
-                return;
-            }
-
-            // Always update parent-child relationships when a property reference is removed,
-            // regardless of reference count. This ensures the Children collection stays accurate
-            // even when the subject has multiple references from different properties.
-            if (change.Property is not null)
-            {
-                var property = TryGetRegisteredProperty(change.Property.Value);
-                if (property is not null)
-                {
-                    // Remove parent relationship from the child subject
-                    registeredSubject.RemoveParent(property, change.Index);
-
-                    // Remove child from the parent property's Children collection
-                    property.RemoveChild(new SubjectPropertyChild
-                    {
-                        Subject = change.Subject,
-                        Index = change.Index
-                    });
-                }
-            }
-
-            // Only remove the subject from the registry when its reference count reaches zero
-            if (change.ReferenceCount == 0)
-            {
-                _knownSubjects.Remove(change.Subject);
-            }
-        }
     }
 
     void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)

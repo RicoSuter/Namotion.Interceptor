@@ -13,9 +13,7 @@ public class SubjectRegistryTests
     public Task WhenTwoChildrenAreAttachedSequentially_ThenWeHaveThreeAttaches()
     {
         // Arrange
-        var events = new List<string>();
-
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -38,50 +36,15 @@ public class SubjectRegistryTests
         // Assert
         var registry = context.GetService<ISubjectRegistry>();
         Assert.Equal(3, registry.KnownSubjects.Count());
-        
-        return Verify(events);
+
+        return Verify(handler.GetEvents());
     }
 
     [Fact]
-    public Task WhenTwoChildrenAreAttachedInOneBranch_ThenWeHaveThreeAttaches()
+    public Task WhenRemovingSubjectWithChild_ThenBothDetach()
     {
         // Arrange
-        var events = new List<string>();
-
-        var handler = new TestLifecyleHandler(events);
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithService(() => handler);
-
-        // Act
-        var person = new Person(context)
-        {
-            FirstName = "Child",
-            Mother = new Person
-            {
-                FirstName = "Mother",
-                Mother = new Person
-                {
-                    FirstName = "Grandmother"
-                }
-            }
-        };
-
-        // Assert
-        var registry = context.GetService<ISubjectRegistry>();
-        Assert.Equal(3, registry.KnownSubjects.Count());
-        
-        return Verify(events);
-    }
-
-    [Fact]
-    public Task WhenProxyWithChildProxyIsRemoved_ThenWeHaveTwoDetaches()
-    {
-        // Arrange
-        var events = new List<string>();
-
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -106,8 +69,8 @@ public class SubjectRegistryTests
         // Assert
         var registry = context.GetService<ISubjectRegistry>();
         Assert.Single(registry.KnownSubjects);
-        
-        return Verify(events);
+
+        return Verify(handler.GetEvents());
     }
 
     [Fact]

@@ -240,7 +240,7 @@ public class OpcUaSubjectLoaderTests
     {
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var subject = new DynamicSubject(context);
-        new LifecycleInterceptor().AttachTo(subject);
+        new LifecycleInterceptor().AttachSubjectToContext(subject);
         return subject;
     }
 
