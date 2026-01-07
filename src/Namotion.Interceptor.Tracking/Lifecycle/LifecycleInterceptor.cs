@@ -1,7 +1,9 @@
 using System.Collections;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.ObjectPool;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Performance;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -9,14 +11,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
     private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference>> _attachedSubjects = [];
 
-    [ThreadStatic]
-    private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
+    private static readonly ObjectPool<List<(IInterceptorSubject subject, PropertyReference property, object? index)>> ListPool =
+        new DefaultObjectPool<List<(IInterceptorSubject, PropertyReference, object?)>>(
+            new ListPoolPolicy<(IInterceptorSubject, PropertyReference, object?)>(8), 256);
 
-    [ThreadStatic]
-    private static Stack<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
+    private static readonly ObjectPool<HashSet<IInterceptorSubject>> SubjectHashSetPool =
+        new DefaultObjectPool<HashSet<IInterceptorSubject>>(
+            new HashSetPoolPolicy<IInterceptorSubject>(8), 256);
 
-    [ThreadStatic]
-    private static Stack<HashSet<PropertyReference>>? _propertyHashSetPool;
+    private static readonly ObjectPool<HashSet<PropertyReference>> PropertyHashSetPool =
+        new DefaultObjectPool<HashSet<PropertyReference>>(
+            new HashSetPoolPolicy<PropertyReference>(8), 256);
 
     /// <summary>
     /// Raised when a subject is attached to the object graph.
@@ -34,7 +39,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
-        var collectedSubjects = GetList();
+        var collectedSubjects = ListPool.Get();
         try
         {
             lock (_attachedSubjects)
@@ -54,13 +59,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            ReturnList(collectedSubjects);
+            ListPool.Return(collectedSubjects);
         }
     }
 
     public void DetachSubjectFromContext(IInterceptorSubject subject)
     {
-        var collectedSubjects = GetList();
+        var collectedSubjects = ListPool.Get();
         try
         {
             lock (_attachedSubjects)
@@ -77,7 +82,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            ReturnList(collectedSubjects);
+            ListPool.Return(collectedSubjects);
         }
     }
 
@@ -87,7 +92,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AttachToContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        var isFirstAttach = _attachedSubjects.TryAdd(subject, GetPropertyHashSet());
+        var isFirstAttach = _attachedSubjects.TryAdd(subject, PropertyHashSetPool.Get());
         if (!isFirstAttach)
         {
             return;
@@ -175,7 +180,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
-        ReturnPropertyHashSet(hs);
+        PropertyHashSetPool.Return(hs);
 
         foreach (var propertyName in subject.Properties.Keys)
         {
@@ -213,12 +218,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
         if (isLastDetach)
         {
-            children = GetList();
+            children = ListPool.Get();
             FindSubjectsInProperties(subject, children, null);
 
             if (_attachedSubjects.Remove(subject, out var hs))
             {
-                ReturnPropertyHashSet(hs);
+                PropertyHashSetPool.Return(hs);
             }
 
             foreach (var propertyName in subject.Properties.Keys)
@@ -252,7 +257,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 DetachFromProperty(child.subject, context, child.property, child.index);
             }
 
-            ReturnList(children);
+            ListPool.Return(children);
         }
     }
 
@@ -296,10 +301,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
-        var oldCollectedSubjects = GetList();
-        var newCollectedSubjects = GetList();
-        var oldTouchedSubjects = GetSubjectHashSet();
-        var newTouchedSubjects = GetSubjectHashSet();
+        var oldCollectedSubjects = ListPool.Get();
+        var newCollectedSubjects = ListPool.Get();
+        var oldTouchedSubjects = SubjectHashSetPool.Get();
+        var newTouchedSubjects = SubjectHashSetPool.Get();
 
         try
         {
@@ -329,10 +334,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            ReturnList(oldCollectedSubjects);
-            ReturnList(newCollectedSubjects);
-            ReturnSubjectHashSet(oldTouchedSubjects);
-            ReturnSubjectHashSet(newTouchedSubjects);
+            ListPool.Return(oldCollectedSubjects);
+            ListPool.Return(newCollectedSubjects);
+            SubjectHashSetPool.Return(oldTouchedSubjects);
+            SubjectHashSetPool.Return(newTouchedSubjects);
         }
     }
 
@@ -402,52 +407,4 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
-    #region  Performance
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static List<(IInterceptorSubject subject, PropertyReference property, object? index)> GetList()
-    {
-        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
-        return _listPool.Count > 0 ? _listPool.Pop() : new List<(IInterceptorSubject, PropertyReference, object?)>(8);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static HashSet<IInterceptorSubject> GetSubjectHashSet()
-    {
-        _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
-        return _subjectHashSetPool.Count > 0 ? _subjectHashSetPool.Pop() : new HashSet<IInterceptorSubject>(8);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static HashSet<PropertyReference> GetPropertyHashSet()
-    {
-        _propertyHashSetPool ??= new Stack<HashSet<PropertyReference>>();
-        return _propertyHashSetPool.Count > 0 ? _propertyHashSetPool.Pop() : new HashSet<PropertyReference>(8);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ReturnList(List<(IInterceptorSubject, PropertyReference, object?)> list)
-    {
-        list.Clear();
-        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
-        _listPool.Push(list);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ReturnSubjectHashSet(HashSet<IInterceptorSubject> hashSet)
-    {
-        hashSet.Clear();
-        _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
-        _subjectHashSetPool.Push(hashSet);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ReturnPropertyHashSet(HashSet<PropertyReference> hashSet)
-    {
-        hashSet.Clear();
-        _propertyHashSetPool ??= new Stack<HashSet<PropertyReference>>();
-        _propertyHashSetPool.Push(hashSet);
-    }
-
-    #endregion
 }

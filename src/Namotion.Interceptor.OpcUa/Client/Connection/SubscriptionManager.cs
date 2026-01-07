@@ -4,7 +4,8 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Performance;
+using Microsoft.Extensions.ObjectPool;
+using Namotion.Interceptor.Tracking.Performance;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -13,8 +14,8 @@ namespace Namotion.Interceptor.OpcUa.Client.Connection;
 
 internal class SubscriptionManager : IAsyncDisposable
 {
-    private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
-        = new(() => new List<PropertyUpdate>(16));
+    private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool =
+        new DefaultObjectPool<List<PropertyUpdate>>(new ListPoolPolicy<PropertyUpdate>(16), 256);
 
     private readonly OpcUaSubjectClientSource _source;
     private readonly SubjectPropertyWriter? _propertyWriter;
@@ -121,7 +122,7 @@ internal class SubscriptionManager : IAsyncDisposable
         }
 
         var receivedTimestamp = DateTimeOffset.UtcNow;
-        var changes = ChangesPool.Rent();
+        var changes = ChangesPool.Get();
 
         for (var i = 0; i < monitoredItemsCount; i++)
         {
