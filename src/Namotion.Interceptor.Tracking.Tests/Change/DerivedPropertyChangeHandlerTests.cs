@@ -31,12 +31,12 @@ public class DerivedPropertyChangeHandlerTests
         // Assert
         Assert.Contains(changes, c =>
             c.Property.Name == nameof(Person.FullName) &&
-            c.GetOldValue<string?>() == " " &&
-            c.GetNewValue<string?>() == "Rico ");
+            c.GetOldValue<string?>() == "NA" &&
+            c.GetNewValue<string?>() == "Rico");
 
         Assert.Contains(changes, c =>
             c.Property.Name == nameof(Person.FullName) &&
-            c.GetOldValue<string?>() == "Rico " &&
+            c.GetOldValue<string?>() == "Rico" &&
             c.GetNewValue<string?>() == "Rico Suter");
 
         Assert.Contains(changes, c =>
@@ -99,8 +99,8 @@ public class DerivedPropertyChangeHandlerTests
         Assert.Equal(10000, changes.Count);
         foreach (var c in changes)
         {
-            // the fullname should contain the timestamp as firstname
-            Assert.Equal(c.GetNewValue<string>(), $"{c.ChangedTimestamp} ");
+            // the fullname should contain the timestamp as firstname (trimmed, no trailing space)
+            Assert.Equal($"{c.ChangedTimestamp}", c.GetNewValue<string>());
         }
     }
 

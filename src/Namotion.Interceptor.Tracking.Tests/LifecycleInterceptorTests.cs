@@ -1,5 +1,4 @@
-﻿using Moq;
-using Namotion.Interceptor.Registry;
+﻿using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -12,9 +11,7 @@ public class LifecycleInterceptorTests
     public Task WhenAssigningArray_ThenAllSubjectsAreAttached()
     {
         // Arrange
-        var events = new List<string>();
-
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -29,16 +26,14 @@ public class LifecycleInterceptorTests
         mother.Children = [child1]; // should only detach child2
 
         // Assert
-        return Verify(events);
+        return Verify(handler.GetEvents());
     }
 
     [Fact]
     public Task WhenAddingInterceptorCollection_ThenArrayItemsAndParentAreAttached()
     {
         // Arrange
-        var events = new List<string>();
-
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -50,20 +45,18 @@ public class LifecycleInterceptorTests
         var child2 = new Person { FirstName = "Child2" };
 
         mother.Children = [child1, child2];
-        
+
         ((IInterceptorSubject)mother).Context.AddFallbackContext(context);
 
         // Assert
-        return Verify(events);
+        return Verify(handler.GetEvents());
     }
 
     [Fact]
     public void WhenAssigningSubject_ThenAllSubjectsAreAttached()
     {
         // Arrange
-        var events = new List<string>();
-
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -77,22 +70,20 @@ public class LifecycleInterceptorTests
 
         // Act & Assert
         mother1.Mother = mother2;
-        Assert.Equal(2, events.Count(e => e.StartsWith("Attached: ")));
+        Assert.Equal(2, handler.GetEvents().Count(e => e.Contains("attached")));
 
         mother2.Mother = mother3;
-        Assert.Equal(3, events.Count(e => e.StartsWith("Attached: ")));
+        Assert.Equal(3, handler.GetEvents().Count(e => e.Contains("attached")));
 
         mother1.Mother = null;
-        Assert.Equal(2, events.Count(e => e.StartsWith("Detached: ")));
+        Assert.Equal(2, handler.GetEvents().Count(e => e.Contains("detached")));
     }
 
     [Fact]
     public Task WhenAddingInterceptorCollection_ThenAllChildrenAreAlsoAttached()
     {
         // Arrange
-        var events = new List<string>();
-
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -110,16 +101,14 @@ public class LifecycleInterceptorTests
         ((IInterceptorSubject)mother1).Context.AddFallbackContext(context);
 
         // Assert
-        return Verify(events);
+        return Verify(handler.GetEvents());
     }
 
     [Fact]
     public Task WhenRemovingInterceptors_ThenAllArrayChildrenAreDetached()
     {
         // Arrange
-        var events = new List<string>();
-
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -134,16 +123,14 @@ public class LifecycleInterceptorTests
         ((IInterceptorSubject)mother).Context.RemoveFallbackContext(context);
 
         // Assert
-        return Verify(events);
+        return Verify(handler.GetEvents());
     }
 
     [Fact]
     public Task WhenRemovingInterceptors_ThenAllChildrenAreDetached()
     {
         // Arrange
-        var events = new List<string>();
-
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -160,16 +147,14 @@ public class LifecycleInterceptorTests
         ((IInterceptorSubject)mother1).Context.RemoveFallbackContext(context);
 
         // Assert
-        return Verify(events);
+        return Verify(handler.GetEvents());
     }
     
     [Fact]
     public void WhenChangingProperty_ThenSubjectAttachAndDetachAreCalled()
     {
         // Arrange
-        var events = new List<string>();
-
-        var handler = new TestLifecyleHandler(events);
+        var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
@@ -195,8 +180,11 @@ public class LifecycleInterceptorTests
     public Task WhenSubjectIsAttachedThenAllPropertiesAreAttachedAndSameWithDetach()
     {
         // Arrange
-        var events = new List<string>();
-        var context = CreateContextAndCollectLifecycleEvents(events);
+        var handler = new TestLifecycleHandler(trackProperties: true);
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithService(() => handler, _ => false);
 
         // Act
         var person = new Person
@@ -204,9 +192,9 @@ public class LifecycleInterceptorTests
             FirstName = "John",
             LastName = "Doe"
         };
-        
+
         ((IInterceptorSubject)person).Context.AddFallbackContext(context);
-        
+
         var father = new Person
         {
             FirstName = "Robert",
@@ -221,64 +209,39 @@ public class LifecycleInterceptorTests
         person.Father = null;
 
         // Assert
-        return Verify(events);
+        return Verify(handler.GetEvents());
     }
-    
+
     [Fact]
     public Task WhenAddingPropertyInLifecycleHandlerAttach_ThenItIsAttachedOnlyOnce()
     {
-        // When a ILifecycleHandler adds a property in AttachSubject, the property should be attached only once
-        
+        // When a ILifecycleHandler adds a property in AttachSubjectToContext, the property should be attached only once
+
         // Arrange
-        var events = new List<string>();
-        var context = CreateContextAndCollectLifecycleEvents(events);
+        var handler = new TestLifecycleHandler(trackProperties: true);
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithService(() => handler, _ => false);
+
         context.AddService(new AddPropertyToSubjectHandler());
 
         // Act
         var person = new Person(context);
-        
+
         // Assert
-        Assert.Single(events, e => e == "Attached property: { }.FooBar"); // should attach FooBar only once
-        return Verify(events);
+        Assert.Single(handler.GetEvents(), e => e == "prop+ NA.FooBar"); // should attach FooBar only once
+        return Verify(handler.GetEvents());
     }
 
     public class AddPropertyToSubjectHandler : ILifecycleHandler
     {
-        public void AttachSubject(SubjectLifecycleChange change)
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
-            change.Subject.TryGetRegisteredSubject()!.AddProperty("FooBar", typeof(string), _ => "MyValue", null);
+            if (change.IsContextAttach)
+            {
+                change.Subject.TryGetRegisteredSubject()!.AddProperty("FooBar", typeof(string), _ => "MyValue", null);
+            }
         }
-
-        public void DetachSubject(SubjectLifecycleChange change)
-        {
-        }
-    }
-
-    private static IInterceptorSubjectContext CreateContextAndCollectLifecycleEvents(List<string> events)
-    {
-        var subjectHandlerMock = new Mock<ILifecycleHandler>();
-        subjectHandlerMock
-            .Setup(h => h.AttachSubject(It.IsAny<SubjectLifecycleChange>()))
-            .Callback((SubjectLifecycleChange h) => events.Add($"Attached: {h.Subject}"));
-        subjectHandlerMock
-            .Setup(h => h.DetachSubject(It.IsAny<SubjectLifecycleChange>()))
-            .Callback((SubjectLifecycleChange h) => events.Add($"Detached: {h.Subject}"));
-        
-        var propertyHandlerMock = new Mock<IPropertyLifecycleHandler>();
-        propertyHandlerMock
-            .Setup(h => h.AttachProperty(It.IsAny<SubjectPropertyLifecycleChange>()))
-            .Callback((SubjectPropertyLifecycleChange h) => events.Add($"Attached property: {h.Subject}.{h.Property.Name}"));
-        propertyHandlerMock
-            .Setup(h => h.DetachProperty(It.IsAny<SubjectPropertyLifecycleChange>()))
-            .Callback((SubjectPropertyLifecycleChange h) => events.Add($"Detached property: {h.Subject}.{h.Property.Name}"));
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-            
-        context
-            .WithService(() => subjectHandlerMock.Object, _ => false)
-            .WithService(() => propertyHandlerMock.Object, _ => false);
-        return context;
     }
 }

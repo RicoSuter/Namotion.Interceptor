@@ -1,0 +1,4 @@
+﻿[
+  - A.Mother -> B (refs: 1),
+  - Root.Father -> A (refs: 0, detached)
+]

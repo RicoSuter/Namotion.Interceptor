@@ -28,7 +28,9 @@ namespace Namotion.Interceptor.Registry.Tests.Models
         public partial string? LastName { get; set; }
 
         [Derived]
-        public string FullName => $"{FirstName} {LastName}";
+        public string FullName => FirstName is null && LastName is null
+            ? "NA"
+            : $"{FirstName} {LastName}".Trim();
 
         [Derived]
         public string FullNameWithPrefix => $"Mr. {FullName}";

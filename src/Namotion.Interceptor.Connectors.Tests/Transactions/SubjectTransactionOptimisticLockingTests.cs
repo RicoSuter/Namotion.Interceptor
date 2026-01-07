@@ -122,7 +122,7 @@ public class SubjectTransactionOptimisticLockingTests
                 person.FirstName = "Tx1";
 
                 // Hold the lock for a bit
-                await Task.Delay(100);
+                await Task.Delay(500);
 
                 await tx.CommitAsync(CancellationToken.None);
                 tx1Complete.SetResult(true);
@@ -146,7 +146,7 @@ public class SubjectTransactionOptimisticLockingTests
 
         // Act
         // Wait a bit - tx2 should still be waiting
-        await Task.Delay(50);
+        await Task.Delay(100);
         Assert.False(tx2Task.IsCompleted, "tx2 should wait for tx1 to complete");
 
         // Wait for tx1 to complete
