@@ -15,9 +15,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [ThreadStatic]
     private static Stack<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
 
-    [ThreadStatic]
-    private static Stack<HashSet<PropertyReference>>? _propertyHashSetPool;
-
     /// <summary>
     /// Raised when a subject is attached to the object graph.
     /// Handlers must be exception-free and fast (invoked inside lock).
@@ -87,7 +84,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AttachToContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        var isFirstAttach = _attachedSubjects.TryAdd(subject, GetPropertyHashSet());
+        var isFirstAttach = _attachedSubjects.TryAdd(subject, []);
         if (!isFirstAttach)
         {
             return;
@@ -170,13 +167,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void DetachFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        if (!_attachedSubjects.Remove(subject, out var hs))
+        if (!_attachedSubjects.Remove(subject))
         {
             return;
         }
-
-        ReturnPropertyHashSet(hs);
-
+        
         foreach (var propertyName in subject.Properties.Keys)
         {
             subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
@@ -215,12 +210,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             children = GetList();
             FindSubjectsInProperties(subject, children, null);
-
-            if (_attachedSubjects.Remove(subject, out var hs))
-            {
-                ReturnPropertyHashSet(hs);
-            }
-
+            
+            _attachedSubjects.Remove(subject);
+            
             foreach (var propertyName in subject.Properties.Keys)
             {
                 subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
@@ -419,13 +411,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static HashSet<PropertyReference> GetPropertyHashSet()
-    {
-        _propertyHashSetPool ??= new Stack<HashSet<PropertyReference>>();
-        return _propertyHashSetPool.Count > 0 ? _propertyHashSetPool.Pop() : new HashSet<PropertyReference>(8);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ReturnList(List<(IInterceptorSubject, PropertyReference, object?)> list)
     {
         list.Clear();
@@ -439,14 +424,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         hashSet.Clear();
         _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
         _subjectHashSetPool.Push(hashSet);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ReturnPropertyHashSet(HashSet<PropertyReference> hashSet)
-    {
-        hashSet.Clear();
-        _propertyHashSetPool ??= new Stack<HashSet<PropertyReference>>();
-        _propertyHashSetPool.Push(hashSet);
     }
 
     #endregion
