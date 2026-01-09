@@ -7,7 +7,7 @@ public enum TransactionConflictBehavior
 {
     /// <summary>
     /// Detect conflicts at commit time by comparing captured old values with current values.
-    /// Throws <see cref="TransactionConflictException"/> if any property was modified since the transaction started.
+    /// Throws <see cref="SubjectTransactionConflictException"/> if any property was modified since the transaction started.
     /// Use for command-style transactions requiring consistency.
     /// </summary>
     FailOnConflict,
