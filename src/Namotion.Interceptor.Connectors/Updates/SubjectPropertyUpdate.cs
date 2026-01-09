@@ -151,8 +151,10 @@ public class SubjectPropertyUpdate
         else if (property.IsSubjectReference)
         {
             Kind = SubjectPropertyUpdateKind.Item;
+            // Always use createReferenceUpdate: true for subject references to avoid circular object references.
+            // The cycle is broken at the reference level (e.g., child.Father -> Reference), not at collections.
             Item = value is IInterceptorSubject itemSubject ?
-                SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, createReferenceUpdate, processors, knownSubjectUpdates, propertyUpdates) :
+                SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, createReferenceUpdate: true, processors, knownSubjectUpdates, propertyUpdates) :
                 null;
         }
         else
