@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Connectors.Updates.Performance;
 using Namotion.Interceptor.Registry;
@@ -10,15 +11,18 @@ namespace Namotion.Interceptor.Connectors.Updates;
 
 public class SubjectUpdate
 {
+    [ThreadStatic]
+    private static int _referenceIdCounter;
+
     /// <summary>
     /// Gets or sets the unique ID of the subject (only set if there is a reference pointing to it).
     /// </summary>
-    public string? Id { get; set; }
+    public int? Id { get; set; }
 
     /// <summary>
     /// Gets or sets the reference ID of an already existing subject.
     /// </summary>
-    public string? Reference { get; set; }
+    public int? Reference { get; set; }
 
     /// <summary>
     /// Gets a dictionary of property updates.
@@ -40,8 +44,11 @@ public class SubjectUpdate
     /// <returns>The update.</returns>
     public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
+        _referenceIdCounter = 0;
+
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates = null;
         var knownSubjectUpdates = SubjectUpdatePools.RentKnownSubjectUpdates();
+        var currentPath = SubjectUpdatePools.RentCurrentPath();
         try
         {
             if (processors.Length > 0)
@@ -49,7 +56,7 @@ public class SubjectUpdate
                 propertyUpdates = SubjectUpdatePools.RentPropertyUpdates();
             }
 
-            var update = GetOrCreateCompleteUpdate(subject, createReferenceUpdate: true, processors, knownSubjectUpdates, propertyUpdates);
+            var update = GetOrCreateCompleteUpdate(subject, processors, knownSubjectUpdates, propertyUpdates, currentPath);
             if (processors.Length > 0 && propertyUpdates is not null && propertyUpdates.Count > 0)
             {
                 ApplyTransformations(knownSubjectUpdates, propertyUpdates, processors);
@@ -59,6 +66,7 @@ public class SubjectUpdate
         }
         finally
         {
+            SubjectUpdatePools.ReturnCurrentPath(currentPath);
             SubjectUpdatePools.ReturnPropertyUpdates(propertyUpdates);
             SubjectUpdatePools.ReturnKnownSubjectUpdates(knownSubjectUpdates);
         }
@@ -68,55 +76,63 @@ public class SubjectUpdate
     /// Creates a complete update with all objects and properties for the given subject as root.
     /// </summary>
     /// <param name="subject">The root subject.</param>
-    /// <param name="createReferenceUpdate">Create update with reference instead of returning existing update.</param>
     /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <param name="knownSubjectUpdates">The known subject updates.</param>
     /// <param name="propertyUpdates">The list to collect property updates for transformation.</param>
+    /// <param name="currentPath">The set of subjects in the current traversal path (for cycle detection).</param>
     /// <returns>The update.</returns>
     internal static SubjectUpdate GetOrCreateCompleteUpdate(IInterceptorSubject subject,
-        bool createReferenceUpdate,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates,
+        HashSet<IInterceptorSubject> currentPath)
     {
-        if (createReferenceUpdate && knownSubjectUpdates.TryGetValue(subject, out var u))
+        if (knownSubjectUpdates.TryGetValue(subject, out var existingUpdate))
         {
-            // Stop cycle with reference to already created update
-            u.Id ??= Guid.NewGuid().ToString();
-            return new SubjectUpdate
+            if (currentPath.Contains(subject))
             {
-                Reference = u.Id
-            };
-        }
+                // Cycle detected - create reference to break the cycle
+                existingUpdate.Id ??= ++_referenceIdCounter;
+                return new SubjectUpdate
+                {
+                    Reference = existingUpdate.Id
+                };
+            }
 
-        if (knownSubjectUpdates.TryGetValue(subject, out var update))
-        {
-            // In case of partial update, return existing update so that properties can be added
-            return update;
+            // Subject already processed, not in current path - return existing update (no cycle)
+            return existingUpdate;
         }
 
         var subjectUpdate = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
+        currentPath.Add(subject);
 
-        var registeredSubject = subject.TryGetRegisteredSubject();
-        if (registeredSubject is not null)
+        try
         {
-            var properties = registeredSubject.Properties;
-            for (var index = 0; index < properties.Length; index++)
+            var registeredSubject = subject.TryGetRegisteredSubject();
+            if (registeredSubject is not null)
             {
-                var property = registeredSubject.Properties[index];
-                if (property is { HasGetter: true, IsAttribute: false } && IsPropertyIncluded(property, processors))
+                var properties = registeredSubject.Properties;
+                for (var index = 0; index < properties.Length; index++)
                 {
-                    var propertyUpdate = SubjectPropertyUpdate.CreateCompleteUpdate(
-                        property, processors, knownSubjectUpdates, propertyUpdates);
+                    var property = registeredSubject.Properties[index];
+                    if (property is { HasGetter: true, IsAttribute: false } && IsPropertyIncluded(property, processors))
+                    {
+                        var propertyUpdate = SubjectPropertyUpdate.CreateCompleteUpdate(
+                            property, processors, knownSubjectUpdates, propertyUpdates, currentPath);
 
-                    subjectUpdate.Properties[property.Name] = propertyUpdate;
+                        subjectUpdate.Properties[property.Name] = propertyUpdate;
 
-                    propertyUpdates?.TryAdd(propertyUpdate, new SubjectPropertyUpdateReference(property, subjectUpdate.Properties));
+                        propertyUpdates?.TryAdd(propertyUpdate, new SubjectPropertyUpdateReference(property, subjectUpdate.Properties));
+                    }
                 }
             }
-        }
 
-        return subjectUpdate;
+            return subjectUpdate;
+        }
+        finally
+        {
+            currentPath.Remove(subject);
+        }
     }
 
     /// <summary>
@@ -132,12 +148,19 @@ public class SubjectUpdate
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
         ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
+        _referenceIdCounter = 0;
+
         var propertyUpdates = processors.Length > 0 ? SubjectUpdatePools.RentPropertyUpdates() : null;
         var knownSubjectUpdates = SubjectUpdatePools.RentKnownSubjectUpdates();
         var processedParentPaths = SubjectUpdatePools.RentProcessedParentPaths();
+        var currentPath = SubjectUpdatePools.RentCurrentPath();
         try
         {
             var update = GetOrCreateSubjectUpdate(subject, knownSubjectUpdates);
+
+            // Add root to currentPath - this is key for detecting cycles back to root
+            currentPath.Add(subject);
+
             for (var index = 0; index < propertyChanges.Length; index++)
             {
                 var change = propertyChanges[index];
@@ -161,7 +184,7 @@ public class SubjectUpdate
 
                     propertyUpdate.ApplyValue(
                         registeredProperty, change.ChangedTimestamp, change.GetNewValue<object?>(),
-                        createReferenceUpdate: false, processors, knownSubjectUpdates, propertyUpdates);
+                        processors, knownSubjectUpdates, propertyUpdates, currentPath);
 
                     subjectUpdate.Properties[registeredProperty.Name] = propertyUpdate;
                 }
@@ -172,7 +195,7 @@ public class SubjectUpdate
                         registeredProperty.GetAttributedProperty(),
                         registeredProperty.AttributeMetadata.AttributeName,
                         registeredProperty, change, processors,
-                        knownSubjectUpdates, propertyUpdates);
+                        knownSubjectUpdates, propertyUpdates, currentPath);
 
                     subjectUpdate.Properties[rootPropertyName] = rootPropertyUpdate;
                 }
@@ -189,6 +212,7 @@ public class SubjectUpdate
         }
         finally
         {
+            SubjectUpdatePools.ReturnCurrentPath(currentPath);
             SubjectUpdatePools.ReturnPropertyUpdates(propertyUpdates);
             SubjectUpdatePools.ReturnProcessedParentPaths(processedParentPaths);
             SubjectUpdatePools.ReturnKnownSubjectUpdates(knownSubjectUpdates);
@@ -250,7 +274,8 @@ public class SubjectUpdate
         SubjectPropertyChange? change,
         ReadOnlySpan<ISubjectUpdateProcessor> processors,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates,
+        HashSet<IInterceptorSubject>? currentPath = null)
     {
         // Find the root property by walking up the attribute chain
         var rootProperty = property;
@@ -285,7 +310,7 @@ public class SubjectUpdate
         {
             finalAttributeUpdate.ApplyValue(
                 changeProperty, change.Value.ChangedTimestamp, change.Value.GetNewValue<object?>(),
-                createReferenceUpdate: false, processors, knownSubjectUpdates, propertyUpdates: propertyUpdates);
+                processors, knownSubjectUpdates, propertyUpdates: propertyUpdates, currentPath);
         }
 
         return (rootPropertyUpdate, rootProperty.Name);
@@ -311,49 +336,49 @@ public class SubjectUpdate
         return attributeUpdate;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static SubjectPropertyUpdate GetOrCreateSubjectAttributeUpdate(
         SubjectPropertyUpdate propertyUpdate, string attributeName)
     {
         propertyUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
-        if (propertyUpdate.Attributes.TryGetValue(attributeName, out var existingSubjectUpdate))
+        ref var attributeUpdate = ref CollectionsMarshal.GetValueRefOrAddDefault(propertyUpdate.Attributes, attributeName, out var exists);
+        if (!exists)
         {
-            return existingSubjectUpdate;
+            attributeUpdate = new SubjectPropertyUpdate();
         }
 
-        var attributeUpdate = new SubjectPropertyUpdate();
-        propertyUpdate.Attributes[attributeName] = attributeUpdate;
-        return attributeUpdate;
+        return attributeUpdate!;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static SubjectPropertyUpdate GetOrCreateSubjectPropertyUpdate(
         RegisteredSubjectProperty property,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
         Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates)
     {
         var subjectUpdate = GetOrCreateSubjectUpdate(property.Subject, knownSubjectUpdates);
-        if (subjectUpdate.Properties.TryGetValue(property.Name, out var existingSubjectUpdate))
+        ref var propertyUpdate = ref CollectionsMarshal.GetValueRefOrAddDefault(subjectUpdate.Properties, property.Name, out var exists);
+        if (!exists)
         {
-            return existingSubjectUpdate;
+            propertyUpdate = new SubjectPropertyUpdate();
+            propertyUpdates?.TryAdd(propertyUpdate, new SubjectPropertyUpdateReference(property, subjectUpdate.Properties));
         }
 
-        var propertyUpdate = new SubjectPropertyUpdate();
-        subjectUpdate.Properties[property.Name] = propertyUpdate;
-        propertyUpdates?.TryAdd(propertyUpdate, new SubjectPropertyUpdateReference(property, subjectUpdate.Properties));
-        return propertyUpdate;
+        return propertyUpdate!;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static SubjectUpdate GetOrCreateSubjectUpdate(
         IInterceptorSubject subject,
         Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates)
     {
-        if (knownSubjectUpdates.TryGetValue(subject, out var subjectUpdate))
+        ref var subjectUpdate = ref CollectionsMarshal.GetValueRefOrAddDefault(knownSubjectUpdates, subject, out var exists);
+        if (!exists)
         {
-            return subjectUpdate;
+            subjectUpdate = new SubjectUpdate();
         }
 
-        subjectUpdate = new SubjectUpdate();
-        knownSubjectUpdates[subject] = subjectUpdate;
-        return subjectUpdate;
+        return subjectUpdate!;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
