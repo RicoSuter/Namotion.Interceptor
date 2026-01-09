@@ -51,7 +51,7 @@ public class SubjectTransactionOptimisticLockingTests
 
         // Act & Assert
         // CommitAsync should throw because current value != captured OldValue
-        var ex = await Assert.ThrowsAsync<TransactionConflictException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionConflictException>(() => tx.CommitAsync(CancellationToken.None));
         Assert.Contains(nameof(Person.FirstName), ex.Message);
     }
 

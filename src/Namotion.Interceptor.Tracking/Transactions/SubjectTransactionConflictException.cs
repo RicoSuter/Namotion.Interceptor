@@ -6,16 +6,16 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Exception thrown when a transaction detects a concurrent modification conflict.
 /// </summary>
 /// <remarks>
-/// Inherits from <see cref="TransactionException"/> for unified exception handling.
-/// <see cref="TransactionException.AppliedChanges"/> and <see cref="TransactionException.FailedChanges"/>
+/// Inherits from <see cref="SubjectTransactionException"/> for unified exception handling.
+/// <see cref="SubjectTransactionException.AppliedChanges"/> and <see cref="SubjectTransactionException.FailedChanges"/>
 /// are always empty since no writes are attempted when conflicts are detected at commit time.
 /// </remarks>
-public sealed class TransactionConflictException : TransactionException
+public sealed class SubjectTransactionConflictException : SubjectTransactionException
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="TransactionConflictException"/> class.
+    /// Initializes a new instance of the <see cref="SubjectTransactionConflictException"/> class.
     /// </summary>
-    public TransactionConflictException(IReadOnlyList<PropertyReference> conflictingProperties)
+    public SubjectTransactionConflictException(IReadOnlyList<PropertyReference> conflictingProperties)
         : base(
             $"Transaction conflict detected on {conflictingProperties.Count} property(ies): {string.Join(", ", conflictingProperties.Select(p => p.Name))}",
             [], [], [])
