@@ -1,5 +1,5 @@
 ﻿{
-  Id: Guid_1,
+  Id: 1,
   Properties: {
     children: {
       Kind: Collection
@@ -16,7 +16,7 @@
             Kind: Item,
             Timestamp: {Scrubbed},
             Item: {
-              Reference: Guid_1
+              Reference: 1
             }
           },
           firstName: {
