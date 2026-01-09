@@ -5,12 +5,12 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// <summary>
 /// Exception thrown when a transaction fails to commit.
 /// </summary>
-public class TransactionException : Exception
+public class SubjectTransactionException : Exception
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="TransactionException"/> class.
+    /// Initializes a new instance of the <see cref="SubjectTransactionException"/> class.
     /// </summary>
-    public TransactionException(
+    public SubjectTransactionException(
         string message,
         IReadOnlyList<SubjectPropertyChange> appliedChanges,
         IReadOnlyList<SubjectPropertyChange> failedChanges,

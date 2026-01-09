@@ -173,7 +173,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ObjectDisposedException">Thrown when the transaction has been disposed.</exception>
-    /// <exception cref="TransactionException">Thrown when one or more external source writes failed.</exception>
+    /// <exception cref="SubjectTransactionException">Thrown when one or more external source writes failed.</exception>
     public async Task CommitAsync(CancellationToken cancellationToken)
     {
         ValidateCanCommit();
@@ -250,7 +250,7 @@ public sealed class SubjectTransaction : IDisposable
             var conflictingProperties = DetectConflicts(changes);
             if (conflictingProperties.Count > 0)
             {
-                throw new TransactionConflictException(conflictingProperties);
+                throw new SubjectTransactionConflictException(conflictingProperties);
             }
         }
     }
@@ -382,7 +382,7 @@ public sealed class SubjectTransaction : IDisposable
                 _ => "One or more changes failed."
             };
 
-            throw new TransactionException(message, successful, failed, errors);
+            throw new SubjectTransactionException(message, successful, failed, errors);
         }
     }
 

@@ -31,7 +31,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // Enable throwing just before commit
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<TransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
 
         // Assert - PropertyA should be applied, PropertyB should fail
         Assert.True(device.PropertyA);
@@ -58,7 +58,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // Enable throwing just before commit
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<TransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
 
         // Assert - Both should be reverted (PropertyA was applied then rolled back)
         Assert.False(device.PropertyA); // Rolled back
@@ -96,7 +96,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // Enable throwing just before commit
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<TransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
 
         // Assert
         // External source should have been written and then reverted (2 calls)
@@ -135,7 +135,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // PropertyA's revert will also fail
         revertPhase = true;
 
-        var exception = await Assert.ThrowsAsync<TransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
 
         // Assert - Both PropertyA (revert failure) and PropertyB (initial failure) should be reported
         Assert.Equal(2, exception.FailedChanges.Count);
@@ -164,7 +164,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // Enable throwing just before commit
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<TransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
 
         // Assert
         Assert.True(device.PropertyA); // Applied
@@ -194,7 +194,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // Enable throwing just before commit
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<TransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
 
         // Assert - PropertyA should be rolled back
         Assert.False(device.PropertyA); // Rolled back
@@ -243,7 +243,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         person.FirstName = "John";  // External source - fails
         device.PropertyA = true;     // Local - would succeed but shouldn't be applied
 
-        var exception = await Assert.ThrowsAsync<TransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
 
         // Assert - Local properties should not be applied when external source fails in rollback mode
         Assert.Null(person.FirstName);
@@ -322,7 +322,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
 
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<TransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
 
         // Assert - External source was written and then reverted (2 calls)
         Assert.Equal(2, writeCount);
@@ -368,7 +368,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
 
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<TransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
 
         // Assert
         // PropertyA: source written (1) + rolled back (2) = 2 calls
@@ -413,7 +413,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
 
         device.ThrowingEnabled = true;
 
-        await Assert.ThrowsAsync<TransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
 
         // Assert - Source was written with true, then rolled back with false
         Assert.Equal(2, writtenValues.Count);
