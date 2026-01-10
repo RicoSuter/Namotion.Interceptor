@@ -14,6 +14,9 @@ internal static class SubjectUpdatePools
     private static readonly ObjectPool<HashSet<IInterceptorSubject>> ProcessedParentPathsPool
         = new(() => []);
 
+    private static readonly ObjectPool<HashSet<IInterceptorSubject>> CurrentPathPool
+        = new(() => []);
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Dictionary<IInterceptorSubject, SubjectUpdate> RentKnownSubjectUpdates()
     {
@@ -54,5 +57,18 @@ internal static class SubjectUpdatePools
     {
         hashSet.Clear();
         ProcessedParentPathsPool.Return(hashSet);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static HashSet<IInterceptorSubject> RentCurrentPath()
+    {
+        return CurrentPathPool.Rent();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void ReturnCurrentPath(HashSet<IInterceptorSubject> hashSet)
+    {
+        hashSet.Clear();
+        CurrentPathPool.Return(hashSet);
     }
 }

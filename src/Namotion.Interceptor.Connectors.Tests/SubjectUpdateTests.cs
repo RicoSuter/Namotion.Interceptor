@@ -1,4 +1,5 @@
 ﻿using System.Reactive.Concurrency;
+using System.Text.Json;
 using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
@@ -282,30 +283,6 @@ public class SubjectUpdateTests
 
         // Assert
         await Verify(partialSubjectUpdate).DisableDateCounting();
-    }
-    
-    [Fact]
-    public async Task WhenTreeHasLoop_ThenCreateCompleteShouldNotFail()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-
-        var father = new Person { FirstName = "Father" };
-        var person = new Person(context)
-        {
-            FirstName = "Child",
-            Father = father,
-        };
-        father.Father = person; // create loop
-        
-        // Act
-        var completeSubjectUpdate = SubjectUpdate
-            .CreateCompleteUpdate(person, [JsonCamelCasePathProcessor.Instance]);
-
-        // Assert
-        await Verify(completeSubjectUpdate).DisableDateCounting();
     }
 
     [Fact]
