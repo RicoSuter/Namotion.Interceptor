@@ -1,4 +1,4 @@
-﻿{
+{
   Properties: {
     children: {
       Kind: Collection,
@@ -14,10 +14,6 @@
               }
             }
           }
-        },
-        {
-          Index: 1,
-          Item: {}
         },
         {
           Index: 2,

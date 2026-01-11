@@ -1,0 +1,58 @@
+﻿{
+  Properties: {
+    Items: {
+      Kind: Collection,
+      Timestamp: DateTimeOffset_1,
+      Operations: [
+        {
+          Action: Insert,
+          Index: 1,
+          Item: {
+            Properties: {
+              Child: {
+                Kind: Item
+              },
+              Items: {
+                Kind: Collection
+              },
+              Lookup: {
+                Kind: Collection
+              },
+              Name: {
+                Kind: Value,
+                Value: Child2,
+                Attributes: {
+                  Status: {
+                    Kind: Value,
+                    Value: active
+                  }
+                }
+              },
+              Parent: {
+                Kind: Item
+              },
+              Self: {
+                Kind: Item
+              }
+            }
+          }
+        }
+      ],
+      Collection: [
+        {
+          Index: 0,
+          Item: {
+            Properties: {
+              Name: {
+                Kind: Value,
+                Value: Child1Updated,
+                Timestamp: DateTimeOffset_2
+              }
+            }
+          }
+        }
+      ],
+      Count: 2
+    }
+  }
+}

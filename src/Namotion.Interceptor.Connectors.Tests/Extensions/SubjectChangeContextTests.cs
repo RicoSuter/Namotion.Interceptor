@@ -32,7 +32,7 @@ public class SubjectChangeContextTests
    
         // Act
         person.FirstName = "A";
-        registeredProperty.SetValueFromSource(source, null, "B");
+        registeredProperty.SetValueFromSource(source, null, null, "B");
         person.FirstName = "C";
 
         // Assert

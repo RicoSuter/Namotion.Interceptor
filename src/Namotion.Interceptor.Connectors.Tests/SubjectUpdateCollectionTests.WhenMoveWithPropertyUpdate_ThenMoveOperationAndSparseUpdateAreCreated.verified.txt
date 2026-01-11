@@ -1,0 +1,104 @@
+﻿{
+  Properties: {
+    Items: {
+      Kind: Collection,
+      Timestamp: DateTimeOffset_1,
+      Operations: [
+        {
+          Action: Move,
+          Index: 0,
+          FromIndex: 2
+        },
+        {
+          Action: Move,
+          Index: 1,
+          FromIndex: 0
+        },
+        {
+          Action: Move,
+          Index: 2,
+          FromIndex: 1
+        }
+      ],
+      Collection: [
+        {
+          Index: 0,
+          Item: {
+            Properties: {
+              Child: {
+                Kind: Item
+              },
+              Items: {
+                Kind: Collection
+              },
+              Lookup: {
+                Kind: Collection
+              },
+              Name: {
+                Kind: Value,
+                Value: Child3,
+                Attributes: {
+                  Status: {
+                    Kind: Value,
+                    Value: active
+                  }
+                }
+              },
+              Parent: {
+                Kind: Item
+              },
+              Self: {
+                Kind: Item
+              }
+            }
+          }
+        },
+        {
+          Index: 1,
+          Item: {
+            Properties: {
+              Child: {
+                Kind: Item
+              },
+              Items: {
+                Kind: Collection
+              },
+              Lookup: {
+                Kind: Collection
+              },
+              Name: {
+                Kind: Value,
+                Value: Child1,
+                Attributes: {
+                  Status: {
+                    Kind: Value,
+                    Value: active
+                  }
+                }
+              },
+              Parent: {
+                Kind: Item
+              },
+              Self: {
+                Kind: Item
+              }
+            }
+          }
+        },
+        {
+          Index: 2,
+          Item: {
+            Properties: {
+              Name: {
+                Kind: Value,
+                Value: Child2Updated,
+                Timestamp: DateTimeOffset_2
+              }
+            }
+          }
+        }
+      ],
+      Count: 3
+    }
+  }
+}

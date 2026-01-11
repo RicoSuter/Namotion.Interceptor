@@ -4,6 +4,16 @@
       children: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
+        Operations: [
+          {
+            Action: Move,
+            Index: 0,
+            FromIndex: 1
+          },
+          {
+            Index: 0
+          }
+        ],
         Collection: [
           {
             Index: 0,
@@ -22,7 +32,8 @@
               }
             }
           }
-        ]
+        ],
+        Count: 1
       }
     }
   },

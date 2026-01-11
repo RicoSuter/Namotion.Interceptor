@@ -1,16 +1,8 @@
-﻿{
+{
   Properties: {
     children: {
       Kind: Collection,
       Collection: [
-        {
-          Index: 0,
-          Item: {}
-        },
-        {
-          Index: 1,
-          Item: {}
-        },
         {
           Index: 2,
           Item: {
