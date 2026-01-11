@@ -117,9 +117,9 @@ public class SubjectUpdateExtensionsTests
                         Kind = SubjectPropertyUpdateKind.Collection,
                         Operations =
                         [
-                            new CollectionOperation
+                            new SubjectCollectionOperation
                             {
-                                Action = CollectionOperationType.Insert,
+                                Action = SubjectCollectionOperationType.Insert,
                                 Index = 0,
                                 Item = new SubjectUpdate
                                 {
@@ -129,9 +129,9 @@ public class SubjectUpdateExtensionsTests
                                     }
                                 }
                             },
-                            new CollectionOperation
+                            new SubjectCollectionOperation
                             {
-                                Action = CollectionOperationType.Insert,
+                                Action = SubjectCollectionOperationType.Insert,
                                 Index = 1,
                                 Item = new SubjectUpdate
                                 {
@@ -338,9 +338,9 @@ public class SubjectUpdateExtensionsTests
                         Kind = SubjectPropertyUpdateKind.Collection,
                         Operations =
                         [
-                            new CollectionOperation
+                            new SubjectCollectionOperation
                             {
-                                Action = CollectionOperationType.Insert,
+                                Action = SubjectCollectionOperationType.Insert,
                                 Index = 0,
                                 Item = new SubjectUpdate
                                 {
@@ -350,9 +350,9 @@ public class SubjectUpdateExtensionsTests
                                     }
                                 }
                             },
-                            new CollectionOperation
+                            new SubjectCollectionOperation
                             {
-                                Action = CollectionOperationType.Insert,
+                                Action = SubjectCollectionOperationType.Insert,
                                 Index = indexElement, // JsonElement index
                                 Item = new SubjectUpdate
                                 {
@@ -440,9 +440,9 @@ public class SubjectUpdateExtensionsTests
                         Kind = SubjectPropertyUpdateKind.Collection,
                         Operations =
                         [
-                            new CollectionOperation
+                            new SubjectCollectionOperation
                             {
-                                Action = CollectionOperationType.Insert,
+                                Action = SubjectCollectionOperationType.Insert,
                                 Index = 2,
                                 Item = new SubjectUpdate
                                 {
@@ -521,9 +521,9 @@ public class SubjectUpdateExtensionsTests
                         Kind = SubjectPropertyUpdateKind.Collection,
                         Operations =
                         [
-                            new CollectionOperation
+                            new SubjectCollectionOperation
                             {
-                                Action = CollectionOperationType.Move,
+                                Action = SubjectCollectionOperationType.Move,
                                 FromIndex = 2,
                                 Index = 0
                             }
@@ -563,9 +563,9 @@ public class SubjectUpdateExtensionsTests
                         Kind = SubjectPropertyUpdateKind.Collection,
                         Operations =
                         [
-                            new CollectionOperation
+                            new SubjectCollectionOperation
                             {
-                                Action = CollectionOperationType.Remove,
+                                Action = SubjectCollectionOperationType.Remove,
                                 Index = 1
                             }
                         ]
@@ -603,9 +603,9 @@ public class SubjectUpdateExtensionsTests
                         Kind = SubjectPropertyUpdateKind.Collection,
                         Operations =
                         [
-                            new CollectionOperation
+                            new SubjectCollectionOperation
                             {
-                                Action = CollectionOperationType.Move,
+                                Action = SubjectCollectionOperationType.Move,
                                 FromIndex = 2,
                                 Index = 0
                             }
@@ -654,9 +654,9 @@ public class SubjectUpdateExtensionsTests
                         Kind = SubjectPropertyUpdateKind.Collection,
                         Operations =
                         [
-                            new CollectionOperation
+                            new SubjectCollectionOperation
                             {
-                                Action = CollectionOperationType.Insert,
+                                Action = SubjectCollectionOperationType.Insert,
                                 Index = "key1",
                                 Item = new SubjectUpdate
                                 {
@@ -700,9 +700,9 @@ public class SubjectUpdateExtensionsTests
                         Kind = SubjectPropertyUpdateKind.Collection,
                         Operations =
                         [
-                            new CollectionOperation
+                            new SubjectCollectionOperation
                             {
-                                Action = CollectionOperationType.Remove,
+                                Action = SubjectCollectionOperationType.Remove,
                                 Index = "key1"
                             }
                         ]

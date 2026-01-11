@@ -9,13 +9,13 @@ namespace Namotion.Interceptor.Connectors.Updates;
 /// - Operations: structural changes (Remove, Insert, Move) - ordered
 /// - Updates: sparse property updates by final index
 /// </summary>
-internal static class CollectionDiffFactory
+internal static class SubjectCollectionDiffFactory
 {
     /// <summary>
     /// Creates a diff between old and new array/list collections.
     /// Returns structural operations and property updates separately.
     /// </summary>
-    public static (List<CollectionOperation>? operations, List<SubjectPropertyCollectionUpdate>? updates)
+    public static (List<SubjectCollectionOperation>? operations, List<SubjectPropertyCollectionUpdate>? updates)
         CreateArrayDiff(
             IEnumerable<IInterceptorSubject>? oldCollection,
             IEnumerable<IInterceptorSubject>? newCollection,
@@ -24,7 +24,7 @@ internal static class CollectionDiffFactory
             Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates,
             HashSet<IInterceptorSubject> currentPath)
     {
-        List<CollectionOperation>? operations = null;
+        List<SubjectCollectionOperation>? operations = null;
         List<SubjectPropertyCollectionUpdate>? updates = null;
 
         // Handle null case - consumer uses Count=0
@@ -58,9 +58,9 @@ internal static class CollectionDiffFactory
                 {
                     // Item moved - add Move operation (no item data, just indices)
                     operations ??= [];
-                    operations.Add(new CollectionOperation
+                    operations.Add(new SubjectCollectionOperation
                     {
-                        Action = CollectionOperationType.Move,
+                        Action = SubjectCollectionOperationType.Move,
                         FromIndex = oldIndex,
                         Index = newIndex
                     });
@@ -84,9 +84,9 @@ internal static class CollectionDiffFactory
             {
                 // New item - Insert operation with full item data
                 operations ??= [];
-                operations.Add(new CollectionOperation
+                operations.Add(new SubjectCollectionOperation
                 {
-                    Action = CollectionOperationType.Insert,
+                    Action = SubjectCollectionOperationType.Insert,
                     Index = newIndex,
                     Item = SubjectUpdateFactory.GetOrCreateCompleteUpdate(
                         newItem, processors, knownSubjectUpdates, propertyUpdates, currentPath)
@@ -100,9 +100,9 @@ internal static class CollectionDiffFactory
             if (!processedOldItems.Contains(oldItems[oldIndex]))
             {
                 operations ??= [];
-                operations.Add(new CollectionOperation
+                operations.Add(new SubjectCollectionOperation
                 {
-                    Action = CollectionOperationType.Remove,
+                    Action = SubjectCollectionOperationType.Remove,
                     Index = oldIndex
                 });
             }
@@ -116,7 +116,7 @@ internal static class CollectionDiffFactory
     /// Returns structural operations and property updates separately.
     /// Move is not applicable for dictionaries.
     /// </summary>
-    public static (List<CollectionOperation>? operations, List<SubjectPropertyCollectionUpdate>? updates)
+    public static (List<SubjectCollectionOperation>? operations, List<SubjectPropertyCollectionUpdate>? updates)
         CreateDictionaryDiff(
             IDictionary? oldDictionary,
             IDictionary? newDictionary,
@@ -125,7 +125,7 @@ internal static class CollectionDiffFactory
             Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates,
             HashSet<IInterceptorSubject> currentPath)
     {
-        List<CollectionOperation>? operations = null;
+        List<SubjectCollectionOperation>? operations = null;
         List<SubjectPropertyCollectionUpdate>? updates = null;
 
         // Handle null case - consumer uses Count=0
@@ -168,9 +168,9 @@ internal static class CollectionDiffFactory
             {
                 // New key - Insert operation with full item data
                 operations ??= [];
-                operations.Add(new CollectionOperation
+                operations.Add(new SubjectCollectionOperation
                 {
-                    Action = CollectionOperationType.Insert,
+                    Action = SubjectCollectionOperationType.Insert,
                     Index = key,
                     Item = newItem is not null
                         ? SubjectUpdateFactory.GetOrCreateCompleteUpdate(
@@ -184,9 +184,9 @@ internal static class CollectionDiffFactory
         foreach (var removedKey in oldKeys)
         {
             operations ??= [];
-            operations.Add(new CollectionOperation
+            operations.Add(new SubjectCollectionOperation
             {
-                Action = CollectionOperationType.Remove,
+                Action = SubjectCollectionOperationType.Remove,
                 Index = removedKey
             });
         }

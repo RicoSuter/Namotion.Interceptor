@@ -39,7 +39,7 @@ public class SubjectPropertyUpdate
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonInclude]
-    public List<CollectionOperation>? Operations { get; internal set; }
+    public List<SubjectCollectionOperation>? Operations { get; internal set; }
 
     /// <summary>
     /// Sparse property updates by FINAL index/key (after Operations applied).
@@ -215,7 +215,7 @@ public class SubjectPropertyUpdate
             var oldDict = oldValue as IDictionary;
             var newDict = newValue as IDictionary;
 
-            var (operations, updates) = CollectionDiffFactory.CreateDictionaryDiff(
+            var (operations, updates) = SubjectCollectionDiffFactory.CreateDictionaryDiff(
                 oldDict, newDict, processors, knownSubjectUpdates, propertyUpdates, currentPath);
 
             Operations = operations;
@@ -228,7 +228,7 @@ public class SubjectPropertyUpdate
             var oldCollection = oldValue as IEnumerable<IInterceptorSubject>;
             var newCollection = newValue as IEnumerable<IInterceptorSubject>;
 
-            var (operations, updates) = CollectionDiffFactory.CreateArrayDiff(
+            var (operations, updates) = SubjectCollectionDiffFactory.CreateArrayDiff(
                 oldCollection, newCollection, processors, knownSubjectUpdates, propertyUpdates, currentPath);
 
             Operations = operations;

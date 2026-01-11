@@ -5,13 +5,13 @@ namespace Namotion.Interceptor.Connectors.Updates;
 /// <summary>
 /// Represents a structural operation on a collection (not property updates).
 /// </summary>
-public class CollectionOperation
+public class SubjectCollectionOperation
 {
     /// <summary>
     /// The type of structural operation.
     /// </summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public required CollectionOperationType Action { get; init; }
+    public required SubjectCollectionOperationType Action { get; init; }
 
     /// <summary>
     /// Target index (int for arrays) or key (object for dictionaries).
@@ -32,25 +32,4 @@ public class CollectionOperation
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SubjectUpdate? Item { get; init; }
-}
-
-/// <summary>
-/// Types of structural operations on collections.
-/// </summary>
-public enum CollectionOperationType
-{
-    /// <summary>
-    /// Remove item at index/key. For arrays, subsequent items shift down.
-    /// </summary>
-    Remove = 0,
-
-    /// <summary>
-    /// Insert new item at index/key. For arrays, subsequent items shift up.
-    /// </summary>
-    Insert = 1,
-
-    /// <summary>
-    /// Move item from FromIndex to Index. Arrays only. Identity preserved.
-    /// </summary>
-    Move = 2
 }

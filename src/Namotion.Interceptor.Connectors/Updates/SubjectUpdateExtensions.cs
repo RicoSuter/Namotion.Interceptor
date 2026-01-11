@@ -219,7 +219,7 @@ public static class SubjectUpdateExtensions
 
                 switch (operation.Action)
                 {
-                    case CollectionOperationType.Remove:
+                    case SubjectCollectionOperationType.Remove:
                         if (index >= 0 && index < existingItems.Count)
                         {
                             existingItems.RemoveAt(index);
@@ -227,7 +227,7 @@ public static class SubjectUpdateExtensions
                         }
                         break;
 
-                    case CollectionOperationType.Insert:
+                    case SubjectCollectionOperationType.Insert:
                         if (subjectFactory is not null && operation.Item is not null)
                         {
                             var newItem = subjectFactory.CreateCollectionSubject(registeredProperty, index);
@@ -246,7 +246,7 @@ public static class SubjectUpdateExtensions
                         }
                         break;
 
-                    case CollectionOperationType.Move:
+                    case SubjectCollectionOperationType.Move:
                         if (operation.FromIndex.HasValue)
                         {
                             var fromIndex = operation.FromIndex.Value;
@@ -364,14 +364,14 @@ public static class SubjectUpdateExtensions
 
                 switch (operation.Action)
                 {
-                    case CollectionOperationType.Remove:
+                    case SubjectCollectionOperationType.Remove:
                         if (workingDict.Remove(key))
                         {
                             structureChanged = true;
                         }
                         break;
 
-                    case CollectionOperationType.Insert:
+                    case SubjectCollectionOperationType.Insert:
                         if (subjectFactory is not null && operation.Item is not null)
                         {
                             var newItem = subjectFactory.CreateCollectionSubject(registeredProperty, key);
