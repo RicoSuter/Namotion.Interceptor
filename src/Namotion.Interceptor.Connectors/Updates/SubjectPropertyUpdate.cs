@@ -1,6 +1,9 @@
 using System.Collections;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
+using Namotion.Interceptor.Connectors.Updates.Collections;
+using Namotion.Interceptor.Connectors.Updates.Items;
+using Namotion.Interceptor.Connectors.Updates.Values;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 
@@ -162,29 +165,22 @@ public class SubjectPropertyUpdate
 
         if (property.IsSubjectDictionary)
         {
-            Kind = SubjectPropertyUpdateKind.Collection;
-            Collection = value is IDictionary dictionary
-                ? CreateDictionaryCollectionUpdates(dictionary, processors, knownSubjectUpdates, propertyUpdates, currentPath)
-                : null;
+            SubjectDictionaryUpdateLogic.ApplyToUpdate(
+                this, value as IDictionary, processors, knownSubjectUpdates, propertyUpdates, currentPath);
         }
         else if (property.IsSubjectCollection)
         {
-            Kind = SubjectPropertyUpdateKind.Collection;
-            Collection = value is IEnumerable<IInterceptorSubject> collection
-                ? CreateEnumerableCollectionUpdates(collection, processors, knownSubjectUpdates, propertyUpdates, currentPath)
-                : null;
+            SubjectCollectionUpdateLogic.ApplyToUpdate(
+                this, value as IEnumerable<IInterceptorSubject>, processors, knownSubjectUpdates, propertyUpdates, currentPath);
         }
         else if (property.IsSubjectReference)
         {
-            Kind = SubjectPropertyUpdateKind.Item;
-            Item = value is IInterceptorSubject itemSubject ?
-                SubjectUpdateFactory.GetOrCreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates, currentPath) :
-                null;
+            SubjectItemUpdateLogic.ApplyItemToUpdate(
+                this, value as IInterceptorSubject, processors, knownSubjectUpdates, propertyUpdates, currentPath);
         }
         else
         {
-            Kind = SubjectPropertyUpdateKind.Value;
-            Value = value;
+            SubjectValueUpdateLogic.ApplyValueToUpdate(this, value);
         }
     }
 
@@ -211,96 +207,18 @@ public class SubjectPropertyUpdate
 
         if (property.IsSubjectDictionary)
         {
-            Kind = SubjectPropertyUpdateKind.Collection;
-            var oldDict = oldValue as IDictionary;
-            var newDict = newValue as IDictionary;
-
-            var (operations, updates) = SubjectCollectionDiffFactory.CreateDictionaryDiff(
-                oldDict, newDict, processors, knownSubjectUpdates, propertyUpdates, currentPath);
-
-            Operations = operations;
-            Collection = updates;
-            Count = newDict?.Count;
+            SubjectDictionaryUpdateLogic.ApplyDiffToUpdate(
+                this, oldValue, newValue, processors, knownSubjectUpdates, propertyUpdates, currentPath);
         }
         else if (property.IsSubjectCollection)
         {
-            Kind = SubjectPropertyUpdateKind.Collection;
-            var oldCollection = oldValue as IEnumerable<IInterceptorSubject>;
-            var newCollection = newValue as IEnumerable<IInterceptorSubject>;
-
-            var (operations, updates) = SubjectCollectionDiffFactory.CreateArrayDiff(
-                oldCollection, newCollection, processors, knownSubjectUpdates, propertyUpdates, currentPath);
-
-            Operations = operations;
-            Collection = updates;
-            Count = (newCollection as ICollection<IInterceptorSubject>)?.Count ?? newCollection?.Count();
+            SubjectCollectionUpdateLogic.ApplyDiffToUpdate(
+                this, oldValue, newValue, processors, knownSubjectUpdates, propertyUpdates, currentPath);
         }
         else
         {
             // For non-collection properties, fall back to regular ApplyValue
             ApplyValue(property, timestamp, newValue, processors, knownSubjectUpdates, propertyUpdates, currentPath);
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static List<SubjectPropertyCollectionUpdate> CreateDictionaryCollectionUpdates(IDictionary dictionary,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors,
-        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates,
-        HashSet<IInterceptorSubject> currentPath)
-    {
-        var collectionUpdates = new List<SubjectPropertyCollectionUpdate>(dictionary.Count);
-        foreach (DictionaryEntry entry in dictionary)
-        {
-            var item = entry.Value as IInterceptorSubject;
-            collectionUpdates.Add(new SubjectPropertyCollectionUpdate
-            {
-                Item = item is not null ?
-                    SubjectUpdateFactory.GetOrCreateCompleteUpdate(item, processors, knownSubjectUpdates, propertyUpdates, currentPath) :
-                    null,
-                Index = entry.Key
-            });
-        }
-
-        return collectionUpdates;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static List<SubjectPropertyCollectionUpdate> CreateEnumerableCollectionUpdates(IEnumerable<IInterceptorSubject> enumerable,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors,
-        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
-        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates,
-        HashSet<IInterceptorSubject> currentPath)
-    {
-        if (enumerable is ICollection<IInterceptorSubject> collection)
-        {
-            var index = 0;
-            var collectionUpdates = new List<SubjectPropertyCollectionUpdate>(collection.Count);
-            foreach (var itemSubject in collection)
-            {
-                collectionUpdates.Add(new SubjectPropertyCollectionUpdate
-                {
-                    Item = SubjectUpdateFactory.GetOrCreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates, currentPath),
-                    Index = index++
-                });
-            }
-
-            return collectionUpdates;
-        }
-        else
-        {
-            var index = 0;
-            var collectionUpdates = new List<SubjectPropertyCollectionUpdate>();
-            foreach (var itemSubject in enumerable)
-            {
-                collectionUpdates.Add(new SubjectPropertyCollectionUpdate
-                {
-                    Item = SubjectUpdateFactory.GetOrCreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates, currentPath),
-                    Index = index++
-                });
-            }
-
-            return collectionUpdates;
         }
     }
 }
