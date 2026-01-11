@@ -34,11 +34,26 @@ public class SubjectPropertyUpdate
     public SubjectUpdate? Item { get; internal set; }
 
     /// <summary>
-    /// Gets or sets the all items of the collection if kind is Collection.
+    /// Structural operations (Remove, Insert, Move) to apply in order.
+    /// Applied BEFORE property updates in Collection.
     /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    public List<CollectionOperation>? Operations { get; internal set; }
+
+    /// <summary>
+    /// Sparse property updates by FINAL index/key (after Operations applied).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonInclude]
     public IReadOnlyCollection<SubjectPropertyCollectionUpdate>? Collection { get; internal set; }
+
+    /// <summary>
+    /// Total count of the collection/dictionary after all operations.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonInclude]
+    public int? Count { get; internal set; }
 
     /// <summary>
     /// Gets the updated attributes.
@@ -163,13 +178,67 @@ public class SubjectPropertyUpdate
         {
             Kind = SubjectPropertyUpdateKind.Item;
             Item = value is IInterceptorSubject itemSubject ?
-                SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates, currentPath) :
+                SubjectUpdateFactory.GetOrCreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates, currentPath) :
                 null;
         }
         else
         {
             Kind = SubjectPropertyUpdateKind.Value;
             Value = value;
+        }
+    }
+
+    /// <summary>
+    /// Applies a diff update for collection/dictionary properties, comparing old and new values.
+    /// Produces structural Operations (Remove, Insert, Move) and sparse Collection updates separately.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="timestamp">The timestamp of the value change.</param>
+    /// <param name="oldValue">The old collection/dictionary value.</param>
+    /// <param name="newValue">The new collection/dictionary value.</param>
+    /// <param name="processors">The update processors to filter and transform updates.</param>
+    /// <param name="knownSubjectUpdates">The known subject updates.</param>
+    /// <param name="propertyUpdates">Optional list to collect property updates for transformation.</param>
+    /// <param name="currentPath">The set of subjects in the current traversal path (for cycle detection).</param>
+    internal void ApplyValueWithDiff(RegisteredSubjectProperty property, DateTimeOffset? timestamp,
+        object? oldValue, object? newValue,
+        ReadOnlySpan<ISubjectUpdateProcessor> processors,
+        Dictionary<IInterceptorSubject, SubjectUpdate> knownSubjectUpdates,
+        Dictionary<SubjectPropertyUpdate, SubjectPropertyUpdateReference>? propertyUpdates,
+        HashSet<IInterceptorSubject> currentPath)
+    {
+        Timestamp = timestamp;
+
+        if (property.IsSubjectDictionary)
+        {
+            Kind = SubjectPropertyUpdateKind.Collection;
+            var oldDict = oldValue as IDictionary;
+            var newDict = newValue as IDictionary;
+
+            var (operations, updates) = CollectionDiffFactory.CreateDictionaryDiff(
+                oldDict, newDict, processors, knownSubjectUpdates, propertyUpdates, currentPath);
+
+            Operations = operations;
+            Collection = updates;
+            Count = newDict?.Count;
+        }
+        else if (property.IsSubjectCollection)
+        {
+            Kind = SubjectPropertyUpdateKind.Collection;
+            var oldCollection = oldValue as IEnumerable<IInterceptorSubject>;
+            var newCollection = newValue as IEnumerable<IInterceptorSubject>;
+
+            var (operations, updates) = CollectionDiffFactory.CreateArrayDiff(
+                oldCollection, newCollection, processors, knownSubjectUpdates, propertyUpdates, currentPath);
+
+            Operations = operations;
+            Collection = updates;
+            Count = (newCollection as ICollection<IInterceptorSubject>)?.Count ?? newCollection?.Count();
+        }
+        else
+        {
+            // For non-collection properties, fall back to regular ApplyValue
+            ApplyValue(property, timestamp, newValue, processors, knownSubjectUpdates, propertyUpdates, currentPath);
         }
     }
 
@@ -187,7 +256,7 @@ public class SubjectPropertyUpdate
             collectionUpdates.Add(new SubjectPropertyCollectionUpdate
             {
                 Item = item is not null ?
-                    SubjectUpdate.GetOrCreateCompleteUpdate(item, processors, knownSubjectUpdates, propertyUpdates, currentPath) :
+                    SubjectUpdateFactory.GetOrCreateCompleteUpdate(item, processors, knownSubjectUpdates, propertyUpdates, currentPath) :
                     null,
                 Index = entry.Key
             });
@@ -211,7 +280,7 @@ public class SubjectPropertyUpdate
             {
                 collectionUpdates.Add(new SubjectPropertyCollectionUpdate
                 {
-                    Item = SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates, currentPath),
+                    Item = SubjectUpdateFactory.GetOrCreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates, currentPath),
                     Index = index++
                 });
             }
@@ -226,7 +295,7 @@ public class SubjectPropertyUpdate
             {
                 collectionUpdates.Add(new SubjectPropertyCollectionUpdate
                 {
-                    Item = SubjectUpdate.GetOrCreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates, currentPath),
+                    Item = SubjectUpdateFactory.GetOrCreateCompleteUpdate(itemSubject, processors, knownSubjectUpdates, propertyUpdates, currentPath),
                     Index = index++
                 });
             }

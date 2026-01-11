@@ -1,0 +1,86 @@
+﻿{
+  Properties: {
+    Items: {
+      Kind: Collection,
+      Timestamp: DateTimeOffset_1,
+      Operations: [
+        {
+          Action: Move,
+          Index: 0,
+          FromIndex: 1
+        },
+        {
+          Action: Insert,
+          Index: 1,
+          Item: {
+            Properties: {
+              Child: {
+                Kind: Item
+              },
+              Items: {
+                Kind: Collection
+              },
+              Lookup: {
+                Kind: Collection
+              },
+              Name: {
+                Kind: Value,
+                Value: Child3,
+                Attributes: {
+                  Status: {
+                    Kind: Value,
+                    Value: active
+                  }
+                }
+              },
+              Parent: {
+                Kind: Item
+              },
+              Self: {
+                Kind: Item
+              }
+            }
+          }
+        },
+        {
+          Index: 0
+        }
+      ],
+      Collection: [
+        {
+          Index: 0,
+          Item: {
+            Properties: {
+              Child: {
+                Kind: Item
+              },
+              Items: {
+                Kind: Collection
+              },
+              Lookup: {
+                Kind: Collection
+              },
+              Name: {
+                Kind: Value,
+                Value: Child2,
+                Attributes: {
+                  Status: {
+                    Kind: Value,
+                    Value: active
+                  }
+                }
+              },
+              Parent: {
+                Kind: Item
+              },
+              Self: {
+                Kind: Item
+              }
+            }
+          }
+        }
+      ],
+      Count: 2
+    }
+  }
+}

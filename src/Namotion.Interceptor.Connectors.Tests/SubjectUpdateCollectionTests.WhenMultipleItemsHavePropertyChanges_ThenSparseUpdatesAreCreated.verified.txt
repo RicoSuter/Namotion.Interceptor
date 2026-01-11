@@ -1,16 +1,16 @@
-{
+﻿{
   Properties: {
-    children: {
+    Items: {
       Kind: Collection,
       Collection: [
         {
           Index: 0,
           Item: {
             Properties: {
-              firstName: {
+              Name: {
                 Kind: Value,
-                Value: NewChild1,
-                Timestamp: {Scrubbed}
+                Value: Child1Updated,
+                Timestamp: DateTimeOffset_1
               }
             }
           }
@@ -19,20 +19,15 @@
           Index: 2,
           Item: {
             Properties: {
-              firstName: {
+              Name: {
                 Kind: Value,
-                Value: NewChild3,
-                Timestamp: {Scrubbed}
+                Value: Child3Updated,
+                Timestamp: DateTimeOffset_2
               }
             }
           }
         }
       ]
-    },
-    firstName: {
-      Kind: Value,
-      Value: NewFather,
-      Timestamp: {Scrubbed}
     }
   }
 }

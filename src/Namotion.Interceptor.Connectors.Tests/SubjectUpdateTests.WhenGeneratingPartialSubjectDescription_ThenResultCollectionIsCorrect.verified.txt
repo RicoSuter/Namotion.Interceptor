@@ -3,6 +3,24 @@
     children: {
       Kind: Collection,
       Timestamp: {Scrubbed},
+      Operations: [
+        {
+          Action: Move,
+          Index: 0,
+          FromIndex: 2
+        },
+        {
+          Action: Move,
+          Index: 1,
+          FromIndex: 3
+        },
+        {
+          Index: 0
+        },
+        {
+          Index: 1
+        }
+      ],
       Collection: [
         {
           Index: 0,
@@ -83,7 +101,8 @@
             }
           }
         }
-      ]
+      ],
+      Count: 2
     },
     father: {
       Kind: Item,

@@ -1,0 +1,33 @@
+﻿{
+  Properties: {
+    Lookup: {
+      Kind: Collection,
+      Collection: [
+        {
+          Index: key1,
+          Item: {
+            Properties: {
+              Name: {
+                Kind: Value,
+                Value: Item1Updated,
+                Timestamp: DateTimeOffset_1
+              }
+            }
+          }
+        },
+        {
+          Index: key3,
+          Item: {
+            Properties: {
+              Name: {
+                Kind: Value,
+                Value: Item3Updated,
+                Timestamp: DateTimeOffset_2
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,21 @@
+﻿{
+  Properties: {
+    Items: {
+      Kind: Collection,
+      Collection: [
+        {
+          Index: 1,
+          Item: {
+            Properties: {
+              Name: {
+                Kind: Value,
+                Value: Child2Updated,
+                Timestamp: DateTimeOffset_1
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

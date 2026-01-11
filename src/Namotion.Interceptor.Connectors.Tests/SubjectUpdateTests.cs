@@ -84,7 +84,8 @@ public class SubjectUpdateTests
             .CreatePartialUpdateFromChanges(person, changes, [counter, JsonCamelCasePathProcessor.Instance]);
 
         // Assert
-        Assert.Equal(5, counter.TransformSubjectCount);
+        // Only changed subjects are included: person, father, child1, child3 (not child2)
+        Assert.Equal(4, counter.TransformSubjectCount);
         Assert.Equal(6, counter.TransformPropertyCount);
 
         await Verify(partialSubjectUpdate).DisableDateCounting();

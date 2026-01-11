@@ -40,6 +40,44 @@
     items: {
       Kind: Collection,
       Timestamp: {Scrubbed},
+      Operations: [
+        {
+          Action: Insert,
+          Index: 1,
+          Item: {
+            Properties: {
+              child: {
+                Kind: Item
+              },
+              items: {
+                Kind: Collection
+              },
+              lookup: {
+                Kind: Collection
+              },
+              name: {
+                Kind: Value,
+                Value: NewItem,
+                Attributes: {
+                  status: {
+                    Kind: Value,
+                    Value: active
+                  }
+                }
+              },
+              parent: {
+                Kind: Item,
+                Item: {
+                  Reference: 1
+                }
+              },
+              self: {
+                Kind: Item
+              }
+            }
+          }
+        }
+      ],
       Collection: [
         {
           Index: 0,
@@ -52,12 +90,9 @@
               }
             }
           }
-        },
-        {
-          Index: 1,
-          Item: {}
         }
-      ]
+      ],
+      Count: 2
     },
     name: {
       Kind: Value,
@@ -96,6 +131,44 @@
           lookup: {
             Kind: Collection,
             Timestamp: {Scrubbed},
+            Operations: [
+              {
+                Action: Insert,
+                Index: newKey,
+                Item: {
+                  Properties: {
+                    child: {
+                      Kind: Item
+                    },
+                    items: {
+                      Kind: Collection
+                    },
+                    lookup: {
+                      Kind: Collection
+                    },
+                    name: {
+                      Kind: Value,
+                      Value: DictItem,
+                      Attributes: {
+                        status: {
+                          Kind: Value,
+                          Value: active
+                        }
+                      }
+                    },
+                    parent: {
+                      Kind: Item,
+                      Item: {
+                        Reference: 1
+                      }
+                    },
+                    self: {
+                      Kind: Item
+                    }
+                  }
+                }
+              }
+            ],
             Collection: [
               {
                 Index: key,
@@ -108,12 +181,9 @@
                     }
                   }
                 }
-              },
-              {
-                Index: newKey,
-                Item: {}
               }
-            ]
+            ],
+            Count: 2
           },
           name: {
             Kind: Value,
