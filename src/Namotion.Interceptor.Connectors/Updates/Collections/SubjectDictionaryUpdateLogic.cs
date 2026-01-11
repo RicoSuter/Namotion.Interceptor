@@ -216,10 +216,23 @@ internal static class SubjectDictionaryUpdateLogic
                 // Key exists - check for property updates
                 if (newItem is not null)
                 {
-                    var itemUpdate = SubjectUpdateFactory.GetOrCreateCompleteUpdate(
-                        newItem, processors, knownSubjectUpdates, propertyUpdates, currentPath);
+                    // For existing items, first check if they already have a sparse update in knownSubjectUpdates.
+                    // If so, use that directly to avoid calling GetOrCreateCompleteUpdate which would
+                    // assign an Id (for cycle detection) that we don't want on sparse updates.
+                    SubjectUpdate itemUpdate;
+                    if (knownSubjectUpdates.TryGetValue(newItem, out var existingUpdate) &&
+                        existingUpdate.Properties.Count > 0)
+                    {
+                        itemUpdate = existingUpdate;
+                    }
+                    else
+                    {
+                        // No existing sparse update - get complete update for this item
+                        itemUpdate = SubjectUpdateFactory.GetOrCreateCompleteUpdate(
+                            newItem, processors, knownSubjectUpdates, propertyUpdates, currentPath);
+                    }
 
-                    if (itemUpdate.Properties.Count > 0 || itemUpdate.Reference.HasValue)
+                    if (itemUpdate.Properties.Count > 0 && !itemUpdate.Reference.HasValue)
                     {
                         updates ??= [];
                         updates.Add(new SubjectPropertyCollectionUpdate

@@ -503,4 +503,195 @@ public class SubjectUpdateCycleTests
 
         await Verify(partialUpdate).DisableDateCounting();
     }
+
+    /// <summary>
+    /// Tests the specific scenario where collection items reference each other.
+    /// This can cause JSON cycles when the same SubjectUpdate object appears in
+    /// multiple Insert operations.
+    /// </summary>
+    [Fact]
+    public void WhenCollectionInsertHasItemsReferencingEachOther_ThenShouldNotFail()
+    {
+        // Arrange - Collection items that reference each other
+        // This scenario causes the same SubjectUpdate to appear in multiple places
+        // in the Operations list, which JSON.NET detects as a cycle
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var root = new CycleTestNode(context) { Name = "Root" };
+
+        // Create items that reference each other (mutual cycle)
+        var item1 = new CycleTestNode { Name = "Item1" };
+        var item2 = new CycleTestNode { Name = "Item2" };
+        item1.Child = item2; // item1 -> item2
+        item2.Child = item1; // item2 -> item1 (cycle between siblings)
+
+        // Also make them reference parent
+        item1.Parent = root;
+        item2.Parent = root;
+
+        // IMPORTANT: Add items to collection to register them, then create the change
+        var oldItems = root.Items.ToList();
+        root.Items = [item1, item2]; // This registers the items
+        var newItems = root.Items.ToList();
+
+        var changes = new[]
+        {
+            SubjectPropertyChange.Create(
+                new PropertyReference(root, "Items"),
+                null,
+                DateTimeOffset.UtcNow,
+                null,
+                oldItems,
+                newItems),
+        };
+
+        // Act
+        var partialUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(root, changes, [JsonCamelCasePathProcessor.Instance]);
+
+        // Assert - verify JSON serialization doesn't fail due to cycles
+        var json = JsonSerializer.Serialize(partialUpdate);
+        Assert.NotNull(json);
+
+        // Verify we have Operations with Inserts
+        Assert.NotNull(partialUpdate.Properties["items"].Operations);
+        Assert.Equal(2, partialUpdate.Properties["items"].Operations!.Count);
+    }
+
+    /// <summary>
+    /// Tests adding a child that references its parent.
+    /// The child's Insert operation should use a Reference for the parent, not the full SubjectUpdate.
+    /// </summary>
+    [Fact]
+    public void WhenInsertedChildReferencesParent_ThenShouldCreateReference()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var root = new CycleTestNode(context) { Name = "Root" };
+
+        // Create a child that references back to root
+        var child = new CycleTestNode { Name = "Child" };
+        child.Parent = root; // child -> root (cycle back to root)
+
+        // IMPORTANT: Add child to collection to register it, then create the change
+        var oldItems = root.Items.ToList();
+        root.Items = [child]; // This registers the child
+        var newItems = root.Items.ToList();
+
+        var changes = new[]
+        {
+            SubjectPropertyChange.Create(
+                new PropertyReference(root, "Items"),
+                null,
+                DateTimeOffset.UtcNow,
+                null,
+                oldItems,
+                newItems),
+        };
+
+        // Act
+        var partialUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(root, changes, [JsonCamelCasePathProcessor.Instance]);
+
+        // Assert - verify JSON serialization doesn't fail due to cycles
+        var json = JsonSerializer.Serialize(partialUpdate);
+        Assert.NotNull(json);
+
+        // The child's parent property should be a reference to root, not the full root SubjectUpdate
+        var operations = partialUpdate.Properties["items"].Operations;
+        Assert.NotNull(operations);
+        Assert.Single(operations);
+
+        var insertedItem = operations[0].Item;
+        Assert.NotNull(insertedItem);
+
+        // The parent property in the inserted item should have a Reference (not Item with full content)
+        // Note: JsonCamelCasePathProcessor converts to camelCase
+        Assert.True(insertedItem.Properties.ContainsKey("parent"),
+            $"Expected 'parent' key. Available keys: {string.Join(", ", insertedItem.Properties.Keys)}");
+        var parentProperty = insertedItem.Properties["parent"];
+        Assert.NotNull(parentProperty.Item);
+        Assert.NotNull(parentProperty.Item!.Reference); // Should be a reference to root
+    }
+
+    /// <summary>
+    /// Tests deeply nested collection inserts with cross-references.
+    /// This reproduces the exact error path: .Properties.Item.Properties.Operations.Item...
+    /// </summary>
+    [Fact]
+    public void WhenDeeplyNestedCollectionInsertsWithCrossReferences_ThenShouldNotFail()
+    {
+        // Arrange - Deeply nested structure matching error path:
+        // $.Changes.Properties.Item.Properties.Item.Properties.Operations.Item...
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var root = new CycleTestNode(context) { Name = "Root" };
+
+        // Create nested levels with collections
+        var level1 = new CycleTestNode { Name = "Level1" };
+        var level2 = new CycleTestNode { Name = "Level2" };
+
+        root.Child = level1;
+        level1.Child = level2;
+        level1.Parent = root;
+        level2.Parent = level1;
+
+        // Create items for level2's collection that reference back up the tree
+        var item1 = new CycleTestNode { Name = "Item1" };
+        var item2 = new CycleTestNode { Name = "Item2" };
+        item1.Parent = root; // references root (grandparent)
+        item2.Parent = level1; // references level1 (parent)
+        item1.Child = item2; // sibling reference
+        item2.Child = item1; // sibling reference (cycle)
+
+        // Items for level1's collection that also have nested items
+        var level1Item = new CycleTestNode { Name = "Level1Item" };
+        level1Item.Parent = root;
+
+        // IMPORTANT: Add items to collections to register them
+        var oldLevel2Items = level2.Items.ToList();
+        level2.Items = [item1, item2];
+        var newLevel2Items = level2.Items.ToList();
+
+        // Update level1Item to include item1 AFTER item1 is registered
+        level1Item.Items = [item1]; // nested collection
+
+        var oldLevel1Items = level1.Items.ToList();
+        level1.Items = [level1Item];
+        var newLevel1Items = level1.Items.ToList();
+
+        // Multiple changes at different levels
+        var changes = new[]
+        {
+            SubjectPropertyChange.Create(
+                new PropertyReference(level2, "Items"),
+                null,
+                DateTimeOffset.UtcNow,
+                null,
+                oldLevel2Items,
+                newLevel2Items),
+            SubjectPropertyChange.Create(
+                new PropertyReference(level1, "Items"),
+                null,
+                DateTimeOffset.UtcNow,
+                null,
+                oldLevel1Items,
+                newLevel1Items),
+        };
+
+        // Act
+        var partialUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(root, changes, [JsonCamelCasePathProcessor.Instance]);
+
+        // Assert - verify JSON serialization doesn't fail due to cycles
+        var json = JsonSerializer.Serialize(partialUpdate);
+        Assert.NotNull(json);
+    }
 }
