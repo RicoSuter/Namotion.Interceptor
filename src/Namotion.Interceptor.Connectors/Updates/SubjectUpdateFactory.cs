@@ -81,8 +81,9 @@ public static class SubjectUpdateFactory
             for (var index = 0; index < propertyChanges.Length; index++)
             {
                 var change = propertyChanges[index];
+                var changedSubject = change.Property.Subject;
 
-                var subjectUpdate = GetOrCreateSubjectUpdate(change.Property.Subject, knownSubjectUpdates);
+                var subjectUpdate = GetOrCreateSubjectUpdate(changedSubject, knownSubjectUpdates);
                 var registeredProperty = change.Property.TryGetRegisteredProperty();
                 if (registeredProperty is null)
                 {
@@ -94,42 +95,55 @@ public static class SubjectUpdateFactory
                     continue;
                 }
 
-                if (!registeredProperty.IsAttribute)
-                {
-                    // handle property changes
-                    var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredProperty, knownSubjectUpdates, propertyUpdates);
+                // Add changed subject to currentPath for cycle detection during value traversal
+                var addedToPath = currentPath.Add(changedSubject);
 
-                    // Use diff algorithm for collections/dictionaries to support sparse updates
-                    if (registeredProperty.IsSubjectCollection || registeredProperty.IsSubjectDictionary)
+                try
+                {
+                    if (!registeredProperty.IsAttribute)
                     {
-                        propertyUpdate.ApplyValueWithDiff(
-                            registeredProperty, change.ChangedTimestamp,
-                            change.GetOldValue<object?>(),
-                            change.GetNewValue<object?>(),
-                            processors, knownSubjectUpdates, propertyUpdates, currentPath);
+                        // handle property changes
+                        var propertyUpdate = GetOrCreateSubjectPropertyUpdate(registeredProperty, knownSubjectUpdates, propertyUpdates);
+
+                        // Use diff algorithm for collections/dictionaries to support sparse updates
+                        if (registeredProperty.IsSubjectCollection || registeredProperty.IsSubjectDictionary)
+                        {
+                            propertyUpdate.ApplyValueWithDiff(
+                                registeredProperty, change.ChangedTimestamp,
+                                change.GetOldValue<object?>(),
+                                change.GetNewValue<object?>(),
+                                processors, knownSubjectUpdates, propertyUpdates, currentPath);
+                        }
+                        else
+                        {
+                            propertyUpdate.ApplyValue(
+                                registeredProperty, change.ChangedTimestamp, change.GetNewValue<object?>(),
+                                processors, knownSubjectUpdates, propertyUpdates, currentPath);
+                        }
+
+                        subjectUpdate.Properties[registeredProperty.Name] = propertyUpdate;
                     }
                     else
                     {
-                        propertyUpdate.ApplyValue(
-                            registeredProperty, change.ChangedTimestamp, change.GetNewValue<object?>(),
-                            processors, knownSubjectUpdates, propertyUpdates, currentPath);
+                        // handle attribute changes
+                        var (rootPropertyUpdate, rootPropertyName) = GetOrCreateSubjectAttributeUpdate(
+                            registeredProperty.GetAttributedProperty(),
+                            registeredProperty.AttributeMetadata.AttributeName,
+                            registeredProperty, change, processors,
+                            knownSubjectUpdates, propertyUpdates, currentPath);
+
+                        subjectUpdate.Properties[rootPropertyName] = rootPropertyUpdate;
                     }
 
-                    subjectUpdate.Properties[registeredProperty.Name] = propertyUpdate;
+                    CreateParentSubjectUpdatePath(registeredProperty.Parent, subject, knownSubjectUpdates, propertyUpdates, processedParentPaths);
                 }
-                else
+                finally
                 {
-                    // handle attribute changes
-                    var (rootPropertyUpdate, rootPropertyName) = GetOrCreateSubjectAttributeUpdate(
-                        registeredProperty.GetAttributedProperty(),
-                        registeredProperty.AttributeMetadata.AttributeName,
-                        registeredProperty, change, processors,
-                        knownSubjectUpdates, propertyUpdates, currentPath);
-
-                    subjectUpdate.Properties[rootPropertyName] = rootPropertyUpdate;
+                    if (addedToPath)
+                    {
+                        currentPath.Remove(changedSubject);
+                    }
                 }
-
-                CreateParentSubjectUpdatePath(registeredProperty.Parent, subject, knownSubjectUpdates, propertyUpdates, processedParentPaths);
             }
 
             if (propertyUpdates is not null)
@@ -169,7 +183,19 @@ public static class SubjectUpdateFactory
                 };
             }
 
-            // Subject already processed, not in current path - return existing update (no cycle)
+            // Subject already processed - if it has content or was already referenced, create a reference
+            // This prevents the same object from appearing multiple times in the tree,
+            // which would cause JSON serialization to fail with cycle detection
+            if (existingUpdate.Properties.Count > 0 || existingUpdate.Id.HasValue)
+            {
+                existingUpdate.Id ??= ++_referenceIdCounter;
+                return new SubjectUpdate
+                {
+                    Reference = existingUpdate.Id
+                };
+            }
+
+            // Subject exists but is empty - return it for property accumulation
             return existingUpdate;
         }
 
@@ -242,9 +268,10 @@ public static class SubjectUpdateFactory
                         childUpdate.Properties.Count > 0)
                     {
                         collectionUpdates ??= [];
+                        // Use reference if SubjectUpdate was already placed elsewhere in the tree
                         collectionUpdates.Add(new SubjectPropertyCollectionUpdate
                         {
-                            Item = childUpdate,
+                            Item = GetSubjectUpdateOrCreateReference(childUpdate),
                             Index = child.Index ?? throw new InvalidOperationException("Index must not be null.")
                         });
                     }
@@ -258,12 +285,33 @@ public static class SubjectUpdateFactory
             }
             else
             {
+                var subjectUpdate = GetOrCreateSubjectUpdate(registeredSubject.Subject, knownSubjectUpdates);
                 parentSubjectPropertyUpdate.Kind = SubjectPropertyUpdateKind.Item;
-                parentSubjectPropertyUpdate.Item = GetOrCreateSubjectUpdate(registeredSubject.Subject, knownSubjectUpdates);
+                // Use reference if SubjectUpdate was already placed elsewhere in the tree
+                parentSubjectPropertyUpdate.Item = GetSubjectUpdateOrCreateReference(subjectUpdate);
             }
 
             registeredSubject = parentRegisteredSubject;
         }
+    }
+
+    /// <summary>
+    /// Returns the SubjectUpdate if it hasn't been referenced elsewhere, or creates a Reference if it has.
+    /// This prevents the same SubjectUpdate object from appearing multiple times in the serialized tree.
+    /// Only creates References for SubjectUpdates with existing Ids (assigned during Insert operation traversal).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static SubjectUpdate GetSubjectUpdateOrCreateReference(SubjectUpdate subjectUpdate)
+    {
+        // If the SubjectUpdate already has an Id, it was placed during Insert operation traversal - create a reference
+        // This prevents the same fully-traversed object from appearing in both Insert operations and navigation paths
+        if (subjectUpdate.Id.HasValue)
+        {
+            return new SubjectUpdate { Reference = subjectUpdate.Id };
+        }
+
+        // SubjectUpdate has no Id - it's a sparse update with only changed properties, return it directly
+        return subjectUpdate;
     }
 
     private static (SubjectPropertyUpdate propertyUpdate, string propertyName) GetOrCreateSubjectAttributeUpdate(
