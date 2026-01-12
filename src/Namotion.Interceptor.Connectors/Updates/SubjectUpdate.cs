@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Namotion.Interceptor.Connectors.Updates.Internal;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 

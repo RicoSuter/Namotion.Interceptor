@@ -14,7 +14,7 @@ internal sealed class UpdateContext
 
     public ISubjectUpdateProcessor[] Processors { get; private set; } = [];
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = new();
-    public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = new();
+    public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
 
     public void Initialize(ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
