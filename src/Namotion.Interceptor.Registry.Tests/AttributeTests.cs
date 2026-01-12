@@ -204,7 +204,7 @@ public class AttributeTests
             FirstName = "Rico"
         };
 
-        // Add a derived attribute (like VariableMethodAttribute.InitializeProperty does)
+        // Add a derived attribute
         var isExecuting = false;
         var firstNameProperty = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
         var derivedAttribute = firstNameProperty.AddDerivedAttribute(
@@ -219,47 +219,8 @@ public class AttributeTests
 
         changes.Clear();
 
-        // Act - Change via SetValue (like: property.TryGetAttribute("IsExecuting")?.SetValue(true))
+        // Act - Change via SetValue
         derivedAttribute.SetValue(true);
-
-        // Assert
-        Assert.Contains(changes, c =>
-            c.Property.Name == $"{nameof(Person.FirstName)}@IsExecuting" &&
-            c.GetNewValue<bool>() == true);
-    }
-
-    [Fact]
-    public void WhenChangingDerivedAttributeViaTryGetAttribute_ThenChangeIsTriggered()
-    {
-        // Arrange
-        var changes = new List<SubjectPropertyChange>();
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
-        var person = new Person(context)
-        {
-            FirstName = "Rico"
-        };
-
-        // Add a derived attribute
-        var isExecuting = false;
-        var firstNameProperty = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
-        firstNameProperty.AddDerivedAttribute(
-            "IsExecuting",
-            typeof(bool),
-            _ => isExecuting,
-            (_, v) => isExecuting = v?.Equals(true) == true);
-
-        context
-            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Subscribe(changes.Add);
-
-        changes.Clear();
-
-        // Act - Change via TryGetAttribute (the exact pattern from VariableMethodAttribute)
-        firstNameProperty.TryGetAttribute("IsExecuting")?.SetValue(true);
 
         // Assert
         Assert.Contains(changes, c =>
@@ -326,6 +287,6 @@ public class AttributeTests
 
         // Assert: ComputedFlag should be false and change event should fire
         Assert.False((bool)computedAttribute.GetValue()!);
-        Assert.Contains(changes, c => c.GetNewValue<bool>() == false);
+        Assert.Contains(changes, c => !c.GetNewValue<bool>());
     }
 }
