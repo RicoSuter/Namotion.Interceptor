@@ -9,13 +9,13 @@
           {
             Action: Insert,
             Index: key2,
-            Id: 3
+            Id: 2
           }
         ],
         Count: 2
       }
     },
-    3: {
+    2: {
       Child: {
         Kind: Item
       },
