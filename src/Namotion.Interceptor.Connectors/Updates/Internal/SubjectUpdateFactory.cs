@@ -247,6 +247,9 @@ internal static class SubjectUpdateFactory
             if (current.Parents.Length == 0)
                 break;
 
+            // Only traverse the first parent - subjects may have multiple parents in a DAG,
+            // but we follow the canonical registration path. This is intentional: each subject
+            // was registered through one primary parent, and that's the path we use for updates.
             var parentInfo = current.Parents[0];
             var parentProperty = parentInfo.Property;
             var parentSubject = parentProperty.Parent;

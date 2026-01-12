@@ -24,7 +24,7 @@ internal static class CollectionUpdateBuilder
         if (collection is null)
             return;
 
-        var items = collection.ToList();
+        var items = collection as IReadOnlyList<IInterceptorSubject> ?? collection.ToList();
         update.Count = items.Count;
         update.Collection = new List<SubjectPropertyCollectionUpdate>(items.Count);
 
@@ -56,8 +56,8 @@ internal static class CollectionUpdateBuilder
         if (newCollection is null)
             return;
 
-        var oldItems = oldCollection?.ToList() ?? [];
-        var newItems = newCollection.ToList();
+        var oldItems = oldCollection as IReadOnlyList<IInterceptorSubject> ?? oldCollection?.ToList() ?? [];
+        var newItems = newCollection as IReadOnlyList<IInterceptorSubject> ?? newCollection.ToList();
         update.Count = newItems.Count;
 
         var changeBuilder = ChangeBuilderPool.Rent();
@@ -207,17 +207,17 @@ internal static class CollectionUpdateBuilder
             }
 
             // Check for property updates on existing items
+            // Build HashSet for O(1) lookup instead of O(n) Any() per iteration
+            var newKeysSet = new HashSet<object>(newItemsToProcess.Select(n => n.key));
             List<SubjectPropertyCollectionUpdate>? updates = null;
             foreach (DictionaryEntry entry in newDict)
             {
                 var key = entry.Key;
-                var item = entry.Value as IInterceptorSubject;
-                if (item is null)
+                if (entry.Value is not IInterceptorSubject item)
                     continue;
 
                 // Skip if this is a new item (already handled above)
-                var isNewItem = newItemsToProcess.Any(n => Equals(n.key, key));
-                if (isNewItem)
+                if (newKeysSet.Contains(key))
                     continue;
 
                 if (context.SubjectHasUpdates(item))
