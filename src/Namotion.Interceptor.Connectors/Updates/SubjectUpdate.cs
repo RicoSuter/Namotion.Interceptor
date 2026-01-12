@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Namotion.Interceptor.Connectors.Updates.Internal;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -15,14 +16,14 @@ public class SubjectUpdate
     /// The ID of the root subject in the <see cref="Subjects"/> dictionary.
     /// </summary>
     [JsonPropertyName("root")]
-    public string Root { get; set; } = string.Empty;
+    public string Root { get; init; } = string.Empty;
 
     /// <summary>
     /// Dictionary of all subjects keyed by their string ID.
     /// Each subject is a dictionary of property name to property update.
     /// </summary>
     [JsonPropertyName("subjects")]
-    public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; set; } = new();
+    public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; init; } = new();
 
     /// <summary>
     /// Creates a complete update with all objects and properties for the given subject as root.
@@ -33,11 +34,11 @@ public class SubjectUpdate
     public static SubjectUpdate CreateCompleteUpdate(
         IInterceptorSubject subject,
         ReadOnlySpan<ISubjectUpdateProcessor> processors)
-        => SubjectUpdateFactory.CreateComplete(subject, processors);
+        => SubjectUpdateFactory.CreateCompleteUpdate(subject, processors);
 
     /// <summary>
     /// Creates a partial update from the given property changes.
-    /// Only directly or indirectly needed objects and properties are added.
+    /// Only directly or indirectly necessary objects and properties are added.
     /// </summary>
     /// <param name="subject">The root subject.</param>
     /// <param name="propertyChanges">The changes to look up within the object graph.</param>
@@ -47,5 +48,5 @@ public class SubjectUpdate
         IInterceptorSubject subject,
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
         ReadOnlySpan<ISubjectUpdateProcessor> processors)
-        => SubjectUpdateFactory.CreatePartialFromChanges(subject, propertyChanges, processors);
+        => SubjectUpdateFactory.CreatePartialUpdateFromChanges(subject, propertyChanges, processors);
 }

@@ -12,7 +12,7 @@ public class SubjectPropertyCollectionUpdate
     /// This is the FINAL index after structural operations are applied.
     /// </summary>
     [JsonPropertyName("index")]
-    public object Index { get; set; } = null!;
+    public required object Index { get; init; }
 
     /// <summary>
     /// The subject ID for this collection item.
@@ -20,5 +20,5 @@ public class SubjectPropertyCollectionUpdate
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("id")]
-    public string? Id { get; set; }
+    public string? Id { get; init; }
 }
