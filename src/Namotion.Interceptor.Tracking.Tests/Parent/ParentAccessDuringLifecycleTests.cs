@@ -420,41 +420,4 @@ public partial class Component : ILifecycleHandler
             }
         }
     }
-
-    /// <summary>
-    /// Tries to find the first parent of the specified type by traversing the parent hierarchy.
-    /// Returns null if not found instead of throwing.
-    /// </summary>
-    public TRoot? TryGetFirstParent<TRoot>()
-        where TRoot : class, IInterceptorSubject
-    {
-        var visited = new HashSet<IInterceptorSubject>();
-        var queue = new Queue<IInterceptorSubject>();
-        queue.Enqueue(this);
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-
-            if (!visited.Add(current))
-            {
-                continue;
-            }
-
-            if (current is TRoot root && !ReferenceEquals(current, this))
-            {
-                return root;
-            }
-
-            foreach (var parent in current.GetParents())
-            {
-                if (!parent.Equals(default))
-                {
-                    queue.Enqueue(parent.Property.Subject);
-                }
-            }
-        }
-
-        return null;
-    }
 }

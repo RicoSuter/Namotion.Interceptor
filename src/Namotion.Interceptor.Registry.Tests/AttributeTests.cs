@@ -188,4 +188,144 @@ public class AttributeTests
         // Assert
         Assert.Contains(changes, x => x.GetNewValue<string>().Equals("Abc"));
     }
+
+    [Fact]
+    public void WhenChangingDerivedAttributeViaSetValue_ThenChangeIsTriggered()
+    {
+        // Arrange - simulating VariableMethodAttribute pattern
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var person = new Person(context)
+        {
+            FirstName = "Rico"
+        };
+
+        // Add a derived attribute (like VariableMethodAttribute.InitializeProperty does)
+        var isExecuting = false;
+        var firstNameProperty = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
+        var derivedAttribute = firstNameProperty.AddDerivedAttribute(
+            "IsExecuting",
+            typeof(bool),
+            _ => isExecuting,
+            (_, v) => isExecuting = v?.Equals(true) == true);
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        changes.Clear();
+
+        // Act - Change via SetValue (like: property.TryGetAttribute("IsExecuting")?.SetValue(true))
+        derivedAttribute.SetValue(true);
+
+        // Assert
+        Assert.Contains(changes, c =>
+            c.Property.Name == $"{nameof(Person.FirstName)}@IsExecuting" &&
+            c.GetNewValue<bool>() == true);
+    }
+
+    [Fact]
+    public void WhenChangingDerivedAttributeViaTryGetAttribute_ThenChangeIsTriggered()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var person = new Person(context)
+        {
+            FirstName = "Rico"
+        };
+
+        // Add a derived attribute
+        var isExecuting = false;
+        var firstNameProperty = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
+        firstNameProperty.AddDerivedAttribute(
+            "IsExecuting",
+            typeof(bool),
+            _ => isExecuting,
+            (_, v) => isExecuting = v?.Equals(true) == true);
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        changes.Clear();
+
+        // Act - Change via TryGetAttribute (the exact pattern from VariableMethodAttribute)
+        firstNameProperty.TryGetAttribute("IsExecuting")?.SetValue(true);
+
+        // Assert
+        Assert.Contains(changes, c =>
+            c.Property.Name == $"{nameof(Person.FirstName)}@IsExecuting" &&
+            c.GetNewValue<bool>() == true);
+    }
+
+    [Fact]
+    public void WhenDerivedPropertyWithSetterUsesShortCircuit_ThenDependenciesAreRerecordedOnSetValue()
+    {
+        // This tests that when SetValue is called on a derived property with a setter,
+        // dependencies are re-recorded based on the new internal state.
+        //
+        // Scenario: ComputedFlag = localFlag || SourceFlag
+        // 1. localFlag=true causes short-circuit (SourceFlag not read, dependency lost)
+        // 2. SetValue(false) sets localFlag=false, now SourceFlag IS read
+        // 3. Dependencies are re-recorded, so changing SourceFlag triggers recalculation
+
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var person = new Person(context)
+        {
+            FirstName = "Rico"
+        };
+
+        var firstNameProperty = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
+
+        // Add SourceFlag attribute
+        var sourceFlag = true;
+        firstNameProperty.AddAttribute(
+            "SourceFlag",
+            typeof(bool),
+            _ => sourceFlag,
+            (_, v) => sourceFlag = v?.Equals(true) == true);
+
+        // Add ComputedFlag with short-circuit: localFlag || SourceFlag
+        // Initial state: localFlag=true, so SourceFlag is NOT read (short-circuit)
+        var localFlag = true;
+        var computedAttribute = firstNameProperty.AddDerivedAttribute(
+            "ComputedFlag",
+            typeof(bool),
+            _ => localFlag || firstNameProperty.TryGetAttribute("SourceFlag")?.GetValue() is true,
+            (_, v) => localFlag = v?.Equals(true) == true);
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(c => c.Property.Name == $"{nameof(Person.FirstName)}@ComputedFlag")
+            .Subscribe(changes.Add);
+
+        changes.Clear();
+
+        // Act: SetValue(false) → localFlag=false
+        // Now SourceFlag IS read (no short-circuit), dependency should be recorded
+        computedAttribute.SetValue(false);
+        Assert.True((bool)computedAttribute.GetValue()!); // Still true because SourceFlag=true
+        changes.Clear();
+
+        // Change SourceFlag to false - should trigger ComputedFlag recalculation
+        firstNameProperty.TryGetAttribute("SourceFlag")?.SetValue(false);
+
+        // Assert: ComputedFlag should be false and change event should fire
+        Assert.False((bool)computedAttribute.GetValue()!);
+        Assert.Contains(changes, c => c.GetNewValue<bool>() == false);
+    }
 }
