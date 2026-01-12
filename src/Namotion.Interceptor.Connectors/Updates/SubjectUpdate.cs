@@ -16,14 +16,14 @@ public class SubjectUpdate
     /// The ID of the root subject in the <see cref="Subjects"/> dictionary.
     /// </summary>
     [JsonPropertyName("root")]
-    public string Root { get; set; } = string.Empty;
+    public string Root { get; init; } = string.Empty;
 
     /// <summary>
     /// Dictionary of all subjects keyed by their string ID.
     /// Each subject is a dictionary of property name to property update.
     /// </summary>
     [JsonPropertyName("subjects")]
-    public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; set; } = new();
+    public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; init; } = new();
 
     /// <summary>
     /// Creates a complete update with all objects and properties for the given subject as root.

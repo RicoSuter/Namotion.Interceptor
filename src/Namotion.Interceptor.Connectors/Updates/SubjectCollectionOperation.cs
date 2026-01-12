@@ -12,20 +12,20 @@ public class SubjectCollectionOperation
     /// </summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
     [JsonPropertyName("action")]
-    public SubjectCollectionOperationType Action { get; set; }
+    public SubjectCollectionOperationType Action { get; init; }
 
     /// <summary>
     /// Target index (int for arrays) or key (string for dictionaries).
     /// </summary>
     [JsonPropertyName("index")]
-    public object Index { get; set; } = null!;
+    public required object Index { get; init; }
 
     /// <summary>
     /// Source index for Move operations (arrays only).
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("fromIndex")]
-    public int? FromIndex { get; set; }
+    public int? FromIndex { get; init; }
 
     /// <summary>
     /// The subject ID for Insert operations.
@@ -33,5 +33,5 @@ public class SubjectCollectionOperation
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("id")]
-    public string? Id { get; set; }
+    public string? Id { get; init; }
 }

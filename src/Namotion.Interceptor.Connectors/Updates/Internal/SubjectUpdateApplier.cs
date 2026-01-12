@@ -14,7 +14,7 @@ internal static class SubjectUpdateApplier
 {
     private static readonly ObjectPool<ApplyContext> ContextPool = new(() => new ApplyContext());
 
-    public static void Apply(
+    public static void ApplyUpdate(
         IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectFactory subjectFactory,

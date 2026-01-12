@@ -72,47 +72,4 @@ public class SubjectPropertyUpdate
     /// </summary>
     [JsonExtensionData]
     public Dictionary<string, object>? ExtensionData { get; set; }
-
-    /// <summary>
-    /// Creates a value property update.
-    /// </summary>
-    public static SubjectPropertyUpdate Create<T>(T value, DateTimeOffset? timestamp = null)
-    {
-        return new SubjectPropertyUpdate
-        {
-            Kind = SubjectPropertyUpdateKind.Value,
-            Value = value,
-            Timestamp = timestamp
-        };
-    }
-
-    /// <summary>
-    /// Creates an item property update referencing a subject by ID.
-    /// </summary>
-    public static SubjectPropertyUpdate CreateItem(string? subjectId, DateTimeOffset? timestamp = null)
-    {
-        return new SubjectPropertyUpdate
-        {
-            Kind = SubjectPropertyUpdateKind.Item,
-            Id = subjectId,
-            Timestamp = timestamp
-        };
-    }
-
-    /// <summary>
-    /// Creates a collection property update.
-    /// </summary>
-    public static SubjectPropertyUpdate CreateCollection(
-        List<SubjectPropertyCollectionUpdate>? collection,
-        List<SubjectCollectionOperation>? operations = null,
-        int? count = null)
-    {
-        return new SubjectPropertyUpdate
-        {
-            Kind = SubjectPropertyUpdateKind.Collection,
-            Collection = collection,
-            Operations = operations,
-            Count = count
-        };
-    }
 }

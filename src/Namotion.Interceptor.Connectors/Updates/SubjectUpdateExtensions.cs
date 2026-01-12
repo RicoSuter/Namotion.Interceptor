@@ -25,7 +25,7 @@ public static class SubjectUpdateExtensions
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
         var receivedTimestamp = DateTimeOffset.UtcNow;
-        SubjectUpdateApplier.Apply(
+        SubjectUpdateApplier.ApplyUpdate(
             subject,
             update,
             subjectFactory ?? DefaultSubjectFactory.Instance,
@@ -50,15 +50,15 @@ public static class SubjectUpdateExtensions
         ISubjectFactory? subjectFactory,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
-        SubjectUpdateApplier.Apply(
+        SubjectUpdateApplier.ApplyUpdate(
             subject,
             update,
             subjectFactory ?? DefaultSubjectFactory.Instance,
             (property, propertyUpdate) =>
             {
+                transformValueBeforeApply?.Invoke(property, propertyUpdate);
                 using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
                 {
-                    transformValueBeforeApply?.Invoke(property, propertyUpdate);
                     var value = SubjectUpdateApplier.ConvertValue(propertyUpdate.Value, property.Type);
                     property.SetValue(value);
                 }

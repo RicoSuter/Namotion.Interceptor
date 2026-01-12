@@ -88,7 +88,7 @@ internal sealed class UpdateContext
         _subjectToId.Clear();
         _propertyUpdates.Clear();
         ProcessedSubjects.Clear();
-        Subjects = new(); // Fresh dict - old one transferred to result
+        Subjects = new(); // create a fresh dictionary, old one transferred to result
         Processors = [];
     }
 }
