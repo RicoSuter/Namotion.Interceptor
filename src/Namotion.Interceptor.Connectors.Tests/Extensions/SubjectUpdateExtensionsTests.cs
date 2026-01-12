@@ -660,4 +660,244 @@ public class SubjectUpdateExtensionsTests
         // Assert - Father should remain null (not set to anything)
         Assert.Null(target.Father);
     }
+
+    [Fact]
+    public void WhenApplyingSparseUpdateWithIndexExceedingCount_ThenExceptionIsThrown()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context)
+        {
+            FirstName = "Parent",
+            Children = [new Person(context) { FirstName = "Child1" }] // Only 1 item
+        };
+
+        // Create an update with index 5 but count 1 - this is invalid (index must be < count)
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Children"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Collection =
+                        [
+                            new SubjectPropertyCollectionUpdate
+                            {
+                                Index = 5, // Invalid: index >= count
+                                Id = "2"
+                            }
+                        ],
+                        Count = 1 // Final size is 1, so only index 0 is valid
+                    }
+                },
+                ["2"] = new()
+                {
+                    ["FirstName"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "NewChild"
+                    }
+                }
+            }
+        };
+
+        // Act & Assert - should throw because index >= count
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance));
+        Assert.Contains("out of bounds", exception.Message.ToLower());
+    }
+
+    [Fact]
+    public void WhenApplyingSparseUpdateAtNextIndex_ThenItemIsAppended()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context)
+        {
+            FirstName = "Parent",
+            Children = [new Person(context) { FirstName = "Child1" }] // 1 item at index 0
+        };
+
+        // Create an update that adds at index 1 (next available position - valid)
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Children"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Collection =
+                        [
+                            new SubjectPropertyCollectionUpdate
+                            {
+                                Index = 1, // Append position - valid
+                                Id = "2"
+                            }
+                        ],
+                        Count = 2
+                    }
+                },
+                ["2"] = new()
+                {
+                    ["FirstName"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "NewChild"
+                    }
+                }
+            }
+        };
+
+        // Act - should not throw
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal(2, target.Children.Count);
+        Assert.Equal("Child1", target.Children[0].FirstName);
+        Assert.Equal("NewChild", target.Children[1].FirstName);
+    }
+
+    [Fact]
+    public void WhenApplyingMoveWithNegativeFromIndex_ThenItIsIgnored()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var child1 = new Person(context) { FirstName = "Child1" };
+        var child2 = new Person(context) { FirstName = "Child2" };
+        var target = new Person(context) { FirstName = "Parent", Children = [child1, child2] };
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Children"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Operations =
+                        [
+                            new SubjectCollectionOperation
+                            {
+                                Action = SubjectCollectionOperationType.Move,
+                                FromIndex = -1, // Invalid negative index
+                                Index = 0
+                            }
+                        ],
+                        Count = 2
+                    }
+                }
+            }
+        };
+
+        // Act - should not throw
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - collection unchanged
+        Assert.Equal(2, target.Children.Count);
+        Assert.Equal("Child1", target.Children[0].FirstName);
+        Assert.Equal("Child2", target.Children[1].FirstName);
+    }
+
+    [Fact]
+    public void WhenApplyingRemoveAtNegativeIndex_ThenItIsIgnored()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context)
+        {
+            FirstName = "Parent",
+            Children = [new Person(context) { FirstName = "Child1" }]
+        };
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Children"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Operations =
+                        [
+                            new SubjectCollectionOperation
+                            {
+                                Action = SubjectCollectionOperationType.Remove,
+                                Index = -1 // Invalid negative index
+                            }
+                        ],
+                        Count = 1
+                    }
+                }
+            }
+        };
+
+        // Act - should not throw
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - collection unchanged
+        Assert.Single(target.Children);
+    }
+
+    [Fact]
+    public void WhenApplyingUpdateToEmptyCollection_ThenInsertOperationWorks()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context)
+        {
+            FirstName = "Parent",
+            Children = [] // Empty collection
+        };
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Children"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Operations =
+                        [
+                            new SubjectCollectionOperation
+                            {
+                                Action = SubjectCollectionOperationType.Insert,
+                                Index = 0,
+                                Id = "2"
+                            }
+                        ],
+                        Count = 1
+                    }
+                },
+                ["2"] = new()
+                {
+                    ["FirstName"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "NewChild"
+                    }
+                }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Single(target.Children);
+        Assert.Equal("NewChild", target.Children[0].FirstName);
+    }
 }

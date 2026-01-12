@@ -20,19 +20,19 @@ internal sealed class SubjectCollectionComparer
     /// </summary>
     /// <param name="oldItems">The old collection items.</param>
     /// <param name="newItems">The new collection items.</param>
-    /// <param name="operations">Output: structural operations (Insert/Remove/Move).</param>
-    /// <param name="newItemsToProcess">Output: items that are new and need full processing.</param>
-    /// <param name="reorderedItems">Output: items that were reordered (for Move operations).</param>
+    /// <param name="operations">Output: structural operations (Insert/Remove/Move), or null if none.</param>
+    /// <param name="newItemsToProcess">Output: items that are new and need full processing, or null if none.</param>
+    /// <param name="reorderedItems">Output: items that were reordered (for Move operations), or null if none.</param>
     public void GetCollectionChanges(
         IReadOnlyList<IInterceptorSubject> oldItems,
         IReadOnlyList<IInterceptorSubject> newItems,
         out List<SubjectCollectionOperation>? operations,
-        out List<(int index, IInterceptorSubject item)> newItemsToProcess,
-        out List<(int oldIndex, int newIndex, IInterceptorSubject item)> reorderedItems)
+        out List<(int index, IInterceptorSubject item)>? newItemsToProcess,
+        out List<(int oldIndex, int newIndex, IInterceptorSubject item)>? reorderedItems)
     {
         operations = null;
-        newItemsToProcess = [];
-        reorderedItems = [];
+        newItemsToProcess = null;
+        reorderedItems = null;
 
         // Build index maps
         _oldIndexMap.Clear();
@@ -65,6 +65,7 @@ internal sealed class SubjectCollectionComparer
             var item = newItems[i];
             if (!_oldIndexMap.ContainsKey(item))
             {
+                newItemsToProcess ??= [];
                 newItemsToProcess.Add((i, item));
             }
         }
@@ -96,6 +97,7 @@ internal sealed class SubjectCollectionComparer
                 var oldCommonIndex = oldCommonIndexMap[item];
                 if (oldCommonIndex != i)
                 {
+                    reorderedItems ??= [];
                     reorderedItems.Add((_oldIndexMap[item], _newIndexMap[item], item));
                 }
             }
@@ -105,15 +107,21 @@ internal sealed class SubjectCollectionComparer
     /// <summary>
     /// Builds dictionary change operations.
     /// </summary>
+    /// <param name="oldDictionary">The old dictionary.</param>
+    /// <param name="newDictionary">The new dictionary.</param>
+    /// <param name="operations">Output: structural operations (Insert/Remove), or null if none.</param>
+    /// <param name="newItemsToProcess">Output: items that are new and need full processing, or null if none.</param>
+    /// <param name="removedKeys">Output: keys that were removed, or null if none.</param>
     public void GetDictionaryChanges(
         IDictionary? oldDictionary,
         IDictionary newDictionary,
         out List<SubjectCollectionOperation>? operations,
-        out List<(object key, IInterceptorSubject item)> newItemsToProcess,
-        out HashSet<object> removedKeys)
+        out List<(object key, IInterceptorSubject item)>? newItemsToProcess,
+        out HashSet<object>? removedKeys)
     {
         operations = null;
-        newItemsToProcess = [];
+        newItemsToProcess = null;
+        removedKeys = null;
 
         _oldKeys.Clear();
         if (oldDictionary is not null)
@@ -121,9 +129,10 @@ internal sealed class SubjectCollectionComparer
             foreach (var key in oldDictionary.Keys)
                 _oldKeys.Add(key);
         }
-       
-        removedKeys = new HashSet<object>(_oldKeys);
-     
+
+        // Track removed keys - start with all old keys, remove ones that still exist
+        HashSet<object>? keysToRemove = _oldKeys.Count > 0 ? [.._oldKeys] : null;
+
         foreach (DictionaryEntry entry in newDictionary)
         {
             var key = entry.Key;
@@ -132,12 +141,19 @@ internal sealed class SubjectCollectionComparer
 
             if (_oldKeys.Contains(key))
             {
-                removedKeys.Remove(key);
+                keysToRemove?.Remove(key);
             }
             else
             {
+                newItemsToProcess ??= [];
                 newItemsToProcess.Add((key, item));
             }
+        }
+
+        // Only return removedKeys if there are actually keys to remove
+        if (keysToRemove is { Count: > 0 })
+        {
+            removedKeys = keysToRemove;
         }
     }
 

@@ -102,32 +102,39 @@ internal static class SubjectCollectionUpdateApplier
         // Apply sparse property updates
         if (propertyUpdate.Collection is { Count: > 0 })
         {
-            foreach (var collUpdate in propertyUpdate.Collection)
+            foreach (var collectionUpdate in propertyUpdate.Collection)
             {
-                var index = ConvertIndexToInt(collUpdate.Index);
+                var index = ConvertIndexToInt(collectionUpdate.Index);
 
-                if (collUpdate.Id is not null &&
-                    context.Subjects.TryGetValue(collUpdate.Id, out var itemProps))
+                // Validate index against declared count - if count is specified, index must be < count
+                if (propertyUpdate.Count.HasValue && index >= propertyUpdate.Count.Value)
+                {
+                    throw new InvalidOperationException(
+                        $"Invalid collection update: index {index} is out of bounds for declared count {propertyUpdate.Count.Value}. " +
+                        "The index in a sparse update must be less than the declared count.");
+                }
+
+                if (collectionUpdate.Id is not null &&
+                    context.Subjects.TryGetValue(collectionUpdate.Id, out var itemProps))
                 {
                     if (index >= 0 && index < workingItems.Count)
                     {
-                        if (context.TryMarkAsProcessed(collUpdate.Id))
+                        // Update existing item
+                        if (context.TryMarkAsProcessed(collectionUpdate.Id))
                         {
                             SubjectUpdateApplier.ApplyProperties(workingItems[index], itemProps, context);
                         }
                     }
-                    else if (index >= 0)
+                    else if (index >= 0 && index <= workingItems.Count)
                     {
+                        // Create new item at append position (for complete updates rebuilding the collection)
                         var newItem = context.SubjectFactory.CreateCollectionSubject(property, index);
                         newItem.Context.AddFallbackContext(parent.Context);
 
-                        if (context.TryMarkAsProcessed(collUpdate.Id))
+                        if (context.TryMarkAsProcessed(collectionUpdate.Id))
                         {
                             SubjectUpdateApplier.ApplyProperties(newItem, itemProps, context);
                         }
-
-                        while (workingItems.Count < index)
-                            workingItems.Add(null!);
 
                         if (index >= workingItems.Count)
                             workingItems.Add(newItem);

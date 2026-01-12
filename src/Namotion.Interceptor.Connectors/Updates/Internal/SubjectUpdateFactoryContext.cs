@@ -45,7 +45,7 @@ internal sealed class SubjectUpdateFactoryContext
     {
         if (_subjectToId.TryGetValue(subject, out var id))
         {
-            return Subjects.TryGetValue(id, out var props) && props.Count > 0;
+            return Subjects.TryGetValue(id, out var properties) && properties.Count > 0;
         }
         return false;
     }
