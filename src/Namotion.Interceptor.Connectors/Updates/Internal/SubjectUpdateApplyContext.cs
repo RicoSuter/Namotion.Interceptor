@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// Context for applying a SubjectUpdate. Tracks processed subjects to prevent cycles.
 /// Designed to be pooled and reused.
 /// </summary>
-internal sealed class ApplyContext
+internal sealed class SubjectUpdateApplyContext
 {
     private readonly HashSet<string> _processedSubjectIds = [];
 

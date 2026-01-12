@@ -7,9 +7,9 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// Builds collection and dictionary updates for <see cref="SubjectUpdate"/> instances.
 /// Handles both complete updates (full snapshot) and diff updates (changes only).
 /// </summary>
-internal static class CollectionUpdateBuilder
+internal static class SubjectCollectionUpdateFactory
 {
-    private static readonly ObjectPool<CollectionChangeBuilder> ChangeBuilderPool = new(() => new CollectionChangeBuilder());
+    private static readonly ObjectPool<SubjectCollectionComparer> ChangeBuilderPool = new(() => new SubjectCollectionComparer());
 
     /// <summary>
     /// Builds a complete collection update with all items.
@@ -17,7 +17,7 @@ internal static class CollectionUpdateBuilder
     internal static void BuildCollectionComplete(
         SubjectPropertyUpdate update,
         IEnumerable<IInterceptorSubject>? collection,
-        UpdateContext context)
+        SubjectUpdateFactoryContext context)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
@@ -49,7 +49,7 @@ internal static class CollectionUpdateBuilder
         SubjectPropertyUpdate update,
         IEnumerable<IInterceptorSubject>? oldCollection,
         IEnumerable<IInterceptorSubject>? newCollection,
-        UpdateContext context)
+        SubjectUpdateFactoryContext context)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
@@ -63,7 +63,7 @@ internal static class CollectionUpdateBuilder
         var changeBuilder = ChangeBuilderPool.Rent();
         try
         {
-            changeBuilder.BuildCollectionChanges(
+            changeBuilder.GetCollectionChanges(
                 oldItems, newItems,
                 out var operations,
                 out var newItemsToProcess,
@@ -129,7 +129,7 @@ internal static class CollectionUpdateBuilder
     internal static void BuildDictionaryComplete(
         SubjectPropertyUpdate update,
         IDictionary? dictionary,
-        UpdateContext context)
+        SubjectUpdateFactoryContext context)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
@@ -162,7 +162,7 @@ internal static class CollectionUpdateBuilder
         SubjectPropertyUpdate update,
         IDictionary? oldDict,
         IDictionary? newDict,
-        UpdateContext context)
+        SubjectUpdateFactoryContext context)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
@@ -174,7 +174,7 @@ internal static class CollectionUpdateBuilder
         var changeBuilder = ChangeBuilderPool.Rent();
         try
         {
-            changeBuilder.BuildDictionaryChanges(
+            changeBuilder.GetDictionaryChanges(
                 oldDict, newDict,
                 out var operations,
                 out var newItemsToProcess,

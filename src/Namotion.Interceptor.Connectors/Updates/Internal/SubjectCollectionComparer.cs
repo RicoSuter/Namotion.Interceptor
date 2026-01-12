@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// Builds collection change operations (Insert/Remove/Move) by comparing old and new collections.
 /// Designed to be pooled and reused.
 /// </summary>
-internal sealed class CollectionChangeBuilder
+internal sealed class SubjectCollectionComparer
 {
     // Reusable containers
     private readonly Dictionary<IInterceptorSubject, int> _oldIndexMap = new();
@@ -23,7 +23,7 @@ internal sealed class CollectionChangeBuilder
     /// <param name="operations">Output: structural operations (Insert/Remove/Move).</param>
     /// <param name="newItemsToProcess">Output: items that are new and need full processing.</param>
     /// <param name="reorderedItems">Output: items that were reordered (for Move operations).</param>
-    public void BuildCollectionChanges(
+    public void GetCollectionChanges(
         IReadOnlyList<IInterceptorSubject> oldItems,
         IReadOnlyList<IInterceptorSubject> newItems,
         out List<SubjectCollectionOperation>? operations,
@@ -42,20 +42,22 @@ internal sealed class CollectionChangeBuilder
         for (var i = 0; i < newItems.Count; i++)
             _newIndexMap[newItems[i]] = i;
 
-        // Generate Remove operations (process from highest index first)
+        // Generate Remove operations (process from the highest index first, then reverse for correct order)
         for (var i = oldItems.Count - 1; i >= 0; i--)
         {
             var item = oldItems[i];
             if (!_newIndexMap.ContainsKey(item))
             {
                 operations ??= [];
-                operations.Insert(0, new SubjectCollectionOperation
+                operations.Add(new SubjectCollectionOperation
                 {
                     Action = SubjectCollectionOperationType.Remove,
                     Index = i
                 });
             }
         }
+        // Reverse to get ascending index order (O(n) once instead of O(n²) from Insert(0,...))
+        operations?.Reverse();
 
         // Generate Insert operations for new items
         for (var i = 0; i < newItems.Count; i++)
@@ -103,9 +105,9 @@ internal sealed class CollectionChangeBuilder
     /// <summary>
     /// Builds dictionary change operations.
     /// </summary>
-    public void BuildDictionaryChanges(
-        IDictionary? oldDict,
-        IDictionary newDict,
+    public void GetDictionaryChanges(
+        IDictionary? oldDictionary,
+        IDictionary newDictionary,
         out List<SubjectCollectionOperation>? operations,
         out List<(object key, IInterceptorSubject item)> newItemsToProcess,
         out HashSet<object> removedKeys)
@@ -114,14 +116,15 @@ internal sealed class CollectionChangeBuilder
         newItemsToProcess = [];
 
         _oldKeys.Clear();
-        if (oldDict is not null)
+        if (oldDictionary is not null)
         {
-            foreach (var key in oldDict.Keys)
+            foreach (var key in oldDictionary.Keys)
                 _oldKeys.Add(key);
         }
+       
         removedKeys = new HashSet<object>(_oldKeys);
-
-        foreach (DictionaryEntry entry in newDict)
+     
+        foreach (DictionaryEntry entry in newDictionary)
         {
             var key = entry.Key;
             if (entry.Value is not IInterceptorSubject item)
