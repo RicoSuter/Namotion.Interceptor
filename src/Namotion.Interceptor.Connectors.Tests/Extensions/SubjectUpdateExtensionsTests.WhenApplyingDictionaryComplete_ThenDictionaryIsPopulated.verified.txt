@@ -2,22 +2,44 @@
   Root: 1,
   Subjects: {
     1: {
+      Child: {
+        Kind: Item
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
       Lookup: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
-        Operations: [
+        Collection: [
           {
-            Action: Insert,
             Index: key1,
             Id: 2
           },
           {
-            Action: Insert,
             Index: key2,
             Id: 3
           }
         ],
         Count: 2
+      },
+      Name: {
+        Kind: Value,
+        Value: Root,
+        Timestamp: DateTimeOffset_2,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      Parent: {
+        Kind: Item
+      },
+      Self: {
+        Kind: Item
       }
     },
     2: {
@@ -35,6 +57,7 @@
       Name: {
         Kind: Value,
         Value: Item1,
+        Timestamp: DateTimeOffset_3,
         Attributes: {
           Status: {
             Kind: Value,
@@ -64,6 +87,7 @@
       Name: {
         Kind: Value,
         Value: Item2,
+        Timestamp: DateTimeOffset_4,
         Attributes: {
           Status: {
             Kind: Value,

@@ -1,48 +1,67 @@
 ﻿{
-  Id: 1,
-  Properties: {
-    father: {
-      Kind: Item,
-      Timestamp: {Scrubbed},
-      Item: {
-        Properties: {
-          children: {
-            Kind: Collection
-          },
-          father: {
-            Kind: Item,
-            Timestamp: {Scrubbed},
-            Item: {
-              Reference: 1
-            }
-          },
-          firstName: {
+  Root: 1,
+  Subjects: {
+    1: {
+      children: {
+        Kind: Collection,
+        Count: 0
+      },
+      father: {
+        Kind: Item,
+        Timestamp: {Scrubbed},
+        Id: 2
+      },
+      firstName: {
+        Kind: Value,
+        Value: Child,
+        Timestamp: {Scrubbed},
+        Attributes: {
+          maxLength: {
             Kind: Value,
-            Value: Father,
-            Attributes: {
-              maxLength: {
-                Kind: Value,
-                Value: 123,
-                Attributes: {
-                  unit: {
-                    Kind: Value,
-                    Value: Count
-                  }
-                }
-              }
-            }
-          },
-          fullName: {
-            Kind: Value,
-            Value: Father 
-          },
-          lastName: {
-            Kind: Value
-          },
-          mother: {
-            Kind: Item
+            Value: 123
           }
         }
+      },
+      fullName: {
+        Kind: Value,
+        Value: Child 
+      },
+      lastName: {
+        Kind: Value
+      },
+      mother: {
+        Kind: Item
+      }
+    },
+    2: {
+      children: {
+        Kind: Collection,
+        Count: 0
+      },
+      father: {
+        Kind: Item,
+        Timestamp: {Scrubbed},
+        Id: 1
+      },
+      firstName: {
+        Kind: Value,
+        Value: Father,
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123
+          }
+        }
+      },
+      fullName: {
+        Kind: Value,
+        Value: Father 
+      },
+      lastName: {
+        Kind: Value
+      },
+      mother: {
+        Kind: Item
       }
     }
   }

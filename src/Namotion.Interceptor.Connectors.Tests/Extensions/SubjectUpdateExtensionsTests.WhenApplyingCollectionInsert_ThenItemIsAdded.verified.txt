@@ -2,13 +2,10 @@
   Root: 1,
   Subjects: {
     1: {
-      Items: {
+      Children: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
         Operations: [
-          {
-            Index: 0
-          },
           {
             Action: Insert,
             Index: 1,
@@ -19,31 +16,33 @@
       }
     },
     2: {
-      Child: {
+      Children: {
+        Kind: Collection,
+        Count: 0
+      },
+      Father: {
         Kind: Item
       },
-      Items: {
-        Kind: Collection,
-        Count: 0
-      },
-      Lookup: {
-        Kind: Collection,
-        Count: 0
-      },
-      Name: {
+      FirstName: {
         Kind: Value,
-        Value: Child3,
+        Value: NewChild,
+        Timestamp: DateTimeOffset_2,
         Attributes: {
-          Status: {
+          MaxLength: {
             Kind: Value,
-            Value: active
+            Value: 123
           }
         }
       },
-      Parent: {
-        Kind: Item
+      FullName: {
+        Kind: Value,
+        Value: NewChild ,
+        Timestamp: DateTimeOffset_3
       },
-      Self: {
+      LastName: {
+        Kind: Value
+      },
+      Mother: {
         Kind: Item
       }
     }

@@ -144,6 +144,50 @@ public class SubjectUpdateCollectionTests
         await Verify(update);
     }
 
+    /// <summary>
+    /// Regression test for BuildPathToRoot bug where only the first item's path was included
+    /// when multiple items in the same collection had property changes in the same batch.
+    /// Previously, after the first item was processed, subsequent items were skipped because
+    /// the parent property already existed in the update - but we should APPEND to the
+    /// collection update, not skip entirely.
+    /// </summary>
+    [Fact]
+    public void WhenManyCollectionItemsHavePropertyChanges_ThenAllAreReferencedInParentCollection()
+    {
+        // Arrange - create a collection with many items (simulates the benchmark scenario)
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var items = Enumerable.Range(0, 100).Select(i => new CycleTestNode { Name = $"Child{i}" }).ToList();
+        var node = new CycleTestNode(context) { Name = "Root", Items = items };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - update ALL items' properties in a single batch (this is what the benchmark does)
+        for (var i = 0; i < items.Count; i++)
+        {
+            items[i].Name = $"Child{i}Updated";
+        }
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert - ALL 100 items should be referenced in the parent's collection update
+        Assert.NotNull(update.Subjects);
+        Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
+        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Collection, itemsUpdate!.Kind);
+        Assert.NotNull(itemsUpdate.Collection);
+
+        // This was the bug: only 1 item was included instead of all 100
+        Assert.Equal(100, itemsUpdate.Collection.Count);
+
+        // Verify all indices are present
+        var indices = itemsUpdate.Collection.Select(c => (int)c.Index!).OrderBy(i => i).ToList();
+        Assert.Equal(Enumerable.Range(0, 100).ToList(), indices);
+
+        // Verify all items have their property updates
+        Assert.Equal(101, update.Subjects.Count); // 1 root + 100 items
+    }
+
     [Fact]
     public async Task WhenRemoveAndInsertCombined_ThenBothOperationsAreCreated()
     {

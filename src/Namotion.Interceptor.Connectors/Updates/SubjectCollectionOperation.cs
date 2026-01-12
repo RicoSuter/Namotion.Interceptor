@@ -3,33 +3,35 @@ using System.Text.Json.Serialization;
 namespace Namotion.Interceptor.Connectors.Updates;
 
 /// <summary>
-/// Represents a structural operation on a collection (not property updates).
+/// Represents a structural operation on a collection.
 /// </summary>
 public class SubjectCollectionOperation
 {
     /// <summary>
-    /// The type of structural operation.
+    /// The type of operation.
     /// </summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public required SubjectCollectionOperationType Action { get; init; }
+    [JsonPropertyName("action")]
+    public SubjectCollectionOperationType Action { get; set; }
 
     /// <summary>
-    /// Target index (int for arrays) or key (object for dictionaries).
-    /// For Remove: the index/key to remove.
-    /// For Insert: the index/key where to insert.
-    /// For Move: the destination index.
+    /// Target index (int for arrays) or key (string for dictionaries).
     /// </summary>
-    public required object Index { get; init; }
+    [JsonPropertyName("index")]
+    public object Index { get; set; } = null!;
 
     /// <summary>
-    /// Source index for Move action. Arrays only.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? FromIndex { get; init; }
-
-    /// <summary>
-    /// The item to insert. Only for Insert action.
+    /// Source index for Move operations (arrays only).
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public SubjectUpdate? Item { get; init; }
+    [JsonPropertyName("fromIndex")]
+    public int? FromIndex { get; set; }
+
+    /// <summary>
+    /// The subject ID for Insert operations.
+    /// References a subject in the Subjects dictionary.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
 }

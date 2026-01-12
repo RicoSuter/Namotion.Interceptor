@@ -1,230 +1,198 @@
 ﻿{
-  Properties: {
-    children: {
-      Kind: Collection,
-      Timestamp: {Scrubbed},
-      Collection: [
-        {
-          Index: 0,
-          Item: {
-            Properties: {
-              children: {
-                Kind: Collection
-              },
-              father: {
-                Kind: Item
-              },
-              firstName: {
-                Kind: Value,
-                Value: Child1,
-                Attributes: {
-                  maxLength: {
-                    Kind: Value,
-                    Value: 123,
-                    Attributes: {
-                      unit: {
-                        Kind: Value,
-                        Value: Count
-                      }
-                    }
-                  }
-                }
-              },
-              fullName: {
-                Kind: Value,
-                Value: Child1 
-              },
-              lastName: {
-                Kind: Value
-              },
-              mother: {
-                Kind: Item
-              }
-            }
+  Root: 1,
+  Subjects: {
+    1: {
+      children: {
+        Kind: Collection,
+        Timestamp: {Scrubbed},
+        Collection: [
+          {
+            Index: 0,
+            Id: 4
+          },
+          {
+            Index: 1,
+            Id: 5
+          },
+          {
+            Index: 2,
+            Id: 6
           }
-        },
-        {
-          Index: 1,
-          Item: {
-            Properties: {
-              children: {
-                Kind: Collection
-              },
-              father: {
-                Kind: Item
-              },
-              firstName: {
-                Kind: Value,
-                Value: Child2,
-                Attributes: {
-                  maxLength: {
-                    Kind: Value,
-                    Value: 123,
-                    Attributes: {
-                      unit: {
-                        Kind: Value,
-                        Value: Count
-                      }
-                    }
-                  }
-                }
-              },
-              fullName: {
-                Kind: Value,
-                Value: Child2 
-              },
-              lastName: {
-                Kind: Value
-              },
-              mother: {
-                Kind: Item
-              }
-            }
-          }
-        },
-        {
-          Index: 2,
-          Item: {
-            Properties: {
-              children: {
-                Kind: Collection
-              },
-              father: {
-                Kind: Item
-              },
-              firstName: {
-                Kind: Value,
-                Value: Child3,
-                Attributes: {
-                  maxLength: {
-                    Kind: Value,
-                    Value: 123,
-                    Attributes: {
-                      unit: {
-                        Kind: Value,
-                        Value: Count
-                      }
-                    }
-                  }
-                }
-              },
-              fullName: {
-                Kind: Value,
-                Value: Child3 
-              },
-              lastName: {
-                Kind: Value
-              },
-              mother: {
-                Kind: Item
-              }
-            }
+        ],
+        Count: 3
+      },
+      father: {
+        Kind: Item,
+        Timestamp: {Scrubbed},
+        Id: 2
+      },
+      firstName: {
+        Kind: Value,
+        Value: Child,
+        Timestamp: {Scrubbed},
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123
           }
         }
-      ]
-    },
-    father: {
-      Kind: Item,
-      Timestamp: {Scrubbed},
-      Item: {
-        Properties: {
-          children: {
-            Kind: Collection
-          },
-          father: {
-            Kind: Item
-          },
-          firstName: {
-            Kind: Value,
-            Value: Father,
-            Attributes: {
-              maxLength: {
-                Kind: Value,
-                Value: 123,
-                Attributes: {
-                  unit: {
-                    Kind: Value,
-                    Value: Count
-                  }
-                }
-              }
-            }
-          },
-          fullName: {
-            Kind: Value,
-            Value: Father 
-          },
-          lastName: {
-            Kind: Value
-          },
-          mother: {
-            Kind: Item
-          }
-        }
+      },
+      fullName: {
+        Kind: Value,
+        Value: Child 
+      },
+      lastName: {
+        Kind: Value
+      },
+      mother: {
+        Kind: Item,
+        Timestamp: {Scrubbed},
+        Id: 3
       }
     },
-    firstName: {
-      Kind: Value,
-      Value: Child,
-      Timestamp: {Scrubbed},
-      Attributes: {
-        maxLength: {
-          Kind: Value,
-          Value: 123,
-          Attributes: {
-            unit: {
-              Kind: Value,
-              Value: Count
-            }
+    2: {
+      children: {
+        Kind: Collection,
+        Count: 0
+      },
+      father: {
+        Kind: Item
+      },
+      firstName: {
+        Kind: Value,
+        Value: Father,
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123
           }
         }
+      },
+      fullName: {
+        Kind: Value,
+        Value: Father 
+      },
+      lastName: {
+        Kind: Value
+      },
+      mother: {
+        Kind: Item
       }
     },
-    fullName: {
-      Kind: Value,
-      Value: Child 
-    },
-    lastName: {
-      Kind: Value
-    },
-    mother: {
-      Kind: Item,
-      Timestamp: {Scrubbed},
-      Item: {
-        Properties: {
-          children: {
-            Kind: Collection
-          },
-          father: {
-            Kind: Item
-          },
-          firstName: {
+    3: {
+      children: {
+        Kind: Collection,
+        Count: 0
+      },
+      father: {
+        Kind: Item
+      },
+      firstName: {
+        Kind: Value,
+        Value: Mother,
+        Attributes: {
+          maxLength: {
             Kind: Value,
-            Value: Mother,
-            Attributes: {
-              maxLength: {
-                Kind: Value,
-                Value: 123,
-                Attributes: {
-                  unit: {
-                    Kind: Value,
-                    Value: Count
-                  }
-                }
-              }
-            }
-          },
-          fullName: {
-            Kind: Value,
-            Value: Mother 
-          },
-          lastName: {
-            Kind: Value
-          },
-          mother: {
-            Kind: Item
+            Value: 123
           }
         }
+      },
+      fullName: {
+        Kind: Value,
+        Value: Mother 
+      },
+      lastName: {
+        Kind: Value
+      },
+      mother: {
+        Kind: Item
+      }
+    },
+    4: {
+      children: {
+        Kind: Collection,
+        Count: 0
+      },
+      father: {
+        Kind: Item
+      },
+      firstName: {
+        Kind: Value,
+        Value: Child1,
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123
+          }
+        }
+      },
+      fullName: {
+        Kind: Value,
+        Value: Child1 
+      },
+      lastName: {
+        Kind: Value
+      },
+      mother: {
+        Kind: Item
+      }
+    },
+    5: {
+      children: {
+        Kind: Collection,
+        Count: 0
+      },
+      father: {
+        Kind: Item
+      },
+      firstName: {
+        Kind: Value,
+        Value: Child2,
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123
+          }
+        }
+      },
+      fullName: {
+        Kind: Value,
+        Value: Child2 
+      },
+      lastName: {
+        Kind: Value
+      },
+      mother: {
+        Kind: Item
+      }
+    },
+    6: {
+      children: {
+        Kind: Collection,
+        Count: 0
+      },
+      father: {
+        Kind: Item
+      },
+      firstName: {
+        Kind: Value,
+        Value: Child3,
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123
+          }
+        }
+      },
+      fullName: {
+        Kind: Value,
+        Value: Child3 
+      },
+      lastName: {
+        Kind: Value
+      },
+      mother: {
+        Kind: Item
       }
     }
   }

@@ -2,10 +2,7 @@
   Root: 1,
   Subjects: {
     1: {
-      Child: {
-        Kind: Item
-      },
-      Items: {
+      Children: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
         Collection: [
@@ -20,83 +17,88 @@
         ],
         Count: 2
       },
-      Lookup: {
-        Kind: Collection,
-        Count: 0
+      Father: {
+        Kind: Item
       },
-      Name: {
+      FirstName: {
         Kind: Value,
-        Value: Root,
+        Value: Parent,
         Timestamp: DateTimeOffset_2,
         Attributes: {
-          Status: {
+          MaxLength: {
             Kind: Value,
-            Value: active
+            Value: 123
           }
         }
       },
-      Parent: {
-        Kind: Item
+      FullName: {
+        Kind: Value,
+        Value: Parent 
       },
-      Self: {
+      LastName: {
+        Kind: Value
+      },
+      Mother: {
         Kind: Item
       }
     },
     2: {
-      Child: {
+      Children: {
+        Kind: Collection,
+        Count: 0
+      },
+      Father: {
         Kind: Item
       },
-      Items: {
-        Kind: Collection,
-        Count: 0
-      },
-      Lookup: {
-        Kind: Collection,
-        Count: 0
-      },
-      Name: {
+      FirstName: {
         Kind: Value,
         Value: Child1,
+        Timestamp: DateTimeOffset_3,
         Attributes: {
-          Status: {
+          MaxLength: {
             Kind: Value,
-            Value: active
+            Value: 123
           }
         }
       },
-      Parent: {
-        Kind: Item
+      FullName: {
+        Kind: Value,
+        Value: Child1 
       },
-      Self: {
+      LastName: {
+        Kind: Value
+      },
+      Mother: {
         Kind: Item
       }
     },
     3: {
-      Child: {
+      Children: {
+        Kind: Collection,
+        Count: 0
+      },
+      Father: {
         Kind: Item
       },
-      Items: {
-        Kind: Collection,
-        Count: 0
-      },
-      Lookup: {
-        Kind: Collection,
-        Count: 0
-      },
-      Name: {
+      FirstName: {
         Kind: Value,
         Value: Child2,
+        Timestamp: DateTimeOffset_4,
         Attributes: {
-          Status: {
+          MaxLength: {
             Kind: Value,
-            Value: active
+            Value: 123
           }
         }
       },
-      Parent: {
-        Kind: Item
+      FullName: {
+        Kind: Value,
+        Value: Child2 
       },
-      Self: {
+      LastName: {
+        Kind: Value
+      },
+      Mother: {
         Kind: Item
       }
     }

@@ -2,19 +2,13 @@
   Root: 1,
   Subjects: {
     1: {
-      Items: {
+      Lookup: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
         Operations: [
           {
             Action: Insert,
-            Index: 1,
-            Id: 3
-          }
-        ],
-        Collection: [
-          {
-            Index: 0,
+            Index: newKey,
             Id: 2
           }
         ],
@@ -22,13 +16,6 @@
       }
     },
     2: {
-      Name: {
-        Kind: Value,
-        Value: Child1Updated,
-        Timestamp: DateTimeOffset_2
-      }
-    },
-    3: {
       Child: {
         Kind: Item
       },
@@ -42,7 +29,8 @@
       },
       Name: {
         Kind: Value,
-        Value: Child2,
+        Value: NewItem,
+        Timestamp: DateTimeOffset_2,
         Attributes: {
           Status: {
             Kind: Value,

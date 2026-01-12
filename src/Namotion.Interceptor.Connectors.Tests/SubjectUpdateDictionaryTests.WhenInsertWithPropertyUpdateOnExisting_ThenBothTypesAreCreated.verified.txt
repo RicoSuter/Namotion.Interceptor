@@ -1,58 +1,61 @@
 ﻿{
-  Properties: {
-    Lookup: {
-      Kind: Collection,
-      Timestamp: DateTimeOffset_1,
-      Operations: [
-        {
-          Action: Insert,
-          Index: key2,
-          Item: {
-            Properties: {
-              Child: {
-                Kind: Item
-              },
-              Items: {
-                Kind: Collection
-              },
-              Lookup: {
-                Kind: Collection
-              },
-              Name: {
-                Kind: Value,
-                Value: Item2,
-                Attributes: {
-                  Status: {
-                    Kind: Value,
-                    Value: active
-                  }
-                }
-              },
-              Parent: {
-                Kind: Item
-              },
-              Self: {
-                Kind: Item
-              }
-            }
+  Root: 1,
+  Subjects: {
+    1: {
+      Lookup: {
+        Kind: Collection,
+        Timestamp: DateTimeOffset_1,
+        Operations: [
+          {
+            Action: Insert,
+            Index: key2,
+            Id: 3
+          }
+        ],
+        Collection: [
+          {
+            Index: key1,
+            Id: 2
+          }
+        ],
+        Count: 2
+      }
+    },
+    2: {
+      Name: {
+        Kind: Value,
+        Value: Item1Updated,
+        Timestamp: DateTimeOffset_2
+      }
+    },
+    3: {
+      Child: {
+        Kind: Item
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
+      Lookup: {
+        Kind: Collection,
+        Count: 0
+      },
+      Name: {
+        Kind: Value,
+        Value: Item2,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: active
           }
         }
-      ],
-      Collection: [
-        {
-          Index: key1,
-          Item: {
-            Properties: {
-              Name: {
-                Kind: Value,
-                Value: Item1Updated,
-                Timestamp: DateTimeOffset_2
-              }
-            }
-          }
-        }
-      ],
-      Count: 2
+      },
+      Parent: {
+        Kind: Item
+      },
+      Self: {
+        Kind: Item
+      }
     }
   }
 }

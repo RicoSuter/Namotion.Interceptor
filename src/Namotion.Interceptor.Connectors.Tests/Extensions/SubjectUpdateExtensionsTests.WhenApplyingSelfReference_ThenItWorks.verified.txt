@@ -2,23 +2,6 @@
   Root: 1,
   Subjects: {
     1: {
-      Items: {
-        Kind: Collection,
-        Timestamp: DateTimeOffset_1,
-        Operations: [
-          {
-            Index: 0
-          },
-          {
-            Action: Insert,
-            Index: 1,
-            Id: 2
-          }
-        ],
-        Count: 2
-      }
-    },
-    2: {
       Child: {
         Kind: Item
       },
@@ -32,7 +15,8 @@
       },
       Name: {
         Kind: Value,
-        Value: Child3,
+        Value: SelfRef,
+        Timestamp: DateTimeOffset_1,
         Attributes: {
           Status: {
             Kind: Value,
@@ -44,7 +28,9 @@
         Kind: Item
       },
       Self: {
-        Kind: Item
+        Kind: Item,
+        Timestamp: DateTimeOffset_2,
+        Id: 1
       }
     }
   }

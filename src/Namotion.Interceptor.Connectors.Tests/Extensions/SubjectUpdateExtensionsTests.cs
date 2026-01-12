@@ -1,5 +1,5 @@
+using System.Reactive.Linq;
 using System.Text.Json;
-using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
@@ -11,753 +11,517 @@ namespace Namotion.Interceptor.Connectors.Tests.Extensions;
 public class SubjectUpdateExtensionsTests
 {
     [Fact]
-    public void WhenApplyingSimpleProperty_ThenItWorks()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-        
-        var person = new Person(context);
-        
-        // Act
-        person.ApplySubjectUpdate(new SubjectUpdate
-        {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(Person.FirstName), SubjectPropertyUpdate.Create("John")
-                },
-                {
-                    nameof(Person.LastName), SubjectPropertyUpdate.Create("Doe")
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
-        
-        // Assert
-        Assert.Equal("John", person.FirstName);
-        Assert.Equal("Doe", person.LastName);
-    }
-    
-    [Fact]
-    public void WhenApplyingSimplePropertyWithTimestamp_ThenTimestampIsPreserved()
+    public async Task WhenApplyingSimpleProperty_ThenItWorks()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var person = new Person(context);
-
-        var timestamp = DateTimeOffset.UtcNow.AddDays(-200);
-        
-        // Act
-        person.ApplySubjectUpdate(new SubjectUpdate
-        {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(Person.FirstName), SubjectPropertyUpdate.Create("John", timestamp)
-                },
-                {
-                    nameof(Person.LastName), SubjectPropertyUpdate.Create("Doe", timestamp)
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
-        
-        // Assert
-        Assert.Equal(timestamp, person
-            .GetPropertyReference("FirstName")
-            .TryGetWriteTimestamp());
-    }
-    
-    [Fact]
-    public void WhenApplyingNestedProperty_ThenItWorks()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var person = new Person(context);
-        
-        // Act
-        person.ApplySubjectUpdate(new SubjectUpdate
-        {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(Person.Father), SubjectPropertyUpdate.Create(new SubjectUpdate
-                    {
-                        Properties = new Dictionary<string, SubjectPropertyUpdate>
-                        {
-                            {
-                                nameof(Person.FirstName), SubjectPropertyUpdate.Create("John")
-                            }
-                        }
-                    })
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
-        
-        // Assert
-        Assert.Equal("John", person.Father?.FirstName);
-    }
-    
-    [Fact]
-    public void WhenApplyingCollectionProperty_ThenItWorks()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var person = new Person(context);
-
-        // Act - Use Operations.Insert for creating new items
-        person.ApplySubjectUpdate(new SubjectUpdate
-        {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(Person.Children),
-                    new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations =
-                        [
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Insert,
-                                Index = 0,
-                                Item = new SubjectUpdate
-                                {
-                                    Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                    {
-                                        { nameof(Person.FirstName), SubjectPropertyUpdate.Create("John") }
-                                    }
-                                }
-                            },
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Insert,
-                                Index = 1,
-                                Item = new SubjectUpdate
-                                {
-                                    Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                    {
-                                        { nameof(Person.FirstName), SubjectPropertyUpdate.Create("Anna") }
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
-
-        // Assert
-        Assert.Equal("John", person.Children.First().FirstName);
-        Assert.Equal("Anna", person.Children.Last().FirstName);
-    }
-
-    [Fact]
-    public void WhenApplyingFromSourceWithTransform_ThenTransformIsApplied()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var person = new Person(context);
-        var sourceMock = new Mock<ISubjectSource>();
-        var transformCalled = false;
+        var source = new Person(context) { FirstName = "John", LastName = "Doe" };
+        var target = new Person(context);
 
         // Act
-        person.ApplySubjectUpdateFromSource(
-            new SubjectUpdate
-            {
-                Properties = new Dictionary<string, SubjectPropertyUpdate>
-                {
-                    {
-                        nameof(Person.FirstName), SubjectPropertyUpdate.Create("John")
-                    }
-                }
-            }, 
-            sourceMock.Object, 
-            DefaultSubjectFactory.Instance,
-            (_, update) =>
-            {
-                transformCalled = true;
-                update.Value = "Transformed";
-            });
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 
         // Assert
-        Assert.True(transformCalled);
-        Assert.Equal("Transformed", person.FirstName);
+        Assert.Equal("John", target.FirstName);
+        Assert.Equal("Doe", target.LastName);
     }
 
     [Fact]
-    public void WhenApplyingCollectionUpdateInPlace_ThenExistingItemsAreUpdatedWithoutReplacement()
+    public async Task WhenApplyingSimplePropertyWithTimestamp_ThenTimestampIsPreserved()
     {
-        // Arrange - Create person with existing children
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var timestamp = new DateTimeOffset(2024, 1, 15, 10, 30, 0, TimeSpan.Zero);
+
+        Person source;
+        using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+        {
+            source = new Person(context) { FirstName = "John", LastName = "Doe" };
+        }
+
+        var target = new Person(context);
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal(timestamp, target.GetPropertyReference("FirstName").TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public async Task WhenApplyingNestedProperty_ThenItWorks()
+    {
+        // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var person = new Person(context);
+        var source = new Person(context)
+        {
+            FirstName = "Child",
+            Father = new Person(context) { FirstName = "Father" }
+        };
+        var target = new Person(context);
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal("Child", target.FirstName);
+        Assert.NotNull(target.Father);
+        Assert.Equal("Father", target.Father.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenApplyingCollectionProperty_ThenItWorks()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new Person(context)
+        {
+            FirstName = "Parent",
+            Children =
+            [
+                new Person(context) { FirstName = "Child1" },
+                new Person(context) { FirstName = "Child2" }
+            ]
+        };
+        var target = new Person(context);
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal(2, target.Children.Count);
+        Assert.Equal("Child1", target.Children[0].FirstName);
+        Assert.Equal("Child2", target.Children[1].FirstName);
+    }
+
+    [Fact]
+    public async Task WhenApplyingPartialUpdate_ThenOnlyChangedPropertiesAreUpdated()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var source = new Person(context) { FirstName = "Initial", LastName = "Name" };
+        var target = new Person(context) { FirstName = "Initial", LastName = "Name" };
+
+        // Make a change to source
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            source.FirstName = "Updated";
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal("Updated", target.FirstName);
+        Assert.Equal("Name", target.LastName); // Unchanged
+    }
+
+    [Fact]
+    public async Task WhenApplyingCollectionInsert_ThenItemIsAdded()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var source = new Person(context)
+        {
+            FirstName = "Parent",
+            Children = [new Person(context) { FirstName = "ExistingChild" }]
+        };
+        var target = new Person(context)
+        {
+            FirstName = "Parent",
+            Children = [new Person(context) { FirstName = "ExistingChild" }]
+        };
+
+        // Make a change - add a child
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            source.Children = [..source.Children, new Person(context) { FirstName = "NewChild" }];
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal(2, target.Children.Count);
+        Assert.Equal("NewChild", target.Children[1].FirstName);
+    }
+
+    [Fact]
+    public async Task WhenApplyingCollectionRemove_ThenItemIsRemoved()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var child1 = new Person(context) { FirstName = "Child1" };
         var child2 = new Person(context) { FirstName = "Child2" };
-        person.Children = [child1, child2];
+        var source = new Person(context) { FirstName = "Parent", Children = [child1, child2] };
 
-        // Act - Apply update to existing items only (no structural change)
-        person.ApplySubjectUpdate(new SubjectUpdate
+        var targetChild1 = new Person(context) { FirstName = "Child1" };
+        var targetChild2 = new Person(context) { FirstName = "Child2" };
+        var target = new Person(context) { FirstName = "Parent", Children = [targetChild1, targetChild2] };
+
+        // Make a change - remove first child
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
         {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(Person.Children),
-                    SubjectPropertyUpdate.Create(
-                        new SubjectPropertyCollectionUpdate
-                        {
-                            Index = 0,
-                            Item = new SubjectUpdate
-                            {
-                                Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                {
-                                    { nameof(Person.FirstName), SubjectPropertyUpdate.Create("UpdatedChild1") }
-                                }
-                            }
-                        },
-                        new SubjectPropertyCollectionUpdate
-                        {
-                            Index = 1,
-                            Item = new SubjectUpdate
-                            {
-                                Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                {
-                                    { nameof(Person.FirstName), SubjectPropertyUpdate.Create("UpdatedChild2") }
-                                }
-                            }
-                        })
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
-
-        // Assert - Same instances should be reused, values updated
-        Assert.Same(child1, person.Children[0]);
-        Assert.Same(child2, person.Children[1]);
-        Assert.Equal("UpdatedChild1", person.Children[0].FirstName);
-        Assert.Equal("UpdatedChild2", person.Children[1].FirstName);
-    }
-
-    [Fact]
-    public void WhenApplyingSparseCollectionUpdate_ThenOnlySpecifiedIndexesAreUpdated()
-    {
-        // Arrange - Create person with 3 children
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var person = new Person(context);
-        var child0 = new Person(context) { FirstName = "Child0" };
-        var child1 = new Person(context) { FirstName = "Child1" };
-        var child2 = new Person(context) { FirstName = "Child2" };
-        person.Children = [child0, child1, child2];
-
-        // Act - Only update index 0 and 2 (skip index 1)
-        person.ApplySubjectUpdate(new SubjectUpdate
-        {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(Person.Children),
-                    SubjectPropertyUpdate.Create(
-                        new SubjectPropertyCollectionUpdate
-                        {
-                            Index = 0,
-                            Item = new SubjectUpdate
-                            {
-                                Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                {
-                                    { nameof(Person.FirstName), SubjectPropertyUpdate.Create("Updated0") }
-                                }
-                            }
-                        },
-                        new SubjectPropertyCollectionUpdate
-                        {
-                            Index = 2,
-                            Item = new SubjectUpdate
-                            {
-                                Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                {
-                                    { nameof(Person.FirstName), SubjectPropertyUpdate.Create("Updated2") }
-                                }
-                            }
-                        })
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
-
-        // Assert - Index 1 unchanged, 0 and 2 updated
-        Assert.Equal("Updated0", person.Children[0].FirstName);
-        Assert.Equal("Child1", person.Children[1].FirstName); // Unchanged
-        Assert.Equal("Updated2", person.Children[2].FirstName);
-    }
-
-    [Fact]
-    public void WhenApplyingUpdateWithJsonElementValues_ThenValuesAreDeserialized()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var person = new Person(context);
-
-        // Simulate JSON deserialization where values come as JsonElement
-        var json = """{"firstName": "JsonPerson", "lastName": "FromElement"}""";
-        var doc = JsonDocument.Parse(json);
-        var firstNameElement = doc.RootElement.GetProperty("firstName");
-        var lastNameElement = doc.RootElement.GetProperty("lastName");
+            source.Children = [child2];
+        }
 
         // Act
-        person.ApplySubjectUpdate(new SubjectUpdate
-        {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                { nameof(Person.FirstName), SubjectPropertyUpdate.Create(firstNameElement) },
-                { nameof(Person.LastName), SubjectPropertyUpdate.Create(lastNameElement) }
-            }
-        }, DefaultSubjectFactory.Instance);
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 
         // Assert
-        Assert.Equal("JsonPerson", person.FirstName);
-        Assert.Equal("FromElement", person.LastName);
+        Assert.Single(target.Children);
+        Assert.Equal("Child2", target.Children[0].FirstName);
     }
 
     [Fact]
-    public void WhenApplyingCollectionUpdateWithJsonElementIndex_ThenIndexIsConverted()
+    public async Task WhenApplyingCollectionMove_ThenItemIsMoved()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child1 = new Person(context) { FirstName = "Child1" };
+        var child2 = new Person(context) { FirstName = "Child2" };
+        var child3 = new Person(context) { FirstName = "Child3" };
+        var source = new Person(context) { FirstName = "Parent", Children = [child1, child2, child3] };
+
+        var targetChild1 = new Person(context) { FirstName = "Child1" };
+        var targetChild2 = new Person(context) { FirstName = "Child2" };
+        var targetChild3 = new Person(context) { FirstName = "Child3" };
+        var target = new Person(context) { FirstName = "Parent", Children = [targetChild1, targetChild2, targetChild3] };
+
+        // Make a change - move child3 to front
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            source.Children = [child3, child1, child2];
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal(3, target.Children.Count);
+        Assert.Equal("Child3", target.Children[0].FirstName);
+        Assert.Equal("Child1", target.Children[1].FirstName);
+        Assert.Equal("Child2", target.Children[2].FirstName);
+    }
+
+    [Fact]
+    public async Task WhenApplyingNestedPropertyUpdate_ThenNestedItemIsUpdated()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child = new Person(context) { FirstName = "OriginalChild" };
+        var source = new Person(context) { FirstName = "Parent", Children = [child] };
+
+        var targetChild = new Person(context) { FirstName = "OriginalChild" };
+        var target = new Person(context) { FirstName = "Parent", Children = [targetChild] };
+
+        // Make a change - update nested child's property
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            child.FirstName = "UpdatedChild";
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Same(targetChild, target.Children[0]); // Same instance reused
+        Assert.Equal("UpdatedChild", target.Children[0].FirstName);
+    }
+
+    [Fact]
+    public async Task WhenApplyingDictionaryComplete_ThenDictionaryIsPopulated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var person = new Person(context);
-
-        // Simulate JSON deserialization where index comes as JsonElement
-        var indexJson = "1";
-        var indexElement = JsonDocument.Parse(indexJson).RootElement;
-
-        // Act - Use Operations.Insert for creating new items
-        person.ApplySubjectUpdate(new SubjectUpdate
+        var source = new CycleTestNode(context)
         {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
             {
+                ["key1"] = new CycleTestNode(context) { Name = "Item1" },
+                ["key2"] = new CycleTestNode(context) { Name = "Item2" }
+            }
+        };
+        var target = new CycleTestNode(context);
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal(2, target.Lookup.Count);
+        Assert.Equal("Item1", target.Lookup["key1"].Name);
+        Assert.Equal("Item2", target.Lookup["key2"].Name);
+    }
+
+    [Fact]
+    public async Task WhenApplyingDictionaryInsert_ThenItemIsAdded()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var existingItem = new CycleTestNode(context) { Name = "Existing" };
+        var source = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode> { ["existing"] = existingItem }
+        };
+        var target = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["existing"] = new CycleTestNode(context) { Name = "Existing" }
+            }
+        };
+
+        // Make a change - add new key
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            source.Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["existing"] = existingItem,
+                ["newKey"] = new CycleTestNode(context) { Name = "NewItem" }
+            };
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal(2, target.Lookup.Count);
+        Assert.Equal("NewItem", target.Lookup["newKey"].Name);
+    }
+
+    [Fact]
+    public async Task WhenApplyingDictionaryRemove_ThenItemIsRemoved()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var item1 = new CycleTestNode(context) { Name = "Item1" };
+        var item2 = new CycleTestNode(context) { Name = "Item2" };
+        var source = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = item1, ["key2"] = item2 }
+        };
+        var target = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key1"] = new CycleTestNode(context) { Name = "Item1" },
+                ["key2"] = new CycleTestNode(context) { Name = "Item2" }
+            }
+        };
+
+        // Make a change - remove key1
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            source.Lookup = new Dictionary<string, CycleTestNode> { ["key2"] = item2 };
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Single(target.Lookup);
+        Assert.False(target.Lookup.ContainsKey("key1"));
+        Assert.Equal("Item2", target.Lookup["key2"].Name);
+    }
+
+    [Fact]
+    public async Task WhenApplyingCircularReference_ThenItWorks()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var parent = new CycleTestNode(context) { Name = "Parent" };
+        var child = new CycleTestNode(context) { Name = "Child", Parent = parent };
+        parent.Child = child;
+
+        var target = new CycleTestNode(context);
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(parent, []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal("Parent", target.Name);
+        Assert.NotNull(target.Child);
+        Assert.Equal("Child", target.Child.Name);
+        // Note: The circular reference back to parent won't be restored since
+        // we create new instances. This is expected behavior.
+    }
+
+    [Fact]
+    public async Task WhenApplyingSelfReference_ThenItWorks()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var node = new CycleTestNode(context) { Name = "SelfRef" };
+        node.Self = node;
+
+        var target = new CycleTestNode(context);
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(node, []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal("SelfRef", target.Name);
+        // Self-reference won't be restored to point to target itself
+    }
+
+    [Fact]
+    public async Task WhenApplyingWithJsonElementValues_ThenValuesAreConverted()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context);
+
+        // Create update with JsonElement values (simulating JSON deserialization)
+        var json = """{"value": "JsonValue"}""";
+        var jsonElement = JsonDocument.Parse(json).RootElement.GetProperty("value");
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new Dictionary<string, SubjectPropertyUpdate>
                 {
-                    nameof(Person.Children),
-                    new SubjectPropertyUpdate
+                    ["FirstName"] = new SubjectPropertyUpdate
                     {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations =
-                        [
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Insert,
-                                Index = 0,
-                                Item = new SubjectUpdate
-                                {
-                                    Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                    {
-                                        { nameof(Person.FirstName), SubjectPropertyUpdate.Create("First") }
-                                    }
-                                }
-                            },
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Insert,
-                                Index = indexElement, // JsonElement index
-                                Item = new SubjectUpdate
-                                {
-                                    Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                    {
-                                        { nameof(Person.FirstName), SubjectPropertyUpdate.Create("Second") }
-                                    }
-                                }
-                            }
-                        ]
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = jsonElement
                     }
                 }
             }
-        }, DefaultSubjectFactory.Instance);
+        };
+
+        // Act
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 
         // Assert
-        Assert.Equal(2, person.Children.Count);
-        Assert.Equal("First", person.Children[0].FirstName);
-        Assert.Equal("Second", person.Children[1].FirstName);
+        Assert.Equal("JsonValue", target.FirstName);
     }
 
     [Fact]
-    public void WhenApplyingFromSource_ThenReceivedTimestampIsSet()
+    public async Task WhenApplyingFromSource_ThenSourceIsTracked()
     {
         // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-        var person = new Person(context);
-        var source = new object();
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var source = new Person(context) { FirstName = "John" };
+        var target = new Person(context);
+        var externalSource = new object();
 
-        var changedTimestamp = DateTimeOffset.UtcNow.AddMinutes(-5);
-        var beforeApply = DateTimeOffset.UtcNow;
-
+        // Capture FirstName change specifically (FullName is derived and fires without source)
         SubjectPropertyChange? capturedChange = null;
         using var subscription = context
             .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Where(c => c.Property.Name == "FirstName")
             .Subscribe(c => capturedChange = c);
 
         // Act
-        person.ApplySubjectUpdateFromSource(
-            new SubjectUpdate
-            {
-                Properties = new Dictionary<string, SubjectPropertyUpdate>
-                {
-                    { nameof(Person.FirstName), SubjectPropertyUpdate.Create("John", changedTimestamp) }
-                }
-            },
-            source,
-            DefaultSubjectFactory.Instance);
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+        await Verify(update);
+        target.ApplySubjectUpdateFromSource(update, externalSource, DefaultSubjectFactory.Instance);
 
-        var afterApply = DateTimeOffset.UtcNow;
-
-        // Assert - Received timestamp should be set to approximately now
+        // Assert
         Assert.NotNull(capturedChange);
-        var change = capturedChange.Value;
-        Assert.NotNull(change.ReceivedTimestamp);
-        Assert.True(change.ReceivedTimestamp >= beforeApply);
-        Assert.True(change.ReceivedTimestamp <= afterApply);
-        Assert.Equal(changedTimestamp, change.ChangedTimestamp);
+        Assert.NotNull(capturedChange.Value.ReceivedTimestamp);
+        Assert.Equal(externalSource, capturedChange.Value.Source);
     }
 
     [Fact]
-    public void WhenApplyingCollectionGrows_ThenExistingItemsReusedAndNewItemsCreated()
-    {
-        // Arrange - Create person with 2 existing children
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var person = new Person(context);
-        var existingChild0 = new Person(context) { FirstName = "Existing0" };
-        var existingChild1 = new Person(context) { FirstName = "Existing1" };
-        person.Children = [existingChild0, existingChild1];
-
-        // Act - Apply update that:
-        // 1. Inserts a new third child (structural change via Operations)
-        // 2. Updates existing items' properties (sparse updates via Collection)
-        person.ApplySubjectUpdate(new SubjectUpdate
-        {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(Person.Children),
-                    new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations =
-                        [
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Insert,
-                                Index = 2,
-                                Item = new SubjectUpdate
-                                {
-                                    Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                    {
-                                        { nameof(Person.FirstName), SubjectPropertyUpdate.Create("NewChild2") }
-                                    }
-                                }
-                            }
-                        ],
-                        Collection =
-                        [
-                            new SubjectPropertyCollectionUpdate
-                            {
-                                Index = 0,
-                                Item = new SubjectUpdate
-                                {
-                                    Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                    {
-                                        { nameof(Person.FirstName), SubjectPropertyUpdate.Create("Updated0") }
-                                    }
-                                }
-                            },
-                            new SubjectPropertyCollectionUpdate
-                            {
-                                Index = 1,
-                                Item = new SubjectUpdate
-                                {
-                                    Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                    {
-                                        { nameof(Person.FirstName), SubjectPropertyUpdate.Create("Updated1") }
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
-
-        // Assert
-        Assert.Equal(3, person.Children.Count);
-
-        // Existing items should be reused
-        Assert.Same(existingChild0, person.Children[0]);
-        Assert.Same(existingChild1, person.Children[1]);
-        Assert.Equal("Updated0", person.Children[0].FirstName);
-        Assert.Equal("Updated1", person.Children[1].FirstName);
-
-        // New item should be created
-        Assert.NotSame(existingChild0, person.Children[2]);
-        Assert.NotSame(existingChild1, person.Children[2]);
-        Assert.Equal("NewChild2", person.Children[2].FirstName);
-    }
-
-    [Fact]
-    public void WhenApplyingMoveOperation_ThenIdentityIsPreserved()
-    {
-        // Arrange - Create person with 3 existing children
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var person = new Person(context);
-        var child0 = new Person(context) { FirstName = "Child0" };
-        var child1 = new Person(context) { FirstName = "Child1" };
-        var child2 = new Person(context) { FirstName = "Child2" };
-        person.Children = [child0, child1, child2];
-
-        // Act - Move child2 to position 0 (reorder)
-        person.ApplySubjectUpdate(new SubjectUpdate
-        {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(Person.Children),
-                    new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations =
-                        [
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Move,
-                                FromIndex = 2,
-                                Index = 0
-                            }
-                        ]
-                    }
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
-
-        // Assert - Identity should be preserved, order should change
-        Assert.Equal(3, person.Children.Count);
-        Assert.Same(child2, person.Children[0]); // child2 moved to front
-        Assert.Same(child0, person.Children[1]); // child0 shifted
-        Assert.Same(child1, person.Children[2]); // child1 shifted
-    }
-
-    [Fact]
-    public void WhenApplyingRemoveOperation_ThenItemIsRemoved()
-    {
-        // Arrange - Create person with 3 existing children
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var person = new Person(context);
-        var child0 = new Person(context) { FirstName = "Child0" };
-        var child1 = new Person(context) { FirstName = "Child1" };
-        var child2 = new Person(context) { FirstName = "Child2" };
-        person.Children = [child0, child1, child2];
-
-        // Act - Remove middle child
-        person.ApplySubjectUpdate(new SubjectUpdate
-        {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(Person.Children),
-                    new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations =
-                        [
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Remove,
-                                Index = 1
-                            }
-                        ]
-                    }
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
-
-        // Assert - Middle item removed, others preserved
-        Assert.Equal(2, person.Children.Count);
-        Assert.Same(child0, person.Children[0]);
-        Assert.Same(child2, person.Children[1]);
-    }
-
-    [Fact]
-    public void WhenApplyingMoveWithPropertyUpdate_ThenBothAreApplied()
-    {
-        // Arrange - Create person with 3 existing children
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var person = new Person(context);
-        var child0 = new Person(context) { FirstName = "Child0" };
-        var child1 = new Person(context) { FirstName = "Child1" };
-        var child2 = new Person(context) { FirstName = "Child2" };
-        person.Children = [child0, child1, child2];
-
-        // Act - Move child2 to front AND update its property
-        person.ApplySubjectUpdate(new SubjectUpdate
-        {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(Person.Children),
-                    new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations =
-                        [
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Move,
-                                FromIndex = 2,
-                                Index = 0
-                            }
-                        ],
-                        Collection =
-                        [
-                            new SubjectPropertyCollectionUpdate
-                            {
-                                Index = 0, // Final index after move
-                                Item = new SubjectUpdate
-                                {
-                                    Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                    {
-                                        { nameof(Person.FirstName), SubjectPropertyUpdate.Create("MovedAndUpdated") }
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
-
-        // Assert - Move AND property update should both be applied
-        Assert.Equal(3, person.Children.Count);
-        Assert.Same(child2, person.Children[0]); // Same instance
-        Assert.Equal("MovedAndUpdated", person.Children[0].FirstName); // Property updated
-    }
-
-    [Fact]
-    public void WhenApplyingDictionaryInsert_ThenItemIsAdded()
+    public async Task WhenApplyingNullItem_ThenItemIsSetToNull()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var node = new CycleTestNode(context) { Name = "Root" };
-
-        // Act - Insert new dictionary item
-        node.ApplySubjectUpdate(new SubjectUpdate
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var source = new Person(context)
         {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(CycleTestNode.Lookup),
-                    new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations =
-                        [
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Insert,
-                                Index = "key1",
-                                Item = new SubjectUpdate
-                                {
-                                    Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                    {
-                                        { nameof(CycleTestNode.Name), SubjectPropertyUpdate.Create("Item1") }
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
+            FirstName = "Parent",
+            Father = new Person(context) { FirstName = "Father" }
+        };
+        var target = new Person(context)
+        {
+            FirstName = "Parent",
+            Father = new Person(context) { FirstName = "Father" }
+        };
+
+        // Make a change - set Father to null
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            source.Father = null;
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 
         // Assert
-        Assert.Single(node.Lookup);
-        Assert.True(node.Lookup.ContainsKey("key1"));
-        Assert.Equal("Item1", node.Lookup["key1"].Name);
+        Assert.Null(target.Father);
     }
 
     [Fact]
-    public void WhenApplyingDictionaryRemove_ThenItemIsRemoved()
+    public async Task WhenApplyingAttributeUpdate_ThenAttributeIsUpdated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var node = new CycleTestNode(context) { Name = "Root" };
-        var item1 = new CycleTestNode(context) { Name = "Item1" };
-        var item2 = new CycleTestNode(context) { Name = "Item2" };
-        node.Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = item1, ["key2"] = item2 };
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var source = new CycleTestNode(context) { Name = "Node" };
+        source.Name_Status = "updated";
 
-        // Act - Remove key1
-        node.ApplySubjectUpdate(new SubjectUpdate
-        {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(CycleTestNode.Lookup),
-                    new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations =
-                        [
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Remove,
-                                Index = "key1"
-                            }
-                        ]
-                    }
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
+        var target = new CycleTestNode(context) { Name = "Node" };
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+        await Verify(update);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 
         // Assert
-        Assert.Single(node.Lookup);
-        Assert.False(node.Lookup.ContainsKey("key1"));
-        Assert.Same(item2, node.Lookup["key2"]);
-    }
-
-    [Fact]
-    public void WhenApplyingDictionaryPropertyUpdate_ThenItemIsUpdated()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var node = new CycleTestNode(context) { Name = "Root" };
-        var item1 = new CycleTestNode(context) { Name = "Item1" };
-        node.Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = item1 };
-
-        // Act - Update property of existing item
-        node.ApplySubjectUpdate(new SubjectUpdate
-        {
-            Properties = new Dictionary<string, SubjectPropertyUpdate>
-            {
-                {
-                    nameof(CycleTestNode.Lookup),
-                    new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Collection =
-                        [
-                            new SubjectPropertyCollectionUpdate
-                            {
-                                Index = "key1",
-                                Item = new SubjectUpdate
-                                {
-                                    Properties = new Dictionary<string, SubjectPropertyUpdate>
-                                    {
-                                        { nameof(CycleTestNode.Name), SubjectPropertyUpdate.Create("UpdatedItem1") }
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                }
-            }
-        }, DefaultSubjectFactory.Instance);
-
-        // Assert - Same instance, property updated
-        Assert.Single(node.Lookup);
-        Assert.Same(item1, node.Lookup["key1"]);
-        Assert.Equal("UpdatedItem1", node.Lookup["key1"].Name);
+        Assert.Equal("updated", target.Name_Status);
     }
 }

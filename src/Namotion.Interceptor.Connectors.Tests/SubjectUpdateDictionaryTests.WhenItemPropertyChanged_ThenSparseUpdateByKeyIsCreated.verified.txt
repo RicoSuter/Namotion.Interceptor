@@ -1,21 +1,23 @@
 ﻿{
-  Properties: {
-    Lookup: {
-      Kind: Collection,
-      Collection: [
-        {
-          Index: key1,
-          Item: {
-            Properties: {
-              Name: {
-                Kind: Value,
-                Value: Item1Updated,
-                Timestamp: DateTimeOffset_1
-              }
-            }
+  Root: 1,
+  Subjects: {
+    1: {
+      Lookup: {
+        Kind: Collection,
+        Collection: [
+          {
+            Index: key1,
+            Id: 2
           }
-        }
-      ]
+        ]
+      }
+    },
+    2: {
+      Name: {
+        Kind: Value,
+        Value: Item1Updated,
+        Timestamp: DateTimeOffset_1
+      }
     }
   }
 }

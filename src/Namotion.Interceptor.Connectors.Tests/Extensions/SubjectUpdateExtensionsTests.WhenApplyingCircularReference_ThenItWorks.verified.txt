@@ -2,22 +2,35 @@
   Root: 1,
   Subjects: {
     1: {
+      Child: {
+        Kind: Item,
+        Timestamp: DateTimeOffset_1,
+        Id: 2
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
       Lookup: {
         Kind: Collection,
-        Timestamp: DateTimeOffset_1,
-        Operations: [
-          {
-            Action: Insert,
-            Index: key1,
-            Id: 2
-          },
-          {
-            Action: Insert,
-            Index: key2,
-            Id: 3
+        Count: 0
+      },
+      Name: {
+        Kind: Value,
+        Value: Parent,
+        Timestamp: DateTimeOffset_2,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: active
           }
-        ],
-        Count: 2
+        }
+      },
+      Parent: {
+        Kind: Item
+      },
+      Self: {
+        Kind: Item
       }
     },
     2: {
@@ -34,7 +47,8 @@
       },
       Name: {
         Kind: Value,
-        Value: Item1,
+        Value: Child,
+        Timestamp: DateTimeOffset_3,
         Attributes: {
           Status: {
             Kind: Value,
@@ -43,36 +57,9 @@
         }
       },
       Parent: {
-        Kind: Item
-      },
-      Self: {
-        Kind: Item
-      }
-    },
-    3: {
-      Child: {
-        Kind: Item
-      },
-      Items: {
-        Kind: Collection,
-        Count: 0
-      },
-      Lookup: {
-        Kind: Collection,
-        Count: 0
-      },
-      Name: {
-        Kind: Value,
-        Value: Item2,
-        Attributes: {
-          Status: {
-            Kind: Value,
-            Value: active
-          }
-        }
-      },
-      Parent: {
-        Kind: Item
+        Kind: Item,
+        Timestamp: DateTimeOffset_4,
+        Id: 1
       },
       Self: {
         Kind: Item

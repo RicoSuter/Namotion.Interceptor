@@ -1,78 +1,48 @@
 ﻿{
-  Properties: {
-    Items: {
-      Kind: Collection,
-      Timestamp: DateTimeOffset_1,
-      Operations: [
-        {
-          Action: Insert,
-          Index: 1,
-          Item: {
-            Properties: {
-              Child: {
-                Kind: Item
-              },
-              Items: {
-                Kind: Collection
-              },
-              Lookup: {
-                Kind: Collection
-              },
-              Name: {
-                Kind: Value,
-                Value: Child2,
-                Attributes: {
-                  Status: {
-                    Kind: Value,
-                    Value: active
-                  }
-                }
-              },
-              Parent: {
-                Kind: Item
-              },
-              Self: {
-                Kind: Item
-              }
-            }
+  Root: 1,
+  Subjects: {
+    1: {
+      Items: {
+        Kind: Collection,
+        Timestamp: DateTimeOffset_1,
+        Operations: [
+          {
+            Action: Insert,
+            Index: 1,
+            Id: 2
+          }
+        ],
+        Count: 2
+      }
+    },
+    2: {
+      Child: {
+        Kind: Item
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
+      Lookup: {
+        Kind: Collection,
+        Count: 0
+      },
+      Name: {
+        Kind: Value,
+        Value: Child2,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: active
           }
         }
-      ],
-      Collection: [
-        {
-          Index: 0,
-          Item: {
-            Properties: {
-              Child: {
-                Kind: Item
-              },
-              Items: {
-                Kind: Collection
-              },
-              Lookup: {
-                Kind: Collection
-              },
-              Name: {
-                Kind: Value,
-                Value: Child1,
-                Attributes: {
-                  Status: {
-                    Kind: Value,
-                    Value: active
-                  }
-                }
-              },
-              Parent: {
-                Kind: Item
-              },
-              Self: {
-                Kind: Item
-              }
-            }
-          }
-        }
-      ],
-      Count: 2
+      },
+      Parent: {
+        Kind: Item
+      },
+      Self: {
+        Kind: Item
+      }
     }
   }
 }
