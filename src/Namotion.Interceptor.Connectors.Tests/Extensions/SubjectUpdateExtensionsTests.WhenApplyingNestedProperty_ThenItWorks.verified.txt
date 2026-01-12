@@ -2,65 +2,64 @@
   Root: 1,
   Subjects: {
     1: {
-      children: {
+      Children: {
         Kind: Collection,
         Count: 0
       },
-      father: {
+      Father: {
         Kind: Item,
-        Timestamp: {Scrubbed},
+        Timestamp: DateTimeOffset_1,
         Id: 2
       },
-      firstName: {
+      FirstName: {
         Kind: Value,
         Value: Child,
-        Timestamp: {Scrubbed},
+        Timestamp: DateTimeOffset_2,
         Attributes: {
-          maxLength: {
+          MaxLength: {
             Kind: Value,
             Value: 123
           }
         }
       },
-      fullName: {
+      FullName: {
         Kind: Value,
         Value: Child 
       },
-      lastName: {
+      LastName: {
         Kind: Value
       },
-      mother: {
+      Mother: {
         Kind: Item
       }
     },
     2: {
-      children: {
+      Children: {
         Kind: Collection,
         Count: 0
       },
-      father: {
-        Kind: Item,
-        Timestamp: {Scrubbed},
-        Id: 1
+      Father: {
+        Kind: Item
       },
-      firstName: {
+      FirstName: {
         Kind: Value,
         Value: Father,
+        Timestamp: DateTimeOffset_3,
         Attributes: {
-          maxLength: {
+          MaxLength: {
             Kind: Value,
             Value: 123
           }
         }
       },
-      fullName: {
+      FullName: {
         Kind: Value,
         Value: Father 
       },
-      lastName: {
+      LastName: {
         Kind: Value
       },
-      mother: {
+      Mother: {
         Kind: Item
       }
     }

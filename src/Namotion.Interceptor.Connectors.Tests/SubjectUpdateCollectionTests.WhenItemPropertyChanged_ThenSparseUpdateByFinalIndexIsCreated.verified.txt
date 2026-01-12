@@ -1,21 +1,23 @@
 ﻿{
-  Properties: {
-    Items: {
-      Kind: Collection,
-      Collection: [
-        {
-          Index: 1,
-          Item: {
-            Properties: {
-              Name: {
-                Kind: Value,
-                Value: Child2Updated,
-                Timestamp: DateTimeOffset_1
-              }
-            }
+  Root: 1,
+  Subjects: {
+    1: {
+      Items: {
+        Kind: Collection,
+        Collection: [
+          {
+            Index: 1,
+            Id: 2
           }
-        }
-      ]
+        ]
+      }
+    },
+    2: {
+      Name: {
+        Kind: Value,
+        Value: Child2Updated,
+        Timestamp: DateTimeOffset_1
+      }
     }
   }
 }

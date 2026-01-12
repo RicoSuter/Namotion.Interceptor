@@ -1,79 +1,85 @@
 ﻿{
   Update1: {
-    Properties: {
-      children: {
-        Kind: Collection,
-        Timestamp: DateTimeOffset_1,
-        Operations: [
-          {
-            Action: Move,
-            Index: 0,
-            FromIndex: 1
-          },
-          {
-            Index: 0
-          }
-        ],
-        Collection: [
-          {
-            Index: 0,
-            Item: {
-              Properties: {
-                firstName: {
-                  Kind: Value,
-                  Value: Child2.0,
-                  Timestamp: DateTimeOffset_1
-                },
-                fullName: {
-                  Kind: Value,
-                  Value: Child2.0 ,
-                  Timestamp: DateTimeOffset_1
-                }
-              }
+    Root: 1,
+    Subjects: {
+      1: {
+        children: {
+          Kind: Collection,
+          Timestamp: DateTimeOffset_1,
+          Operations: [
+            {
+              Index: 0
             }
-          }
-        ],
-        Count: 1
+          ],
+          Collection: [
+            {
+              Index: 0,
+              Id: 2
+            }
+          ],
+          Count: 1
+        }
+      },
+      2: {
+        firstName: {
+          Kind: Value,
+          Value: Child2.0,
+          Timestamp: DateTimeOffset_1
+        },
+        fullName: {
+          Kind: Value,
+          Value: Child2.0 ,
+          Timestamp: DateTimeOffset_1
+        }
       }
     }
   },
   Update2: {
-    Properties: {
-      children: {
-        Kind: Collection,
-        Collection: [
-          {
-            Index: 0,
-            Item: {
-              Properties: {
-                firstName: {
-                  Kind: Value,
-                  Value: Child2.1,
-                  Timestamp: DateTimeOffset_2
-                },
-                fullName: {
-                  Kind: Value,
-                  Value: Child2.1 ,
-                  Timestamp: DateTimeOffset_2
-                }
-              }
+    Root: 1,
+    Subjects: {
+      1: {
+        children: {
+          Kind: Collection,
+          Collection: [
+            {
+              Index: 1,
+              Id: 2
+            },
+            {
+              Index: 1,
+              Id: 2
             }
-          }
-        ]
+          ]
+        }
+      },
+      2: {
+        firstName: {
+          Kind: Value,
+          Value: Child2.1,
+          Timestamp: DateTimeOffset_2
+        },
+        fullName: {
+          Kind: Value,
+          Value: Child2.1 ,
+          Timestamp: DateTimeOffset_2
+        }
       }
     }
   },
   Update3: {
-    Properties: {
-      firstName: {
-        Kind: Value,
-        Value: ParentNext,
-        Timestamp: DateTimeOffset_3
-      },
-      fullName: {
-        Kind: Value,
-        Value: ParentNext ,
-        Timestamp: DateTimeOffset_3
+    Root: 1,
+    Subjects: {
+      1: {
+        firstName: {
+          Kind: Value,
+          Value: ParentNext,
+          Timestamp: DateTimeOffset_3
+        },
+        fullName: {
+          Kind: Value,
+          Value: ParentNext ,
+          Timestamp: DateTimeOffset_3
+        }
       }
     }
   }

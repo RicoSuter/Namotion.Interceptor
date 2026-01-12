@@ -2,31 +2,29 @@
   Root: 1,
   Subjects: {
     1: {
-      Lookup: {
+      Children: {
         Kind: Collection,
         Collection: [
           {
-            Index: key1,
+            Index: 0,
             Id: 2
           },
           {
-            Index: key3,
-            Id: 3
+            Index: 0,
+            Id: 2
           }
         ]
       }
     },
     2: {
-      Name: {
+      FirstName: {
         Kind: Value,
-        Value: Item1Updated,
+        Value: UpdatedChild,
         Timestamp: DateTimeOffset_1
-      }
-    },
-    3: {
-      Name: {
+      },
+      FullName: {
         Kind: Value,
-        Value: Item3Updated,
+        Value: UpdatedChild ,
         Timestamp: DateTimeOffset_2
       }
     }

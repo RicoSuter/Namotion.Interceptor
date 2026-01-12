@@ -5,31 +5,24 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors.Updates;
 
 /// <summary>
-/// Represents an update for a subject with its property updates.
+/// Represents an update containing one or more subject property updates.
+/// Uses a flat structure where all subjects are stored in a dictionary
+/// and referenced by string IDs.
 /// </summary>
 public class SubjectUpdate
 {
     /// <summary>
-    /// Gets or sets the unique ID of the subject (only set if there is a reference pointing to it).
+    /// The ID of the root subject in the <see cref="Subjects"/> dictionary.
     /// </summary>
-    public int? Id { get; set; }
+    [JsonPropertyName("root")]
+    public string Root { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the reference ID of an already existing subject.
+    /// Dictionary of all subjects keyed by their string ID.
+    /// Each subject is a dictionary of property name to property update.
     /// </summary>
-    public int? Reference { get; set; }
-
-    /// <summary>
-    /// Gets a dictionary of property updates.
-    /// The dictionary is mutable so that additional updates can be attached.
-    /// </summary>
-    public Dictionary<string, SubjectPropertyUpdate> Properties { get; init; } = new();
-
-    /// <summary>
-    /// Gets or sets custom extension data added by the transformPropertyUpdate function.
-    /// </summary>
-    [JsonExtensionData]
-    public Dictionary<string, object>? ExtensionData { get; set; }
+    [JsonPropertyName("subjects")]
+    public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; set; } = new();
 
     /// <summary>
     /// Creates a complete update with all objects and properties for the given subject as root.
@@ -37,7 +30,9 @@ public class SubjectUpdate
     /// <param name="subject">The root subject.</param>
     /// <param name="processors">The update processors to filter and transform updates.</param>
     /// <returns>The update.</returns>
-    public static SubjectUpdate CreateCompleteUpdate(IInterceptorSubject subject, ReadOnlySpan<ISubjectUpdateProcessor> processors)
+    public static SubjectUpdate CreateCompleteUpdate(
+        IInterceptorSubject subject,
+        ReadOnlySpan<ISubjectUpdateProcessor> processors)
         => SubjectUpdateFactory.CreateComplete(subject, processors);
 
     /// <summary>

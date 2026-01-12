@@ -14,9 +14,13 @@ public class JsonCamelCasePathProcessor : ISubjectUpdateProcessor
 
     public SubjectUpdate TransformSubjectUpdate(IInterceptorSubject subject, SubjectUpdate update)
     {
-        if (update.Properties.Count > 0)
+        // Transform all property names in all subjects to camelCase
+        foreach (var subjectProperties in update.Subjects.Values)
         {
-            TransformDictionaryKeys(update.Properties);
+            if (subjectProperties.Count > 0)
+            {
+                TransformDictionaryKeys(subjectProperties);
+            }
         }
 
         return update;

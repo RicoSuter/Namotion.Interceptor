@@ -1,17 +1,20 @@
 ﻿{
-  Properties: {
-    Lookup: {
-      Kind: Collection,
-      Timestamp: DateTimeOffset_1,
-      Operations: [
-        {
-          Index: key1
-        },
-        {
-          Index: key2
-        }
-      ],
-      Count: 0
+  Root: 1,
+  Subjects: {
+    1: {
+      Lookup: {
+        Kind: Collection,
+        Timestamp: DateTimeOffset_1,
+        Operations: [
+          {
+            Index: key1
+          },
+          {
+            Index: key2
+          }
+        ],
+        Count: 0
+      }
     }
   }
 }

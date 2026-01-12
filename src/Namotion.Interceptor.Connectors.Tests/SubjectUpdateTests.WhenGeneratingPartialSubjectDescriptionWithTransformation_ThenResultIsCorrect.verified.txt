@@ -1,38 +1,39 @@
-{
-  Properties: {
-    children: {
-      Kind: Collection,
-      Collection: [
-        {
-          Index: 2,
-          Item: {
-            Properties: {
-              firstName: {
-                Kind: Value,
-                Value: TransformedValue,
-                Timestamp: {Scrubbed}
-              }
-            }
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      children: {
+        Kind: Collection,
+        Collection: [
+          {
+            Index: 2,
+            Id: 3
           }
-        }
-      ]
-    },
-    father: {
-      Kind: Item,
-      Item: {
-        Properties: {
-          firstName: {
-            Kind: Value,
-            Value: NewFather,
-            Timestamp: {Scrubbed}
-          }
-        }
+        ]
+      },
+      father: {
+        Kind: Item,
+        Id: 2
+      },
+      firstName: {
+        Kind: Value,
+        Value: NewPerson,
+        Timestamp: {Scrubbed}
       }
     },
-    firstName: {
-      Kind: Value,
-      Value: NewPerson,
-      Timestamp: {Scrubbed}
+    2: {
+      firstName: {
+        Kind: Value,
+        Value: NewFather,
+        Timestamp: {Scrubbed}
+      }
+    },
+    3: {
+      firstName: {
+        Kind: Value,
+        Value: TransformedValue,
+        Timestamp: {Scrubbed}
+      }
     }
   }
 }

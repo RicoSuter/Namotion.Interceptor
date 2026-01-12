@@ -2,7 +2,7 @@
   Root: 1,
   Subjects: {
     1: {
-      Items: {
+      Children: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
         Operations: [
