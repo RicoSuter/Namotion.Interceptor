@@ -231,7 +231,7 @@ var registered = subject.TryGetRegisteredSubject();
 
 - `WithRegistry()` → `Tracking.WithContextInheritance()`
 
-### [Namotion.Interceptor.Sources](docs/sources.md)
+### [Namotion.Interceptor.Connectors](docs/connectors.md)
 
 Enables binding subject properties to external data sources like MQTT, OPC UA, or custom providers.
 
