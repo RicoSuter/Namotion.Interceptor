@@ -40,15 +40,6 @@ internal static class SubjectUpdateApplier
         }
     }
 
-    public static void DefaultApplyValue(RegisteredSubjectProperty property, SubjectPropertyUpdate propertyUpdate)
-    {
-        using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-        {
-            var value = ConvertValue(propertyUpdate.Value, property.Type);
-            property.SetValue(value);
-        }
-    }
-
     public static object? ConvertValue(object? value, Type targetType)
     {
         if (value is null)
@@ -141,9 +132,7 @@ internal static class SubjectUpdateApplier
         if (propertyUpdate.Id is not null &&
             context.Subjects.TryGetValue(propertyUpdate.Id, out var itemProperties))
         {
-            var existingItem = property.GetValue() as IInterceptorSubject;
-
-            if (existingItem is not null)
+            if (property.GetValue() is IInterceptorSubject existingItem)
             {
                 if (context.TryMarkAsProcessed(propertyUpdate.Id))
                 {
@@ -153,19 +142,16 @@ internal static class SubjectUpdateApplier
             else
             {
                 var newItem = context.SubjectFactory.CreateSubject(property);
-                if (newItem is not null)
+                newItem.Context.AddFallbackContext(parent.Context);
+
+                if (context.TryMarkAsProcessed(propertyUpdate.Id))
                 {
-                    newItem.Context.AddFallbackContext(parent.Context);
+                    ApplyProperties(newItem, itemProperties, context);
+                }
 
-                    if (context.TryMarkAsProcessed(propertyUpdate.Id))
-                    {
-                        ApplyProperties(newItem, itemProperties, context);
-                    }
-
-                    using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-                    {
-                        property.SetValue(newItem);
-                    }
+                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+                {
+                    property.SetValue(newItem);
                 }
             }
         }

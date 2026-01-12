@@ -275,7 +275,7 @@ internal static class SubjectUpdateFactory
         if (newCollection is null)
             return;
 
-        var oldItems = oldCollection?.ToList() ?? new List<IInterceptorSubject>();
+        var oldItems = oldCollection?.ToList() ?? [];
         var newItems = newCollection.ToList();
         update.Count = newItems.Count;
 
@@ -294,7 +294,7 @@ internal static class SubjectUpdateFactory
                 var itemId = context.GetOrCreateId(item);
                 ProcessSubjectComplete(item, context);
 
-                operations ??= new();
+                operations ??= [];
                 operations.Add(new SubjectCollectionOperation
                 {
                     Action = SubjectCollectionOperationType.Insert,
@@ -304,9 +304,9 @@ internal static class SubjectUpdateFactory
             }
 
             // Add Move operations for reordered items
-            foreach (var (oldIndex, newIndex, item) in reorderedItems)
+            foreach (var (oldIndex, newIndex, _) in reorderedItems)
             {
-                operations ??= new();
+                operations ??= [];
                 operations.Add(new SubjectCollectionOperation
                 {
                     Action = SubjectCollectionOperationType.Move,
@@ -323,7 +323,7 @@ internal static class SubjectUpdateFactory
                 {
                     var itemId = context.GetOrCreateId(item);
                     var newIndex = changeBuilder.GetNewIndex(item);
-                    updates ??= new();
+                    updates ??= [];
                     updates.Add(new SubjectPropertyCollectionUpdate
                     {
                         Index = newIndex,
@@ -399,7 +399,7 @@ internal static class SubjectUpdateFactory
                 var itemId = context.GetOrCreateId(item);
                 ProcessSubjectComplete(item, context);
 
-                operations ??= new();
+                operations ??= [];
                 operations.Add(new SubjectCollectionOperation
                 {
                     Action = SubjectCollectionOperationType.Insert,
@@ -411,7 +411,7 @@ internal static class SubjectUpdateFactory
             // Add Remove operations
             foreach (var removedKey in removedKeys)
             {
-                operations ??= new();
+                operations ??= [];
                 operations.Add(new SubjectCollectionOperation
                 {
                     Action = SubjectCollectionOperationType.Remove,
@@ -436,7 +436,7 @@ internal static class SubjectUpdateFactory
                 if (context.SubjectHasUpdates(item))
                 {
                     var itemId = context.GetOrCreateId(item);
-                    updates ??= new();
+                    updates ??= [];
                     updates.Add(new SubjectPropertyCollectionUpdate
                     {
                         Index = key,
