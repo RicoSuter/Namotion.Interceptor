@@ -11,6 +11,7 @@ internal sealed class SubjectCollectionComparer
     // Reusable containers
     private readonly Dictionary<IInterceptorSubject, int> _oldIndexMap = new();
     private readonly Dictionary<IInterceptorSubject, int> _newIndexMap = new();
+    private readonly Dictionary<IInterceptorSubject, int> _oldCommonIndexMap = new();
     private readonly List<IInterceptorSubject> _oldCommonOrder = [];
     private readonly List<IInterceptorSubject> _newCommonOrder = [];
     private readonly HashSet<object> _oldKeys = [];
@@ -87,14 +88,14 @@ internal sealed class SubjectCollectionComparer
         // Detect reordering
         if (_oldCommonOrder.Count > 0 && !_oldCommonOrder.SequenceEqual(_newCommonOrder))
         {
-            var oldCommonIndexMap = new Dictionary<IInterceptorSubject, int>(_oldCommonOrder.Count);
+            _oldCommonIndexMap.Clear();
             for (var i = 0; i < _oldCommonOrder.Count; i++)
-                oldCommonIndexMap[_oldCommonOrder[i]] = i;
+                _oldCommonIndexMap[_oldCommonOrder[i]] = i;
 
             for (var i = 0; i < _newCommonOrder.Count; i++)
             {
                 var item = _newCommonOrder[i];
-                var oldCommonIndex = oldCommonIndexMap[item];
+                var oldCommonIndex = _oldCommonIndexMap[item];
                 if (oldCommonIndex != i)
                 {
                     reorderedItems ??= [];
@@ -175,6 +176,7 @@ internal sealed class SubjectCollectionComparer
     {
         _oldIndexMap.Clear();
         _newIndexMap.Clear();
+        _oldCommonIndexMap.Clear();
         _oldCommonOrder.Clear();
         _newCommonOrder.Clear();
         _oldKeys.Clear();
