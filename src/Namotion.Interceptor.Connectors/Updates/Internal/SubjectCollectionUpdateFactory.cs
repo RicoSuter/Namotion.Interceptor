@@ -220,9 +220,13 @@ internal static class SubjectCollectionUpdateFactory
 
             // Check for property updates on existing items
             // Build HashSet for O(1) lookup instead of O(n) Any() per iteration
-            HashSet<object>? newKeysSet = newItemsToProcess is not null
-                ? [..newItemsToProcess.Select(n => n.key)]
-                : null;
+            HashSet<object>? newKeysSet = null;
+            if (newItemsToProcess is not null)
+            {
+                newKeysSet = new HashSet<object>(newItemsToProcess.Count);
+                foreach (var (key, _) in newItemsToProcess)
+                    newKeysSet.Add(key);
+            }
 
             List<SubjectPropertyCollectionUpdate>? updates = null;
             foreach (DictionaryEntry entry in newDict)

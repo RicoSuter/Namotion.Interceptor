@@ -20,29 +20,26 @@ internal static class SubjectCollectionUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var existingItems = (property.GetValue() as IEnumerable<IInterceptorSubject>)?.ToList() ?? [];
-        var originalItems = new List<IInterceptorSubject>(existingItems);
-        var workingItems = new List<IInterceptorSubject>(existingItems);
+        var workingItems = (property.GetValue() as IEnumerable<IInterceptorSubject>)?.ToList() ?? [];
         var structureChanged = false;
 
         // Apply structural operations
         if (propertyUpdate.Operations is { Count: > 0 })
         {
-            var hasOnlyMoves = propertyUpdate.Operations.All(op => op.Action == SubjectCollectionOperationType.Move);
-            if (hasOnlyMoves && propertyUpdate.Operations.Count > 0)
+            // Move-only operations use original indices and must be applied atomically
+            if (propertyUpdate.Operations.All(op => op.Action == SubjectCollectionOperationType.Move))
             {
-                var newItems = new IInterceptorSubject[originalItems.Count];
+                var snapshot = workingItems.ToArray();
                 foreach (var operation in propertyUpdate.Operations)
                 {
                     var toIndex = ConvertIndexToInt(operation.Index);
                     var fromIndex = operation.FromIndex!.Value;
-                    if (fromIndex >= 0 && fromIndex < originalItems.Count && toIndex >= 0 && toIndex < newItems.Length)
+                    if (fromIndex >= 0 && fromIndex < snapshot.Length && toIndex >= 0 && toIndex < workingItems.Count)
                     {
-                        newItems[toIndex] = originalItems[fromIndex];
+                        workingItems[toIndex] = snapshot[fromIndex];
                         structureChanged = true;
                     }
                 }
-                workingItems = newItems.ToList();
             }
             else
             {
@@ -62,14 +59,7 @@ internal static class SubjectCollectionUpdateApplier
                         case SubjectCollectionOperationType.Insert:
                             if (operation.Id is not null && context.Subjects.TryGetValue(operation.Id, out var itemProps))
                             {
-                                var newItem = context.SubjectFactory.CreateCollectionSubject(property, index);
-                                newItem.Context.AddFallbackContext(parent.Context);
-
-                                if (context.TryMarkAsProcessed(operation.Id))
-                                {
-                                    SubjectUpdateApplier.ApplyPropertyUpdates(newItem, itemProps, context);
-                                }
-
+                                var newItem = CreateAndApplyItem(parent, property, index, operation.Id, itemProps, context);
                                 if (index >= workingItems.Count)
                                     workingItems.Add(newItem);
                                 else
@@ -128,14 +118,7 @@ internal static class SubjectCollectionUpdateApplier
                     else if (index >= 0 && index <= workingItems.Count)
                     {
                         // Create new item at append position (for complete updates rebuilding the collection)
-                        var newItem = context.SubjectFactory.CreateCollectionSubject(property, index);
-                        newItem.Context.AddFallbackContext(parent.Context);
-
-                        if (context.TryMarkAsProcessed(collectionUpdate.Id))
-                        {
-                            SubjectUpdateApplier.ApplyPropertyUpdates(newItem, itemProps, context);
-                        }
-
+                        var newItem = CreateAndApplyItem(parent, property, index, collectionUpdate.Id, itemProps, context);
                         if (index >= workingItems.Count)
                             workingItems.Add(newItem);
                         else
@@ -194,14 +177,7 @@ internal static class SubjectCollectionUpdateApplier
                     case SubjectCollectionOperationType.Insert:
                         if (operation.Id is not null && context.Subjects.TryGetValue(operation.Id, out var itemProps))
                         {
-                            var newItem = context.SubjectFactory.CreateCollectionSubject(property, key);
-                            newItem.Context.AddFallbackContext(parent.Context);
-
-                            if (context.TryMarkAsProcessed(operation.Id))
-                            {
-                                SubjectUpdateApplier.ApplyPropertyUpdates(newItem, itemProps, context);
-                            }
-
+                            var newItem = CreateAndApplyItem(parent, property, key, operation.Id, itemProps, context);
                             workingDictionary[key] = newItem;
                             structureChanged = true;
                         }
@@ -229,14 +205,7 @@ internal static class SubjectCollectionUpdateApplier
                     }
                     else
                     {
-                        var newItem = context.SubjectFactory.CreateCollectionSubject(property, key);
-                        newItem.Context.AddFallbackContext(parent.Context);
-
-                        if (context.TryMarkAsProcessed(collUpdate.Id))
-                        {
-                            SubjectUpdateApplier.ApplyPropertyUpdates(newItem, itemProps, context);
-                        }
-
+                        var newItem = CreateAndApplyItem(parent, property, key, collUpdate.Id, itemProps, context);
                         workingDictionary[key] = newItem;
                         structureChanged = true;
                     }
@@ -264,5 +233,22 @@ internal static class SubjectCollectionUpdateApplier
     private static object ConvertDictionaryKey(object key)
     {
         return key is JsonElement jsonElement ? jsonElement.GetString() ?? jsonElement.ToString() : key;
+    }
+
+    private static IInterceptorSubject CreateAndApplyItem(
+        IInterceptorSubject parent,
+        RegisteredSubjectProperty property,
+        object indexOrKey,
+        string subjectId,
+        Dictionary<string, SubjectPropertyUpdate> properties,
+        SubjectUpdateApplyContext context)
+    {
+        var newItem = context.SubjectFactory.CreateCollectionSubject(property, indexOrKey);
+        newItem.Context.AddFallbackContext(parent.Context);
+        if (context.TryMarkAsProcessed(subjectId))
+        {
+            SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);
+        }
+        return newItem;
     }
 }
