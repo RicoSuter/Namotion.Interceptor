@@ -465,15 +465,13 @@ public class SubjectUpdateExtensionsTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
         await Verify(update);
-        var receivedTimestamp = DateTimeOffset.UtcNow;
-        using (SubjectChangeContext.WithState(externalSource, changed: null, received: receivedTimestamp))
+        using (SubjectChangeContext.WithSource(externalSource))
         {
             target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
         }
 
         // Assert
         Assert.NotNull(capturedChange);
-        Assert.NotNull(capturedChange.Value.ReceivedTimestamp);
         Assert.Equal(externalSource, capturedChange.Value.Source);
     }
 
