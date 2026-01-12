@@ -73,7 +73,12 @@ internal sealed class SubjectUpdateFactoryContext
                 var transformed = Processors[i].TransformSubjectPropertyUpdate(info.Property, update);
                 if (transformed != update)
                 {
-                    info.Parent[info.Property.Name] = transformed;
+                    // Use AttributeName for attributes, Name for regular properties
+                    var key = info.Property.IsAttribute
+                        ? info.Property.AttributeMetadata.AttributeName
+                        : info.Property.Name;
+
+                    info.Parent[key] = transformed;
                 }
             }
         }

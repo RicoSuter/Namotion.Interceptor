@@ -20,10 +20,29 @@ public class JsonCamelCasePathProcessor : ISubjectUpdateProcessor
             if (subjectProperties.Count > 0)
             {
                 TransformDictionaryKeys(subjectProperties);
+
+                // Also transform nested attribute dictionaries
+                foreach (var propertyUpdate in subjectProperties.Values)
+                {
+                    TransformAttributesRecursively(propertyUpdate);
+                }
             }
         }
 
         return update;
+    }
+
+    private static void TransformAttributesRecursively(SubjectPropertyUpdate update)
+    {
+        if (update.Attributes is null || update.Attributes.Count == 0)
+            return;
+
+        TransformDictionaryKeys(update.Attributes);
+
+        foreach (var attributeUpdate in update.Attributes.Values)
+        {
+            TransformAttributesRecursively(attributeUpdate);
+        }
     }
 
     public SubjectPropertyUpdate TransformSubjectPropertyUpdate(RegisteredSubjectProperty property, SubjectPropertyUpdate update)
