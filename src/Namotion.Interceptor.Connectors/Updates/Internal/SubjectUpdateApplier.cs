@@ -17,7 +17,7 @@ internal static class SubjectUpdateApplier
         IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectFactory subjectFactory,
-        Action<RegisteredSubjectProperty, SubjectPropertyUpdate> applyValue)
+        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
         if (string.IsNullOrEmpty(update.Root))
             return;
@@ -28,7 +28,7 @@ internal static class SubjectUpdateApplier
         var context = ContextPool.Rent();
         try
         {
-            context.Initialize(update.Subjects, subjectFactory, applyValue);
+            context.Initialize(update.Subjects, subjectFactory, transformValueBeforeApply);
             context.TryMarkAsProcessed(update.Root);
             ApplyProperties(subject, rootProperties, context);
         }
@@ -106,7 +106,12 @@ internal static class SubjectUpdateApplier
         switch (propertyUpdate.Kind)
         {
             case SubjectPropertyUpdateKind.Value:
-                context.ApplyValue(registeredProperty, propertyUpdate);
+                context.TransformValueBeforeApply?.Invoke(registeredProperty, propertyUpdate);
+                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+                {
+                    var value = ConvertValue(propertyUpdate.Value, registeredProperty.Type);
+                    registeredProperty.SetValue(value);
+                }
                 break;
 
             case SubjectPropertyUpdateKind.Item:

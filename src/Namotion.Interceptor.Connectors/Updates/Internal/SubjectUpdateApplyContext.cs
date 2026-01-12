@@ -12,16 +12,16 @@ internal sealed class SubjectUpdateApplyContext
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
-    public Action<RegisteredSubjectProperty, SubjectPropertyUpdate> ApplyValue { get; private set; } = null!;
+    public Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? TransformValueBeforeApply { get; private set; }
 
     public void Initialize(
         Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> subjects,
         ISubjectFactory subjectFactory,
-        Action<RegisteredSubjectProperty, SubjectPropertyUpdate> applyValue)
+        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply)
     {
         Subjects = subjects;
         SubjectFactory = subjectFactory;
-        ApplyValue = applyValue;
+        TransformValueBeforeApply = transformValueBeforeApply;
     }
 
     public bool TryMarkAsProcessed(string subjectId)
@@ -35,6 +35,6 @@ internal sealed class SubjectUpdateApplyContext
         _processedSubjectIds.Clear();
         Subjects = null!;
         SubjectFactory = null!;
-        ApplyValue = null!;
+        TransformValueBeforeApply = null;
     }
 }
