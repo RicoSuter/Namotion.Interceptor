@@ -30,7 +30,7 @@ internal static class SubjectUpdateApplier
         {
             context.Initialize(update.Subjects, subjectFactory, transformValueBeforeApply);
             context.TryMarkAsProcessed(update.Root);
-            ApplyProperties(subject, rootProperties, context);
+            ApplyPropertyUpdates(subject, rootProperties, context);
         }
         finally
         {
@@ -39,32 +39,7 @@ internal static class SubjectUpdateApplier
         }
     }
 
-    public static object? ConvertValue(object? value, Type targetType)
-    {
-        if (value is null)
-            return null;
-
-        if (value is JsonElement jsonElement)
-        {
-            return jsonElement.ValueKind switch
-            {
-                JsonValueKind.String => jsonElement.GetString(),
-                JsonValueKind.Number when targetType == typeof(int) || targetType == typeof(int?) => jsonElement.GetInt32(),
-                JsonValueKind.Number when targetType == typeof(long) || targetType == typeof(long?) => jsonElement.GetInt64(),
-                JsonValueKind.Number when targetType == typeof(float) || targetType == typeof(float?) => jsonElement.GetSingle(),
-                JsonValueKind.Number when targetType == typeof(double) || targetType == typeof(double?) => jsonElement.GetDouble(),
-                JsonValueKind.Number when targetType == typeof(decimal) || targetType == typeof(decimal?) => jsonElement.GetDecimal(),
-                JsonValueKind.Number => jsonElement.GetDouble(),
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                _ => value
-            };
-        }
-
-        return value;
-    }
-
-    internal static void ApplyProperties(
+    internal static void ApplyPropertyUpdates(
         IInterceptorSubject subject,
         Dictionary<string, SubjectPropertyUpdate> properties,
         SubjectUpdateApplyContext context)
@@ -140,7 +115,7 @@ internal static class SubjectUpdateApplier
             {
                 if (context.TryMarkAsProcessed(propertyUpdate.Id))
                 {
-                    ApplyProperties(existingItem, itemProperties, context);
+                    ApplyPropertyUpdates(existingItem, itemProperties, context);
                 }
             }
             else
@@ -150,7 +125,7 @@ internal static class SubjectUpdateApplier
 
                 if (context.TryMarkAsProcessed(propertyUpdate.Id))
                 {
-                    ApplyProperties(newItem, itemProperties, context);
+                    ApplyPropertyUpdates(newItem, itemProperties, context);
                 }
 
                 using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
@@ -166,5 +141,15 @@ internal static class SubjectUpdateApplier
                 property.SetValue(null);
             }
         }
+    }
+
+    private static object? ConvertValue(object? value, Type targetType)
+    {
+        return value switch
+        {
+            null => null,
+            JsonElement jsonElement => jsonElement.Deserialize(targetType),
+            _ => value
+        };
     }
 }

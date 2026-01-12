@@ -67,7 +67,7 @@ internal static class SubjectCollectionUpdateApplier
 
                                 if (context.TryMarkAsProcessed(operation.Id))
                                 {
-                                    SubjectUpdateApplier.ApplyProperties(newItem, itemProps, context);
+                                    SubjectUpdateApplier.ApplyPropertyUpdates(newItem, itemProps, context);
                                 }
 
                                 if (index >= workingItems.Count)
@@ -122,7 +122,7 @@ internal static class SubjectCollectionUpdateApplier
                         // Update existing item
                         if (context.TryMarkAsProcessed(collectionUpdate.Id))
                         {
-                            SubjectUpdateApplier.ApplyProperties(workingItems[index], itemProps, context);
+                            SubjectUpdateApplier.ApplyPropertyUpdates(workingItems[index], itemProps, context);
                         }
                     }
                     else if (index >= 0 && index <= workingItems.Count)
@@ -133,7 +133,7 @@ internal static class SubjectCollectionUpdateApplier
 
                         if (context.TryMarkAsProcessed(collectionUpdate.Id))
                         {
-                            SubjectUpdateApplier.ApplyProperties(newItem, itemProps, context);
+                            SubjectUpdateApplier.ApplyPropertyUpdates(newItem, itemProps, context);
                         }
 
                         if (index >= workingItems.Count)
@@ -199,7 +199,7 @@ internal static class SubjectCollectionUpdateApplier
 
                             if (context.TryMarkAsProcessed(operation.Id))
                             {
-                                SubjectUpdateApplier.ApplyProperties(newItem, itemProps, context);
+                                SubjectUpdateApplier.ApplyPropertyUpdates(newItem, itemProps, context);
                             }
 
                             workingDictionary[key] = newItem;
@@ -224,7 +224,7 @@ internal static class SubjectCollectionUpdateApplier
                     {
                         if (context.TryMarkAsProcessed(collUpdate.Id))
                         {
-                            SubjectUpdateApplier.ApplyProperties(existing, itemProps, context);
+                            SubjectUpdateApplier.ApplyPropertyUpdates(existing, itemProps, context);
                         }
                     }
                     else
@@ -234,7 +234,7 @@ internal static class SubjectCollectionUpdateApplier
 
                         if (context.TryMarkAsProcessed(collUpdate.Id))
                         {
-                            SubjectUpdateApplier.ApplyProperties(newItem, itemProps, context);
+                            SubjectUpdateApplier.ApplyPropertyUpdates(newItem, itemProps, context);
                         }
 
                         workingDictionary[key] = newItem;

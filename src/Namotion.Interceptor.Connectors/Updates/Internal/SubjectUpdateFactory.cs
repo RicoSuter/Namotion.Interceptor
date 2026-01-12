@@ -20,7 +20,7 @@ internal static class SubjectUpdateFactory
     /// <summary>
     /// Creates a complete update with all properties for the given subject.
     /// </summary>
-    public static SubjectUpdate CreateComplete(
+    public static SubjectUpdate CreateCompleteUpdate(
         IInterceptorSubject subject,
         ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
@@ -57,7 +57,7 @@ internal static class SubjectUpdateFactory
     /// <summary>
     /// Creates a partial update from property changes.
     /// </summary>
-    public static SubjectUpdate CreatePartialFromChanges(
+    public static SubjectUpdate CreatePartialUpdateFromChanges(
         IInterceptorSubject rootSubject,
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
         ReadOnlySpan<ISubjectUpdateProcessor> processors)
@@ -319,13 +319,8 @@ internal static class SubjectUpdateFactory
 
             attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
 
-            var attributeUpdate = new SubjectPropertyUpdate
-            {
-                Kind = SubjectPropertyUpdateKind.Value,
-                Value = attribute.GetValue(),
-                Timestamp = attribute.Reference.TryGetWriteTimestamp()
-            };
-
+            // Reuse the same property update logic for attributes
+            var attributeUpdate = CreatePropertyUpdate(attribute, context);
             attributes[attribute.AttributeMetadata.AttributeName] = attributeUpdate;
             context.TrackPropertyUpdate(attributeUpdate, attribute, attributes);
         }
@@ -352,18 +347,21 @@ internal static class SubjectUpdateFactory
             subjectProperties[rootProperty.Name] = rootUpdate;
         }
 
-        // Navigate/create an attribute chain
+        // Navigate/create an attribute chain (excluding the last one which we'll create from change)
         var currentUpdate = rootUpdate;
         var attributeChain = new List<RegisteredSubjectProperty>();
         var currentProperty = attributeProperty;
         while (currentProperty.IsAttribute)
         {
-            attributeChain.Insert(0, currentProperty);
+            attributeChain.Add(currentProperty);
             currentProperty = currentProperty.GetAttributedProperty();
         }
+        attributeChain.Reverse();
 
-        foreach (var chainedAttribute in attributeChain)
+        // Navigate to parent of target attribute
+        for (var i = 0; i < attributeChain.Count - 1; i++)
         {
+            var chainedAttribute = attributeChain[i];
             currentUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
             var attributeName = chainedAttribute.AttributeMetadata.AttributeName;
 
@@ -376,13 +374,14 @@ internal static class SubjectUpdateFactory
             currentUpdate = nestedAttributeUpdate;
         }
 
-        // Apply the value
-        currentUpdate.Kind = SubjectPropertyUpdateKind.Value;
-        currentUpdate.Value = change.GetNewValue<object?>();
-        currentUpdate.Timestamp = change.ChangedTimestamp;
+        // Create the final attribute update using the same logic as properties
+        var finalAttribute = attributeChain[^1];
+        currentUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
+        var finalAttributeName = finalAttribute.AttributeMetadata.AttributeName;
+        var attributeUpdate = CreatePropertyUpdateFromChange(attributeProperty, change, context);
+        currentUpdate.Attributes[finalAttributeName] = attributeUpdate;
 
-        context.TrackPropertyUpdate(currentUpdate, attributeProperty,
-            currentUpdate == rootUpdate ? subjectProperties : rootUpdate.Attributes!);
+        context.TrackPropertyUpdate(attributeUpdate, attributeProperty, currentUpdate.Attributes);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

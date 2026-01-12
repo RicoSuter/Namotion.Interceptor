@@ -98,7 +98,13 @@
         Attributes: {
           maxLength: {
             Kind: Value,
-            Value: 123
+            Value: 123,
+            Attributes: {
+              unit: {
+                Kind: Value,
+                Value: Count
+              }
+            }
           }
         }
       },
