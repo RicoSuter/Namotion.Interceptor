@@ -5,7 +5,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
-namespace Namotion.Interceptor.Connectors.Tests;
+namespace Namotion.Interceptor.Connectors.Tests.Paths;
 
 public class PathExtensionsTests
 {

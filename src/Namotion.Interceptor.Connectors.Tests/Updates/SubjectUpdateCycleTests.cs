@@ -7,7 +7,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Connectors.Tests;
+namespace Namotion.Interceptor.Connectors.Tests.Updates;
 
 /// <summary>
 /// Tests for cycle detection and handling in SubjectUpdate serialization.
