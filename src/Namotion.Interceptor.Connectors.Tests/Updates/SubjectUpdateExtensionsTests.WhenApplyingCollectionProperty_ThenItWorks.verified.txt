@@ -95,7 +95,7 @@
       FirstName: {
         Kind: Value,
         Value: Child2,
-        Timestamp: DateTimeOffset_1,
+        Timestamp: DateTimeOffset_4,
         Attributes: {
           MaxLength: {
             Kind: Value,
