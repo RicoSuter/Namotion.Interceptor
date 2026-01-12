@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Connectors.Updates.Internal;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Updates;
 
@@ -25,13 +25,16 @@ public static class SubjectUpdateExtensions
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
         var receivedTimestamp = DateTimeOffset.UtcNow;
-
-        subject.ApplySubjectUpdate(update, subjectFactory, (property, propertyUpdate) =>
-        {
-            transformValueBeforeApply?.Invoke(property, propertyUpdate);
-            var value = SubjectUpdateApplier.ConvertValue(propertyUpdate.Value, property.Type);
-            property.SetValueFromSource(source, propertyUpdate.Timestamp, receivedTimestamp, value);
-        });
+        SubjectUpdateApplier.Apply(
+            subject,
+            update,
+            subjectFactory ?? DefaultSubjectFactory.Instance,
+            (property, propertyUpdate) =>
+            {
+                transformValueBeforeApply?.Invoke(property, propertyUpdate);
+                var value = SubjectUpdateApplier.ConvertValue(propertyUpdate.Value, property.Type);
+                property.SetValueFromSource(source, propertyUpdate.Timestamp, receivedTimestamp, value);
+            });
     }
 
     /// <summary>
@@ -40,17 +43,25 @@ public static class SubjectUpdateExtensions
     /// <param name="subject">The subject.</param>
     /// <param name="update">The update data.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects, null to ignore updates on missing subjects.</param>
-    /// <param name="applyValueOverride">The function to apply an update to a property.</param>
+    /// <param name="transformValueBeforeApply">The function to transform the update before applying it.</param>
     public static void ApplySubjectUpdate(
         this IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectFactory? subjectFactory,
-        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? applyValueOverride = null)
+        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
         SubjectUpdateApplier.Apply(
             subject,
             update,
             subjectFactory ?? DefaultSubjectFactory.Instance,
-            applyValueOverride ?? SubjectUpdateApplier.DefaultApplyValue);
+            (property, propertyUpdate) =>
+            {
+                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+                {
+                    transformValueBeforeApply?.Invoke(property, propertyUpdate);
+                    var value = SubjectUpdateApplier.ConvertValue(propertyUpdate.Value, property.Type);
+                    property.SetValue(value);
+                }
+            });
     }
 }
