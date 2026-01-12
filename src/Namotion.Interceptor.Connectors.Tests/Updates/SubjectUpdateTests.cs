@@ -8,7 +8,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Connectors.Tests;
+namespace Namotion.Interceptor.Connectors.Tests.Updates;
 
 public class SubjectUpdateTests
 {
