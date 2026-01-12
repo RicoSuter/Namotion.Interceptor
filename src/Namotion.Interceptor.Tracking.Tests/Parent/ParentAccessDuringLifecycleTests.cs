@@ -278,6 +278,64 @@ public class ParentAccessDuringLifecycleTests
         Assert.Contains("TrackedChild.AttachSubjectToContext - HasParents: True", handlerCallOrder);
     }
 
+    [Fact]
+    public void WhenFourLevelHierarchy_ThenTryGetFirstParentFindsInterfaceOnSecondLevel()
+    {
+        // Arrange: Create a 4-level tree: a => b => c => d
+        // Where 'b' implements ISpecialMarker interface
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithParents();
+
+        var levelA = new LevelA(context) { Name = "A" };
+        var levelB = new LevelB { Name = "B" };  // Implements ISpecialMarker
+        var levelC = new LevelC { Name = "C" };
+        var levelD = new LevelD { Name = "D" };
+
+        // Build hierarchy: A -> B -> C -> D
+        levelA.Child = levelB;
+        levelB.Child = levelC;
+        levelC.Child = levelD;
+
+        // Act: From D, find first parent implementing ISpecialMarker (should be B)
+        var foundParent = levelD.TryGetFirstParent<ISpecialMarker>();
+
+        // Assert
+        Assert.NotNull(foundParent);
+        Assert.Same(levelB, foundParent);
+    }
+
+    [Fact]
+    public void WhenMultipleParents_AndFirstParentDoesNotHaveInterface_ThenFindsSecondParent()
+    {
+        // Arrange: Create a multi-parent scenario where:
+        // - Child has two parents: ParentWithoutMarker and ParentWithMarker
+        // - First parent does NOT implement ISpecialMarker
+        // - Second parent DOES implement ISpecialMarker
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithParents();
+
+        var parentWithoutMarker = new ParentWithoutMarker(context) { Name = "NoMarker" };
+        var parentWithMarker = new ParentWithMarker(context) { Name = "WithMarker" };
+        var child = new MultiParentChild { Name = "Child" };
+
+        // Attach child to first parent (no marker)
+        parentWithoutMarker.Child = child;
+
+        // Also attach child to second parent (has marker) - creates multi-parent
+        parentWithMarker.Child = child;
+
+        // Act: Find first parent implementing ISpecialMarker
+        var foundParent = child.TryGetFirstParent<ISpecialMarker>();
+
+        // Assert: Should find parentWithMarker even though parentWithoutMarker was added first
+        Assert.NotNull(foundParent);
+        Assert.Same(parentWithMarker, foundParent);
+    }
+
     private class OrderTrackingHandler : ILifecycleHandler
     {
         private readonly List<string> _callOrder;
@@ -420,41 +478,114 @@ public partial class Component : ILifecycleHandler
             }
         }
     }
+}
 
-    /// <summary>
-    /// Tries to find the first parent of the specified type by traversing the parent hierarchy.
-    /// Returns null if not found instead of throwing.
-    /// </summary>
-    public TRoot? TryGetFirstParent<TRoot>()
-        where TRoot : class, IInterceptorSubject
+/// <summary>
+/// Marker interface for testing TryGetFirstParent with interface type parameter.
+/// </summary>
+public interface ISpecialMarker
+{
+}
+
+/// <summary>
+/// Root level (level A) of the 4-level hierarchy test.
+/// </summary>
+[InterceptorSubject]
+public partial class LevelA
+{
+    public partial string Name { get; set; }
+    public partial LevelB? Child { get; set; }
+
+    public LevelA()
     {
-        var visited = new HashSet<IInterceptorSubject>();
-        var queue = new Queue<IInterceptorSubject>();
-        queue.Enqueue(this);
+        Name = string.Empty;
+    }
+}
 
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
+/// <summary>
+/// Level B of the 4-level hierarchy - implements ISpecialMarker.
+/// </summary>
+[InterceptorSubject]
+public partial class LevelB : ISpecialMarker
+{
+    public partial string Name { get; set; }
+    public partial LevelC? Child { get; set; }
 
-            if (!visited.Add(current))
-            {
-                continue;
-            }
+    public LevelB()
+    {
+        Name = string.Empty;
+    }
+}
 
-            if (current is TRoot root && !ReferenceEquals(current, this))
-            {
-                return root;
-            }
+/// <summary>
+/// Level C of the 4-level hierarchy.
+/// </summary>
+[InterceptorSubject]
+public partial class LevelC
+{
+    public partial string Name { get; set; }
+    public partial LevelD? Child { get; set; }
 
-            foreach (var parent in current.GetParents())
-            {
-                if (!parent.Equals(default))
-                {
-                    queue.Enqueue(parent.Property.Subject);
-                }
-            }
-        }
+    public LevelC()
+    {
+        Name = string.Empty;
+    }
+}
 
-        return null;
+/// <summary>
+/// Leaf level (level D) of the 4-level hierarchy.
+/// </summary>
+[InterceptorSubject]
+public partial class LevelD
+{
+    public partial string Name { get; set; }
+
+    public LevelD()
+    {
+        Name = string.Empty;
+    }
+}
+
+/// <summary>
+/// Parent that does NOT implement ISpecialMarker for multi-parent test.
+/// </summary>
+[InterceptorSubject]
+public partial class ParentWithoutMarker
+{
+    public partial string Name { get; set; }
+    public partial MultiParentChild? Child { get; set; }
+
+    public ParentWithoutMarker()
+    {
+        Name = string.Empty;
+    }
+}
+
+/// <summary>
+/// Parent that implements ISpecialMarker for multi-parent test.
+/// </summary>
+[InterceptorSubject]
+public partial class ParentWithMarker : ISpecialMarker
+{
+    public partial string Name { get; set; }
+    public partial MultiParentChild? Child { get; set; }
+
+    public ParentWithMarker()
+    {
+        Name = string.Empty;
+    }
+}
+
+/// <summary>
+/// Child that can have multiple parents for multi-parent test.
+/// </summary>
+[InterceptorSubject]
+public partial class MultiParentChild
+{
+    public partial string Name { get; set; }
+
+    public MultiParentChild()
+    {
+        Name = string.Empty;
     }
 }

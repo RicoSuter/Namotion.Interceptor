@@ -21,6 +21,43 @@ public static class ParentsHandlerExtensions
     }
 
     /// <summary>
+    /// Tries to find the first parent of the specified type by traversing the parent hierarchy.
+    /// Returns null if not found instead of throwing.
+    /// </summary>
+    public static TRoot? TryGetFirstParent<TRoot>(this IInterceptorSubject subject)
+        where TRoot : class
+    {
+        var visited = new HashSet<IInterceptorSubject>();
+        var queue = new Queue<IInterceptorSubject>();
+        queue.Enqueue(subject);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+
+            if (!visited.Add(current))
+            {
+                continue;
+            }
+
+            if (current is TRoot root && !ReferenceEquals(current, subject))
+            {
+                return root;
+            }
+
+            foreach (var parent in current.GetParents())
+            {
+                if (!parent.Equals(default))
+                {
+                    queue.Enqueue(parent.Property.Subject);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Gets the parents of the subject as an immutable array.
     /// This is the preferred method for accessing parents with zero-allocation enumeration.
     /// </summary>

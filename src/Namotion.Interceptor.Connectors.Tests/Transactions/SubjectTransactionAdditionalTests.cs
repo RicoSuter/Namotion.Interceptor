@@ -143,7 +143,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
         person.LastName = "Doe";
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<TransactionException>(
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
             async () => await transaction.CommitAsync(CancellationToken.None));
 
         // LastName should have succeeded, FirstName should have failed

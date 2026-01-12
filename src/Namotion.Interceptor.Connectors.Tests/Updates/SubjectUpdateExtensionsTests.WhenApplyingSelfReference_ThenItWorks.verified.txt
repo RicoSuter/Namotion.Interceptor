@@ -1,0 +1,37 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      Child: {
+        Kind: Item
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
+      Lookup: {
+        Kind: Collection,
+        Count: 0
+      },
+      Name: {
+        Kind: Value,
+        Value: SelfRef,
+        Timestamp: DateTimeOffset_1,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      Parent: {
+        Kind: Item
+      },
+      Self: {
+        Kind: Item,
+        Timestamp: DateTimeOffset_2,
+        Id: 1
+      }
+    }
+  }
+}

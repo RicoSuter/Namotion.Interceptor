@@ -8,7 +8,7 @@ public enum TransactionFailureHandling
     /// <summary>
     /// Best-effort mode: Apply successful changes to the in-process model, rollback failed ones.
     /// For each property, if the source write succeeds but local apply fails, the source is rolled back
-    /// to maintain per-property consistency. A <see cref="TransactionException"/> is thrown containing all failures.
+    /// to maintain per-property consistency. A <see cref="SubjectTransactionException"/> is thrown containing all failures.
     /// This maximizes successful writes but may result in partial updates across properties.
     /// </summary>
     BestEffort,
