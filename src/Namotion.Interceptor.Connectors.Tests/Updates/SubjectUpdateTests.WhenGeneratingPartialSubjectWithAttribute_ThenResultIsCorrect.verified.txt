@@ -10,7 +10,7 @@
     2: {
       firstName: {
         Attributes: {
-          Test1: {
+          test1: {
             Kind: Value,
             Value: 12,
             Timestamp: {Scrubbed},
