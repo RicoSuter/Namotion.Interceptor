@@ -1,20 +1,19 @@
 using System.Collections;
 using System.Runtime.CompilerServices;
-using Namotion.Interceptor.Connectors.Updates.Internal;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Connectors.Updates;
+namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
 /// <summary>
 /// Factory for creating <see cref="SubjectUpdate"/> instances.
 /// Uses a flat structure where all subjects are stored in a single dictionary
 /// and referenced by string IDs, eliminating cycle detection complexity.
 /// </summary>
-public static class SubjectUpdateFactory
+internal static class SubjectUpdateFactory
 {
     private static readonly ObjectPool<UpdateContext> ContextPool = new(() => new UpdateContext());
     private static readonly ObjectPool<CollectionChangeBuilder> ChangeBuilderPool = new(() => new CollectionChangeBuilder());
@@ -615,5 +614,4 @@ public static class SubjectUpdateFactory
         }
         return true;
     }
-
 }

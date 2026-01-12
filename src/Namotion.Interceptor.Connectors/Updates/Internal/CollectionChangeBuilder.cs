@@ -11,9 +11,9 @@ internal sealed class CollectionChangeBuilder
     // Reusable containers
     private readonly Dictionary<IInterceptorSubject, int> _oldIndexMap = new();
     private readonly Dictionary<IInterceptorSubject, int> _newIndexMap = new();
-    private readonly List<IInterceptorSubject> _oldCommonOrder = new();
-    private readonly List<IInterceptorSubject> _newCommonOrder = new();
-    private readonly HashSet<object> _oldKeys = new();
+    private readonly List<IInterceptorSubject> _oldCommonOrder = [];
+    private readonly List<IInterceptorSubject> _newCommonOrder = [];
+    private readonly HashSet<object> _oldKeys = [];
 
     /// <summary>
     /// Builds collection change operations.
@@ -31,8 +31,8 @@ internal sealed class CollectionChangeBuilder
         out List<(int oldIndex, int newIndex, IInterceptorSubject item)> reorderedItems)
     {
         operations = null;
-        newItemsToProcess = new();
-        reorderedItems = new();
+        newItemsToProcess = [];
+        reorderedItems = [];
 
         // Build index maps
         _oldIndexMap.Clear();
@@ -48,7 +48,7 @@ internal sealed class CollectionChangeBuilder
             var item = oldItems[i];
             if (!_newIndexMap.ContainsKey(item))
             {
-                operations ??= new();
+                operations ??= [];
                 operations.Insert(0, new SubjectCollectionOperation
                 {
                     Action = SubjectCollectionOperationType.Remove,
@@ -111,7 +111,7 @@ internal sealed class CollectionChangeBuilder
         out HashSet<object> removedKeys)
     {
         operations = null;
-        newItemsToProcess = new();
+        newItemsToProcess = [];
 
         _oldKeys.Clear();
         if (oldDict is not null)
@@ -124,8 +124,7 @@ internal sealed class CollectionChangeBuilder
         foreach (DictionaryEntry entry in newDict)
         {
             var key = entry.Key;
-            var item = entry.Value as IInterceptorSubject;
-            if (item is null)
+            if (entry.Value is not IInterceptorSubject item)
                 continue;
 
             if (_oldKeys.Contains(key))
@@ -143,7 +142,7 @@ internal sealed class CollectionChangeBuilder
     /// Gets the new index for an item.
     /// </summary>
     public int GetNewIndex(IInterceptorSubject item) =>
-        _newIndexMap.TryGetValue(item, out var index) ? index : -1;
+        _newIndexMap.GetValueOrDefault(item, -1);
 
     /// <summary>
     /// Gets items that exist in both old and new collections.
