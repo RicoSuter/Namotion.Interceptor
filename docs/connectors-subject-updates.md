@@ -2,6 +2,38 @@
 
 Subject updates enable efficient synchronization of object graphs between server and clients. Instead of sending full object state on every change, only the changed properties are transmitted.
 
+## Flat Structure
+
+Subject updates use a **flat dictionary structure** where all subjects are stored in a single dictionary and referenced by string IDs. This design:
+
+- Eliminates circular reference issues during serialization
+- Enables O(1) subject lookup
+- Makes debugging easier (all subjects visible at top level)
+- Keeps each subject's data in exactly one place
+
+### JSON Format Overview
+
+```json
+{
+  "root": "1",
+  "subjects": {
+    "1": {
+      "name": { "kind": "Value", "value": "Parent" },
+      "child": { "kind": "Item", "id": "2" }
+    },
+    "2": {
+      "name": { "kind": "Value", "value": "Child" },
+      "parent": { "kind": "Item", "id": "1" }
+    }
+  }
+}
+```
+
+- `root` - The ID of the root subject
+- `subjects` - Dictionary of all subjects, keyed by string ID
+- Each subject contains property name → property update mappings
+- References to other subjects use `id` (not nested objects)
+
 ## Creating Updates
 
 ### Complete Update (Full State)
@@ -32,8 +64,11 @@ var json = JsonSerializer.Serialize(update);
 
 ```csharp
 // Apply update from external source (e.g., WebSocket message from client)
-// The 'source' parameter enables echo prevention in change tracking
-subject.ApplySubjectUpdateFromSource(update, source, DefaultSubjectFactory.Instance);
+// The WithSource scope enables echo prevention in change tracking
+using (SubjectChangeContext.WithSource(source))
+{
+    subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+}
 
 // Apply update without source tracking
 subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
@@ -42,6 +77,54 @@ subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 ### Client-Side (TypeScript)
 
 See the TypeScript types at the end of this document. The apply logic follows the same two-phase approach described below.
+
+## Property Update Kinds
+
+| Kind | Description |
+|------|-------------|
+| `Value` | Scalar value (string, number, boolean, etc.) |
+| `Item` | Single nested subject (referenced by ID) |
+| `Collection` | Array or dictionary of subjects |
+
+### Value Property
+
+```json
+{
+  "kind": "Value",
+  "value": "John",
+  "timestamp": "2024-01-10T12:00:00Z"
+}
+```
+
+### Item Property
+
+References another subject by ID:
+
+```json
+{
+  "kind": "Item",
+  "id": "2"
+}
+```
+
+A null reference omits the `id` field:
+
+```json
+{
+  "kind": "Item"
+}
+```
+
+### Collection Property
+
+```json
+{
+  "kind": "Collection",
+  "operations": [ ... ],
+  "collection": [ ... ],
+  "count": 5
+}
+```
 
 ## How Collection Updates Work
 
@@ -58,7 +141,7 @@ First, apply structural changes in order:
 | Operation | Description |
 |-----------|-------------|
 | `Remove` | Remove item at index (arrays) or key (dictionaries) |
-| `Insert` | Insert new item at index/key with full item data |
+| `Insert` | Insert new item at index/key (references subject by ID) |
 | `Move` | Move item from one index to another (arrays only, no item data) |
 
 ### Phase 2: Property Updates
@@ -72,12 +155,26 @@ After: `[A, C]` where C.name = "Charles"
 
 ```json
 {
+  "kind": "Collection",
   "operations": [
     { "action": "Remove", "index": 1 }
   ],
   "collection": [
-    { "index": 1, "item": { "properties": { "name": { "value": "Charles" } } } }
-  ]
+    { "index": 1, "id": "3" }
+  ],
+  "count": 2
+}
+```
+
+The subject with ID "3" (C) has its property update in the `subjects` dictionary:
+
+```json
+{
+  "subjects": {
+    "3": {
+      "name": { "kind": "Value", "value": "Charles" }
+    }
+  }
 }
 ```
 
@@ -90,13 +187,39 @@ After: `[C, A, B]`
 
 ```json
 {
+  "kind": "Collection",
   "operations": [
     { "action": "Move", "fromIndex": 2, "index": 0 }
-  ]
+  ],
+  "count": 3
 }
 ```
 
 Move operations contain only indices - no item data is transmitted, keeping payloads small even for large objects.
+
+### Example: Insert New Item
+
+```json
+{
+  "kind": "Collection",
+  "operations": [
+    { "action": "Insert", "index": 1, "id": "5" }
+  ],
+  "count": 3
+}
+```
+
+The new item's data is in the `subjects` dictionary:
+
+```json
+{
+  "subjects": {
+    "5": {
+      "name": { "kind": "Value", "value": "New Item" }
+    }
+  }
+}
+```
 
 ### Complete vs Partial Collection Updates
 
@@ -106,7 +229,7 @@ Move operations contain only indices - no item data is transmitted, keeping payl
 {
   "kind": "Collection",
   "operations": [ { "action": "Remove", "index": 1 } ],
-  "collection": [ { "index": 0, "item": { ... } } ],
+  "collection": [ { "index": 0, "id": "2" } ],
   "count": 2
 }
 ```
@@ -117,115 +240,61 @@ Move operations contain only indices - no item data is transmitted, keeping payl
 {
   "kind": "Collection",
   "collection": [
-    { "index": 0, "item": { ... } },
-    { "index": 1, "item": { ... } }
+    { "index": 0, "id": "1" },
+    { "index": 1, "id": "2" }
   ],
   "count": 2
 }
 ```
 
-When applying: if `operations` is empty but `collection` contains items at indices that don't exist locally, create new items at those positions.
+### Applying Collection Updates
+
+When applying sparse property updates from the `collection` array, the `index` must be valid according to the declared `count`:
+
+| Condition | Behavior |
+|-----------|----------|
+| `index < count` | Valid - update or create item at that position |
+| `index >= count` | **Error** - throws `InvalidOperationException` |
+| `count` not specified | Index validated against current collection size |
+
+**Important:** The `count` field declares the final expected size of the collection. Any `index` in the `collection` array must satisfy `index < count`. An index >= count indicates a malformed update (bug in the sender) and will throw an exception.
+
+For complete updates (no `operations`), items at indices that don't exist locally are created sequentially. For partial updates, indices reference the final position after structural operations have been applied.
 
 ## Circular References
 
-Object graphs with cycles are handled via reference IDs:
+Circular references are handled naturally by the flat structure. Each subject appears exactly once in the `subjects` dictionary, and references use string IDs:
 
 ```json
 {
-  "id": "root-1",
-  "properties": {
-    "child": {
-      "kind": "Item",
-      "item": {
-        "id": "child-1",
-        "properties": {
-          "parent": {
-            "kind": "Item",
-            "item": { "reference": "root-1" }
-          }
-        }
-      }
+  "root": "1",
+  "subjects": {
+    "1": {
+      "name": { "kind": "Value", "value": "Parent" },
+      "child": { "kind": "Item", "id": "2" }
+    },
+    "2": {
+      "name": { "kind": "Value", "value": "Child" },
+      "parent": { "kind": "Item", "id": "1" }
     }
   }
 }
 ```
 
-The `reference` field points to an already-defined subject by its `id`, avoiding infinite recursion.
+No special `reference` field is needed - the `id` field always points to a subject in the dictionary.
 
-## JSON Format Overview
+## Attributes
 
-### Property Update Kinds
-
-| Kind | Description |
-|------|-------------|
-| `Value` | Scalar value (string, number, boolean, etc.) |
-| `Item` | Single nested subject |
-| `Collection` | Array or dictionary of subjects |
-
-### Value Property
+Properties can have attributes (metadata) that are updated alongside values:
 
 ```json
 {
   "kind": "Value",
-  "value": "John",
-  "timestamp": "2024-01-10T12:00:00Z"
-}
-```
-
-### Item Property
-
-```json
-{
-  "kind": "Item",
-  "item": {
-    "properties": { ... }
+  "value": 25.5,
+  "timestamp": "2024-01-10T12:00:00Z",
+  "attributes": {
+    "unit": { "kind": "Value", "value": "celsius" },
+    "quality": { "kind": "Value", "value": "good" }
   }
-}
-```
-
-### Collection Property
-
-```json
-{
-  "kind": "Collection",
-  "operations": [ ... ],
-  "collection": [ ... ],
-  "count": 5
-}
-```
-
-## TypeScript Types
-
-```typescript
-export type SubjectPropertyUpdateKind = "None" | "Value" | "Item" | "Collection";
-export type CollectionOperationType = "Remove" | "Insert" | "Move";
-
-export interface SubjectUpdate {
-    id?: string | null;
-    reference?: string | null;
-    properties?: { [key: string]: SubjectPropertyUpdate };
-}
-
-export interface SubjectPropertyUpdate {
-    kind?: SubjectPropertyUpdateKind;
-    value?: any | null;
-    timestamp?: string | null;
-    item?: SubjectUpdate | null;
-    operations?: CollectionOperation[] | null;
-    collection?: SubjectPropertyCollectionUpdate[] | null;
-    count?: number | null;
-    attributes?: { [key: string]: SubjectPropertyUpdate } | null;
-}
-
-export interface CollectionOperation {
-    action: CollectionOperationType;
-    index: number | string;  // number for arrays, string for dictionaries
-    fromIndex?: number;      // Move only
-    item?: SubjectUpdate;    // Insert only
-}
-
-export interface SubjectPropertyCollectionUpdate {
-    index: number | string;
-    item?: SubjectUpdate;
 }
 ```
