@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// </summary>
 internal static class SubjectCollectionUpdateFactory
 {
-    private static readonly ObjectPool<SubjectCollectionComparer> ChangeBuilderPool = new(() => new SubjectCollectionComparer());
+    private static readonly ObjectPool<CollectionDiffBuilder> ChangeBuilderPool = new(() => new CollectionDiffBuilder());
 
     /// <summary>
     /// Builds a complete collection update with all items.
@@ -17,7 +17,7 @@ internal static class SubjectCollectionUpdateFactory
     internal static void BuildCollectionComplete(
         SubjectPropertyUpdate update,
         IEnumerable<IInterceptorSubject>? collection,
-        SubjectUpdateFactoryContext context)
+        SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
@@ -31,8 +31,8 @@ internal static class SubjectCollectionUpdateFactory
         for (var i = 0; i < items.Count; i++)
         {
             var item = items[i];
-            var itemId = context.GetOrCreateId(item);
-            SubjectUpdateFactory.ProcessSubjectComplete(item, context);
+            var itemId = builder.GetOrCreateId(item);
+            SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
 
             update.Collection.Add(new SubjectPropertyCollectionUpdate
             {
@@ -49,7 +49,7 @@ internal static class SubjectCollectionUpdateFactory
         SubjectPropertyUpdate update,
         IEnumerable<IInterceptorSubject>? oldCollection,
         IEnumerable<IInterceptorSubject>? newCollection,
-        SubjectUpdateFactoryContext context)
+        SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
@@ -74,8 +74,8 @@ internal static class SubjectCollectionUpdateFactory
             {
                 foreach (var (index, item) in newItemsToProcess)
                 {
-                    var itemId = context.GetOrCreateId(item);
-                    SubjectUpdateFactory.ProcessSubjectComplete(item, context);
+                    var itemId = builder.GetOrCreateId(item);
+                    SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
 
                     operations ??= [];
                     operations.Add(new SubjectCollectionOperation
@@ -106,9 +106,9 @@ internal static class SubjectCollectionUpdateFactory
             List<SubjectPropertyCollectionUpdate>? updates = null;
             foreach (var item in changeBuilder.GetCommonItems())
             {
-                if (context.SubjectHasUpdates(item))
+                if (builder.SubjectHasUpdates(item))
                 {
-                    var itemId = context.GetOrCreateId(item);
+                    var itemId = builder.GetOrCreateId(item);
                     var newIndex = changeBuilder.GetNewIndex(item);
                     updates ??= [];
                     updates.Add(new SubjectPropertyCollectionUpdate
@@ -135,7 +135,7 @@ internal static class SubjectCollectionUpdateFactory
     internal static void BuildDictionaryComplete(
         SubjectPropertyUpdate update,
         IDictionary? dictionary,
-        SubjectUpdateFactoryContext context)
+        SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
@@ -149,8 +149,8 @@ internal static class SubjectCollectionUpdateFactory
         {
             if (entry.Value is IInterceptorSubject item)
             {
-                var itemId = context.GetOrCreateId(item);
-                SubjectUpdateFactory.ProcessSubjectComplete(item, context);
+                var itemId = builder.GetOrCreateId(item);
+                SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
 
                 update.Collection.Add(new SubjectPropertyCollectionUpdate
                 {
@@ -168,7 +168,7 @@ internal static class SubjectCollectionUpdateFactory
         SubjectPropertyUpdate update,
         IDictionary? oldDict,
         IDictionary? newDict,
-        SubjectUpdateFactoryContext context)
+        SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
@@ -191,8 +191,8 @@ internal static class SubjectCollectionUpdateFactory
             {
                 foreach (var (key, item) in newItemsToProcess)
                 {
-                    var itemId = context.GetOrCreateId(item);
-                    SubjectUpdateFactory.ProcessSubjectComplete(item, context);
+                    var itemId = builder.GetOrCreateId(item);
+                    SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
 
                     operations ??= [];
                     operations.Add(new SubjectCollectionOperation
@@ -239,9 +239,9 @@ internal static class SubjectCollectionUpdateFactory
                 if (newKeysSet?.Contains(key) == true)
                     continue;
 
-                if (context.SubjectHasUpdates(item))
+                if (builder.SubjectHasUpdates(item))
                 {
-                    var itemId = context.GetOrCreateId(item);
+                    var itemId = builder.GetOrCreateId(item);
                     updates ??= [];
                     updates.Add(new SubjectPropertyCollectionUpdate
                     {
