@@ -34,11 +34,11 @@ public class SubjectUpdate
     public static SubjectUpdate CreateCompleteUpdate(
         IInterceptorSubject subject,
         ReadOnlySpan<ISubjectUpdateProcessor> processors)
-        => SubjectUpdateFactory.CreateComplete(subject, processors);
+        => SubjectUpdateFactory.CreateCompleteUpdate(subject, processors);
 
     /// <summary>
     /// Creates a partial update from the given property changes.
-    /// Only directly or indirectly needed objects and properties are added.
+    /// Only directly or indirectly necessary objects and properties are added.
     /// </summary>
     /// <param name="subject">The root subject.</param>
     /// <param name="propertyChanges">The changes to look up within the object graph.</param>
@@ -48,5 +48,5 @@ public class SubjectUpdate
         IInterceptorSubject subject,
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
         ReadOnlySpan<ISubjectUpdateProcessor> processors)
-        => SubjectUpdateFactory.CreatePartialFromChanges(subject, propertyChanges, processors);
+        => SubjectUpdateFactory.CreatePartialUpdateFromChanges(subject, propertyChanges, processors);
 }

@@ -18,7 +18,13 @@
         Attributes: {
           MaxLength: {
             Kind: Value,
-            Value: 123
+            Value: 123,
+            Attributes: {
+              Unit: {
+                Kind: Value,
+                Value: Count
+              }
+            }
           }
         }
       },
@@ -48,7 +54,13 @@
         Attributes: {
           MaxLength: {
             Kind: Value,
-            Value: 123
+            Value: 123,
+            Attributes: {
+              Unit: {
+                Kind: Value,
+                Value: Count
+              }
+            }
           }
         }
       },
