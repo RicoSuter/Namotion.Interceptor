@@ -71,6 +71,20 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         next(ref context);
 
+        // If this property is itself a derived property with a setter, recalculate it.
+        // This handles the case where SetValue is called directly on a derived property -
+        // the setter modifies internal state, but the actual value is computed by the getter.
+        // We need to: 1) re-record dependencies, 2) fire change notification with correct value.
+        // Performance: Two boolean checks for common case, extra getter call only for
+        // the rare case of derived properties with setters.
+        var metadata = context.Property.Metadata;
+        if (metadata is { IsDerived: true, SetValue: not null })
+        {
+            var currentTimestamp = SubjectChangeContext.Current.ChangedTimestamp;
+            var property = context.Property;
+            RecalculateDerivedProperty(ref property, ref currentTimestamp);
+        }
+
         // Check this first as it's more likely to early-exit than transaction check
         var usedByProperties = context.Property.GetUsedByProperties().Items;
         if (usedByProperties.Length == 0)
