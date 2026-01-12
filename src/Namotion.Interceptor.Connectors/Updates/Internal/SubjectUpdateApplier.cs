@@ -1,7 +1,7 @@
 using System.Text.Json;
+using Microsoft.Extensions.ObjectPool;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
@@ -11,7 +11,8 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// </summary>
 internal static class SubjectUpdateApplier
 {
-    private static readonly ObjectPool<SubjectUpdateApplyContext> ContextPool = new(() => new SubjectUpdateApplyContext());
+    private static readonly ObjectPool<SubjectUpdateApplyContext> ContextPool =
+        new DefaultObjectPool<SubjectUpdateApplyContext>(new SubjectUpdateApplyContextPoolPolicy(), 256);
 
     public static void ApplyUpdate(
         IInterceptorSubject subject,
@@ -25,7 +26,7 @@ internal static class SubjectUpdateApplier
         if (!update.Subjects.TryGetValue(update.Root, out var rootProperties))
             return;
 
-        var context = ContextPool.Rent();
+        var context = ContextPool.Get();
         try
         {
             context.Initialize(update.Subjects, subjectFactory, transformValueBeforeApply);
@@ -34,7 +35,6 @@ internal static class SubjectUpdateApplier
         }
         finally
         {
-            context.Clear();
             ContextPool.Return(context);
         }
     }
