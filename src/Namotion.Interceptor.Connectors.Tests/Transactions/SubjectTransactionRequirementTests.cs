@@ -32,7 +32,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
         Assert.Equal(2, ex.FailedChanges.Count); // Both changes failed (validation error)
@@ -72,7 +72,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe"; // 2 changes > batch size of 1
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
         Assert.Equal(2, ex.FailedChanges.Count); // Both changes failed (validation error)
@@ -245,7 +245,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
         Assert.Null(person.FirstName);
@@ -282,7 +282,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.LastName = "Doe";
         person.Father = father; // No source - should be in successful changes
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
         // Validation error should be reported - both source-bound changes failed
@@ -336,7 +336,7 @@ public class SubjectTransactionRequirementTests : TransactionTestBase
         person.LastName = "Doe"; // 2 changes > batch size of 1
         person.Father = father; // No source
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
         // Validation error for batch size - both source-bound changes failed

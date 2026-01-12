@@ -1,0 +1,61 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      Items: {
+        Kind: Collection,
+        Timestamp: DateTimeOffset_1,
+        Operations: [
+          {
+            Action: Insert,
+            Index: 1,
+            Id: 3
+          }
+        ],
+        Collection: [
+          {
+            Index: 0,
+            Id: 2
+          }
+        ],
+        Count: 2
+      }
+    },
+    2: {
+      Name: {
+        Kind: Value,
+        Value: Child1Updated,
+        Timestamp: DateTimeOffset_2
+      }
+    },
+    3: {
+      Child: {
+        Kind: Item
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
+      Lookup: {
+        Kind: Collection,
+        Count: 0
+      },
+      Name: {
+        Kind: Value,
+        Value: Child2,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      Parent: {
+        Kind: Item
+      },
+      Self: {
+        Kind: Item
+      }
+    }
+  }
+}

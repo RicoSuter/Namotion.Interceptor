@@ -165,7 +165,7 @@ internal class OpcUaSubjectLoader
             var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
             newSubject.Context.AddFallbackContext(subject.Context);
             await LoadSubjectAsync(newSubject, nodeReference, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
-            property.SetValueFromSource(_source, null, newSubject);
+            property.SetValueFromSource(_source, null, null, newSubject);
         }
     }
 
@@ -195,7 +195,7 @@ internal class OpcUaSubjectLoader
         var collection = DefaultSubjectFactory.Instance
             .CreateSubjectCollection(property.Type, children.Select(c => c.Subject));
 
-        property.SetValueFromSource(_source, null, collection);
+        property.SetValueFromSource(_source, null, null, collection);
 
         // TODO(perf): Consider parallelizing child subject loading with Task.WhenAll.
         // Requires making monitoredItems and loadedSubjects thread-safe (e.g., ConcurrentBag, ConcurrentHashSet).

@@ -48,4 +48,23 @@ public class DefaultSubjectFactory : ISubjectFactory
 
         return (IEnumerable<IInterceptorSubject?>)collection;
     }
+
+    /// <inheritdoc />
+    public IDictionary CreateSubjectDictionary(Type propertyType, IDictionary<object, IInterceptorSubject> entries)
+    {
+        // Get key and value types from the dictionary generic type arguments
+        var keyType = propertyType.GenericTypeArguments[0];
+        var valueType = propertyType.GenericTypeArguments[1];
+        var dictionaryType = typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
+
+        var dictionary = (IDictionary)Activator.CreateInstance(dictionaryType)!;
+        foreach (var entry in entries)
+        {
+            // Convert key to the target key type if needed
+            var key = Convert.ChangeType(entry.Key, keyType);
+            dictionary.Add(key, entry.Value);
+        }
+
+        return dictionary;
+    }
 }
