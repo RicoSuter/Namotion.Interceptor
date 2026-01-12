@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// </summary>
 internal sealed class ApplyContext
 {
-    private readonly HashSet<string> _processedSubjectIds = new();
+    private readonly HashSet<string> _processedSubjectIds = [];
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
