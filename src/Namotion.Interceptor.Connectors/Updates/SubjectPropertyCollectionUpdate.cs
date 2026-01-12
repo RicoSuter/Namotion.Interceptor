@@ -1,14 +1,24 @@
+using System.Text.Json.Serialization;
+
 namespace Namotion.Interceptor.Connectors.Updates;
 
+/// <summary>
+/// Represents a sparse property update for a collection item at a specific index/key.
+/// </summary>
 public class SubjectPropertyCollectionUpdate
 {
     /// <summary>
-    /// Gets the index of the collection item.
+    /// The target index (int for arrays) or key (string for dictionaries).
+    /// This is the FINAL index after structural operations are applied.
     /// </summary>
+    [JsonPropertyName("index")]
     public required object Index { get; init; }
 
     /// <summary>
-    /// Gets the collection item.
+    /// The subject ID for this collection item.
+    /// References a subject in the Subjects dictionary.
     /// </summary>
-    public SubjectUpdate? Item { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("id")]
+    public string? Id { get; init; }
 }

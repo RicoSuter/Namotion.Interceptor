@@ -1,0 +1,57 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      children: {
+        Kind: Collection,
+        Collection: [
+          {
+            Index: 0,
+            Id: 4
+          },
+          {
+            Index: 2,
+            Id: 5
+          }
+        ]
+      },
+      firstName: {
+        Kind: Value,
+        Value: NewFather,
+        Timestamp: {Scrubbed}
+      }
+    },
+    2: {
+      firstName: {
+        Kind: Value,
+        Value: NewPerson,
+        Timestamp: {Scrubbed}
+      },
+      mother: {
+        Kind: Item,
+        Id: 3
+      }
+    },
+    3: {
+      firstName: {
+        Kind: Value,
+        Value: NewMother,
+        Timestamp: {Scrubbed}
+      }
+    },
+    4: {
+      firstName: {
+        Kind: Value,
+        Value: NewChild1,
+        Timestamp: {Scrubbed}
+      }
+    },
+    5: {
+      firstName: {
+        Kind: Value,
+        Value: NewChild3,
+        Timestamp: {Scrubbed}
+      }
+    }
+  }
+}
