@@ -143,7 +143,10 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         return Task.FromResult<Action?>(() =>
         {
             var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
-            _subject.ApplySubjectUpdateFromSource(_initialState, this, factory);
+            using (SubjectChangeContext.WithSource(this))
+            {
+                _subject.ApplySubjectUpdate(_initialState, factory);
+            }
 
             // Claim ownership of all properties matching the path provider
             ClaimPropertyOwnership();
@@ -294,7 +297,13 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
         _propertyWriter.Write(
             (update, _subject, this, _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance),
-            static state => state._subject.ApplySubjectUpdateFromSource(state.update, state.Item3, state.Item4));
+            static state =>
+            {
+                using (SubjectChangeContext.WithSource(state.Item3))
+                {
+                    state._subject.ApplySubjectUpdate(state.update, state.Item4);
+                }
+            });
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

@@ -56,7 +56,7 @@ public class SubjectUpdateFlowTests
             {
                 ["1"] = new Dictionary<string, SubjectPropertyUpdate>
                 {
-                    ["Name"] = SubjectPropertyUpdate.Create("UpdatedValue")
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "UpdatedValue" }
                 }
             }
         };

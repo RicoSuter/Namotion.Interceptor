@@ -155,7 +155,10 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
             try
             {
                 var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
-                _subject.ApplySubjectUpdateFromSource(update, this, factory);
+                using (SubjectChangeContext.WithSource(this))
+                {
+                    _subject.ApplySubjectUpdate(update, factory);
+                }
             }
             catch (Exception ex)
             {

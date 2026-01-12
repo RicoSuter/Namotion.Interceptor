@@ -32,7 +32,7 @@ public class JsonWsSerializerTests
             {
                 ["1"] = new Dictionary<string, SubjectPropertyUpdate>
                 {
-                    ["Temperature"] = SubjectPropertyUpdate.Create(23.5)
+                    ["Temperature"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = 23.5 }
                 }
             }
         };
@@ -81,8 +81,8 @@ public class JsonWsSerializerTests
             {
                 ["1"] = new Dictionary<string, SubjectPropertyUpdate>
                 {
-                    ["Name"] = SubjectPropertyUpdate.Create("TestName"),
-                    ["Number"] = SubjectPropertyUpdate.Create(42.5m)
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "TestName" },
+                    ["Number"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = 42.5m }
                 }
             }
         };
@@ -123,7 +123,7 @@ public class JsonWsSerializerTests
             {
                 ["1"] = new Dictionary<string, SubjectPropertyUpdate>
                 {
-                    ["Name"] = SubjectPropertyUpdate.Create("TestValue")
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "TestValue" }
                 }
             }
         };
