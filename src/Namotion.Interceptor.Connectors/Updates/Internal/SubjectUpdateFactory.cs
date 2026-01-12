@@ -352,7 +352,7 @@ internal static class SubjectUpdateFactory
             subjectProperties[rootProperty.Name] = rootUpdate;
         }
 
-        // Navigate/create attribute chain
+        // Navigate/create an attribute chain
         var currentUpdate = rootUpdate;
         var attributeChain = new List<RegisteredSubjectProperty>();
         var currentProperty = attributeProperty;

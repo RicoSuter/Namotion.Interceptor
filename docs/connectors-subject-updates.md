@@ -64,8 +64,12 @@ var json = JsonSerializer.Serialize(update);
 
 ```csharp
 // Apply update from external source (e.g., WebSocket message from client)
-// The 'source' parameter enables echo prevention in change tracking
-subject.ApplySubjectUpdateFromSource(update, source, DefaultSubjectFactory.Instance);
+// The WithState scope enables echo prevention in change tracking
+var receivedTimestamp = DateTimeOffset.UtcNow;
+using (SubjectChangeContext.WithState(source, changed: null, received: receivedTimestamp))
+{
+    subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+}
 
 // Apply update without source tracking
 subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
