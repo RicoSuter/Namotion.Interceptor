@@ -250,16 +250,12 @@ internal static class CollectionUpdateApplier
         }
     }
 
-    private static int ConvertIndexToInt(object index)
+    private static int ConvertIndexToInt(object index) => index switch
     {
-        if (index is int intIndex)
-            return intIndex;
-
-        if (index is JsonElement jsonElement)
-            return jsonElement.GetInt32();
-
-        return Convert.ToInt32(index);
-    }
+        int i => i,
+        JsonElement json => json.GetInt32(),
+        _ => Convert.ToInt32(index)
+    };
 
     private static object ConvertDictKey(object key)
     {

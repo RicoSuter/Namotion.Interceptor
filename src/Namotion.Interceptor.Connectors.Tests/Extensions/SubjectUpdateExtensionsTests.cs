@@ -524,4 +524,140 @@ public class SubjectUpdateExtensionsTests
         // Assert
         Assert.Equal("updated", target.Name_Status);
     }
+
+    [Fact]
+    public void WhenApplyingUpdateWithEmptyRoot_ThenNothingHappens()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context) { FirstName = "Original" };
+
+        var update = new SubjectUpdate
+        {
+            Root = string.Empty,
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["FirstName"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Changed"
+                    }
+                }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - nothing should change
+        Assert.Equal("Original", target.FirstName);
+    }
+
+    [Fact]
+    public void WhenApplyingUpdateWithMissingRootSubject_ThenNothingHappens()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context) { FirstName = "Original" };
+
+        var update = new SubjectUpdate
+        {
+            Root = "nonexistent",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["FirstName"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Changed"
+                    }
+                }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - nothing should change
+        Assert.Equal("Original", target.FirstName);
+    }
+
+    [Fact]
+    public void WhenApplyingCollectionUpdateWithInvalidIndex_ThenItIsIgnored()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context)
+        {
+            FirstName = "Parent",
+            Children =
+            [
+                new Person(context) { FirstName = "Child1" }
+            ]
+        };
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Children"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Operations =
+                        [
+                            new SubjectCollectionOperation
+                            {
+                                Action = SubjectCollectionOperationType.Remove,
+                                Index = 999 // Invalid index - way out of bounds
+                            }
+                        ],
+                        Count = 1
+                    }
+                }
+            }
+        };
+
+        // Act - should not throw
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - collection unchanged
+        Assert.Single(target.Children);
+        Assert.Equal("Child1", target.Children[0].FirstName);
+    }
+
+    [Fact]
+    public void WhenApplyingUpdateWithMissingSubjectId_ThenItIsIgnored()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context) { FirstName = "Original" };
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    ["Father"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Item,
+                        Id = "nonexistent" // References a subject that doesn't exist
+                    }
+                }
+            }
+        };
+
+        // Act - should not throw
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - Father should remain null (not set to anything)
+        Assert.Null(target.Father);
+    }
 }
