@@ -1,5 +1,5 @@
 using System.Collections;
-using Namotion.Interceptor.Registry.Performance;
+using Microsoft.Extensions.ObjectPool;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
@@ -9,7 +9,8 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// </summary>
 internal static class SubjectCollectionUpdateFactory
 {
-    private static readonly ObjectPool<CollectionDiffBuilder> ChangeBuilderPool = new(() => new CollectionDiffBuilder());
+    private static readonly ObjectPool<CollectionDiffBuilder> ChangeBuilderPool =
+        new DefaultObjectPool<CollectionDiffBuilder>(new CollectionDiffBuilderPoolPolicy(), 256);
 
     /// <summary>
     /// Builds a complete collection update with all items.
@@ -60,7 +61,7 @@ internal static class SubjectCollectionUpdateFactory
         var newItems = newCollection as IReadOnlyList<IInterceptorSubject> ?? newCollection.ToList();
         update.Count = newItems.Count;
 
-        var changeBuilder = ChangeBuilderPool.Rent();
+        var changeBuilder = ChangeBuilderPool.Get();
         try
         {
             changeBuilder.GetCollectionChanges(
@@ -124,7 +125,6 @@ internal static class SubjectCollectionUpdateFactory
         }
         finally
         {
-            changeBuilder.Clear();
             ChangeBuilderPool.Return(changeBuilder);
         }
     }
@@ -177,7 +177,7 @@ internal static class SubjectCollectionUpdateFactory
 
         update.Count = newDict.Count;
 
-        var changeBuilder = ChangeBuilderPool.Rent();
+        var changeBuilder = ChangeBuilderPool.Get();
         try
         {
             changeBuilder.GetDictionaryChanges(
@@ -256,7 +256,6 @@ internal static class SubjectCollectionUpdateFactory
         }
         finally
         {
-            changeBuilder.Clear();
             ChangeBuilderPool.Return(changeBuilder);
         }
     }
