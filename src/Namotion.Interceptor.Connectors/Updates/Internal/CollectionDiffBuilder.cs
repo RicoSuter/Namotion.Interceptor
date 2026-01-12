@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// Builds collection change operations (Insert/Remove/Move) by comparing old and new collections.
 /// Designed to be pooled and reused.
 /// </summary>
-internal sealed class SubjectCollectionComparer
+internal sealed class CollectionDiffBuilder
 {
     // Reusable containers
     private readonly Dictionary<IInterceptorSubject, int> _oldIndexMap = new();

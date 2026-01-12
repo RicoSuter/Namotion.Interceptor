@@ -3,22 +3,25 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
 /// <summary>
-/// Context for building a SubjectUpdate. Tracks IDs, subjects, and transformations.
+/// Builder for creating a SubjectUpdate. Tracks IDs, subjects, and transformations.
 /// Designed to be pooled and reused.
 /// </summary>
-internal sealed class SubjectUpdateFactoryContext
+internal sealed class SubjectUpdateBuilder
 {
     private int _nextId;
     private readonly Dictionary<IInterceptorSubject, string> _subjectToId = new();
     private readonly Dictionary<SubjectPropertyUpdate, (RegisteredSubjectProperty Property, IDictionary<string, SubjectPropertyUpdate> Parent)> _propertyUpdates = new();
 
     public ISubjectUpdateProcessor[] Processors { get; private set; } = [];
+    
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = new();
+
     public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
 
-    public void Initialize(ReadOnlySpan<ISubjectUpdateProcessor> processors)
+    public void Initialize(IInterceptorSubject rootSubject, ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
         Processors = processors.ToArray();
+        GetOrCreateId(rootSubject); // Ensure root subject gets ID "1"
     }
 
     public string GetOrCreateId(IInterceptorSubject subject)
@@ -61,7 +64,42 @@ internal sealed class SubjectUpdateFactoryContext
         }
     }
 
-    public void ApplyTransformations()
+    /// <summary>
+    /// Builds the final SubjectUpdate, applying all transformations.
+    /// </summary>
+    public SubjectUpdate Build(IInterceptorSubject subject)
+    {
+        ApplyTransformations();
+
+        var rootId = GetOrCreateId(subject);
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = Subjects
+        };
+
+        for (var i = 0; i < Processors.Length; i++)
+        {
+            update = Processors[i].TransformSubjectUpdate(subject, update);
+        }
+
+        return update;
+    }
+
+    /// <summary>
+    /// Clears the builder for reuse. Call before returning to pool.
+    /// </summary>
+    public void Clear()
+    {
+        _nextId = 0;
+        _subjectToId.Clear();
+        _propertyUpdates.Clear();
+        ProcessedSubjects.Clear();
+        Subjects = new(); // create a fresh dictionary, old one transferred to result
+        Processors = [];
+    }
+
+    private void ApplyTransformations()
     {
         if (Processors.Length == 0)
             return;
@@ -82,18 +120,5 @@ internal sealed class SubjectUpdateFactoryContext
                 }
             }
         }
-    }
-
-    /// <summary>
-    /// Clears the context for reuse. Call before returning to pool.
-    /// </summary>
-    public void Clear()
-    {
-        _nextId = 0;
-        _subjectToId.Clear();
-        _propertyUpdates.Clear();
-        ProcessedSubjects.Clear();
-        Subjects = new(); // create a fresh dictionary, old one transferred to result
-        Processors = [];
     }
 }
