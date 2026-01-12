@@ -10,11 +10,16 @@ public static class RegisteredSubjectPropertyExtensions
     /// </summary>
     /// <param name="property">The property.</param>
     /// <param name="source">The source which changes the property.</param>
-    /// <param name="timestamp">The timestamp to set in the context.</param>
+    /// <param name="changedTimestamp">The timestamp when the value was changed at the source.</param>
+    /// <param name="receivedTimestamp">The timestamp when the value was received.</param>
     /// <param name="value">The new value.</param>
-    public static void SetValueFromSource(this RegisteredSubjectProperty property, object source, DateTimeOffset? timestamp, object? value)
+    public static void SetValueFromSource(
+        this RegisteredSubjectProperty property,
+        object source,
+        DateTimeOffset? changedTimestamp,
+        DateTimeOffset? receivedTimestamp,
+        object? value)
     {
-        // TODO: Remove this method and only provide the one on PropertyReference? (also missing received timestamp parameter)
-        property.Reference.SetValueFromSource(source, timestamp, null, value);
+        property.Reference.SetValueFromSource(source, changedTimestamp, receivedTimestamp, value);
     }
 }

@@ -28,7 +28,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
         Assert.Equal("John", person.FirstName);
@@ -86,7 +86,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
         Assert.Null(person.FirstName);
@@ -125,7 +125,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
         Assert.Equal(2, ex.FailedChanges.Count);
@@ -150,7 +150,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe"; // No source - not applied when source fails in Rollback mode
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
         // Both changes should be in FailedChanges - FirstName failed to write, LastName wasn't applied
@@ -180,7 +180,7 @@ public class SubjectTransactionFailureHandlingTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe"; // No source
 
-        var ex = await Assert.ThrowsAsync<TransactionException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None));
 
         // Assert
         // In BestEffort, successful changes are applied

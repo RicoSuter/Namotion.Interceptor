@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Connectors.Transactions;
 
@@ -8,7 +9,7 @@ namespace Namotion.Interceptor.Connectors.Transactions;
 /// <remarks>
 /// <para>
 /// This exception is collected during the commit process and wrapped in a
-/// <see cref="Namotion.Interceptor.Tracking.Transactions.TransactionException"/> thrown at the end.
+/// <see cref="SubjectTransactionException"/> thrown at the end.
 /// </para>
 /// <para>
 /// In <c>BestEffort</c> mode: Successfully written changes are applied even if other sources fail.
