@@ -244,7 +244,19 @@ The new item's data is in the `subjects` dictionary:
 }
 ```
 
-When applying: if `operations` is empty but `collection` contains items at indices that don't exist locally, create new items at those positions.
+### Applying Collection Updates
+
+When applying sparse property updates from the `collection` array, the `index` must be valid according to the declared `count`:
+
+| Condition | Behavior |
+|-----------|----------|
+| `index < count` | Valid - update or create item at that position |
+| `index >= count` | **Error** - throws `InvalidOperationException` |
+| `count` not specified | Index validated against current collection size |
+
+**Important:** The `count` field declares the final expected size of the collection. Any `index` in the `collection` array must satisfy `index < count`. An index >= count indicates a malformed update (bug in the sender) and will throw an exception.
+
+For complete updates (no `operations`), items at indices that don't exist locally are created sequentially. For partial updates, indices reference the final position after structural operations have been applied.
 
 ## Circular References
 

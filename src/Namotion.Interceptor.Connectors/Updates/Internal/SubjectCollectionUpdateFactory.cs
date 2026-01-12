@@ -70,30 +70,36 @@ internal static class SubjectCollectionUpdateFactory
                 out var reorderedItems);
 
             // Add Insert operations for new items
-            foreach (var (index, item) in newItemsToProcess)
+            if (newItemsToProcess is not null)
             {
-                var itemId = context.GetOrCreateId(item);
-                SubjectUpdateFactory.ProcessSubjectComplete(item, context);
-
-                operations ??= [];
-                operations.Add(new SubjectCollectionOperation
+                foreach (var (index, item) in newItemsToProcess)
                 {
-                    Action = SubjectCollectionOperationType.Insert,
-                    Index = index,
-                    Id = itemId
-                });
+                    var itemId = context.GetOrCreateId(item);
+                    SubjectUpdateFactory.ProcessSubjectComplete(item, context);
+
+                    operations ??= [];
+                    operations.Add(new SubjectCollectionOperation
+                    {
+                        Action = SubjectCollectionOperationType.Insert,
+                        Index = index,
+                        Id = itemId
+                    });
+                }
             }
 
             // Add Move operations for reordered items
-            foreach (var (oldIndex, newIndex, _) in reorderedItems)
+            if (reorderedItems is not null)
             {
-                operations ??= [];
-                operations.Add(new SubjectCollectionOperation
+                foreach (var (oldIndex, newIndex, _) in reorderedItems)
                 {
-                    Action = SubjectCollectionOperationType.Move,
-                    FromIndex = oldIndex,
-                    Index = newIndex
-                });
+                    operations ??= [];
+                    operations.Add(new SubjectCollectionOperation
+                    {
+                        Action = SubjectCollectionOperationType.Move,
+                        FromIndex = oldIndex,
+                        Index = newIndex
+                    });
+                }
             }
 
             // Generate sparse updates for common items with property changes
@@ -181,34 +187,43 @@ internal static class SubjectCollectionUpdateFactory
                 out var removedKeys);
 
             // Add Insert operations for new items
-            foreach (var (key, item) in newItemsToProcess)
+            if (newItemsToProcess is not null)
             {
-                var itemId = context.GetOrCreateId(item);
-                SubjectUpdateFactory.ProcessSubjectComplete(item, context);
-
-                operations ??= [];
-                operations.Add(new SubjectCollectionOperation
+                foreach (var (key, item) in newItemsToProcess)
                 {
-                    Action = SubjectCollectionOperationType.Insert,
-                    Index = key,
-                    Id = itemId
-                });
+                    var itemId = context.GetOrCreateId(item);
+                    SubjectUpdateFactory.ProcessSubjectComplete(item, context);
+
+                    operations ??= [];
+                    operations.Add(new SubjectCollectionOperation
+                    {
+                        Action = SubjectCollectionOperationType.Insert,
+                        Index = key,
+                        Id = itemId
+                    });
+                }
             }
 
             // Add Remove operations
-            foreach (var removedKey in removedKeys)
+            if (removedKeys is not null)
             {
-                operations ??= [];
-                operations.Add(new SubjectCollectionOperation
+                foreach (var removedKey in removedKeys)
                 {
-                    Action = SubjectCollectionOperationType.Remove,
-                    Index = removedKey
-                });
+                    operations ??= [];
+                    operations.Add(new SubjectCollectionOperation
+                    {
+                        Action = SubjectCollectionOperationType.Remove,
+                        Index = removedKey
+                    });
+                }
             }
 
             // Check for property updates on existing items
             // Build HashSet for O(1) lookup instead of O(n) Any() per iteration
-            var newKeysSet = new HashSet<object>(newItemsToProcess.Select(n => n.key));
+            HashSet<object>? newKeysSet = newItemsToProcess is not null
+                ? [..newItemsToProcess.Select(n => n.key)]
+                : null;
+
             List<SubjectPropertyCollectionUpdate>? updates = null;
             foreach (DictionaryEntry entry in newDict)
             {
@@ -217,7 +232,7 @@ internal static class SubjectCollectionUpdateFactory
                     continue;
 
                 // Skip if this is a new item (already handled above)
-                if (newKeysSet.Contains(key))
+                if (newKeysSet?.Contains(key) == true)
                     continue;
 
                 if (context.SubjectHasUpdates(item))

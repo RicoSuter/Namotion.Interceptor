@@ -319,15 +319,15 @@ internal static class SubjectUpdateFactory
 
             attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
 
-            var attrUpdate = new SubjectPropertyUpdate
+            var attributeUpdate = new SubjectPropertyUpdate
             {
                 Kind = SubjectPropertyUpdateKind.Value,
                 Value = attribute.GetValue(),
                 Timestamp = attribute.Reference.TryGetWriteTimestamp()
             };
 
-            attributes[attribute.AttributeMetadata.AttributeName] = attrUpdate;
-            context.TrackPropertyUpdate(attrUpdate, attribute, attributes);
+            attributes[attribute.AttributeMetadata.AttributeName] = attributeUpdate;
+            context.TrackPropertyUpdate(attributeUpdate, attribute, attributes);
         }
 
         return attributes;
@@ -354,26 +354,26 @@ internal static class SubjectUpdateFactory
 
         // Navigate/create attribute chain
         var currentUpdate = rootUpdate;
-        var attrChain = new List<RegisteredSubjectProperty>();
-        var prop = attributeProperty;
-        while (prop.IsAttribute)
+        var attributeChain = new List<RegisteredSubjectProperty>();
+        var currentProperty = attributeProperty;
+        while (currentProperty.IsAttribute)
         {
-            attrChain.Insert(0, prop);
-            prop = prop.GetAttributedProperty();
+            attributeChain.Insert(0, currentProperty);
+            currentProperty = currentProperty.GetAttributedProperty();
         }
 
-        foreach (var attrProp in attrChain)
+        foreach (var chainedAttribute in attributeChain)
         {
             currentUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
-            var attrName = attrProp.AttributeMetadata.AttributeName;
+            var attributeName = chainedAttribute.AttributeMetadata.AttributeName;
 
-            if (!currentUpdate.Attributes.TryGetValue(attrName, out var attrUpdate))
+            if (!currentUpdate.Attributes.TryGetValue(attributeName, out var nestedAttributeUpdate))
             {
-                attrUpdate = new SubjectPropertyUpdate();
-                currentUpdate.Attributes[attrName] = attrUpdate;
+                nestedAttributeUpdate = new SubjectPropertyUpdate();
+                currentUpdate.Attributes[attributeName] = nestedAttributeUpdate;
             }
 
-            currentUpdate = attrUpdate;
+            currentUpdate = nestedAttributeUpdate;
         }
 
         // Apply the value

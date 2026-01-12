@@ -312,4 +312,126 @@ public class SubjectUpdateCollectionTests
         // Assert - Collection should have all items with full data
         await Verify(update);
     }
+
+    [Fact]
+    public async Task WhenEmptyCollectionRemainsEmpty_ThenNoOperationsAreCreated()
+    {
+        // Arrange - both old and new collections are empty
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var node = new CycleTestNode(context) { Name = "Root", Items = [] };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - assign a new empty collection (triggers change detection)
+        node.Items = [];
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert - no operations should be created for empty-to-empty
+        await Verify(update);
+    }
+
+    [Fact]
+    public async Task WhenSingleItemCollectionPropertyChanges_ThenSparseUpdateIsCreated()
+    {
+        // Arrange - collection with exactly one item
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var child = new CycleTestNode { Name = "OnlyChild" };
+        var node = new CycleTestNode(context) { Name = "Root", Items = [child] };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - change the single item's property
+        child.Name = "UpdatedChild";
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert - sparse update at index 0
+        await Verify(update);
+    }
+
+    [Fact]
+    public async Task WhenSingleItemRemoved_ThenRemoveOperationAtIndexZero()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var child = new CycleTestNode { Name = "OnlyChild" };
+        var node = new CycleTestNode(context) { Name = "Root", Items = [child] };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - remove the only item
+        node.Items = [];
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert - Remove at index 0
+        await Verify(update);
+    }
+
+    [Fact]
+    public async Task WhenFirstItemPropertyChanges_ThenSparseUpdateAtIndexZero()
+    {
+        // Arrange - test boundary condition at index 0
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var child1 = new CycleTestNode { Name = "First" };
+        var child2 = new CycleTestNode { Name = "Second" };
+        var node = new CycleTestNode(context) { Name = "Root", Items = [child1, child2] };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - change first item (index 0)
+        child1.Name = "FirstUpdated";
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert - sparse update at index 0
+        await Verify(update);
+    }
+
+    [Fact]
+    public async Task WhenFirstItemRemoved_ThenRemoveAtIndexZero()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var child1 = new CycleTestNode { Name = "First" };
+        var child2 = new CycleTestNode { Name = "Second" };
+        var node = new CycleTestNode(context) { Name = "Root", Items = [child1, child2] };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - remove first item
+        node.Items = [child2];
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert
+        await Verify(update);
+    }
+
+    [Fact]
+    public async Task WhenInsertAtIndexZero_ThenInsertOperationAtZero()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var child1 = new CycleTestNode { Name = "Existing" };
+        var node = new CycleTestNode(context) { Name = "Root", Items = [child1] };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - insert at index 0
+        var newChild = new CycleTestNode { Name = "NewFirst" };
+        node.Items = [newChild, child1];
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert
+        await Verify(update);
+    }
 }

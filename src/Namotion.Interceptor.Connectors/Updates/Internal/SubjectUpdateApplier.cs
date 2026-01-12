@@ -76,14 +76,14 @@ internal static class SubjectUpdateApplier
             // Apply attributes first
             if (propertyUpdate.Attributes is not null)
             {
-                foreach (var (attrName, attrUpdate) in propertyUpdate.Attributes)
+                foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
                 {
-                    var registeredAttr = subject.TryGetRegisteredSubject()?
-                        .TryGetPropertyAttribute(propertyName, attrName);
+                    var registeredAttribute = subject.TryGetRegisteredSubject()?
+                        .TryGetPropertyAttribute(propertyName, attributeName);
 
-                    if (registeredAttr is not null)
+                    if (registeredAttribute is not null)
                     {
-                        ApplyPropertyUpdate(subject, registeredAttr.Name, attrUpdate, context, registry);
+                        ApplyPropertyUpdate(subject, registeredAttribute.Name, attributeUpdate, context, registry);
                     }
                 }
             }
