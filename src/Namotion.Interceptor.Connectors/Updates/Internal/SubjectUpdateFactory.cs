@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// </summary>
 internal static class SubjectUpdateFactory
 {
-    private static readonly ObjectPool<UpdateContext> ContextPool = new(() => new UpdateContext());
+    private static readonly ObjectPool<SubjectUpdateFactoryContext> ContextPool = new(() => new SubjectUpdateFactoryContext());
 
     /// <summary>
     /// Creates a complete update with all properties for the given subject.
@@ -98,7 +98,7 @@ internal static class SubjectUpdateFactory
 
     internal static void ProcessSubjectComplete(
         IInterceptorSubject subject,
-        UpdateContext context)
+        SubjectUpdateFactoryContext context)
     {
         var subjectId = context.GetOrCreateId(subject);
 
@@ -129,7 +129,7 @@ internal static class SubjectUpdateFactory
     private static void ProcessPropertyChange(
         SubjectPropertyChange change,
         IInterceptorSubject rootSubject,
-        UpdateContext context)
+        SubjectUpdateFactoryContext context)
     {
         var changedSubject = change.Property.Subject;
         var registeredProperty = change.Property.TryGetRegisteredProperty();
@@ -159,7 +159,7 @@ internal static class SubjectUpdateFactory
 
     private static SubjectPropertyUpdate CreatePropertyUpdate(
         RegisteredSubjectProperty property,
-        UpdateContext context)
+        SubjectUpdateFactoryContext context)
     {
         var value = property.GetValue();
         var timestamp = property.Reference.TryGetWriteTimestamp();
@@ -168,11 +168,11 @@ internal static class SubjectUpdateFactory
 
         if (property.IsSubjectDictionary)
         {
-            CollectionUpdateBuilder.BuildDictionaryComplete(update, value as IDictionary, context);
+            SubjectCollectionUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, context);
         }
         else if (property.IsSubjectCollection)
         {
-            CollectionUpdateBuilder.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, context);
+            SubjectCollectionUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, context);
         }
         else if (property.IsSubjectReference)
         {
@@ -192,18 +192,18 @@ internal static class SubjectUpdateFactory
     private static SubjectPropertyUpdate CreatePropertyUpdateFromChange(
         RegisteredSubjectProperty property,
         SubjectPropertyChange change,
-        UpdateContext context)
+        SubjectUpdateFactoryContext context)
     {
         var update = new SubjectPropertyUpdate { Timestamp = change.ChangedTimestamp };
 
         if (property.IsSubjectDictionary)
         {
-            CollectionUpdateBuilder.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
+            SubjectCollectionUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
                 change.GetNewValue<IDictionary?>(), context);
         }
         else if (property.IsSubjectCollection)
         {
-            CollectionUpdateBuilder.BuildCollectionDiff(update,
+            SubjectCollectionUpdateFactory.BuildCollectionDiff(update,
                 change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
                 change.GetNewValue<IEnumerable<IInterceptorSubject>?>(), context);
         }
@@ -224,7 +224,7 @@ internal static class SubjectUpdateFactory
     private static void BuildItemReference(
         SubjectPropertyUpdate update,
         IInterceptorSubject? item,
-        UpdateContext context)
+        SubjectUpdateFactoryContext context)
     {
         update.Kind = SubjectPropertyUpdateKind.Item;
 
@@ -238,7 +238,7 @@ internal static class SubjectUpdateFactory
     private static void BuildPathToRoot(
         IInterceptorSubject subject,
         IInterceptorSubject rootSubject,
-        UpdateContext context)
+        SubjectUpdateFactoryContext context)
     {
         var current = subject.TryGetRegisteredSubject();
 
@@ -308,7 +308,7 @@ internal static class SubjectUpdateFactory
 
     private static Dictionary<string, SubjectPropertyUpdate>? CreateAttributeUpdates(
         RegisteredSubjectProperty property,
-        UpdateContext context)
+        SubjectUpdateFactoryContext context)
     {
         Dictionary<string, SubjectPropertyUpdate>? attributes = null;
 
@@ -337,7 +337,7 @@ internal static class SubjectUpdateFactory
         RegisteredSubjectProperty attributeProperty,
         SubjectPropertyChange change,
         Dictionary<string, SubjectPropertyUpdate> subjectProperties,
-        UpdateContext context)
+        SubjectUpdateFactoryContext context)
     {
         // Find the root property
         var rootProperty = attributeProperty;

@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// </summary>
 internal static class SubjectUpdateApplier
 {
-    private static readonly ObjectPool<ApplyContext> ContextPool = new(() => new ApplyContext());
+    private static readonly ObjectPool<SubjectUpdateApplyContext> ContextPool = new(() => new SubjectUpdateApplyContext());
 
     public static void ApplyUpdate(
         IInterceptorSubject subject,
@@ -67,7 +67,7 @@ internal static class SubjectUpdateApplier
     internal static void ApplyProperties(
         IInterceptorSubject subject,
         Dictionary<string, SubjectPropertyUpdate> properties,
-        ApplyContext context)
+        SubjectUpdateApplyContext context)
     {
         var registry = subject.Context.GetService<ISubjectRegistry>();
 
@@ -96,7 +96,7 @@ internal static class SubjectUpdateApplier
         IInterceptorSubject subject,
         string propertyName,
         SubjectPropertyUpdate propertyUpdate,
-        ApplyContext context,
+        SubjectUpdateApplyContext context,
         ISubjectRegistry? registry)
     {
         var registeredProperty = subject.TryGetRegisteredProperty(propertyName, registry);
@@ -115,9 +115,9 @@ internal static class SubjectUpdateApplier
 
             case SubjectPropertyUpdateKind.Collection:
                 if (registeredProperty.IsSubjectDictionary)
-                    CollectionUpdateApplier.ApplyDictionaryUpdate(subject, registeredProperty, propertyUpdate, context);
+                    SubjectCollectionUpdateApplier.ApplyDictionaryUpdate(subject, registeredProperty, propertyUpdate, context);
                 else
-                    CollectionUpdateApplier.ApplyCollectionUpdate(subject, registeredProperty, propertyUpdate, context);
+                    SubjectCollectionUpdateApplier.ApplyCollectionUpdate(subject, registeredProperty, propertyUpdate, context);
                 break;
         }
     }
@@ -126,7 +126,7 @@ internal static class SubjectUpdateApplier
         IInterceptorSubject parent,
         RegisteredSubjectProperty property,
         SubjectPropertyUpdate propertyUpdate,
-        ApplyContext context)
+        SubjectUpdateApplyContext context)
     {
         if (propertyUpdate.Id is not null &&
             context.Subjects.TryGetValue(propertyUpdate.Id, out var itemProperties))

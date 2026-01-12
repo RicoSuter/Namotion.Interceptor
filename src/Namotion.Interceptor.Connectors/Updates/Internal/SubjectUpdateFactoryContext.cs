@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// Context for building a SubjectUpdate. Tracks IDs, subjects, and transformations.
 /// Designed to be pooled and reused.
 /// </summary>
-internal sealed class UpdateContext
+internal sealed class SubjectUpdateFactoryContext
 {
     private int _nextId;
     private readonly Dictionary<IInterceptorSubject, string> _subjectToId = new();

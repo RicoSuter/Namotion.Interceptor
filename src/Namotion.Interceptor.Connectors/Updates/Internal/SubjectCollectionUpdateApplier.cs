@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// Applies collection and dictionary updates from <see cref="SubjectUpdate"/> instances.
 /// Handles structural operations (Insert, Remove, Move) and sparse property updates.
 /// </summary>
-internal static class CollectionUpdateApplier
+internal static class SubjectCollectionUpdateApplier
 {
     /// <summary>
     /// Applies a collection (array/list) update to a property.
@@ -18,18 +18,17 @@ internal static class CollectionUpdateApplier
         IInterceptorSubject parent,
         RegisteredSubjectProperty property,
         SubjectPropertyUpdate propertyUpdate,
-        ApplyContext context)
+        SubjectUpdateApplyContext context)
     {
         var existingItems = (property.GetValue() as IEnumerable<IInterceptorSubject>)?.ToList() ?? [];
         var originalItems = new List<IInterceptorSubject>(existingItems);
         var workingItems = new List<IInterceptorSubject>(existingItems);
         var structureChanged = false;
 
-        // Phase 1: Structural operations
+        // Apply structural operations
         if (propertyUpdate.Operations is { Count: > 0 })
         {
             var hasOnlyMoves = propertyUpdate.Operations.All(op => op.Action == SubjectCollectionOperationType.Move);
-
             if (hasOnlyMoves && propertyUpdate.Operations.Count > 0)
             {
                 var newItems = new IInterceptorSubject[originalItems.Count];
@@ -50,7 +49,6 @@ internal static class CollectionUpdateApplier
                 foreach (var operation in propertyUpdate.Operations)
                 {
                     var index = ConvertIndexToInt(operation.Index);
-
                     switch (operation.Action)
                     {
                         case SubjectCollectionOperationType.Remove:
@@ -101,7 +99,7 @@ internal static class CollectionUpdateApplier
             }
         }
 
-        // Phase 2: Sparse property updates
+        // Apply sparse property updates
         if (propertyUpdate.Collection is { Count: > 0 })
         {
             foreach (var collUpdate in propertyUpdate.Collection)
@@ -158,32 +156,31 @@ internal static class CollectionUpdateApplier
         IInterceptorSubject parent,
         RegisteredSubjectProperty property,
         SubjectPropertyUpdate propertyUpdate,
-        ApplyContext context)
+        SubjectUpdateApplyContext context)
     {
-        var existingDict = property.GetValue() as IDictionary;
-        var workingDict = new Dictionary<object, IInterceptorSubject>();
+        var existingDictionary = property.GetValue() as IDictionary;
+        var workingDictionary = new Dictionary<object, IInterceptorSubject>();
         var structureChanged = false;
 
-        if (existingDict is not null)
+        if (existingDictionary is not null)
         {
-            foreach (DictionaryEntry entry in existingDict)
+            foreach (DictionaryEntry entry in existingDictionary)
             {
                 if (entry.Value is IInterceptorSubject item)
-                    workingDict[entry.Key] = item;
+                    workingDictionary[entry.Key] = item;
             }
         }
 
-        // Phase 1: Structural operations
+        // Apply structural operations
         if (propertyUpdate.Operations is { Count: > 0 })
         {
             foreach (var operation in propertyUpdate.Operations)
             {
-                var key = ConvertDictKey(operation.Index);
-
+                var key = ConvertDictionaryKey(operation.Index);
                 switch (operation.Action)
                 {
                     case SubjectCollectionOperationType.Remove:
-                        if (workingDict.Remove(key))
+                        if (workingDictionary.Remove(key))
                             structureChanged = true;
                         break;
 
@@ -198,7 +195,7 @@ internal static class CollectionUpdateApplier
                                 SubjectUpdateApplier.ApplyProperties(newItem, itemProps, context);
                             }
 
-                            workingDict[key] = newItem;
+                            workingDictionary[key] = newItem;
                             structureChanged = true;
                         }
                         break;
@@ -206,17 +203,17 @@ internal static class CollectionUpdateApplier
             }
         }
 
-        // Phase 2: Sparse property updates
+        // Apply sparse property updates
         if (propertyUpdate.Collection is { Count: > 0 })
         {
             foreach (var collUpdate in propertyUpdate.Collection)
             {
-                var key = ConvertDictKey(collUpdate.Index);
+                var key = ConvertDictionaryKey(collUpdate.Index);
 
                 if (collUpdate.Id is not null &&
                     context.Subjects.TryGetValue(collUpdate.Id, out var itemProps))
                 {
-                    if (workingDict.TryGetValue(key, out var existing))
+                    if (workingDictionary.TryGetValue(key, out var existing))
                     {
                         if (context.TryMarkAsProcessed(collUpdate.Id))
                         {
@@ -233,7 +230,7 @@ internal static class CollectionUpdateApplier
                             SubjectUpdateApplier.ApplyProperties(newItem, itemProps, context);
                         }
 
-                        workingDict[key] = newItem;
+                        workingDictionary[key] = newItem;
                         structureChanged = true;
                     }
                 }
@@ -242,10 +239,10 @@ internal static class CollectionUpdateApplier
 
         if (structureChanged)
         {
-            var dict = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDict);
+            var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
             using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
             {
-                property.SetValue(dict);
+                property.SetValue(dictionary);
             }
         }
     }
@@ -257,10 +254,8 @@ internal static class CollectionUpdateApplier
         _ => Convert.ToInt32(index)
     };
 
-    private static object ConvertDictKey(object key)
+    private static object ConvertDictionaryKey(object key)
     {
-        if (key is JsonElement jsonElement)
-            return jsonElement.GetString() ?? jsonElement.ToString();
-        return key;
+        return key is JsonElement jsonElement ? jsonElement.GetString() ?? jsonElement.ToString() : key;
     }
 }
