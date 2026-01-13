@@ -286,6 +286,92 @@ public class SubjectUpdateTests
     }
 
     [Fact]
+    public async Task WhenAssigningNewSubjectToNestedProperty_ThenPartialUpdateContainsOnlyPathAndNewSubject()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var mother = new Person { FirstName = "Mother" };
+        var root = new Person(context)
+        {
+            FirstName = "Root",
+            Mother = mother
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        using var _ = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => changes.Add(change));
+
+        // Act: Assign a new Person to mother.Father (nested property)
+        mother.Father = new Person { FirstName = "NewFather" };
+
+        // Log what changes we received for debugging
+        var changesSummary = changes.Select(c => $"{c.Property.Subject.GetType().Name}.{c.Property.Name}").ToList();
+
+        var partialUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(root, changes.ToArray(), [JsonCamelCasePathProcessor.Instance]);
+
+        // The partial update should contain:
+        // 1. root: only the path reference to mother (mother property)
+        // 2. mother: only the father property (the actual change)
+        // 3. newFather: all properties of the new subject
+        //
+        // It should NOT contain other properties like root.firstName, root.children, etc.
+        await Verify(new { Changes = changesSummary, Update = partialUpdate }).DisableDateCounting();
+    }
+
+    [Fact]
+    public async Task WhenAssigningNewSubjectWithRootReference_ThenPartialUpdateShouldNotIncludeFullAncestorProperties()
+    {
+        // Arrange
+        // This test reproduces a bug where assigning a new subject that has a Root property
+        // (which navigates back up the tree) causes the partial update to include
+        // ALL properties of ALL ancestors, not just the path references.
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var person = new PersonWithRoot { FirstName = "Person" };
+        var root = new PersonRoot(context)
+        {
+            Name = "Root",
+            Person = person
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        using var _ = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => changes.Add(change));
+
+        // Act: Assign a new PersonWithRoot to person.Father
+        // The new father has a Root property that references back to PersonRoot
+        // This creates a circular reference: root -> person -> father -> root
+        person.Father = new PersonWithRoot { FirstName = "NewFather", Root = root };
+
+        var changesSummary = changes.Select(c => $"{c.Property.Subject.GetType().Name}.{c.Property.Name}").ToList();
+
+        var partialUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(root, changes.ToArray(), [JsonCamelCasePathProcessor.Instance]);
+
+        // Expected behavior:
+        // - root (PersonRoot): only path reference to person (person property)
+        // - person (PersonWithRoot): only the father property (the actual change)
+        // - newFather (PersonWithRoot): all properties INCLUDING the Root reference
+        //
+        // Bug: The Root property on newFather causes ProcessSubjectComplete to traverse
+        // back up to PersonRoot, which then includes ALL properties of PersonRoot and
+        // the full tree, not just the minimal path references.
+
+        await Verify(new { Changes = changesSummary, Update = partialUpdate }).DisableDateCounting();
+    }
+
+    [Fact]
     public async Task WhenUpdateContainsIncrementalChanges_ThenAllOfThemAreApplied()
     {
         // Arrange

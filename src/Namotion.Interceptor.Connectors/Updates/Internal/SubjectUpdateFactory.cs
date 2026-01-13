@@ -199,8 +199,18 @@ internal static class SubjectUpdateFactory
 
         if (item is not null)
         {
-            update.Id = builder.GetOrCreateId(item);
-            ProcessSubjectComplete(item, builder);
+            var (id, isNew) = builder.GetOrCreateIdWithStatus(item);
+            update.Id = id;
+
+            // Only process the complete subject if it's newly encountered.
+            // If the subject already had an ID, it's part of the existing tree
+            // and we should only add a reference to it, not all its properties.
+            // This prevents circular references from causing the entire tree
+            // to be included in partial updates.
+            if (isNew)
+            {
+                ProcessSubjectComplete(item, builder);
+            }
         }
     }
 
