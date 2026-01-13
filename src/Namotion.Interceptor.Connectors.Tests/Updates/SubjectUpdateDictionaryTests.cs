@@ -1,4 +1,5 @@
 using System.Reactive.Concurrency;
+using System.Text.Json;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
@@ -241,5 +242,35 @@ public class SubjectUpdateDictionaryTests
 
         // Assert - Collection should have all items with full data
         await Verify(update);
+    }
+
+    [Fact]
+    public void WhenDictionaryHasIntKeys_ThenKeysArePreservedAfterJsonRoundTrip()
+    {
+        // Arrange - use dedicated model to avoid affecting other snapshot tests
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var item1 = new IntKeyDictionaryNode { Name = "Item1" };
+        var item2 = new IntKeyDictionaryNode { Name = "Item2" };
+        var source = new IntKeyDictionaryNode(sourceContext)
+        {
+            Name = "Root",
+            Children = new Dictionary<int, IntKeyDictionaryNode> { [42] = item1, [123] = item2 }
+        };
+
+        // Act - create update, serialize to JSON, deserialize, and apply
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+        var json = JsonSerializer.Serialize(update);
+        var deserializedUpdate = JsonSerializer.Deserialize<SubjectUpdate>(json)!;
+
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new IntKeyDictionaryNode(targetContext) { Name = "Target" };
+        target.ApplySubjectUpdate(deserializedUpdate, DefaultSubjectFactory.Instance);
+
+        // Assert - int keys should be preserved after JSON round-trip
+        Assert.Equal(2, target.Children!.Count);
+        Assert.True(target.Children.ContainsKey(42), "Key 42 should exist");
+        Assert.True(target.Children.ContainsKey(123), "Key 123 should exist");
+        Assert.Equal("Item1", target.Children[42].Name);
+        Assert.Equal("Item2", target.Children[123].Name);
     }
 }
