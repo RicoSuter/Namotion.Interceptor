@@ -1,3 +1,5 @@
+@using HomeBlaze.Components.Dialogs
+
 @inject SubjectComponentRegistry ComponentRegistry
 @inject IDialogService DialogService
 
@@ -51,6 +53,7 @@
         padding: 2px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         opacity: 0.9;
+        pointer-events: auto;  /* Re-enable clicks even when parent has pointer-events: none */
     }
     .subject-edit-overlay:hover {
         opacity: 1;
@@ -129,22 +132,6 @@
         if (Subject == null)
             return;
 
-        // Use dynamic type lookup for SubjectEditDialog since it's in HomeBlaze.Host
-        var dialogType = System.Type.GetType("HomeBlaze.Host.Components.Dialogs.SubjectEditDialog, HomeBlaze.Host");
-        if (dialogType == null)
-            return;
-
-        var parameters = new DialogParameters<object>
-        {
-            { "Subject", Subject }
-        };
-
-        var options = new DialogOptions
-        {
-            MaxWidth = MaxWidth.Small,
-            FullWidth = true
-        };
-
-        await DialogService.ShowAsync(dialogType, "Edit", parameters, options);
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, "Edit");
     }
 }

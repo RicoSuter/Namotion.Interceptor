@@ -1,4 +1,5 @@
 @using HomeBlaze.Components.Dialogs
+@using Namotion.Interceptor.Tracking.Parent
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(GridLayout))]
 @implements ISubjectComponent
@@ -6,6 +7,7 @@
 @inject IDialogService DialogService
 @inject SubjectFactory SubjectFactory
 @inject SubjectComponentRegistry ComponentRegistry
+@inject RootManager RootManager
 
 <div class="grid-layout-container"
      style="display: grid;
@@ -179,15 +181,18 @@
 
     private async Task AddCellAt(int row, int column)
     {
-        var result = await SubjectSetupDialog.ShowAsync(DialogService);
-        if (result?.Subject == null) return;
+        await SubjectSetupDialog.ShowAsync(DialogService, subject =>
+        {
+            if (Grid == null) return;
 
-        var cell = SubjectFactory.CreateSubject<GridCell>();
-        cell.Row = row;
-        cell.Column = column;
-        cell.Child = result.Subject;
+            var cell = SubjectFactory.CreateSubject<GridCell>();
+            cell.Row = row;
+            cell.Column = column;
+            cell.Child = subject;
 
-        Grid?.Cells.Add(cell);
+            // Replace list to trigger property setter and parent tracking
+            Grid.Cells = [.. Grid.Cells, cell];
+        });
     }
 
     private async Task EditLayout()
@@ -203,6 +208,8 @@
 
     private async Task DeleteCell(GridCell cell)
     {
+        if (Grid == null) return;
+
         var confirmed = await DialogService.ShowMessageBox(
             "Delete Cell",
             "Are you sure you want to delete this cell?",
@@ -211,7 +218,12 @@
 
         if (confirmed == true)
         {
-            Grid?.Cells.Remove(cell);
+            // Replace list to trigger property setter and parent tracking
+            Grid.Cells = Grid.Cells.Where(c => c != cell).ToList();
+
+            // Persist the change
+            var configurationWriter = Grid.TryFindFirstParent<IConfigurationWriter>() ?? RootManager;
+            await configurationWriter.WriteConfigurationAsync(Grid, CancellationToken.None);
         }
     }
 }

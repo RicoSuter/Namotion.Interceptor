@@ -1,5 +1,6 @@
 @using Excubo.Blazor.Diagrams
 @using HomeBlaze.Components.Dialogs
+@using Namotion.Interceptor.Tracking.Parent
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(CanvasLayout))]
 @implements ISubjectComponent
@@ -7,6 +8,7 @@
 @inject IDialogService DialogService
 @inject SubjectFactory SubjectFactory
 @inject SubjectComponentRegistry ComponentRegistry
+@inject RootManager RootManager
 
 <div class="canvas-layout-container"
      style="position: relative; width: 100%; min-height: @(Canvas?.MinHeight ?? 400)px;"
@@ -144,15 +146,18 @@
             y = (int)Math.Round((double)y / snapSize) * snapSize;
         }
 
-        var result = await SubjectSetupDialog.ShowAsync(DialogService);
-        if (result?.Subject == null) return;
+        await SubjectSetupDialog.ShowAsync(DialogService, subject =>
+        {
+            if (Canvas == null) return;
 
-        var node = SubjectFactory.CreateSubject<CanvasNode>();
-        node.X = x;
-        node.Y = y;
-        node.Child = result.Subject;
+            var node = SubjectFactory.CreateSubject<CanvasNode>();
+            node.X = x;
+            node.Y = y;
+            node.Child = subject;
 
-        Canvas?.Nodes.Add(node);
+            // Replace list to trigger property setter and parent tracking
+            Canvas.Nodes = [.. Canvas.Nodes, node];
+        });
     }
 
     private async Task EditLayout()
@@ -168,6 +173,8 @@
 
     private async Task DeleteNode(CanvasNode node)
     {
+        if (Canvas == null) return;
+
         var confirmed = await DialogService.ShowMessageBox(
             "Delete Node",
             "Are you sure you want to delete this node?",
@@ -176,7 +183,12 @@
 
         if (confirmed == true)
         {
-            Canvas?.Nodes.Remove(node);
+            // Replace list to trigger property setter and parent tracking
+            Canvas.Nodes = Canvas.Nodes.Where(n => n != node).ToList();
+
+            // Persist the change
+            var configurationWriter = Canvas.TryFindFirstParent<IConfigurationWriter>() ?? RootManager;
+            await configurationWriter.WriteConfigurationAsync(Canvas, CancellationToken.None);
         }
     }
 }

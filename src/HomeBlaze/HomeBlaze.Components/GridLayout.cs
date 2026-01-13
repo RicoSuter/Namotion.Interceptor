@@ -28,7 +28,7 @@ public partial class GridLayout : IConfigurableSubject, ITitleProvider
     /// <summary>
     /// Collection of cells in the grid.
     /// </summary>
-    [Configuration]
+    [Configuration, State]
     public partial List<GridCell> Cells { get; set; }
 
     public string? Title => "Grid";
@@ -37,7 +37,7 @@ public partial class GridLayout : IConfigurableSubject, ITitleProvider
     {
         Rows = 2;
         Columns = 2;
-        Cells = new List<GridCell>();
+        Cells = [];
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default)
