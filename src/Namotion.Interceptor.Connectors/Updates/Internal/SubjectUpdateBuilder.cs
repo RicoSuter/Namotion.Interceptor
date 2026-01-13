@@ -18,6 +18,12 @@ internal sealed class SubjectUpdateBuilder
 
     public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
 
+    /// <summary>
+    /// Tracks visited subjects during path building to detect cycles.
+    /// Cleared before each TryBuildPathToRoot call.
+    /// </summary>
+    public HashSet<IInterceptorSubject> PathVisited { get; } = [];
+
     public void Initialize(IInterceptorSubject rootSubject, ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
         Processors = processors.ToArray();
@@ -110,6 +116,7 @@ internal sealed class SubjectUpdateBuilder
         _subjectToId.Clear();
         _propertyUpdates.Clear();
         ProcessedSubjects.Clear();
+        PathVisited.Clear();
         Subjects = new(); // create a fresh dictionary, old one transferred to result
         Processors = [];
     }
