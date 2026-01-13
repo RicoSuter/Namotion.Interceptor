@@ -126,8 +126,6 @@ internal static class SubjectUpdateFactory
             properties[registeredProperty.Name] = propertyUpdate;
             builder.TrackPropertyUpdate(propertyUpdate, registeredProperty, properties);
         }
-
-        // NOTE: BuildPathToRoot removed - handled before this call in CreatePartialUpdateFromChanges
     }
 
     private static SubjectPropertyUpdate CreatePropertyUpdate(
