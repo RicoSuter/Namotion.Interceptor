@@ -1,8 +1,0 @@
-[
-  FirstName,
-  Father.FirstName,
-  Mother.FirstName,
-  Children[0].FirstName,
-  Children[1].FirstName,
-  Children[2].FirstName
-]

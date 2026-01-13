@@ -102,39 +102,14 @@
                 _propertiesEditor?.ApplyChanges();
             }
 
-            Console.WriteLine($"[SubjectEditPanel.SaveAsync] Subject type: {subject.GetType().Name}");
-            Console.WriteLine($"[SubjectEditPanel.SaveAsync] Subject is IConfigurableSubject: {subject is IConfigurableSubject}");
-
-            // Debug: print full parent chain
-            var current = subject;
-            var depth = 0;
-            while (current != null && depth < 10)
-            {
-                var parents = current.GetParents();
-                Console.WriteLine($"[SubjectEditPanel.SaveAsync] Parent chain [{depth}]: {current.GetType().Name} has {parents.Length} parents");
-                if (parents.Length > 0)
-                {
-                    current = parents[0].Property.Subject;
-                }
-                else
-                {
-                    current = null;
-                }
-                depth++;
-            }
-
             if (subject is not IConfigurableSubject)
             {
-                var parent = subject.TryFindFirstParent<IConfigurableSubject>();
-                Console.WriteLine($"[SubjectEditPanel.SaveAsync] Found parent IConfigurableSubject: {parent?.GetType().Name ?? "null"}");
-                subject = parent as IInterceptorSubject;
+                subject = subject.TryGetFirstParent<IConfigurableSubject>() as IInterceptorSubject;
             }
 
             if (subject is IConfigurableSubject)
             {
-                var configurationWriter = subject.TryFindFirstParent<IConfigurationWriter>();
-                Console.WriteLine($"[SubjectEditPanel.SaveAsync] Found IConfigurationWriter: {configurationWriter?.GetType().Name ?? "null (using RootManager)"}");
-                configurationWriter ??= RootManager;
+                var configurationWriter = subject.TryGetFirstParent<IConfigurationWriter>() ?? RootManager;
                 await configurationWriter.WriteConfigurationAsync(subject, CancellationToken.None);
             }
 
@@ -165,5 +140,45 @@
         }
 
         return ValueTask.CompletedTask;
+    }
+
+    private T FindNearest<T>(IInterceptorSubject subject)
+    {
+        // TODO: Replace with BFS when available in Namotion.Interceptor.Tracking
+
+        // Check if the subject itself is a writer
+        if (subject is T writer)
+        {
+            return writer;
+        }
+
+        // Traverse parents to find the nearest IConfigurationWriter
+        var visited = new HashSet<IInterceptorSubject>();
+        var current = subject;
+
+        while (current != null)
+        {
+            if (!visited.Add(current))
+            {
+                break; // Avoid infinite loops
+            }
+
+            var parents = current.GetParents();
+            if (parents.Length == 0)
+            {
+                break;
+            }
+
+            // Get the first parent's subject
+            var parentSubject = parents[0].Property.Subject;
+            if (parentSubject is T parentWriter)
+            {
+                return parentWriter;
+            }
+
+            current = parentSubject;
+        }
+
+        return default!;
     }
 }

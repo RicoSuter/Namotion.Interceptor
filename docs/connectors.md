@@ -247,6 +247,8 @@ The `Updates/` folder contains serialization infrastructure for subject state:
 
 These are used by both sources and servers (e.g., ASP.NET Core controllers, SignalR hubs).
 
+For details on the update format, collection synchronization, and apply logic, see [Subject Updates](connectors-subject-updates.md).
+
 ## Setup
 
 ### Adding a Source
