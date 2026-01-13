@@ -201,11 +201,11 @@ internal static class SubjectUpdateFactory
         {
             update.Id = builder.GetOrCreateId(item, out var isNew);
 
-            // Only process the complete subject if it's newly encountered.
-            // If the subject already had an ID, it's part of the existing tree
+            // Only process the complete subject if it's newly encountered in this update.
+            // If the subject already had an ID (from Initialize, being a changedSubject,
+            // or BuildPathToRoot), it's either the root or an existing part of the tree
             // and we should only add a reference to it, not all its properties.
-            // This prevents circular references from causing the entire tree
-            // to be included in partial updates.
+            // This prevents circular references from causing the entire tree to be included.
             if (isNew)
             {
                 ProcessSubjectComplete(item, builder);

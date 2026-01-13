@@ -13,7 +13,7 @@ internal sealed class SubjectUpdateBuilder
     private readonly Dictionary<SubjectPropertyUpdate, (RegisteredSubjectProperty Property, IDictionary<string, SubjectPropertyUpdate> Parent)> _propertyUpdates = new();
 
     public ISubjectUpdateProcessor[] Processors { get; private set; } = [];
-    
+
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = new();
 
     public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];

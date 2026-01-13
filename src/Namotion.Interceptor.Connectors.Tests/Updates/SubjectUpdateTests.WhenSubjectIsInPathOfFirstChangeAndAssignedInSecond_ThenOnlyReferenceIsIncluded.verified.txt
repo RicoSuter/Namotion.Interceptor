@@ -1,0 +1,41 @@
+﻿{
+  Changes: [
+    Person.FirstName,
+    Person.FullName,
+    Person.Mother
+  ],
+  Update: {
+    Root: 1,
+    Subjects: {
+      1: {
+        father: {
+          Kind: Item,
+          Id: 3
+        },
+        mother: {
+          Kind: Item,
+          Timestamp: {Scrubbed},
+          Id: 2
+        }
+      },
+      2: {
+        firstName: {
+          Kind: Value,
+          Value: UpdatedParent,
+          Timestamp: {Scrubbed}
+        },
+        fullName: {
+          Kind: Value,
+          Value: UpdatedParent ,
+          Timestamp: {Scrubbed}
+        }
+      },
+      3: {
+        father: {
+          Kind: Item,
+          Id: 2
+        }
+      }
+    }
+  }
+}
