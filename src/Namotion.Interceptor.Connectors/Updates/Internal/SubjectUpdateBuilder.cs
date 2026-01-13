@@ -26,28 +26,27 @@ internal sealed class SubjectUpdateBuilder
 
     public string GetOrCreateId(IInterceptorSubject subject)
     {
-        if (!_subjectToId.TryGetValue(subject, out var id))
-        {
-            id = (++_nextId).ToString();
-            _subjectToId[subject] = id;
-        }
-        return id;
+        return GetOrCreateId(subject, out _);
     }
 
     /// <summary>
     /// Gets an existing ID for a subject, or creates a new one.
-    /// Returns true if a new ID was created, false if the subject already had an ID.
     /// </summary>
-    public (string Id, bool IsNew) GetOrCreateIdWithStatus(IInterceptorSubject subject)
+    /// <param name="subject">The subject to get or create an ID for.</param>
+    /// <param name="isNew">True if a new ID was created, false if the subject already had an ID.</param>
+    /// <returns>The subject's ID.</returns>
+    public string GetOrCreateId(IInterceptorSubject subject, out bool isNew)
     {
         if (_subjectToId.TryGetValue(subject, out var id))
         {
-            return (id, false);
+            isNew = false;
+            return id;
         }
 
         id = (++_nextId).ToString();
         _subjectToId[subject] = id;
-        return (id, true);
+        isNew = true;
+        return id;
     }
 
     public Dictionary<string, SubjectPropertyUpdate> GetOrCreateProperties(string subjectId)
