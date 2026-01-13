@@ -372,6 +372,52 @@ public class SubjectUpdateTests
     }
 
     [Fact]
+    public async Task WhenSubjectIsInPathOfFirstChangeAndAssignedInSecond_ThenOnlyReferenceIsIncluded()
+    {
+        // This test verifies that if a subject gets an ID from being in the path of
+        // one change, and is then assigned as a value in another change, we correctly
+        // only include a reference (not full properties) because the subject already
+        // exists in the tree.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var grandparent = new Person { FirstName = "Grandparent" };
+        var parent = new Person { FirstName = "Parent" };
+        var root = new Person(context)
+        {
+            FirstName = "Root",
+            Father = grandparent
+        };
+        grandparent.Father = parent;
+
+        var changes = new List<SubjectPropertyChange>();
+        using var _ = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => changes.Add(change));
+
+        // Act:
+        // Change 1: Update parent's name (parent is in path from grandparent to root)
+        parent.FirstName = "UpdatedParent";
+        // Change 2: Assign parent to root.Mother (parent is now also a new value)
+        root.Mother = parent;
+
+        var changesSummary = changes.Select(c => $"{c.Property.Subject.GetType().Name}.{c.Property.Name}").ToList();
+
+        var partialUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(root, changes.ToArray(), [JsonCamelCasePathProcessor.Instance]);
+
+        // Assert:
+        // - parent should only appear once with just the firstName change
+        // - root.Mother should reference parent's ID
+        // - parent should NOT have full properties duplicated
+        await Verify(new { Changes = changesSummary, Update = partialUpdate }).DisableDateCounting();
+    }
+
+    [Fact]
     public async Task WhenUpdateContainsIncrementalChanges_ThenAllOfThemAreApplied()
     {
         // Arrange
