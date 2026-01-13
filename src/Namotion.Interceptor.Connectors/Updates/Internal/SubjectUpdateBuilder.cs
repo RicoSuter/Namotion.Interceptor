@@ -13,10 +13,16 @@ internal sealed class SubjectUpdateBuilder
     private readonly Dictionary<SubjectPropertyUpdate, (RegisteredSubjectProperty Property, IDictionary<string, SubjectPropertyUpdate> Parent)> _propertyUpdates = new();
 
     public ISubjectUpdateProcessor[] Processors { get; private set; } = [];
-    
+
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = new();
 
     public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
+
+    /// <summary>
+    /// Tracks visited subjects during path building to detect cycles.
+    /// Cleared before each TryBuildPathToRoot call.
+    /// </summary>
+    public HashSet<IInterceptorSubject> PathVisited { get; } = [];
 
     public void Initialize(IInterceptorSubject rootSubject, ReadOnlySpan<ISubjectUpdateProcessor> processors)
     {
@@ -26,11 +32,26 @@ internal sealed class SubjectUpdateBuilder
 
     public string GetOrCreateId(IInterceptorSubject subject)
     {
-        if (!_subjectToId.TryGetValue(subject, out var id))
+        return GetOrCreateId(subject, out _);
+    }
+
+    /// <summary>
+    /// Gets an existing ID for a subject, or creates a new one.
+    /// </summary>
+    /// <param name="subject">The subject to get or create an ID for.</param>
+    /// <param name="isNew">True if a new ID was created, false if the subject already had an ID.</param>
+    /// <returns>The subject's ID.</returns>
+    public string GetOrCreateId(IInterceptorSubject subject, out bool isNew)
+    {
+        if (_subjectToId.TryGetValue(subject, out var id))
         {
-            id = (++_nextId).ToString();
-            _subjectToId[subject] = id;
+            isNew = false;
+            return id;
         }
+
+        id = (++_nextId).ToString();
+        _subjectToId[subject] = id;
+        isNew = true;
         return id;
     }
 
@@ -95,6 +116,7 @@ internal sealed class SubjectUpdateBuilder
         _subjectToId.Clear();
         _propertyUpdates.Clear();
         ProcessedSubjects.Clear();
+        PathVisited.Clear();
         Subjects = new(); // create a fresh dictionary, old one transferred to result
         Processors = [];
     }
