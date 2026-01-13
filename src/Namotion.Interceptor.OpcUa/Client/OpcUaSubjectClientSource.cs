@@ -177,7 +177,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             foreach (var (property, dataValue) in result)
             {
                 var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
-                property.SetValueFromSource(this, dataValue.SourceTimestamp, value);
+                property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
             }
 
             _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);

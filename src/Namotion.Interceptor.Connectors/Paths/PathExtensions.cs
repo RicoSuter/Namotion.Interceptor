@@ -82,7 +82,7 @@ public static class PathExtensions
     {
         using (SubjectChangeContext.WithChangedTimestamp(timestamp))
         {
-            return VisitPropertiesFromPaths(subject, paths, visitProperty, pathProvider, subjectFactory);
+            return subject.VisitPropertiesFromPaths(paths, visitProperty, pathProvider, subjectFactory);
         }
     }
 
@@ -90,7 +90,7 @@ public static class PathExtensions
     {
         if (source is not null)
         {
-            property.SetValueFromSource(source, timestamp, value);
+            property.SetValueFromSource(source, timestamp, null, value);
         }
         else
         {
@@ -157,7 +157,7 @@ public static class PathExtensions
             var registeredProperty = change.Property.TryGetRegisteredProperty();
             if (registeredProperty is not null)
             {
-                var path = TryGetPath(registeredProperty, pathProvider, rootSubject);
+                var path = registeredProperty.TryGetPath(pathProvider, rootSubject);
                 if (path is not null)
                 {
                     yield return (path, change);
@@ -205,8 +205,7 @@ public static class PathExtensions
         PathProviderBase pathProvider, ISubjectFactory? subjectFactory = null)
     {
         var visitedPaths = new List<string>();
-        foreach (var (path, property, index) in
-            GetPropertiesFromPaths(subject, paths, pathProvider, subjectFactory, useCache: false))
+        foreach (var (path, property, index) in subject.GetPropertiesFromPaths(paths, pathProvider, subjectFactory, useCache: false))
         {
             if (property is not null)
             {
