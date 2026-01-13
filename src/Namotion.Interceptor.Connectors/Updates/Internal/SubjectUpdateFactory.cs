@@ -53,7 +53,18 @@ internal static class SubjectUpdateFactory
 
             for (var i = 0; i < propertyChanges.Length; i++)
             {
-                ProcessPropertyChange(propertyChanges[i], rootSubject, builder);
+                var change = propertyChanges[i];
+
+                // 1. Check inclusion (with attribute chain check)
+                if (!IsChangeIncluded(change, builder))
+                    continue;
+
+                // 2. Build path FIRST (assigns IDs to ancestors) - with inclusion check
+                if (!TryBuildPathToRoot(change.Property.Subject, rootSubject, builder))
+                    continue; // No valid path
+
+                // 3. Then process change (ancestors now have IDs)
+                ProcessPropertyChange(change, builder);
             }
 
             return builder.Build(rootSubject);
@@ -97,17 +108,10 @@ internal static class SubjectUpdateFactory
 
     private static void ProcessPropertyChange(
         SubjectPropertyChange change,
-        IInterceptorSubject rootSubject,
         SubjectUpdateBuilder builder)
     {
         var changedSubject = change.Property.Subject;
-        var registeredProperty = change.Property.TryGetRegisteredProperty();
-
-        if (registeredProperty is null)
-            return;
-
-        if (!IsPropertyIncluded(registeredProperty, builder.Processors))
-            return;
+        var registeredProperty = change.Property.TryGetRegisteredProperty()!; // Already validated in IsChangeIncluded
 
         var subjectId = builder.GetOrCreateId(changedSubject);
         var properties = builder.GetOrCreateProperties(subjectId);
@@ -123,7 +127,7 @@ internal static class SubjectUpdateFactory
             builder.TrackPropertyUpdate(propertyUpdate, registeredProperty, properties);
         }
 
-        BuildPathToRoot(changedSubject, rootSubject, builder);
+        // NOTE: BuildPathToRoot removed - handled before this call in CreatePartialUpdateFromChanges
     }
 
     private static SubjectPropertyUpdate CreatePropertyUpdate(
@@ -214,29 +218,58 @@ internal static class SubjectUpdateFactory
     }
 
     /// <summary>
-    /// Builds the path from a changed subject up to the root subject by adding
-    /// property references for each parent in the hierarchy.
-    /// Only traverses the first parent (canonical registration path) in DAG structures.
+    /// Builds the path from a changed subject up to the root subject.
+    /// Returns false if no valid path exists (all paths have excluded segments).
+    /// Tries all parents in DAG structures to find a valid path.
     /// </summary>
-    private static void BuildPathToRoot(
+    private static bool TryBuildPathToRoot(
         IInterceptorSubject subject,
         IInterceptorSubject rootSubject,
         SubjectUpdateBuilder builder)
     {
+        builder.PathVisited.Clear();
+        return TryBuildPathToRootRecursive(subject, rootSubject, builder);
+    }
+
+    /// <summary>
+    /// Recursive implementation of path building.
+    /// Uses recursion to build references in root→subject order without allocations.
+    /// </summary>
+    private static bool TryBuildPathToRootRecursive(
+        IInterceptorSubject subject,
+        IInterceptorSubject rootSubject,
+        SubjectUpdateBuilder builder)
+    {
+        if (subject == rootSubject)
+            return true;
+
+        // Cycle detection
+        if (!builder.PathVisited.Add(subject))
+            return false;
+
         var current = subject.TryGetRegisteredSubject();
+        if (current is null || current.Parents.Length == 0)
+            return false;
 
-        while (current is not null && current.Subject != rootSubject)
+        // Try each parent to find a valid path (DAG support)
+        foreach (var parentInfo in current.Parents)
         {
-            if (current.Parents.Length == 0)
-                break;
-
-            var parentInfo = current.Parents[0];
             var parentProperty = parentInfo.Property;
+
+            // Check if this segment is included
+            if (!IsPropertyIncluded(parentProperty, builder.Processors))
+                continue;
+
             var parentSubject = parentProperty.Parent;
 
+            // Recurse FIRST - this builds references from root down
+            if (!TryBuildPathToRootRecursive(parentSubject.Subject, rootSubject, builder))
+                continue;
+
+            // THEN add this segment's reference (after parent path is built)
             var parentId = builder.GetOrCreateId(parentSubject.Subject);
             var parentProperties = builder.GetOrCreateProperties(parentId);
-            var childId = builder.GetOrCreateId(current.Subject);
+            var childId = builder.GetOrCreateId(subject);
 
             if (parentInfo.Index is not null)
             {
@@ -247,8 +280,10 @@ internal static class SubjectUpdateFactory
                 AddSingleReferenceToParent(parentProperties, parentProperty.Name, childId);
             }
 
-            current = parentSubject;
+            return true;
         }
+
+        return false;
     }
 
     /// <summary>
@@ -387,6 +422,42 @@ internal static class SubjectUpdateFactory
             if (!processors[i].IsIncluded(property))
                 return false;
         }
+        return true;
+    }
+
+    /// <summary>
+    /// Checks if a change should be included, validating the property
+    /// and full attribute chain if applicable.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsChangeIncluded(
+        SubjectPropertyChange change,
+        SubjectUpdateBuilder builder)
+    {
+        var registeredProperty = change.Property.TryGetRegisteredProperty();
+        if (registeredProperty is null)
+            return false;
+
+        // Check the changed property itself
+        if (!IsPropertyIncluded(registeredProperty, builder.Processors))
+            return false;
+
+        // For attributes: check entire chain up to root property
+        if (registeredProperty.IsAttribute)
+        {
+            var current = registeredProperty.GetAttributedProperty();
+            while (current is not null)
+            {
+                if (!IsPropertyIncluded(current, builder.Processors))
+                    return false;
+
+                if (!current.IsAttribute)
+                    break;
+
+                current = current.GetAttributedProperty();
+            }
+        }
+
         return true;
     }
 }

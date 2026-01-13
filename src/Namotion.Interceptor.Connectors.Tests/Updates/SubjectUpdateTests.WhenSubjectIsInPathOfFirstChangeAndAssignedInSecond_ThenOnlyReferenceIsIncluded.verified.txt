@@ -10,15 +10,21 @@
       1: {
         father: {
           Kind: Item,
-          Id: 3
+          Id: 2
         },
         mother: {
           Kind: Item,
           Timestamp: {Scrubbed},
-          Id: 2
+          Id: 3
         }
       },
       2: {
+        father: {
+          Kind: Item,
+          Id: 3
+        }
+      },
+      3: {
         firstName: {
           Kind: Value,
           Value: UpdatedParent,
@@ -28,12 +34,6 @@
           Kind: Value,
           Value: UpdatedParent ,
           Timestamp: {Scrubbed}
-        }
-      },
-      3: {
-        father: {
-          Kind: Item,
-          Id: 2
         }
       }
     }
