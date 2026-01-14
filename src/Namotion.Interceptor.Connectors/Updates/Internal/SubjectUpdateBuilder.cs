@@ -18,9 +18,9 @@ internal sealed class SubjectUpdateBuilder
 
     public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
 
-    public void Initialize(IInterceptorSubject rootSubject, ReadOnlySpan<ISubjectUpdateProcessor> processors)
+    public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors)
     {
-        Processors = processors.ToArray();
+        Processors = processors;
         GetOrCreateId(rootSubject); // Ensure root subject gets ID "1"
     }
 

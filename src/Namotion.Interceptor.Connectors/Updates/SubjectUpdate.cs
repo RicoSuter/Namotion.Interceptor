@@ -33,7 +33,7 @@ public class SubjectUpdate
     /// <returns>The update.</returns>
     public static SubjectUpdate CreateCompleteUpdate(
         IInterceptorSubject subject,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors)
+        ISubjectUpdateProcessor[] processors)
         => SubjectUpdateFactory.CreateCompleteUpdate(subject, processors);
 
     /// <summary>
@@ -47,6 +47,6 @@ public class SubjectUpdate
     public static SubjectUpdate CreatePartialUpdateFromChanges(
         IInterceptorSubject subject,
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors)
+        ISubjectUpdateProcessor[] processors)
         => SubjectUpdateFactory.CreatePartialUpdateFromChanges(subject, propertyChanges, processors);
 }
