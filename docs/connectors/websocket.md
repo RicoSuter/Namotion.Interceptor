@@ -12,9 +12,22 @@ The `Namotion.Interceptor.WebSocket` package provides bidirectional WebSocket co
 - Multiple client support with broadcast updates
 - TypeScript client compatibility (native JSON parsing)
 
-## Server Setup
+## Choosing a Server Mode
 
-Host a WebSocket server that exposes subject state to connected clients with `AddWebSocketSubjectServer`. The server broadcasts property changes to all connected clients and accepts updates from clients.
+The package offers two server modes with identical performance (both use Kestrel):
+
+| Mode | Method | Best For |
+|------|--------|----------|
+| **Standalone** | `AddWebSocketSubjectServer` | Dedicated sync servers, edge nodes, SCADA systems, console apps |
+| **Embedded** | `AddWebSocketSubjectHandler` + `MapWebSocketSubject` | Adding sync to existing ASP.NET apps (API + WebSocket on same port) |
+
+**Use standalone mode** when WebSocket sync is the primary purpose of your application. It creates a dedicated Kestrel server with minimal overhead.
+
+**Use embedded mode** when you already have an ASP.NET application (with controllers, Blazor, etc.) and want to add WebSocket sync without running a second server.
+
+## Server Setup (Standalone)
+
+Creates a dedicated WebSocket server on its own port. Best for edge nodes, industrial gateways, and dedicated sync services.
 
 ```csharp
 [InterceptorSubject]
@@ -45,9 +58,9 @@ host.Run();
 // Server listens on ws://localhost:8080/ws
 ```
 
-## Embedded Server Setup
+## Server Setup (Embedded)
 
-If you already have an ASP.NET application, you can embed the WebSocket endpoint into your existing server instead of creating a new one:
+Adds WebSocket sync to an existing ASP.NET application. Best when you already have a web app and want to add real-time sync.
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
@@ -64,10 +77,17 @@ builder.Services.AddSingleton(device);
 builder.Services.AddWebSocketSubjectHandler<Device>();
 
 var app = builder.Build();
+
+// Your existing middleware
+app.MapControllers();
+app.MapBlazorHub();
+
+// Add WebSocket sync endpoint
 app.UseWebSockets();
 app.MapWebSocketSubject("/ws");
+
 app.Run();
-// WebSocket endpoint available at ws://localhost:5000/ws (uses existing Kestrel)
+// WebSocket available alongside your existing endpoints
 ```
 
 ## Client Setup
