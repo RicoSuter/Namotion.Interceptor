@@ -47,7 +47,19 @@
       firstName: {
         Kind: Value,
         Value: Jane,
-        Timestamp: {Scrubbed}
+        Timestamp: {Scrubbed},
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123,
+            Attributes: {
+              unit: {
+                Kind: Value,
+                Value: Count
+              }
+            }
+          }
+        }
       },
       fullName: {
         Kind: Value,
@@ -71,7 +83,19 @@
       firstName: {
         Kind: Value,
         Value: John,
-        Timestamp: {Scrubbed}
+        Timestamp: {Scrubbed},
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123,
+            Attributes: {
+              unit: {
+                Kind: Value,
+                Value: Count
+              }
+            }
+          }
+        }
       },
       fullName: {
         Kind: Value,
