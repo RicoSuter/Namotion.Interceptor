@@ -10,20 +10,18 @@ public class DynamicSubjectFactory
     private static readonly ProxyGenerator ProxyGenerator = new();
     private static readonly ConcurrentDictionary<string, SubjectPropertyMetadata[]> PropertyCache = new();
 
-    // TODO: Remove context in all methods?
-
-    public static DynamicSubject CreateDynamicSubject(IInterceptorSubjectContext? context, params Type[] interfaces)
+    public static IInterceptorSubject CreateDynamicSubject(params Type[] interfaces)
     {
-        return CreateSubject<DynamicSubject>(context, interfaces);
+        return CreateSubject<DynamicSubject>(interfaces);
     }
 
-    public static TSubject CreateSubject<TSubject>(IInterceptorSubjectContext? context, params Type[] interfaces)
+    public static TSubject CreateSubject<TSubject>(params Type[] interfaces)
         where TSubject : IInterceptorSubject
     {
-        return (TSubject)CreateSubject(context, typeof(TSubject), interfaces);
+        return (TSubject)CreateSubject(typeof(TSubject), interfaces);
     }
     
-    public static IInterceptorSubject CreateSubject(IInterceptorSubjectContext? context, Type type, params Type[] interfaces)
+    public static IInterceptorSubject CreateSubject(Type type, params Type[] interfaces)
     {
         var subject = (IInterceptorSubject)ProxyGenerator
             .CreateClassProxy(type, interfaces, new DynamicSubjectInterceptor());
@@ -49,12 +47,6 @@ public class DynamicSubjectFactory
         }, subject);
 
         subject.AddProperties(missingProperties);
-        
-        if (context is not null)
-        {
-            subject.Context.AddFallbackContext(context);
-        }
-
         return subject;
     }
 
