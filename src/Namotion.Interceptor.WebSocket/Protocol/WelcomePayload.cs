@@ -15,7 +15,7 @@ public class WelcomePayload
     /// <summary>
     /// Negotiated serialization format.
     /// </summary>
-    public WsFormat Format { get; set; } = WsFormat.Json;
+    public WebSocketFormat Format { get; set; } = WebSocketFormat.Json;
 
     /// <summary>
     /// Complete initial state.

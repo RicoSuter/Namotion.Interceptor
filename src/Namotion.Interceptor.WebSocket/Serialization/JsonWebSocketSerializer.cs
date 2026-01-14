@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.WebSocket.Serialization;
 /// <summary>
 /// JSON serializer for WebSocket messages.
 /// </summary>
-public class JsonWsSerializer : IWsSerializer
+public class JsonWebSocketSerializer : IWebSocketSerializer
 {
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -18,7 +18,7 @@ public class JsonWsSerializer : IWsSerializer
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
-    public WsFormat Format => WsFormat.Json;
+    public WebSocketFormat Format => WebSocketFormat.Json;
 
     public byte[] Serialize<T>(T value)
     {

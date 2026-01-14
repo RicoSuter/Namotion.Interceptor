@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.IO;
 using System.Net.WebSockets;
 using System.Threading;
@@ -18,7 +19,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private readonly System.Net.WebSockets.WebSocket _webSocket;
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _cts = new();
-    private readonly IWsSerializer _serializer = new JsonWsSerializer();
+    private readonly IWebSocketSerializer _serializer = new JsonWebSocketSerializer();
 
     public string ConnectionId { get; } = Guid.NewGuid().ToString("N")[..8];
     public bool IsConnected => _webSocket.State == WebSocketState.Open;
@@ -42,7 +43,6 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         try
         {
             var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(buffer.AsSpan(0, result.Count));
-
             if (messageType == MessageType.Hello)
             {
                 return _serializer.Deserialize<HelloPayload>(payloadBytes.Span);
@@ -61,7 +61,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         var welcome = new WelcomePayload
         {
             Version = 1,
-            Format = WsFormat.Json,
+            Format = WebSocketFormat.Json,
             State = initialState
         };
 
@@ -101,11 +101,11 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
     public async Task<SubjectUpdate?> ReceiveUpdateAsync(CancellationToken cancellationToken)
     {
-        var buffer = new byte[64 * 1024];
-        using var messageStream = new MemoryStream();
-
+        var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
         try
         {
+            using var messageStream = new MemoryStream();
+
             // Receive complete message (handling fragmentation)
             WebSocketReceiveResult result;
             do
@@ -147,6 +147,10 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         catch (OperationCanceledException)
         {
             return null;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 

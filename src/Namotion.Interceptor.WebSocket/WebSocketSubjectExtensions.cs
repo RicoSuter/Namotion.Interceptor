@@ -1,4 +1,7 @@
 using System;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -76,7 +79,7 @@ public static class WebSocketSubjectExtensions
         var key = Guid.NewGuid().ToString();
 
         return services
-            .AddKeyedSingleton(key, (serviceProvider, _) =>
+            .AddKeyedSingleton(key, (_, _) =>
             {
                 var configuration = new WebSocketClientConfiguration();
                 configure(configuration);
@@ -104,5 +107,86 @@ public static class WebSocketSubjectExtensions
                     configuration.RetryTime,
                     configuration.WriteRetryQueueSize);
             });
+    }
+
+    /// <summary>
+    /// Adds a WebSocket subject handler for embedding in an existing ASP.NET application.
+    /// Call MapWebSocketSubject to map the endpoint after building the app.
+    /// </summary>
+    public static IServiceCollection AddWebSocketSubjectHandler<TSubject>(
+        this IServiceCollection services,
+        Action<WebSocketServerConfiguration>? configure = null)
+        where TSubject : IInterceptorSubject
+    {
+        return services.AddWebSocketSubjectHandler(
+            serviceProvider => serviceProvider.GetRequiredService<TSubject>(),
+            configure);
+    }
+
+    /// <summary>
+    /// Adds a WebSocket subject handler with custom subject selector.
+    /// Call MapWebSocketSubject to map the endpoint after building the app.
+    /// </summary>
+    public static IServiceCollection AddWebSocketSubjectHandler(
+        this IServiceCollection services,
+        Func<IServiceProvider, IInterceptorSubject> subjectSelector,
+        Action<WebSocketServerConfiguration>? configure = null)
+    {
+        return services
+            .AddSingleton(serviceProvider =>
+            {
+                var configuration = new WebSocketServerConfiguration();
+                configure?.Invoke(configuration);
+                return configuration;
+            })
+            .AddSingleton(serviceProvider =>
+            {
+                var subject = subjectSelector(serviceProvider);
+                var configuration = serviceProvider.GetRequiredService<WebSocketServerConfiguration>();
+                return new WebSocketSubjectHandler(
+                    subject,
+                    configuration,
+                    serviceProvider.GetRequiredService<ILogger<WebSocketSubjectHandler>>());
+            })
+            .AddSingleton<IHostedService, WebSocketSubjectChangeProcessor>();
+    }
+
+    /// <summary>
+    /// Maps a WebSocket subject endpoint into an existing ASP.NET application.
+    /// Requires AddWebSocketSubjectHandler to be called during service registration.
+    /// </summary>
+    /// <param name="endpoints">The endpoint route builder.</param>
+    /// <param name="path">The path to map the WebSocket endpoint to. Default: "/ws"</param>
+    /// <returns>The endpoint route builder for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// // In Program.cs:
+    /// builder.Services.AddWebSocketSubjectHandler&lt;Device&gt;();
+    ///
+    /// var app = builder.Build();
+    /// app.UseWebSockets();
+    /// app.MapWebSocketSubject("/ws");
+    /// app.Run();
+    /// </code>
+    /// </example>
+    public static IEndpointRouteBuilder MapWebSocketSubject(
+        this IEndpointRouteBuilder endpoints,
+        string path = "/ws")
+    {
+        endpoints.Map(path, async context =>
+        {
+            if (context.WebSockets.IsWebSocketRequest)
+            {
+                var handler = context.RequestServices.GetRequiredService<WebSocketSubjectHandler>();
+                var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                await handler.HandleClientAsync(webSocket, context.RequestAborted);
+            }
+            else
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            }
+        });
+
+        return endpoints;
     }
 }

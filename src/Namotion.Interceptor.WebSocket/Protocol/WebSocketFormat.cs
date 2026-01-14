@@ -4,7 +4,7 @@ namespace Namotion.Interceptor.WebSocket.Protocol;
 /// Serialization format for WebSocket messages.
 /// Reserved for future format negotiation (e.g., MessagePack).
 /// </summary>
-public enum WsFormat
+public enum WebSocketFormat
 {
     /// <summary>
     /// JSON serialization (human-readable, native browser support).

@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.IO;
 using System.Linq;
 using System.Net.WebSockets;
@@ -24,7 +25,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private readonly WebSocketClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly ISubjectUpdateProcessor[] _processors;
-    private readonly IWsSerializer _serializer = new JsonWsSerializer();
+    private readonly IWebSocketSerializer _serializer = new JsonWebSocketSerializer();
 
     private ClientWebSocket? _webSocket;
     private SubjectPropertyWriter? _propertyWriter;
@@ -74,7 +75,9 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 {
                     _webSocket.Abort();
                 }
-                catch { }
+                catch
+                {
+                }
             }
         });
     }
@@ -87,6 +90,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             await _receiveCts.CancelAsync();
             _receiveCts.Dispose();
         }
+
         _webSocket?.Dispose();
 
         _receiveCts = new CancellationTokenSource();
@@ -100,37 +104,43 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         await _webSocket.ConnectAsync(_configuration.ServerUri!, connectCts.Token);
 
         // Send Hello
-        var hello = new HelloPayload { Version = 1, Format = WsFormat.Json };
+        var hello = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
         var helloBytes = _serializer.SerializeMessage(MessageType.Hello, null, hello);
         await _webSocket.SendAsync(helloBytes, WebSocketMessageType.Text, true, cancellationToken);
 
         // Receive Welcome (handling fragmentation for large state)
-        var buffer = new byte[64 * 1024];
-        using var messageStream = new MemoryStream();
-
-        WebSocketReceiveResult result;
-        do
+        var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+        try
         {
-            result = await _webSocket.ReceiveAsync(buffer, cancellationToken);
-            messageStream.Write(buffer, 0, result.Count);
+            using var messageStream = new MemoryStream();
+
+            WebSocketReceiveResult result;
+            do
+            {
+                result = await _webSocket.ReceiveAsync(buffer, cancellationToken);
+                messageStream.Write(buffer, 0, result.Count);
+            } while (!result.EndOfMessage);
+
+            var messageBytes = messageStream.ToArray();
+            var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(messageBytes);
+
+            if (messageType != MessageType.Welcome)
+            {
+                throw new InvalidOperationException($"Expected Welcome message, got {messageType}");
+            }
+
+            var welcome = _serializer.Deserialize<WelcomePayload>(payloadBytes.Span);
+            _initialState = welcome.State;
+
+            _logger.LogInformation("Connected to WebSocket server");
+
+            // Start receive loop (signals _receiveLoopCompleted when done)
+            _ = ReceiveLoopAsync(_receiveCts.Token);
         }
-        while (!result.EndOfMessage);
-
-        var messageBytes = messageStream.ToArray();
-        var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(messageBytes);
-
-        if (messageType != MessageType.Welcome)
+        finally
         {
-            throw new InvalidOperationException($"Expected Welcome message, got {messageType}");
+            ArrayPool<byte>.Shared.Return(buffer);
         }
-
-        var welcome = _serializer.Deserialize<WelcomePayload>(payloadBytes.Span);
-        _initialState = welcome.State;
-
-        _logger.LogInformation("Connected to WebSocket server");
-
-        // Start receive loop (signals _receiveLoopCompleted when done)
-        _ = ReceiveLoopAsync(_receiveCts.Token);
     }
 
     public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
@@ -225,11 +235,11 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
-        var buffer = new byte[64 * 1024];
-        using var messageStream = new MemoryStream();
-
+        var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
         try
         {
+            using var messageStream = new MemoryStream();
+
             while (!cancellationToken.IsCancellationRequested && _webSocket?.State == WebSocketState.Open)
             {
                 try
@@ -249,8 +259,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                         }
 
                         messageStream.Write(buffer, 0, result.Count);
-                    }
-                    while (!result.EndOfMessage);
+                    } while (!result.EndOfMessage);
 
                     var messageBytes = messageStream.ToArray();
                     var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(messageBytes);
@@ -286,6 +295,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         }
         finally
         {
+            ArrayPool<byte>.Shared.Return(buffer);
+
             // Signal that receive loop has completed (for reconnection handling)
             _receiveLoopCompleted?.TrySetResult();
         }
@@ -423,8 +434,11 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                     // Close timed out, abort
                     _webSocket.Abort();
                 }
-                catch { }
+                catch
+                {
+                }
             }
+
             _webSocket.Dispose();
         }
 

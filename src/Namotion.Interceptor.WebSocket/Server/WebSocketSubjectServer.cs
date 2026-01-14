@@ -1,7 +1,4 @@
 using System;
-using System.Collections.Concurrent;
-using System.Linq;
-using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
@@ -10,46 +7,70 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Connectors.Updates;
-using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.WebSocket.Server;
 
 /// <summary>
-/// WebSocket server that exposes subject updates to connected clients.
+/// Standalone WebSocket server that exposes subject updates to connected clients.
 /// Uses Kestrel for cross-platform support without elevation.
+/// For embedding in an existing ASP.NET app, use MapWebSocketSubject extension instead.
 /// </summary>
 public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
 {
-    private readonly IInterceptorSubject _subject;
-    private readonly IInterceptorSubjectContext _context;
+    private readonly WebSocketSubjectHandler _handler;
     private readonly WebSocketServerConfiguration _configuration;
     private readonly ILogger _logger;
-
-    private readonly ConcurrentDictionary<string, WebSocketClientConnection> _connections = new();
-    private readonly ISubjectUpdateProcessor[] _processors;
 
     private WebApplication? _app;
     private int _disposed;
 
-    public int ConnectionCount => _connections.Count;
+    public int ConnectionCount => _handler.ConnectionCount;
 
     public WebSocketSubjectServer(
         IInterceptorSubject subject,
         WebSocketServerConfiguration configuration,
         ILogger<WebSocketSubjectServer> logger)
     {
-        _subject = subject ?? throw new ArgumentNullException(nameof(subject));
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _context = subject.Context;
-        _processors = configuration.Processors ?? [];
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(logger);
 
         configuration.Validate();
+
+        _handler = new WebSocketSubjectHandler(subject, configuration, logger);
+        _configuration = configuration;
+        _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var retryDelay = TimeSpan.FromSeconds(5);
+        var maxRetryDelay = TimeSpan.FromSeconds(60);
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await RunServerAsync(stoppingToken);
+                break;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "WebSocket server failed. Retrying in {Delay}...", retryDelay);
+                await Task.Delay(retryDelay, stoppingToken);
+
+                var jitter = Random.Shared.NextDouble() * 0.1 + 0.95;
+                retryDelay = TimeSpan.FromMilliseconds(
+                    Math.Min(retryDelay.TotalMilliseconds * 2 * jitter, maxRetryDelay.TotalMilliseconds));
+            }
+        }
+    }
+
+    private async Task RunServerAsync(CancellationToken stoppingToken)
     {
         var builder = WebApplication.CreateSlimBuilder();
 
@@ -71,7 +92,7 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
             if (context.WebSockets.IsWebSocketRequest)
             {
                 var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-                await HandleClientAsync(webSocket, stoppingToken);
+                await _handler.HandleClientAsync(webSocket, stoppingToken);
             }
             else
             {
@@ -82,11 +103,11 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
         _logger.LogInformation("WebSocket server starting on {Url}{Path}", url, _configuration.Path);
 
         using var changeQueueProcessor = new ChangeQueueProcessor(
-            source: this,
-            _context,
-            propertyFilter: IsPropertyIncluded,
-            writeHandler: BroadcastChangesAsync,
-            _configuration.BufferTime,
+            source: _handler,
+            _handler.Context,
+            propertyFilter: _handler.IsPropertyIncluded,
+            writeHandler: _handler.BroadcastChangesAsync,
+            _handler.BufferTime,
             _logger);
 
         var processorTask = changeQueueProcessor.ProcessAsync(stoppingToken);
@@ -95,127 +116,11 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
         await Task.WhenAll(processorTask, serverTask);
     }
 
-    private async Task HandleClientAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken stoppingToken)
-    {
-        var connection = new WebSocketClientConnection(webSocket, _logger);
-
-        try
-        {
-            // Receive Hello
-            var hello = await connection.ReceiveHelloAsync(stoppingToken);
-            if (hello is null)
-            {
-                _logger.LogWarning("Client {ConnectionId}: No Hello received, closing", connection.ConnectionId);
-                await connection.CloseAsync("No Hello received");
-                return;
-            }
-
-            _logger.LogInformation("Client {ConnectionId} connected, sending Welcome...", connection.ConnectionId);
-
-            // Send Welcome with initial state
-            var initialState = SubjectUpdate.CreateCompleteUpdate(_subject, _processors);
-            await connection.SendWelcomeAsync(initialState, stoppingToken);
-
-            _logger.LogInformation("Client {ConnectionId}: Welcome sent, waiting for updates...", connection.ConnectionId);
-
-            // Register connection
-            _connections[connection.ConnectionId] = connection;
-
-            // Handle incoming updates
-            await ReceiveUpdatesAsync(connection, stoppingToken);
-
-            _logger.LogDebug("Client {ConnectionId}: ReceiveUpdatesAsync returned normally", connection.ConnectionId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error handling client {ConnectionId}", connection.ConnectionId);
-        }
-        finally
-        {
-            _connections.TryRemove(connection.ConnectionId, out _);
-            await connection.DisposeAsync();
-            _logger.LogInformation("Client {ConnectionId} disconnected", connection.ConnectionId);
-        }
-    }
-
-    private async Task ReceiveUpdatesAsync(WebSocketClientConnection connection, CancellationToken stoppingToken)
-    {
-        _logger.LogDebug("Client {ConnectionId}: Starting receive loop (IsConnected={IsConnected})",
-            connection.ConnectionId, connection.IsConnected);
-
-        while (!stoppingToken.IsCancellationRequested && connection.IsConnected)
-        {
-            var update = await connection.ReceiveUpdateAsync(stoppingToken);
-            if (update is null)
-            {
-                _logger.LogWarning("Client {ConnectionId}: Received null update, exiting loop", connection.ConnectionId);
-                break;
-            }
-
-            try
-            {
-                var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
-                using (SubjectChangeContext.WithSource(this))
-                {
-                    _subject.ApplySubjectUpdate(update, factory);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error applying update from client {ConnectionId}", connection.ConnectionId);
-
-                await connection.SendErrorAsync(new Protocol.ErrorPayload
-                {
-                    Code = Protocol.ErrorCode.InternalError,
-                    Message = ex.Message
-                }, stoppingToken);
-            }
-        }
-
-        _logger.LogDebug("Client {ConnectionId}: Exited receive loop (Cancelled={Cancelled}, IsConnected={IsConnected})",
-            connection.ConnectionId, stoppingToken.IsCancellationRequested, connection.IsConnected);
-    }
-
-    private async ValueTask BroadcastChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-    {
-        if (changes.Length == 0 || _connections.IsEmpty) return;
-
-        var batchSize = _configuration.WriteBatchSize;
-        if (batchSize <= 0 || changes.Length <= batchSize)
-        {
-            // Single batch
-            var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors);
-            var tasks = _connections.Values.Select(c => c.SendUpdateAsync(update, cancellationToken));
-            await Task.WhenAll(tasks);
-        }
-        else
-        {
-            // Multiple batches
-            for (var i = 0; i < changes.Length; i += batchSize)
-            {
-                var currentBatchSize = Math.Min(batchSize, changes.Length - i);
-                var batch = changes.Slice(i, currentBatchSize);
-                var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, batch.Span, _processors);
-                var tasks = _connections.Values.Select(c => c.SendUpdateAsync(update, cancellationToken));
-                await Task.WhenAll(tasks);
-            }
-        }
-    }
-
-    private bool IsPropertyIncluded(RegisteredSubjectProperty property)
-    {
-        return _configuration.PathProvider?.IsPropertyIncluded(property) ?? true;
-    }
-
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
 
-        foreach (var connection in _connections.Values)
-        {
-            await connection.DisposeAsync();
-        }
-        _connections.Clear();
+        await _handler.CloseAllConnectionsAsync();
 
         if (_app is not null)
         {
