@@ -131,23 +131,38 @@ internal sealed class CollectionDiffBuilder
                 _oldKeys.Add(key);
         }
 
-        // Track removed keys - start with all old keys, remove ones that still exist
+        // Track removed keys - start with all old keys, remove ones that still exist with same value
         HashSet<object>? keysToRemove = _oldKeys.Count > 0 ? [.._oldKeys] : null;
 
         foreach (DictionaryEntry entry in newDictionary)
         {
             var key = entry.Key;
-            if (entry.Value is not IInterceptorSubject item)
+            if (entry.Value is not IInterceptorSubject newItem)
                 continue;
 
             if (_oldKeys.Contains(key))
             {
-                keysToRemove?.Remove(key);
+                // Key exists in both - check if VALUE changed (different object reference)
+                var oldValue = oldDictionary![key];
+                if (ReferenceEquals(oldValue, newItem))
+                {
+                    // Same object - key is not removed, not a new item
+                    keysToRemove?.Remove(key);
+                }
+                else
+                {
+                    // Different object at same key - treat as Remove + Insert
+                    // Key stays in keysToRemove (will generate Remove)
+                    // Add to newItemsToProcess (will generate Insert)
+                    newItemsToProcess ??= [];
+                    newItemsToProcess.Add((key, newItem));
+                }
             }
             else
             {
+                // New key
                 newItemsToProcess ??= [];
-                newItemsToProcess.Add((key, item));
+                newItemsToProcess.Add((key, newItem));
             }
         }
 
