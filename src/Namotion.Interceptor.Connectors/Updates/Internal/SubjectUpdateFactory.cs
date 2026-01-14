@@ -22,7 +22,7 @@ internal static class SubjectUpdateFactory
     /// </summary>
     public static SubjectUpdate CreateCompleteUpdate(
         IInterceptorSubject subject,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors)
+        ISubjectUpdateProcessor[] processors)
     {
         var builder = BuilderPool.Rent();
         try
@@ -44,7 +44,7 @@ internal static class SubjectUpdateFactory
     public static SubjectUpdate CreatePartialUpdateFromChanges(
         IInterceptorSubject rootSubject,
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors)
+        ISubjectUpdateProcessor[] processors)
     {
         var builder = BuilderPool.Rent();
         try
@@ -381,7 +381,7 @@ internal static class SubjectUpdateFactory
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsPropertyIncluded(
         RegisteredSubjectProperty property,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors)
+        ISubjectUpdateProcessor[] processors)
     {
         for (var i = 0; i < processors.Length; i++)
         {
