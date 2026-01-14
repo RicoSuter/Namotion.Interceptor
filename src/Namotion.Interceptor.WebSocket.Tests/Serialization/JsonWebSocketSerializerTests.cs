@@ -6,14 +6,14 @@ using Xunit;
 
 namespace Namotion.Interceptor.WebSocket.Tests.Serialization;
 
-public class JsonWsSerializerTests
+public class JsonWebSocketSerializerTests
 {
-    private readonly JsonWsSerializer _serializer = new();
+    private readonly JsonWebSocketSerializer _serializer = new();
 
     [Fact]
     public void SerializeAndDeserialize_HelloPayload_ShouldRoundTrip()
     {
-        var original = new HelloPayload { Version = 1, Format = WsFormat.Json };
+        var original = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
 
         var bytes = _serializer.Serialize(original);
         var deserialized = _serializer.Deserialize<HelloPayload>(bytes);
@@ -48,7 +48,7 @@ public class JsonWsSerializerTests
     [Fact]
     public void SerializeMessage_ShouldCreateEnvelopeArray()
     {
-        var payload = new HelloPayload { Version = 1, Format = WsFormat.Json };
+        var payload = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
 
         var bytes = _serializer.SerializeMessage(MessageType.Hello, null, payload);
         var json = System.Text.Encoding.UTF8.GetString(bytes);
@@ -59,7 +59,7 @@ public class JsonWsSerializerTests
     [Fact]
     public void DeserializeMessageEnvelope_ShouldExtractComponents()
     {
-        var payload = new HelloPayload { Version = 1, Format = WsFormat.Json };
+        var payload = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
         var bytes = _serializer.SerializeMessage(MessageType.Hello, 42, payload);
 
         var (messageType, correlationId, payloadBytes) = _serializer.DeserializeMessageEnvelope(bytes);
@@ -90,7 +90,7 @@ public class JsonWsSerializerTests
         var welcome = new WelcomePayload
         {
             Version = 1,
-            Format = WsFormat.Json,
+            Format = WebSocketFormat.Json,
             State = update
         };
 

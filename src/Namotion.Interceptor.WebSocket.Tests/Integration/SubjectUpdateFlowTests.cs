@@ -131,10 +131,10 @@ public class SubjectUpdateFlowTests
         };
 
         // Act - Create Welcome, serialize, deserialize, apply (this is the path where Index becomes JsonElement)
-        var serializer = new JsonWsSerializer();
+        var serializer = new JsonWebSocketSerializer();
         var update = SubjectUpdate.CreateCompleteUpdate(serverRoot, []);
 
-        var welcome = new WelcomePayload { Version = 1, Format = WsFormat.Json, State = update };
+        var welcome = new WelcomePayload { Version = 1, Format = WebSocketFormat.Json, State = update };
         var bytes = serializer.SerializeMessage(MessageType.Welcome, null, welcome);
         var (_, _, payloadBytes) = serializer.DeserializeMessageEnvelope(bytes);
         var deserializedWelcome = serializer.Deserialize<WelcomePayload>(payloadBytes.Span);
@@ -185,9 +185,9 @@ public class SubjectUpdateFlowTests
         };
 
         // Act - Serialize and apply
-        var serializer = new JsonWsSerializer();
+        var serializer = new JsonWebSocketSerializer();
         var update = SubjectUpdate.CreateCompleteUpdate(serverRoot, []);
-        var welcome = new WelcomePayload { Version = 1, Format = WsFormat.Json, State = update };
+        var welcome = new WelcomePayload { Version = 1, Format = WebSocketFormat.Json, State = update };
         var bytes = serializer.SerializeMessage(MessageType.Welcome, null, welcome);
         var (_, _, payloadBytes) = serializer.DeserializeMessageEnvelope(bytes);
         var deserializedWelcome = serializer.Deserialize<WelcomePayload>(payloadBytes.Span);
@@ -237,7 +237,7 @@ public class SubjectUpdateFlowTests
         var clientRoot = new TestRoot(clientContext);
 
         // Act - Create Welcome, serialize, deserialize, apply
-        var serializer = new JsonWsSerializer();
+        var serializer = new JsonWebSocketSerializer();
         var update = SubjectUpdate.CreateCompleteUpdate(serverRoot, []);
 
         // Verify the original update has the property
@@ -245,7 +245,7 @@ public class SubjectUpdateFlowTests
         Assert.True(rootProps.ContainsKey("Name"), "Original update should contain Name");
         Assert.Equal("Initial", rootProps["Name"].Value);
 
-        var welcome = new WelcomePayload { Version = 1, Format = WsFormat.Json, State = update };
+        var welcome = new WelcomePayload { Version = 1, Format = WebSocketFormat.Json, State = update };
 
         var bytes = serializer.SerializeMessage(MessageType.Welcome, null, welcome);
         var json = System.Text.Encoding.UTF8.GetString(bytes);

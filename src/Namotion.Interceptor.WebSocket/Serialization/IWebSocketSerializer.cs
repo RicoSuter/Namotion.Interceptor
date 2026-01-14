@@ -7,12 +7,12 @@ namespace Namotion.Interceptor.WebSocket.Serialization;
 /// Serializer interface for WebSocket messages.
 /// Extensible for future format support (e.g., MessagePack).
 /// </summary>
-public interface IWsSerializer
+public interface IWebSocketSerializer
 {
     /// <summary>
     /// Gets the serialization format.
     /// </summary>
-    WsFormat Format { get; }
+    WebSocketFormat Format { get; }
 
     /// <summary>
     /// Serializes a payload to bytes.

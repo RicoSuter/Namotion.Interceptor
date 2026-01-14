@@ -45,6 +45,31 @@ host.Run();
 // Server listens on ws://localhost:8080/ws
 ```
 
+## Embedded Server Setup
+
+If you already have an ASP.NET application, you can embed the WebSocket endpoint into your existing server instead of creating a new one:
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithRegistry()
+    .WithLifecycle()
+    .WithHostedServices(builder.Services);
+
+var device = new Device(context);
+builder.Services.AddSingleton(device);
+builder.Services.AddWebSocketSubjectHandler<Device>();
+
+var app = builder.Build();
+app.UseWebSockets();
+app.MapWebSocketSubject("/ws");
+app.Run();
+// WebSocket endpoint available at ws://localhost:5000/ws (uses existing Kestrel)
+```
+
 ## Client Setup
 
 Connect to a WebSocket server as a subscriber with `AddWebSocketSubjectClientSource`. The client automatically connects, performs the handshake, receives initial state, and synchronizes property changes bidirectionally.
