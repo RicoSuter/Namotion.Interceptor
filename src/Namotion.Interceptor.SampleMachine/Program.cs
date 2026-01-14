@@ -49,6 +49,7 @@ namespace Namotion.Interceptor.SampleMachine
     [OpcUaTypeDefinition("ProcessValueType", "http://opcfoundation.org/UA/Machinery/ProcessValues/")]
     public partial class ProcessValueType
     {
+        [GraphQLIgnore]
         [OpcUaNode("AnalogSignal", "http://opcfoundation.org/UA/PADIM/")]
         public partial AnalogSignalVariable AnalogSignal { get; private set; }
 
