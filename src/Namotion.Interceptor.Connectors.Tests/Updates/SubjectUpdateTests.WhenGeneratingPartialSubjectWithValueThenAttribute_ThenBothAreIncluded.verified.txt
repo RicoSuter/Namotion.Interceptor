@@ -1,0 +1,25 @@
+{
+  Root: 1,
+  Subjects: {
+    1: {
+      mother: {
+        Kind: Item,
+        Id: 2
+      }
+    },
+    2: {
+      firstName: {
+        Kind: Value,
+        Value: Jane,
+        Timestamp: {Scrubbed},
+        Attributes: {
+          unit: {
+            Kind: Value,
+            Value: meters,
+            Timestamp: {Scrubbed}
+          }
+        }
+      }
+    }
+  }
+}

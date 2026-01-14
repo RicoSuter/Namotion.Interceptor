@@ -22,7 +22,7 @@ internal static class SubjectUpdateFactory
     /// </summary>
     public static SubjectUpdate CreateCompleteUpdate(
         IInterceptorSubject subject,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors)
+        ISubjectUpdateProcessor[] processors)
     {
         var builder = BuilderPool.Rent();
         try
@@ -44,7 +44,7 @@ internal static class SubjectUpdateFactory
     public static SubjectUpdate CreatePartialUpdateFromChanges(
         IInterceptorSubject rootSubject,
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors)
+        ISubjectUpdateProcessor[] processors)
     {
         var builder = BuilderPool.Rent();
         try
@@ -118,8 +118,15 @@ internal static class SubjectUpdateFactory
         }
         else
         {
-            var propertyUpdate = CreatePropertyUpdateFromChange(registeredProperty, change, builder);
-            properties[registeredProperty.Name] = propertyUpdate;
+            // Try to get existing update (may have been created by earlier attribute changes)
+            if (!properties.TryGetValue(registeredProperty.Name, out var propertyUpdate))
+            {
+                propertyUpdate = new SubjectPropertyUpdate();
+                properties[registeredProperty.Name] = propertyUpdate;
+            }
+
+            // Update the property value in place (preserves any existing attributes)
+            ApplyPropertyChangeToUpdate(propertyUpdate, registeredProperty, change, builder);
             builder.TrackPropertyUpdate(propertyUpdate, registeredProperty, properties);
         }
 
@@ -158,12 +165,17 @@ internal static class SubjectUpdateFactory
         return update;
     }
 
-    private static SubjectPropertyUpdate CreatePropertyUpdateFromChange(
+    /// <summary>
+    /// Applies a property change to an existing update in place.
+    /// This preserves any existing attributes on the update.
+    /// </summary>
+    private static void ApplyPropertyChangeToUpdate(
+        SubjectPropertyUpdate update,
         RegisteredSubjectProperty property,
         SubjectPropertyChange change,
         SubjectUpdateBuilder builder)
     {
-        var update = new SubjectPropertyUpdate { Timestamp = change.ChangedTimestamp };
+        update.Timestamp = change.ChangedTimestamp;
 
         if (property.IsSubjectDictionary)
         {
@@ -185,8 +197,6 @@ internal static class SubjectUpdateFactory
             update.Kind = SubjectPropertyUpdateKind.Value;
             update.Value = change.GetNewValue<object?>();
         }
-
-        return update;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -368,20 +378,26 @@ internal static class SubjectUpdateFactory
             currentUpdate = nestedAttributeUpdate;
         }
 
-        // Create the final attribute update using the same logic as properties
+        // Get or create the final attribute update
         var finalAttribute = attributeChain[^1];
         currentUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
         var finalAttributeName = finalAttribute.AttributeMetadata.AttributeName;
-        var attributeUpdate = CreatePropertyUpdateFromChange(attributeProperty, change, builder);
-        currentUpdate.Attributes[finalAttributeName] = attributeUpdate;
 
+        if (!currentUpdate.Attributes.TryGetValue(finalAttributeName, out var attributeUpdate))
+        {
+            attributeUpdate = new SubjectPropertyUpdate();
+            currentUpdate.Attributes[finalAttributeName] = attributeUpdate;
+        }
+
+        // Apply the change in place (preserves any existing nested attributes)
+        ApplyPropertyChangeToUpdate(attributeUpdate, attributeProperty, change, builder);
         builder.TrackPropertyUpdate(attributeUpdate, attributeProperty, currentUpdate.Attributes);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsPropertyIncluded(
         RegisteredSubjectProperty property,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors)
+        ISubjectUpdateProcessor[] processors)
     {
         for (var i = 0; i < processors.Length; i++)
         {

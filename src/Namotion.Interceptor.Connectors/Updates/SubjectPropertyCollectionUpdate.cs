@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Connectors.Updates;
 /// <summary>
 /// Represents a sparse property update for a collection item at a specific index/key.
 /// </summary>
-public class SubjectPropertyCollectionUpdate
+public readonly struct SubjectPropertyCollectionUpdate
 {
     /// <summary>
     /// The target index (int for arrays) or key (string for dictionaries).
