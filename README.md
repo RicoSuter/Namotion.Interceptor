@@ -268,8 +268,8 @@ Namotion.Interceptor is designed to be extended:
 
 | Package | Description | Docs |
 |---------|-------------|------|
-| **Namotion.Interceptor.AspNetCore** | ASP.NET Core integration for web APIs | |
+| **Namotion.Interceptor.AspNetCore** | ASP.NET Core integration for web APIs | [ASP.NET Core](docs/aspnetcore.md) |
 | **Namotion.Interceptor.Blazor** | Automatic re-rendering on property changes | [Blazor](docs/blazor.md) |
-| **Namotion.Interceptor.GraphQL** | GraphQL subscriptions for real-time updates | |
+| **Namotion.Interceptor.GraphQL** | GraphQL subscriptions for real-time updates | [GraphQL](docs/graphql.md) |
 
 For more examples, see the `Samples` directory in the solution.
