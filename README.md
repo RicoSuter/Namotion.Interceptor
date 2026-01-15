@@ -8,7 +8,7 @@ Namotion.Interceptor is a .NET library for building reactive applications with a
 
 Simply mark your classes with `[InterceptorSubject]` and declare properties as `partial`. The source generator handles the rest: creating interception logic, change detection, derived property updates, and lifecycle management. Your domain models remain clean POCOs while gaining powerful reactive capabilities.
 
-The library supports **bidirectional synchronization** with external systems like MQTT brokers, OPC UA servers, and databases. When a property changes locally, connectors automatically propagate the change to external systems. When external data arrives, your object model updates and triggers change notifications - enabling real-time data synchronization for industrial automation, IoT applications, and reactive services.
+The library supports **bidirectional synchronization** with external systems. When a property changes locally, connectors propagate the change outward. When external data arrives, your object model updates and triggers change notifications. Built-in integrations include MQTT, OPC UA, ASP.NET Core, Blazor, and GraphQL - useful for IoT dashboards, industrial HMIs, real-time web apps, and data synchronization services.
 
 ![](features.png)
 
@@ -24,8 +24,6 @@ The library supports **bidirectional synchronization** with external systems lik
 ### Interceptor Subjects
 
 An **interceptor subject** is a class marked with `[InterceptorSubject]` that uses C# 13 partial properties. The source generator transforms your partial properties into fully tracked properties that route through an interception pipeline - no runtime reflection required.
-
-For detailed patterns and best practices, see the [Subject Design Guidelines](docs/subject-guidelines.md).
 
 ```csharp
 // Your code:
@@ -75,70 +73,11 @@ person.LastName = "Doe";
 
 The system records which properties are read during derived property evaluation, then automatically recalculates when any dependency changes. This works across the entire object graph.
 
+> **Note**: Requires `WithDerivedPropertyChangeDetection()` or `WithFullPropertyTracking()` on the context.
+
 ### Interception Pipeline
 
-Property reads and writes flow through a configurable chain of interceptors. Each interceptor receives a `next` delegate and can run code **before** and **after** calling it. The "after" code runs in reverse order, creating a nested pipeline:
-
-**Write Pipeline** (`IWriteInterceptor`):
-```
-person.Name = "John"
-    │
-    ▼
-┌─ Interceptor 1 ─────────────────────────────┐
-│  (before next)  validate, transform, etc.   │
-│      │                                      │
-│      ▼                                      │
-│  ┌─ Interceptor 2 ───────────────────────┐  │
-│  │  (before next)  equality check        │  │
-│  │      │                                │  │
-│  │      ▼                                │  │
-│  │  ┌─ Interceptor 3 ─────────────────┐  │  │
-│  │  │  (before next)                  │  │  │
-│  │  │      │                          │  │  │
-│  │  │      ▼                          │  │  │
-│  │  │    _name = "John"  ← field set  │  │  │
-│  │  │      │                          │  │  │
-│  │  │      ▼                          │  │  │
-│  │  │  (after next)                   │  │  │
-│  │  └────────────────────────────────-┘  │  │
-│  │      │                                │  │
-│  │      ▼                                │  │
-│  │  (after next)  fire change event      │  │
-│  └───────────────────────────────────────┘  │
-│      │                                      │
-│      ▼                                      │
-│  (after next)  notify observers             │
-└─────────────────────────────────────────────┘
-```
-
-**Read Pipeline** (`IReadInterceptor`):
-```
-var name = person.Name
-    │
-    ▼
-┌─ Interceptor 1 ─────────────────────────────┐
-│  (before next)  record access, etc.         │
-│      │                                      │
-│      ▼                                      │
-│  ┌─ Interceptor 2 ───────────────────────┐  │
-│  │  (before next)                        │  │
-│  │      │                                │  │
-│  │      ▼                                │  │
-│  │    return _name  ← field read         │  │
-│  │      │                                │  │
-│  │      ▼                                │  │
-│  │  (after next)  transform value        │  │
-│  └───────────────────────────────────────┘  │
-│      │                                      │
-│      ▼                                      │
-│  (after next)                               │
-└─────────────────────────────────────────────┘
-    │
-    ▼
-  "John"
-```
-
-See [Interceptors documentation](docs/interceptor.md) for details.
+Property reads and writes flow through a configurable chain of interceptors. Each interceptor receives a `next` delegate and can run code before and after calling it - enabling validation, transformation, change detection, and more. See [interceptors documentation](docs/interceptor.md) for details.
 
 ## Requirements
 
@@ -147,11 +86,27 @@ See [Interceptors documentation](docs/interceptor.md) for details.
 - **C# 13** with partial properties support
 - IDE with source generator support (Visual Studio 2022, Rider, VS Code with C# extension)
 
+## Installation
+
+Add both the core library and the source generator to your project:
+
+```xml
+<ItemGroup>
+    <PackageReference Include="Namotion.Interceptor" Version="0.1.0" />
+    <PackageReference Include="Namotion.Interceptor.Generator" Version="0.1.0"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+</ItemGroup>
+```
+
+For change tracking and derived properties, also add:
+
+```xml
+<PackageReference Include="Namotion.Interceptor.Tracking" Version="0.1.0" />
+```
+
 ## Samples
 
-### Basic usage
-
-Define a interceptable class:
+The following samples build on this `Person` class:
 
 ```csharp
 [InterceptorSubject]
@@ -159,6 +114,7 @@ public partial class Person
 {
     public partial string FirstName { get; set; }
     public partial string LastName { get; set; }
+    public partial Person[] Children { get; set; }
 
     [Derived]
     public string FullName => $"{FirstName} {LastName}";
@@ -167,11 +123,16 @@ public partial class Person
     {
         FirstName = string.Empty;
         LastName = string.Empty;
+        Children = [];
     }
 }
 ```
 
-Create a context and start tracking:
+For detailed patterns and best practices, see the [Subject Design Guidelines](docs/subject-guidelines.md).
+
+### Basic Usage
+
+Create a context and instantiate your subject:
 
 ```csharp
 var context = InterceptorSubjectContext
@@ -186,10 +147,6 @@ var person = new Person(context);
 Subscribe to property changes across your object graph:
 
 ```csharp
-var context = InterceptorSubjectContext
-    .Create()
-    .WithFullPropertyTracking();
-
 context
     .GetPropertyChangeObservable()
     .Subscribe(change =>
@@ -199,51 +156,27 @@ context
             $"from '{change.OldValue}' to '{change.NewValue}'.");
     });
 
-var person = new Person(context)
-{
-    FirstName = "John",
-    // Property 'FirstName' changed from '' to 'John'.
-    // Property 'FullName' changed from ' ' to 'John '.
+person.FirstName = "John";
+// Property 'FirstName' changed from '' to 'John'.
+// Property 'FullName' changed from ' ' to 'John '.
 
-    LastName = "Doe"
-    // Property 'LastName' changed from '' to 'Doe'.
-    // Property 'FullName' changed from 'John ' to 'John Doe'.
-};
+person.LastName = "Doe";
+// Property 'LastName' changed from '' to 'Doe'.
+// Property 'FullName' changed from 'John ' to 'John Doe'.
 ```
 
-### Subject Lifecycle Tracking
+### Lifecycle Tracking
 
 Track when objects enter or leave your object graph:
 
 ```csharp
-[InterceptorSubject]
-public partial class Person
-{
-    public partial string Name { get; set; }
-    public partial Person[] Children { get; set; }
-
-    public Person()
-    {
-        Name = "n/a";
-        Children = [];
-    }
-}
-
-var context = InterceptorSubjectContext
-    .Create()
-    .WithFullPropertyTracking()
-    .WithService(() => new LogLifecycleHandler());
-
-var person = new Person(context);
-// Attached: Person
-
-person.Children = [new Person { Name = "Child1" }, new Person { Name = "Child2" }];
-// Attached: Child1
-// Attached: Child2
+person.Children = [new Person { FirstName = "Alice" }, new Person { FirstName = "Bob" }];
+// Attached: Alice
+// Attached: Bob
 
 person.Children = [];
-// Detached: Child1
-// Detached: Child2
+// Detached: Alice
+// Detached: Bob
 ```
 
 ### Bidirectional Synchronization with External Systems
@@ -311,7 +244,7 @@ Namotion.Interceptor is designed to be extended:
 | Package | Description | Docs |
 |---------|-------------|------|
 | **Namotion.Interceptor** | Property interception with compile-time source generation | [Interceptors](docs/interceptor.md) |
-| **Namotion.Interceptor.Generator** | Source generator (included automatically) | |
+| **Namotion.Interceptor.Generator** | Source generator for `[InterceptorSubject]` classes (add as analyzer) | |
 
 ### Foundation
 
@@ -338,15 +271,5 @@ Namotion.Interceptor is designed to be extended:
 | **Namotion.Interceptor.AspNetCore** | ASP.NET Core integration for web APIs | |
 | **Namotion.Interceptor.Blazor** | Automatic re-rendering on property changes | [Blazor](docs/blazor.md) |
 | **Namotion.Interceptor.GraphQL** | GraphQL subscriptions for real-time updates | |
-
-## Documentation
-
-- [Subject Design Guidelines](docs/subject-guidelines.md) - Property patterns and best practices
-- [Interceptors and Contexts](docs/interceptor.md) - Core interception pipeline
-- [Tracking](docs/tracking.md) - Change tracking, transactions, lifecycle
-- [Registry](docs/registry.md) - Runtime property discovery and metadata
-- [Connectors](docs/connectors.md) - External system integration
-
-## Samples
 
 For more examples, see the `Samples` directory in the solution.
