@@ -11,23 +11,31 @@ Simply mark your classes with `[InterceptorSubject]` and declare properties as `
 The library supports **bidirectional synchronization** with external systems like MQTT brokers, OPC UA servers, and databases. When a property changes locally, connectors automatically propagate the change to external systems. When external data arrives, your object model updates and triggers change notifications - enabling real-time data synchronization for industrial automation, IoT applications, and reactive services.
 
 ```mermaid
-graph LR
-    subgraph Core
-        Interceptor[Interceptor + Source Generation]
+graph TB
+    subgraph Row1 [ ]
+        direction LR
+        subgraph Core
+            Interceptor[Interceptor + Source Generation]
+        end
+        subgraph Foundation
+            Tracking[Tracking]
+            Registry[Registry]
+            Validation[Validation]
+        end
     end
-    subgraph Foundation
-        Tracking[Tracking]
-        Registry[Registry]
-        Validation[Validation]
-    end
-    subgraph Connectors
-        MQTT[MQTT]
-        OpcUa[OPC UA]
-    end
-    subgraph Integrations
-        Blazor[Blazor]
-        GraphQL[GraphQL]
-        AspNetCore[ASP.NET Core]
+
+    subgraph Row2 [ ]
+        direction LR
+        subgraph Connectors
+            ConnectorsBase[Connectors]
+            MQTT[MQTT]
+            OpcUa[OPC UA]
+        end
+        subgraph Integrations
+            Blazor[Blazor]
+            GraphQL[GraphQL]
+            AspNetCore[ASP.NET Core]
+        end
     end
 
     Core --> Foundation
@@ -47,6 +55,8 @@ graph LR
 ### Interceptor Subjects
 
 An **interceptor subject** is a class marked with `[InterceptorSubject]` that uses C# 13 partial properties. The source generator transforms your partial properties into fully tracked properties that route through an interception pipeline - no runtime reflection required.
+
+For detailed patterns and best practices, see the [Subject Design Guidelines](docs/subject-guidelines.md).
 
 ```csharp
 // Your code:
@@ -72,25 +82,44 @@ public partial class Car : IInterceptorSubject
 }
 ```
 
-### Key Interfaces
+### Derived Properties
 
-| Interface | Purpose |
-|-----------|---------|
-| **`IInterceptorSubject`** | Every intercepted class implements this, providing access to context and property metadata |
-| **`IInterceptorSubjectContext`** | The coordination hub that manages services, interceptors, and the execution pipeline |
-| **`IReadInterceptor` / `IWriteInterceptor`** | Middleware components that observe or modify property operations |
-| **`ILifecycleHandler`** | Reacts to subjects being attached to or detached from the object graph |
+Mark computed properties with `[Derived]` for automatic dependency tracking. When any property used in the calculation changes, the derived property is automatically re-evaluated and fires its own change event:
 
-### How Interception Works
+```csharp
+[InterceptorSubject]
+public partial class Person
+{
+    public partial string FirstName { get; set; }
+    public partial string LastName { get; set; }
 
-When you read or write a property, the operation flows through a chain of interceptors:
+    [Derived]
+    public string FullName => $"{FirstName} {LastName}";
+}
 
+person.FirstName = "John";
+// Fires: FirstName changed, FullName changed
+
+person.LastName = "Doe";
+// Fires: LastName changed, FullName changed
 ```
-Write: Your Code → Interceptor 1 → Interceptor 2 → ... → Actual Field Write
-Read:  Actual Field Read → ... → Interceptor 2 → Interceptor 1 → Your Code
+
+The system records which properties are read during derived property evaluation, then automatically recalculates when any dependency changes. This works across the entire object graph.
+
+### Interception Pipeline
+
+Property reads and writes flow through a configurable chain of interceptors. Each interceptor can observe, modify, or block the operation:
+
+```mermaid
+flowchart LR
+    Code[Your Code] --> WriteInterceptors[Write Interceptors]
+    WriteInterceptors --> Field[Field Storage]
+    Field --> ChangeEvent[Change Event]
+    ChangeEvent --> Observers[Observers]
+    ChangeEvent --> Connectors[Connectors]
 ```
 
-Each interceptor can observe, modify, or block the operation. This enables change tracking, validation, external synchronization, and more - all without modifying your domain logic.
+Built-in interceptors provide equality checking (skip if value unchanged), change tracking, validation, and external synchronization. You can add custom interceptors by implementing `IReadInterceptor` or `IWriteInterceptor`. See [Interceptors documentation](docs/interceptor.md) for details.
 
 ## Requirements
 
@@ -98,6 +127,60 @@ Each interceptor can observe, modify, or block the operation. This enables chang
 - **.NET Standard 2.0** (core library only)
 - **C# 13** with partial properties support
 - IDE with source generator support (Visual Studio 2022, Rider, VS Code with C# extension)
+
+## Feature Overview
+
+The following diagram shows the available `With*()` extension methods and their dependencies. Arrows indicate "depends on" relationships:
+
+```mermaid
+flowchart LR
+    subgraph Tracking
+        WithLifecycle
+        WithEqualityCheck
+        WithPropertyChangeObservable
+        WithPropertyChangeQueue
+        WithReadPropertyRecorder
+        WithTransactions
+        WithDerivedPropertyChangeDetection
+        WithContextInheritance
+        WithParents
+        WithFullPropertyTracking
+    end
+
+    subgraph Validation
+        WithPropertyValidation
+        WithDataAnnotationValidation
+    end
+
+    subgraph Registry
+        WithRegistry
+    end
+
+    subgraph Connectors
+        WithSourceTransactions
+    end
+
+    %% Tracking dependencies
+    WithDerivedPropertyChangeDetection --> WithLifecycle
+    WithContextInheritance --> WithLifecycle
+    WithParents --> WithLifecycle
+
+    %% Composite method
+    WithFullPropertyTracking --> WithEqualityCheck
+    WithFullPropertyTracking --> WithDerivedPropertyChangeDetection
+    WithFullPropertyTracking --> WithPropertyChangeObservable
+    WithFullPropertyTracking --> WithPropertyChangeQueue
+    WithFullPropertyTracking --> WithContextInheritance
+
+    %% Validation dependencies
+    WithDataAnnotationValidation --> WithPropertyValidation
+
+    %% Registry dependencies
+    WithRegistry --> WithContextInheritance
+
+    %% Connectors dependencies
+    WithSourceTransactions --> WithTransactions
+```
 
 ## Quick Start
 
@@ -204,7 +287,7 @@ person.Children = [];
 // Detached: Child2
 ```
 
-## Bidirectional Synchronization with External Systems
+### Bidirectional Synchronization with External Systems
 
 The core tracking capabilities enable powerful integrations. Here's an example with MQTT:
 
@@ -250,60 +333,6 @@ sensor.Temperature = 25.5m;
 
 Similar patterns work with OPC UA, databases, and other external systems. See the [MQTT](docs/connectors/mqtt.md), [OPC UA](docs/connectors/opcua.md), and [Connectors](docs/connectors.md) documentation for details.
 
-## Feature Overview
-
-The following diagram shows the available `With*()` extension methods and their dependencies. Arrows indicate "depends on" relationships:
-
-```mermaid
-flowchart LR
-    subgraph Tracking
-        WithLifecycle
-        WithEqualityCheck
-        WithPropertyChangeObservable
-        WithPropertyChangeQueue
-        WithReadPropertyRecorder
-        WithTransactions
-        WithDerivedPropertyChangeDetection
-        WithContextInheritance
-        WithParents
-        WithFullPropertyTracking
-    end
-
-    subgraph Validation
-        WithPropertyValidation
-        WithDataAnnotationValidation
-    end
-
-    subgraph Registry
-        WithRegistry
-    end
-
-    subgraph Connectors
-        WithSourceTransactions
-    end
-
-    %% Tracking dependencies
-    WithDerivedPropertyChangeDetection --> WithLifecycle
-    WithContextInheritance --> WithLifecycle
-    WithParents --> WithLifecycle
-
-    %% Composite method
-    WithFullPropertyTracking --> WithEqualityCheck
-    WithFullPropertyTracking --> WithDerivedPropertyChangeDetection
-    WithFullPropertyTracking --> WithPropertyChangeObservable
-    WithFullPropertyTracking --> WithPropertyChangeQueue
-    WithFullPropertyTracking --> WithContextInheritance
-
-    %% Validation dependencies
-    WithDataAnnotationValidation --> WithPropertyValidation
-
-    %% Registry dependencies
-    WithRegistry --> WithContextInheritance
-
-    %% Connectors dependencies
-    WithSourceTransactions --> WithTransactions
-```
-
 ## Extensibility
 
 Namotion.Interceptor is designed to be extended:
@@ -320,47 +349,36 @@ Namotion.Interceptor is designed to be extended:
 
 ### Core
 
-| Package | Description |
-|---------|-------------|
-| **Namotion.Interceptor** | Property interception with compile-time source generation |
-| **Namotion.Interceptor.Generator** | Source generator (included automatically) |
+| Package | Description | Docs |
+|---------|-------------|------|
+| **Namotion.Interceptor** | Property interception with compile-time source generation | [Interceptors](docs/interceptor.md) |
+| **Namotion.Interceptor.Generator** | Source generator (included automatically) | |
 
 ### Foundation
 
-| Package | Description |
-|---------|-------------|
-| **Namotion.Interceptor.Tracking** | Change tracking, derived properties, lifecycle events, transactions |
-| **Namotion.Interceptor.Registry** | Runtime property discovery, metadata, and dynamic properties |
-| **Namotion.Interceptor.Validation** | Property validation with data annotation support |
-| **Namotion.Interceptor.Dynamic** | Create subjects from interfaces at runtime |
-| **Namotion.Interceptor.Hosting** | Hosted service lifecycle management |
+| Package | Description | Docs |
+|---------|-------------|------|
+| **Namotion.Interceptor.Tracking** | Change tracking, derived properties, lifecycle events, transactions | [Tracking](docs/tracking.md) |
+| **Namotion.Interceptor.Registry** | Runtime property discovery, metadata, and dynamic properties | [Registry](docs/registry.md) |
+| **Namotion.Interceptor.Validation** | Property validation with data annotation support | |
+| **Namotion.Interceptor.Dynamic** | Create subjects from interfaces at runtime | [Dynamic](docs/dynamic.md) |
+| **Namotion.Interceptor.Hosting** | Hosted service lifecycle management | |
 
 ### Connectors
 
-| Package | Description |
-|---------|-------------|
-| **Namotion.Interceptor.Connectors** | Base infrastructure for external system integration |
-| **Namotion.Interceptor.Mqtt** | Bidirectional MQTT synchronization |
-| **Namotion.Interceptor.OpcUa** | OPC UA client and server integration |
+| Package | Description | Docs |
+|---------|-------------|------|
+| **Namotion.Interceptor.Connectors** | Base infrastructure for external system integration | [Connectors](docs/connectors.md) |
+| **Namotion.Interceptor.Mqtt** | Bidirectional MQTT synchronization | [MQTT](docs/connectors/mqtt.md) |
+| **Namotion.Interceptor.OpcUa** | OPC UA client and server integration | [OPC UA](docs/connectors/opcua.md) |
 
 ### Integrations
 
-| Package | Description |
-|---------|-------------|
-| **Namotion.Interceptor.AspNetCore** | ASP.NET Core integration for web APIs |
-| **Namotion.Interceptor.Blazor** | Automatic re-rendering on property changes |
-| **Namotion.Interceptor.GraphQL** | GraphQL subscriptions for real-time updates |
-
-## How It Works
-
-```mermaid
-flowchart LR
-    PropertySet[Property Set] --> Interceptors[Interceptors]
-    Interceptors --> ChangeEvent[Change Event]
-    ChangeEvent --> Observers[Observers]
-    ChangeEvent --> Connectors[Connectors]
-    Connectors --> ExternalSystems[External Systems]
-```
+| Package | Description | Docs |
+|---------|-------------|------|
+| **Namotion.Interceptor.AspNetCore** | ASP.NET Core integration for web APIs | |
+| **Namotion.Interceptor.Blazor** | Automatic re-rendering on property changes | [Blazor](docs/blazor.md) |
+| **Namotion.Interceptor.GraphQL** | GraphQL subscriptions for real-time updates | |
 
 ## Documentation
 
