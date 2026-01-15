@@ -77,18 +77,68 @@ The system records which properties are read during derived property evaluation,
 
 ### Interception Pipeline
 
-Property reads and writes flow through a configurable chain of interceptors. Each interceptor can observe, modify, or block the operation:
+Property reads and writes flow through a configurable chain of interceptors. Each interceptor receives a `next` delegate and can run code **before** and **after** calling it. The "after" code runs in reverse order, creating a nested pipeline:
 
-```mermaid
-flowchart LR
-    Code[Your Code] --> WriteInterceptors[Write Interceptors]
-    WriteInterceptors --> Field[Field Storage]
-    Field --> ChangeEvent[Change Event]
-    ChangeEvent --> Observers[Observers]
-    ChangeEvent --> Connectors[Connectors]
+**Write Pipeline** (`IWriteInterceptor`):
+```
+person.Name = "John"
+    │
+    ▼
+┌─ Interceptor 1 ─────────────────────────────┐
+│  (before next)  validate, transform, etc.   │
+│      │                                      │
+│      ▼                                      │
+│  ┌─ Interceptor 2 ───────────────────────┐  │
+│  │  (before next)  equality check        │  │
+│  │      │                                │  │
+│  │      ▼                                │  │
+│  │  ┌─ Interceptor 3 ─────────────────┐  │  │
+│  │  │  (before next)                  │  │  │
+│  │  │      │                          │  │  │
+│  │  │      ▼                          │  │  │
+│  │  │    _name = "John"  ← field set  │  │  │
+│  │  │      │                          │  │  │
+│  │  │      ▼                          │  │  │
+│  │  │  (after next)                   │  │  │
+│  │  └────────────────────────────────-┘  │  │
+│  │      │                                │  │
+│  │      ▼                                │  │
+│  │  (after next)  fire change event      │  │
+│  └───────────────────────────────────────┘  │
+│      │                                      │
+│      ▼                                      │
+│  (after next)  notify observers             │
+└─────────────────────────────────────────────┘
 ```
 
-Built-in interceptors provide equality checking (skip if value unchanged), change tracking, validation, and external synchronization. You can add custom interceptors by implementing `IReadInterceptor` or `IWriteInterceptor`. See [Interceptors documentation](docs/interceptor.md) for details.
+**Read Pipeline** (`IReadInterceptor`):
+```
+var name = person.Name
+    │
+    ▼
+┌─ Interceptor 1 ─────────────────────────────┐
+│  (before next)  record access, etc.         │
+│      │                                      │
+│      ▼                                      │
+│  ┌─ Interceptor 2 ───────────────────────┐  │
+│  │  (before next)                        │  │
+│  │      │                                │  │
+│  │      ▼                                │  │
+│  │    return _name  ← field read         │  │
+│  │      │                                │  │
+│  │      ▼                                │  │
+│  │  (after next)  transform value        │  │
+│  └───────────────────────────────────────┘  │
+│      │                                      │
+│      ▼                                      │
+│  (after next)                               │
+└─────────────────────────────────────────────┘
+    │
+    ▼
+  "John"
+```
+
+See [Interceptors documentation](docs/interceptor.md) for details.
 
 ## Requirements
 
@@ -97,15 +147,11 @@ Built-in interceptors provide equality checking (skip if value unchanged), chang
 - **C# 13** with partial properties support
 - IDE with source generator support (Visual Studio 2022, Rider, VS Code with C# extension)
 
-## Quick Start
+## Samples
 
-Install the core package:
+### Basic usage
 
-```bash
-dotnet add package Namotion.Interceptor
-```
-
-Define a trackable class:
+Define a interceptable class:
 
 ```csharp
 [InterceptorSubject]
@@ -134,8 +180,6 @@ var context = InterceptorSubjectContext
 
 var person = new Person(context);
 ```
-
-## Samples
 
 ### Change Tracking
 
