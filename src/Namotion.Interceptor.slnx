@@ -13,10 +13,7 @@
     <File Path="../README.md" />
     <File Path="Directory.Build.props" />
   </Folder>
-  <Folder Name="/Extensions/">
-    <Project Path="Namotion.Interceptor.AspNetCore/Namotion.Interceptor.AspNetCore.csproj" />
-    <Project Path="Namotion.Interceptor.Blazor/Namotion.Interceptor.Blazor.csproj" />
-    <Project Path="Namotion.Interceptor.GraphQL/Namotion.Interceptor.GraphQL.csproj" />
+  <Folder Name="/Connectors/">
     <Project Path="Namotion.Interceptor.Mqtt.SampleClient/Namotion.Interceptor.Mqtt.SampleClient.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt.SampleServer/Namotion.Interceptor.Mqtt.SampleServer.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt/Namotion.Interceptor.Mqtt.csproj" />
@@ -24,6 +21,11 @@
     <Project Path="Namotion.Interceptor.OpcUa.SampleServer/Namotion.Interceptor.OpcUa.SampleServer.csproj" />
     <Project Path="Namotion.Interceptor.OpcUa/Namotion.Interceptor.OpcUa.csproj" />
     <Project Path="Namotion.Interceptor.SamplesModel/Namotion.Interceptor.SamplesModel.csproj" />
+  </Folder>
+  <Folder Name="/Extensions/">
+    <Project Path="Namotion.Interceptor.AspNetCore/Namotion.Interceptor.AspNetCore.csproj" />
+    <Project Path="Namotion.Interceptor.Blazor/Namotion.Interceptor.Blazor.csproj" />
+    <Project Path="Namotion.Interceptor.GraphQL/Namotion.Interceptor.GraphQL.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/">
     <Project Path="HomeBlaze/HomeBlaze.Components/HomeBlaze.Components.csproj" />
@@ -55,7 +57,6 @@
     <Project Path="HomeBlaze/HomeBlaze.Storage.Tests/HomeBlaze.Storage.Tests.csproj" />
   </Folder>
   <Folder Name="/Samples/">
-    <Project Path="Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj" />
     <Project Path="Namotion.Interceptor.SampleBlazor/Namotion.Interceptor.SampleBlazor.csproj" />
     <Project Path="Namotion.Interceptor.SampleConsole/Namotion.Interceptor.SampleConsole.csproj" />
     <Project Path="Namotion.Interceptor.SampleMachine/Namotion.Interceptor.SampleMachine.csproj" />
@@ -77,6 +78,7 @@
   <Project Path="Namotion.Interceptor.Generator/Namotion.Interceptor.Generator.csproj" />
   <Project Path="Namotion.Interceptor.Hosting/Namotion.Interceptor.Hosting.csproj" />
   <Project Path="Namotion.Interceptor.Registry/Namotion.Interceptor.Registry.csproj" />
+  <Project Path="Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj" />
   <Project Path="Namotion.Interceptor.Connectors/Namotion.Interceptor.Connectors.csproj" />
   <Project Path="Namotion.Interceptor.Testing/Namotion.Interceptor.Testing.csproj" />
   <Project Path="Namotion.Interceptor.Tracking/Namotion.Interceptor.Tracking.csproj" />

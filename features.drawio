@@ -1,0 +1,107 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.3.0 Chrome/140.0.7339.249 Electron/38.7.2 Safari/537.36" scale="1" border="0" version="29.3.0">
+  <diagram name="Page-1" id="Akw01ZIGIV-2cNeXsqmA">
+    <mxGraphModel dx="2468" dy="3304" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="1654" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-7" edge="1" parent="1" source="d9BL-mROPcZ20sLbiVwK-6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="d9BL-mROPcZ20sLbiVwK-3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;div&gt;&lt;b&gt;Property write validation&lt;/b&gt;&lt;/div&gt;&lt;div&gt;WithPropertyValidation()&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;IPropertyValidator" vertex="1">
+          <mxGeometry height="100" width="190" x="180" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-6" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="&lt;div&gt;&lt;b&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;Data annotations validation&lt;/span&gt;&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;WithDataAnnotationValidation()&lt;/span&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;DataAnnotationsValidator" vertex="1">
+          <mxGeometry height="90" width="189" x="180" y="440" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-11" edge="1" parent="1" source="d9BL-mROPcZ20sLbiVwK-8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="d9BL-mROPcZ20sLbiVwK-12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-8" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" value="&lt;b&gt;Registry &lt;br&gt;(subject &quot;reflection&quot;)&lt;/b&gt;&lt;div&gt;WithRegistry()&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;div&gt;ISubjectRegistry&lt;br&gt;&lt;/div&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="100" width="165" x="800" y="-40" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-13" edge="1" parent="1" source="d9BL-mROPcZ20sLbiVwK-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.75;entryY=0;entryDx=0;entryDy=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="d9BL-mROPcZ20sLbiVwK-9">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="560" y="300" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-9" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;div&gt;&lt;b&gt;Subject lifecycle&lt;/b&gt;&lt;/div&gt;&lt;div&gt;WithLifecycle()&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;ILifecycleHandler" vertex="1">
+          <mxGeometry height="90" width="200" x="410" y="410" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-12" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="&lt;div&gt;&lt;b&gt;Automatically assign context on children&lt;/b&gt;&lt;/div&gt;WithContextInheritance()" vertex="1">
+          <mxGeometry height="60" width="274" x="610" y="270" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-15" edge="1" parent="1" source="d9BL-mROPcZ20sLbiVwK-14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="d9BL-mROPcZ20sLbiVwK-9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-14" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="&lt;div&gt;&lt;b&gt;Assign parents&lt;/b&gt;&lt;/div&gt;WithParents()" vertex="1">
+          <mxGeometry height="60" width="145" x="680" y="425" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-16" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;div&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;&lt;b&gt;Observable changes&lt;/b&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;background-color: transparent;&quot;&gt;WithPropertyChangeObservable&lt;/span&gt;&lt;span style=&quot;background-color: initial;&quot;&gt;()&lt;/span&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Subscribe to observable via&amp;nbsp;GetPropertyChangeObservable()&lt;/div&gt;" vertex="1">
+          <mxGeometry height="110" width="240" x="480" y="-250" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-19" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="&lt;div&gt;&lt;b&gt;Record property getter accesses&lt;/b&gt;&lt;/div&gt;WithReadPropertyRecorder()" vertex="1">
+          <mxGeometry height="60" width="220" x="542.5" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-24" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" value="&lt;div&gt;&lt;b&gt;Raise property changed for derived properties&lt;/b&gt;&lt;/div&gt;WithDerivedPropertyChangeDetection()" vertex="1">
+          <mxGeometry height="60" width="320" x="300" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-38" edge="1" parent="1" source="d9BL-mROPcZ20sLbiVwK-24" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" target="d9BL-mROPcZ20sLbiVwK-9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-28" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;div&gt;&lt;b&gt;Call setter only for new values&lt;/b&gt;&lt;/div&gt;WithEqualityCheck()" vertex="1">
+          <mxGeometry height="60" width="210" x="110" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-32" edge="1" parent="1" source="d9BL-mROPcZ20sLbiVwK-31" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="d9BL-mROPcZ20sLbiVwK-14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-31" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="&lt;b&gt;JSON utilities&lt;/b&gt;&lt;br&gt;property.GetJsonPath()" vertex="1">
+          <mxGeometry height="60" width="180" x="860" y="425" as="geometry" />
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-37" edge="1" parent="1" source="d9BL-mROPcZ20sLbiVwK-36" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="d9BL-mROPcZ20sLbiVwK-8">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="880" y="-140" />
+              <mxPoint x="880" y="-120" />
+              <mxPoint x="883" y="-120" />
+            </Array>
+            <mxPoint x="1017.5" y="-60" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="d9BL-mROPcZ20sLbiVwK-36" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="&lt;b&gt;Property attributes&lt;/b&gt;&lt;div&gt;property.GetPropertyAttributes()&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="240" x="762.5" y="-170" as="geometry" />
+        </mxCell>
+        <mxCell id="EaddW8LMifSNtddjIqRl-2" edge="1" parent="1" source="EaddW8LMifSNtddjIqRl-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="d9BL-mROPcZ20sLbiVwK-8">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="924" y="60" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="EaddW8LMifSNtddjIqRl-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="&lt;div&gt;&lt;b&gt;Attributes with initializer&lt;/b&gt;&lt;/div&gt;ISubjectPropertyInitializer" vertex="1">
+          <mxGeometry height="60" width="200" x="782.5" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="fullTracking-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" value="&lt;div&gt;&lt;b&gt;Full property tracking (composite)&lt;/b&gt;&lt;/div&gt;WithFullPropertyTracking()" vertex="1">
+          <mxGeometry height="60" width="240" x="360" y="-50" as="geometry" />
+        </mxCell>
+        <mxCell id="fullTracking-2" edge="1" parent="1" source="fullTracking-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="d9BL-mROPcZ20sLbiVwK-28">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fullTracking-3" edge="1" parent="1" source="fullTracking-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0.75;exitY=1;exitDx=0;exitDy=0;" target="d9BL-mROPcZ20sLbiVwK-24">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fullTracking-4" edge="1" parent="1" source="fullTracking-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.25;entryY=1;entryDx=0;entryDy=0;exitX=0.75;exitY=0;exitDx=0;exitDy=0;" target="d9BL-mROPcZ20sLbiVwK-16">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fullTracking-5" edge="1" parent="1" source="fullTracking-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" target="d9BL-mROPcZ20sLbiVwK-12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="changeQueue-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;div&gt;&lt;b&gt;Queue-based changes&lt;/b&gt;&lt;/div&gt;WithPropertyChangeQueue()" vertex="1">
+          <mxGeometry height="60" width="210" x="215" y="-220" as="geometry" />
+        </mxCell>
+        <mxCell id="fullTracking-6" edge="1" parent="1" source="fullTracking-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;exitX=0.164;exitY=0.02;exitDx=0;exitDy=0;exitPerimeter=0;" target="changeQueue-1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
