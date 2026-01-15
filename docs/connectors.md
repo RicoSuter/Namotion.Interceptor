@@ -2,6 +2,10 @@
 
 The `Namotion.Interceptor.Connectors` package provides infrastructure for connecting subject graphs to external systems. It includes **sources** (for synchronizing FROM external systems) and shared components used by both sources and servers.
 
+- [MQTT](connectors/mqtt.md) - MQTT client/server integration for IoT scenarios
+- [OPC UA](connectors/opcua.md) - OPC UA client/server integration for industrial automation
+- [Subject Updates](connectors/subject-updates.md) - Wire format for serializing subject state
+
 ## Architecture Overview
 
 ### Layers
@@ -247,7 +251,7 @@ The `Updates/` folder contains serialization infrastructure for subject state:
 
 These are used by both sources and servers (e.g., ASP.NET Core controllers, SignalR hubs).
 
-For details on the update format, collection synchronization, and apply logic, see [Subject Updates](connectors-subject-updates.md).
+For details on the update format, collection synchronization, and apply logic, see [Subject Updates](connectors/subject-updates.md).
 
 ## Setup
 
