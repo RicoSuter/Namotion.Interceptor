@@ -10,38 +10,7 @@ Simply mark your classes with `[InterceptorSubject]` and declare properties as `
 
 The library supports **bidirectional synchronization** with external systems like MQTT brokers, OPC UA servers, and databases. When a property changes locally, connectors automatically propagate the change to external systems. When external data arrives, your object model updates and triggers change notifications - enabling real-time data synchronization for industrial automation, IoT applications, and reactive services.
 
-```mermaid
-graph TB
-    subgraph Row1 [ ]
-        direction LR
-        subgraph Core
-            Interceptor[Interceptor + Source Generation]
-        end
-        subgraph Foundation
-            Tracking[Tracking]
-            Registry[Registry]
-            Validation[Validation]
-        end
-    end
-
-    subgraph Row2 [ ]
-        direction LR
-        subgraph Connectors
-            ConnectorsBase[Connectors]
-            MQTT[MQTT]
-            OpcUa[OPC UA]
-        end
-        subgraph Integrations
-            Blazor[Blazor]
-            GraphQL[GraphQL]
-            AspNetCore[ASP.NET Core]
-        end
-    end
-
-    Core --> Foundation
-    Foundation --> Connectors
-    Connectors --> Integrations
-```
+![](features.png)
 
 ## Why Namotion.Interceptor?
 
@@ -127,60 +96,6 @@ Built-in interceptors provide equality checking (skip if value unchanged), chang
 - **.NET Standard 2.0** (core library only)
 - **C# 13** with partial properties support
 - IDE with source generator support (Visual Studio 2022, Rider, VS Code with C# extension)
-
-## Feature Overview
-
-The following diagram shows the available `With*()` extension methods and their dependencies. Arrows indicate "depends on" relationships:
-
-```mermaid
-flowchart LR
-    subgraph Tracking
-        WithLifecycle
-        WithEqualityCheck
-        WithPropertyChangeObservable
-        WithPropertyChangeQueue
-        WithReadPropertyRecorder
-        WithTransactions
-        WithDerivedPropertyChangeDetection
-        WithContextInheritance
-        WithParents
-        WithFullPropertyTracking
-    end
-
-    subgraph Validation
-        WithPropertyValidation
-        WithDataAnnotationValidation
-    end
-
-    subgraph Registry
-        WithRegistry
-    end
-
-    subgraph Connectors
-        WithSourceTransactions
-    end
-
-    %% Tracking dependencies
-    WithDerivedPropertyChangeDetection --> WithLifecycle
-    WithContextInheritance --> WithLifecycle
-    WithParents --> WithLifecycle
-
-    %% Composite method
-    WithFullPropertyTracking --> WithEqualityCheck
-    WithFullPropertyTracking --> WithDerivedPropertyChangeDetection
-    WithFullPropertyTracking --> WithPropertyChangeObservable
-    WithFullPropertyTracking --> WithPropertyChangeQueue
-    WithFullPropertyTracking --> WithContextInheritance
-
-    %% Validation dependencies
-    WithDataAnnotationValidation --> WithPropertyValidation
-
-    %% Registry dependencies
-    WithRegistry --> WithContextInheritance
-
-    %% Connectors dependencies
-    WithSourceTransactions --> WithTransactions
-```
 
 ## Quick Start
 
