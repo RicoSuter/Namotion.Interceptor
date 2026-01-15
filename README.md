@@ -11,28 +11,28 @@ Simply mark your classes with `[InterceptorSubject]` and declare properties as `
 The library supports **bidirectional synchronization** with external systems like MQTT brokers, OPC UA servers, and databases. When a property changes locally, connectors automatically propagate the change to external systems. When external data arrives, your object model updates and triggers change notifications - enabling real-time data synchronization for industrial automation, IoT applications, and reactive services.
 
 ```mermaid
-graph TB
-    subgraph Integrations
-        Blazor[Blazor]
-        GraphQL[GraphQL]
-        AspNetCore[ASP.NET Core]
-    end
-    subgraph Connectors
-        MQTT[MQTT]
-        OpcUa[OPC UA]
+graph LR
+    subgraph Core
+        Interceptor[Interceptor + Source Generation]
     end
     subgraph Foundation
         Tracking[Tracking]
         Registry[Registry]
         Validation[Validation]
     end
-    subgraph Core
-        Interceptor[Interceptor + Source Generation]
+    subgraph Connectors
+        MQTT[MQTT]
+        OpcUa[OPC UA]
+    end
+    subgraph Integrations
+        Blazor[Blazor]
+        GraphQL[GraphQL]
+        AspNetCore[ASP.NET Core]
     end
 
-    Integrations --> Connectors
-    Connectors --> Foundation
-    Foundation --> Core
+    Core --> Foundation
+    Foundation --> Connectors
+    Connectors --> Integrations
 ```
 
 ## Why Namotion.Interceptor?
@@ -252,49 +252,56 @@ Similar patterns work with OPC UA, databases, and other external systems. See th
 
 ## Feature Overview
 
-The following diagram shows the available features and how they build on each other:
+The following diagram shows the available `With*()` extension methods and their dependencies. Arrows indicate "depends on" relationships:
 
 ```mermaid
-flowchart TB
-    subgraph Getters
-        ReadRecorder[WithReadPropertyRecorder]
-        DerivedChange[WithDerivedPropertyChangeDetection]
+flowchart LR
+    subgraph Tracking
+        WithLifecycle
+        WithEqualityCheck
+        WithPropertyChangeObservable
+        WithPropertyChangeQueue
+        WithReadPropertyRecorder
+        WithTransactions
+        WithDerivedPropertyChangeDetection
+        WithContextInheritance
+        WithParents
+        WithFullPropertyTracking
     end
 
-    subgraph Setters
-        EqualityCheck[WithEqualityCheck]
-        Validation[WithPropertyValidation]
-        DataAnnotations[WithDataAnnotationValidation]
-    end
-
-    subgraph Context
-        ContextInheritance[WithContextInheritance]
-        Parents[WithParents]
-        JsonUtilities[GetJsonPath]
-    end
-
-    subgraph Lifecycle
-        LifecycleHandler[WithLifecycle]
+    subgraph Validation
+        WithPropertyValidation
+        WithDataAnnotationValidation
     end
 
     subgraph Registry
-        RegistryFeature[WithRegistry]
-        PropertyAttributes[GetPropertyAttributes]
-        AttributeInitializer[ISubjectPropertyInitializer]
+        WithRegistry
     end
 
-    subgraph Observable
-        PropertyChangeObservable[WithPropertyChangeObservable]
+    subgraph Connectors
+        WithSourceTransactions
     end
 
-    DerivedChange --> ReadRecorder
-    DerivedChange --> LifecycleHandler
-    ContextInheritance --> LifecycleHandler
-    RegistryFeature --> ContextInheritance
-    DataAnnotations --> Validation
-    PropertyAttributes --> RegistryFeature
-    AttributeInitializer --> PropertyAttributes
-    Parents --> LifecycleHandler
+    %% Tracking dependencies
+    WithDerivedPropertyChangeDetection --> WithLifecycle
+    WithContextInheritance --> WithLifecycle
+    WithParents --> WithLifecycle
+
+    %% Composite method
+    WithFullPropertyTracking --> WithEqualityCheck
+    WithFullPropertyTracking --> WithDerivedPropertyChangeDetection
+    WithFullPropertyTracking --> WithPropertyChangeObservable
+    WithFullPropertyTracking --> WithPropertyChangeQueue
+    WithFullPropertyTracking --> WithContextInheritance
+
+    %% Validation dependencies
+    WithDataAnnotationValidation --> WithPropertyValidation
+
+    %% Registry dependencies
+    WithRegistry --> WithContextInheritance
+
+    %% Connectors dependencies
+    WithSourceTransactions --> WithTransactions
 ```
 
 ## Extensibility
