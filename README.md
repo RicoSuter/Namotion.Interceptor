@@ -1,20 +1,113 @@
-[![Nuget](https://img.shields.io/nuget/v/Namotion.Interceptor.svg)](https://apimundo.com/organizations/nuget-org/nuget-feeds/public/packages/Namotion.Interceptor/versions/latest)
+[![NuGet](https://img.shields.io/nuget/v/Namotion.Interceptor.svg)](https://www.nuget.org/packages/Namotion.Interceptor)
 
-**The library is currently in development and the APIs might change.**
+> **Note**: This library is in active development. APIs may change between versions.
 
 # Namotion.Interceptor for .NET
 
-Namotion.Interceptor is a .NET library designed to simplify the creation of trackable object models by automatically generating property interceptors (requires [C# 13 partial properties](https://learn.microsoft.com/en-us/dotnet/csharp/whats-new/csharp-13#more-partial-members)). All you need to do is annotate your model classes with a few simple attributes; they remain regular POCOs otherwise. The library uses source generation to handle the interception logic for you.
+Namotion.Interceptor is a .NET library for building reactive applications with automatic property tracking and change propagation. It uses **C# 13 partial properties** and **source generation** to transform your classes into observable object graphs - without runtime reflection or proxy objects.
 
-In addition to property tracking, Namotion.Interceptor offers advanced features such as automatic change detection (including derived properties), reactive source mapping (e.g., for GraphQL subscriptions or MQTT publishing), and other powerful capabilities that integrate seamlessly into your workflow.
+Simply mark your classes with `[InterceptorSubject]` and declare properties as `partial`. The source generator handles the rest: creating interception logic, change detection, derived property updates, and lifecycle management. Your domain models remain clean POCOs while gaining powerful reactive capabilities.
 
-**[Subject Design Guidelines](docs/subject-guidelines.md)** - Complete reference for property patterns and best practices
+The library supports **bidirectional synchronization** with external systems like MQTT brokers, OPC UA servers, and databases. When a property changes locally, connectors automatically propagate the change to external systems. When external data arrives, your object model updates and triggers change notifications - enabling real-time data synchronization for industrial automation, IoT applications, and reactive services.
 
-![Feature Map](./features.png)
+```mermaid
+graph TB
+    subgraph Integrations
+        Blazor[Blazor]
+        GraphQL[GraphQL]
+        AspNetCore[ASP.NET Core]
+    end
+    subgraph Connectors
+        MQTT[MQTT]
+        OpcUa[OPC UA]
+    end
+    subgraph Foundation
+        Tracking[Tracking]
+        Registry[Registry]
+        Validation[Validation]
+    end
+    subgraph Core
+        Interceptor[Interceptor + Source Generation]
+    end
 
-## Change tracking sample
+    Integrations --> Connectors
+    Connectors --> Foundation
+    Foundation --> Core
+```
 
-First, define a proxied class:
+## Why Namotion.Interceptor?
+
+- **Reactive object graphs** - Property changes automatically propagate to derived properties and external systems
+- **Zero runtime reflection** - All interception logic is generated at compile-time for maximum performance
+- **Bidirectional synchronization** - Connect your object model to MQTT brokers, OPC UA servers, or databases with minimal code
+- **Clean domain models** - Your classes stay as POCOs with simple attributes
+
+## Core Concepts
+
+### Interceptor Subjects
+
+An **interceptor subject** is a class marked with `[InterceptorSubject]` that uses C# 13 partial properties. The source generator transforms your partial properties into fully tracked properties that route through an interception pipeline - no runtime reflection required.
+
+```csharp
+// Your code:
+[InterceptorSubject]
+public partial class Car
+{
+    public partial string Name { get; set; }
+    public partial Tire[] Tires { get; set; }
+}
+
+// Generated code (simplified):
+public partial class Car : IInterceptorSubject
+{
+    private string _name;
+
+    public partial string Name
+    {
+        get => Context.GetPropertyValue("Name", () => _name);
+        set => Context.SetPropertyValue("Name", value, v => _name = v);
+    }
+
+    // Constructor, metadata, IInterceptorSubject implementation...
+}
+```
+
+### Key Interfaces
+
+| Interface | Purpose |
+|-----------|---------|
+| **`IInterceptorSubject`** | Every intercepted class implements this, providing access to context and property metadata |
+| **`IInterceptorSubjectContext`** | The coordination hub that manages services, interceptors, and the execution pipeline |
+| **`IReadInterceptor` / `IWriteInterceptor`** | Middleware components that observe or modify property operations |
+| **`ILifecycleHandler`** | Reacts to subjects being attached to or detached from the object graph |
+
+### How Interception Works
+
+When you read or write a property, the operation flows through a chain of interceptors:
+
+```
+Write: Your Code → Interceptor 1 → Interceptor 2 → ... → Actual Field Write
+Read:  Actual Field Read → ... → Interceptor 2 → Interceptor 1 → Your Code
+```
+
+Each interceptor can observe, modify, or block the operation. This enables change tracking, validation, external synchronization, and more - all without modifying your domain logic.
+
+## Requirements
+
+- **.NET 9.0** or later (extensions and integrations)
+- **.NET Standard 2.0** (core library only)
+- **C# 13** with partial properties support
+- IDE with source generator support (Visual Studio 2022, Rider, VS Code with C# extension)
+
+## Quick Start
+
+Install the core package:
+
+```bash
+dotnet add package Namotion.Interceptor
+```
+
+Define a trackable class:
 
 ```csharp
 [InterceptorSubject]
@@ -25,10 +118,30 @@ public partial class Person
 
     [Derived]
     public string FullName => $"{FirstName} {LastName}";
+
+    public Person()
+    {
+        FirstName = string.Empty;
+        LastName = string.Empty;
+    }
 }
 ```
 
-Then create a context and start tracking changes:
+Create a context and start tracking:
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking();
+
+var person = new Person(context);
+```
+
+## Samples
+
+### Change Tracking
+
+Subscribe to property changes across your object graph:
 
 ```csharp
 var context = InterceptorSubjectContext
@@ -54,15 +167,11 @@ var person = new Person(context)
     // Property 'LastName' changed from '' to 'Doe'.
     // Property 'FullName' changed from 'John ' to 'John Doe'.
 };
-
-person.FirstName = "Jane";
-// Property 'FirstName' changed from 'John' to 'Jane'.
-// Property 'FullName' changed from 'John Doe' to 'Jane Doe'.
 ```
 
-## Subject attach and detach tracking sample
+### Subject Lifecycle Tracking
 
-Implement a class with properties that reference other proxied objects:
+Track when objects enter or leave your object graph:
 
 ```csharp
 [InterceptorSubject]
@@ -76,213 +185,184 @@ public partial class Person
         Name = "n/a";
         Children = [];
     }
-
-    public override string ToString() => "Person: " + Name;
 }
-```
 
-The context automatically tracks attachment and detachment of referenced proxies:
-
-```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithService(() => new LogPropertyChangesHandler())
-    .WithFullPropertyTracking(); // tracks property changes and subject attaches/detaches
-
-var child1 = new Person { Name = "Child1" };
-var child2 = new Person { Name = "Child2" };
-var child3 = new Person { Name = "Child3" };
+    .WithFullPropertyTracking()
+    .WithService(() => new LogLifecycleHandler());
 
 var person = new Person(context);
-// Attach: Person: n/a
+// Attached: Person
 
-person.Children = [child1, child2];
-// Attach: Person: Child1
-// Attach: Person: Child2
-
-person.Children = [child1, child2, child3];
-// Attach: Person: Child3
+person.Children = [new Person { Name = "Child1" }, new Person { Name = "Child2" }];
+// Attached: Child1
+// Attached: Child2
 
 person.Children = [];
-// Detach: Person: Child1
-// Detach: Person: Child2
-// Detach: Person: Child3
-
-public class LogPropertyChangesHandler : ILifecycleHandler
-{
-    public void Attach(LifecycleContext context) =>
-        Console.WriteLine($"Attach: {context.Subject}");
-
-    public void Detach(LifecycleContext context) =>
-        Console.WriteLine($"Detach: {context.Subject}");
-}
+// Detached: Child1
+// Detached: Child2
 ```
 
-## More samples
+## Bidirectional Synchronization with External Systems
 
-For more samples, check out the "Samples" directory in the Visual Studio solution.
-
-## Projects
-
-### [Namotion.Interceptor](docs/interceptor.md)
-
-Core library for property and method interception with source generation support. Provides the fundamental building blocks for creating intercepted objects.
-
-**Key Components:**
-
-- **`IInterceptorSubject`** - The fundamental interface that every intercepted object implements. Represents an observable object that participates in the interception system with context, data storage, and property metadata.
-
-- **`IInterceptorSubjectContext`** - The central coordination hub that manages all interception behavior. Acts as a service container and orchestrates the interception pipeline with support for context hierarchies.
-
-- **`IInterceptorExecutor`** - High-level execution engine that subjects use to perform intercepted property and method operations. Extends the context with actual execution capabilities.
-
-- **`IReadInterceptor / IWriteInterceptor`** - Core interception interfaces that define middleware components for observing, modifying, or blocking property operations using a chain-of-responsibility pattern.
-
-- **`SubjectPropertyMetadata`** - Property descriptor containing type information, access methods, and interception flags that tells the system how to work with each property.
-
-Thread-safety and correctness:
-
-- Property field reads and writes are synchronized via the subject's `SyncRoot` lock when interceptors are present, ensuring the interception pipeline executes safely across threads.
-- Without interceptors, properties behave like standard C# POCOs (no locking).
-- **Warning**: External use of `SyncRoot` for custom locking should be done with care, as it may lead to performance degradation or deadlocks if not coordinated properly with the interception system.
-
-### Namotion.Interceptor.Generator
-
-Source generator that creates the interception logic for classes marked with `[InterceptorSubject]`. Automatically included when you install the main `Namotion.Interceptor` package.
-
-**What it generates:**
-
-The generator creates partial property implementations that route through the interception pipeline:
+The core tracking capabilities enable powerful integrations. Here's an example with MQTT:
 
 ```csharp
-// Your code:
 [InterceptorSubject]
-public partial class Car
+public partial class Sensor
 {
-    public partial string Name { get; set; }
-    public partial Tire[] Tires { get; set; }
-}
+    [Path("mqtt", "temperature")]
+    public partial decimal Temperature { get; set; }
 
-// Generated code (simplified):
-public partial class Car : IInterceptorSubject
-{
-    public IInterceptorSubjectContext Context { get; }
+    [Path("mqtt", "humidity")]
+    public partial decimal Humidity { get; set; }
 
-    public partial string Name
+    public Sensor()
     {
-        get => (string)((IInterceptorExecutor)Context).GetPropertyValue("Name", () => _name);
-        set => ((IInterceptorExecutor)Context).SetPropertyValue("Name", value, () => _name, v => _name = v);
+        Temperature = 0;
+        Humidity = 0;
     }
-
-    // Constructor injection, metadata registration, etc.
 }
 ```
 
-**Key Features:**
-
-- **Zero Runtime Reflection** - All interception logic is generated at compile time
-- **Preserves IntelliSense** - Full IDE support for your partial properties
-- **Metadata Generation** - Creates property metadata for the registry system
-- **Constructor Injection** - Generates constructors that accept `IInterceptorSubjectContext`
-
-**Build Integration:**
-
-The generator runs during compilation and integrates with MSBuild, supporting incremental builds and design-time builds for optimal IDE experience.
-
-### [Namotion.Interceptor.Dynamic](docs/dynamic.md)
-
-Creates interceptor subjects from interfaces at runtime without requiring compile-time code generation. This enables dynamic object creation for plugin architectures, external interfaces, and scenarios where runtime flexibility is needed.
-
-### Namotion.Interceptor.Hosting
-
-Automatically start and stop subjects which implement `IHostedService` based on object graph attachment and detachment, with support for attaching and detaching hosted services to subjects.
-
-Setup during application configuration:
+Configure the MQTT client in your application:
 
 ```csharp
-var builder = WebApplication.CreateBuilder(args);
-
-var context = InterceptorSubjectContext
-    .Create()
-    .WithHostedServices(builder.Services);
-
-var person = new Person(context);
-var hostedService = new PersonBackgroundService(person);
-person.AttachHostedService(hostedService);
+builder.Services.AddMqttSubjectClient<Sensor>(
+    brokerHost: "mqtt.example.com",
+    sourceName: "mqtt",
+    brokerPort: 1883,
+    topicPrefix: "sensors/room1");
 ```
 
-**Methods:**
-
-- `WithHostedServices(IServiceCollection)` → `Tracking.WithLifecycle()`
-
-### [Namotion.Interceptor.Registry](docs/registry.md)
-
-Tracks subjects and their properties with support for dynamic properties and property attributes. Enables runtime discovery of metadata and object graph navigation.
+Now property changes synchronize automatically:
 
 ```csharp
-var context = InterceptorSubjectContext
-    .Create()
-    .WithRegistry();
+var sensor = serviceProvider.GetRequiredService<Sensor>();
 
-var registered = subject.TryGetRegisteredSubject();
+// Changes publish to MQTT broker
+sensor.Temperature = 25.5m;
+
+// External MQTT messages update the property
+// (and trigger change notifications)
 ```
 
-**Methods:**
+Similar patterns work with OPC UA, databases, and other external systems. See the [MQTT](docs/connectors/mqtt.md), [OPC UA](docs/connectors/opcua.md), and [Connectors](docs/connectors.md) documentation for details.
 
-- `WithRegistry()` → `Tracking.WithContextInheritance()`
+## Feature Overview
 
-### [Namotion.Interceptor.Connectors](docs/connectors.md)
+The following diagram shows the available features and how they build on each other:
 
-Enables binding subject properties to external data sources like MQTT, OPC UA, or custom providers.
+```mermaid
+flowchart TB
+    subgraph Getters
+        ReadRecorder[WithReadPropertyRecorder]
+        DerivedChange[WithDerivedPropertyChangeDetection]
+    end
 
-### [Namotion.Interceptor.Tracking](docs/tracking.md)
+    subgraph Setters
+        EqualityCheck[WithEqualityCheck]
+        Validation[WithPropertyValidation]
+        DataAnnotations[WithDataAnnotationValidation]
+    end
 
-Provides comprehensive change tracking for subjects, including property changes, derived properties, and subject lifecycle events.
+    subgraph Context
+        ContextInheritance[WithContextInheritance]
+        Parents[WithParents]
+        JsonUtilities[GetJsonPath]
+    end
 
-```csharp
-var context = InterceptorSubjectContext
-    .Create()
-    .WithFullPropertyTracking();
+    subgraph Lifecycle
+        LifecycleHandler[WithLifecycle]
+    end
 
-context.GetPropertyChangeObservable().Subscribe(change => {
-    Console.WriteLine($"{change.Property.Name}: {change.OldValue} → {change.NewValue}");
-});
+    subgraph Registry
+        RegistryFeature[WithRegistry]
+        PropertyAttributes[GetPropertyAttributes]
+        AttributeInitializer[ISubjectPropertyInitializer]
+    end
+
+    subgraph Observable
+        PropertyChangeObservable[WithPropertyChangeObservable]
+    end
+
+    DerivedChange --> ReadRecorder
+    DerivedChange --> LifecycleHandler
+    ContextInheritance --> LifecycleHandler
+    RegistryFeature --> ContextInheritance
+    DataAnnotations --> Validation
+    PropertyAttributes --> RegistryFeature
+    AttributeInitializer --> PropertyAttributes
+    Parents --> LifecycleHandler
 ```
 
-**Methods:**
+## Extensibility
 
-- `WithLifecycle()` - Subject attach and detach callbacks
-- `WithFullPropertyTracking()` → `WithEqualityCheck()`, `WithContextInheritance()`, `WithDerivedPropertyChangeDetection()`, `WithPropertyChangeObservable()`
-- `WithPropertyChangeObservable()` - Observable property change notifications
-- `WithDerivedPropertyChangeDetection()` → `WithLifecycle()` - Automatic derived property updates
-- `WithContextInheritance()` → `WithLifecycle()` - Child subjects inherit parent context
-- `WithEqualityCheck()` - Only trigger changes when values actually change
-- `WithParents()` - Track parent-child relationships
-- `WithReadPropertyRecorder()` - Record property read operations
+Namotion.Interceptor is designed to be extended:
 
-### Namotion.Interceptor.Validation
+| Extension Point | What it enables | Documentation |
+|-----------------|-----------------|---------------|
+| **Read/Write Interceptors** | Add cross-cutting concerns like logging, caching, or transformation to property access | [Interceptors](docs/interceptor.md) |
+| **Lifecycle Handlers** | React to objects entering or leaving the object graph (cleanup, initialization) | [Tracking](docs/tracking.md) |
+| **Custom Connectors** | Synchronize with any external system (databases, message queues, APIs) | [Connectors](docs/connectors.md) |
+| **Property Validation** | Implement custom validation logic beyond data annotations | [Validation](docs/interceptor.md) |
+| **Dynamic Subjects** | Create trackable objects from interfaces at runtime without source generation | [Dynamic](docs/dynamic.md) |
 
-Validates subjects and properties using custom validation logic or data annotations.
+## Packages
 
-```csharp
-var context = InterceptorSubjectContext
-    .Create()
-    .WithDataAnnotationValidation();
+### Core
+
+| Package | Description |
+|---------|-------------|
+| **Namotion.Interceptor** | Property interception with compile-time source generation |
+| **Namotion.Interceptor.Generator** | Source generator (included automatically) |
+
+### Foundation
+
+| Package | Description |
+|---------|-------------|
+| **Namotion.Interceptor.Tracking** | Change tracking, derived properties, lifecycle events, transactions |
+| **Namotion.Interceptor.Registry** | Runtime property discovery, metadata, and dynamic properties |
+| **Namotion.Interceptor.Validation** | Property validation with data annotation support |
+| **Namotion.Interceptor.Dynamic** | Create subjects from interfaces at runtime |
+| **Namotion.Interceptor.Hosting** | Hosted service lifecycle management |
+
+### Connectors
+
+| Package | Description |
+|---------|-------------|
+| **Namotion.Interceptor.Connectors** | Base infrastructure for external system integration |
+| **Namotion.Interceptor.Mqtt** | Bidirectional MQTT synchronization |
+| **Namotion.Interceptor.OpcUa** | OPC UA client and server integration |
+
+### Integrations
+
+| Package | Description |
+|---------|-------------|
+| **Namotion.Interceptor.AspNetCore** | ASP.NET Core integration for web APIs |
+| **Namotion.Interceptor.Blazor** | Automatic re-rendering on property changes |
+| **Namotion.Interceptor.GraphQL** | GraphQL subscriptions for real-time updates |
+
+## How It Works
+
+```mermaid
+flowchart LR
+    PropertySet[Property Set] --> Interceptors[Interceptors]
+    Interceptors --> ChangeEvent[Change Event]
+    ChangeEvent --> Observers[Observers]
+    ChangeEvent --> Connectors[Connectors]
+    Connectors --> ExternalSystems[External Systems]
 ```
 
-**Methods:**
+## Documentation
 
-- `WithPropertyValidation()` - Custom property validation
-- `WithDataAnnotationValidation()` → `WithPropertyValidation()` - Automatic data annotation validation
+- [Subject Design Guidelines](docs/subject-guidelines.md) - Property patterns and best practices
+- [Interceptors and Contexts](docs/interceptor.md) - Core interception pipeline
+- [Tracking](docs/tracking.md) - Change tracking, transactions, lifecycle
+- [Registry](docs/registry.md) - Runtime property discovery and metadata
+- [Connectors](docs/connectors.md) - External system integration
 
-### Integration Packages
+## Samples
 
-**Namotion.Interceptor.AspNetCore** - ASP.NET Core integration for exposing subjects as web APIs
-
-**[Namotion.Interceptor.Blazor](docs/blazor.md)** - Blazor components for data binding with interceptor subjects
-
-**Namotion.Interceptor.GraphQL** - GraphQL integration with subscription support for real-time updates
-
-**[Namotion.Interceptor.Mqtt](docs/mqtt.md)** - MQTT client/server integration for IoT scenarios
-
-**[Namotion.Interceptor.OpcUa](docs/opcua.md)** - OPC UA client/server integration for industrial automation
+For more examples, see the `Samples` directory in the solution.
