@@ -18,10 +18,10 @@ Connect to an OPC UA server by configuring a client with `AddOpcUaSubjectClient`
 [InterceptorSubject]
 public partial class Machine
 {
-    [SourcePath("opc", "Temperature")]
+    [Path("opc", "Temperature")]
     public partial decimal Temperature { get; set; }
 
-    [SourcePath("opc", "Speed")]
+    [Path("opc", "Speed")]
     public partial decimal Speed { get; set; }
 }
 
@@ -46,7 +46,7 @@ Expose your C# objects as an OPC UA server by configuring with `AddOpcUaSubjectS
 [InterceptorSubject]
 public partial class Sensor
 {
-    [SourcePath("opc", "Value")]
+    [Path("opc", "Value")]
     public partial decimal Value { get; set; }
 }
 
@@ -72,7 +72,7 @@ builder.Services.AddOpcUaSubjectClient(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://localhost:4840",
-        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         TypeResolver = new OpcUaTypeResolver(logger),
         ValueConverter = new OpcUaValueConverter(),
         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -113,7 +113,7 @@ builder.Services.AddOpcUaSubjectServer(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaServerConfiguration
     {
-        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         ValueConverter = new OpcUaValueConverter(),
 
         // Optional
@@ -168,7 +168,7 @@ Control how properties are linked in the OPC UA address space by specifying the 
 
 ```csharp
 [OpcUaNodeReferenceType("Organizes")]
-[SourcePath("opc", "Machines")]
+[Path("opc", "Machines")]
 public partial Machine[] Machines { get; set; }
 ```
 
@@ -180,7 +180,7 @@ For collection properties, specify how individual items are referenced in the OP
 
 ```csharp
 [OpcUaNodeItemReferenceType("HasComponent")]
-[SourcePath("opc", "Parameters")]
+[Path("opc", "Parameters")]
 public partial Parameter[] Parameters { get; set; }
 ```
 
@@ -269,14 +269,14 @@ The library automatically handles nested object hierarchies, traversing through 
 [InterceptorSubject]
 public partial class Factory
 {
-    [SourcePath("opc", "Lines")]
+    [Path("opc", "Lines")]
     public partial ProductionLine[] Lines { get; set; }
 }
 
 [InterceptorSubject]
 public partial class ProductionLine
 {
-    [SourcePath("opc", "Machines")]
+    [Path("opc", "Machines")]
     public partial Machine[] Machines { get; set; }
 }
 ```
@@ -328,7 +328,7 @@ builder.Services.AddOpcUaSubjectClient(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default)
     });
 
@@ -351,7 +351,7 @@ builder.Services.AddOpcUaSubjectClient(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         EnablePollingFallback = true, // Default
         PollingInterval = TimeSpan.FromSeconds(1), // Default: 1 second
         PollingBatchSize = 100 // Default: 100 items per batch
@@ -374,7 +374,7 @@ builder.Services.AddOpcUaSubjectClient(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10) // Default: 10 seconds
     });
 ```
