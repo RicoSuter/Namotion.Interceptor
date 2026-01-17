@@ -314,6 +314,8 @@ Most other C# patterns (nullable, required, init, virtual, override, data annota
 
 ## Implementing Hosted Subjects for DI
 
+> See [Hosting](hosting.md) for foundational concepts on hosted subjects and the hosting lifecycle.
+
 When creating a subject library that extends `BackgroundService`, provide a DI extension method using `AddHostedSubject<T>` from `Namotion.Interceptor.Hosting`.
 
 ### DI Extension Method
