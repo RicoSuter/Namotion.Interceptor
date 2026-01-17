@@ -175,10 +175,10 @@ var (subject, property) = rootSubject.FindPropertyFromJsonPath("location.room");
 Register `IPropertyValidator` implementations to validate incoming updates:
 
 ```csharp
-builder.Services.AddSingleton<IPropertyValidator, DataAnnotationPropertyValidator>();
+builder.Services.AddSingleton<IPropertyValidator, DataAnnotationsValidator>();
 ```
 
-The `DataAnnotationPropertyValidator` from `Namotion.Interceptor.Validation` validates against data annotations like `[Range]`, `[Required]`, etc.
+The `DataAnnotationsValidator` from `Namotion.Interceptor.Validation` validates against data annotations like `[Range]`, `[Required]`, etc.
 
 ## JSON Serialization
 
