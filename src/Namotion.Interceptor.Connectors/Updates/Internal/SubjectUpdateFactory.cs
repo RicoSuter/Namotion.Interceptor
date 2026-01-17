@@ -1,8 +1,8 @@
 using System.Collections;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.ObjectPool;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -15,7 +15,8 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// </summary>
 internal static class SubjectUpdateFactory
 {
-    private static readonly ObjectPool<SubjectUpdateBuilder> BuilderPool = new(() => new SubjectUpdateBuilder());
+    private static readonly ObjectPool<SubjectUpdateBuilder> BuilderPool =
+        new DefaultObjectPool<SubjectUpdateBuilder>(new SubjectUpdateBuilderPoolPolicy(), 256);
 
     /// <summary>
     /// Creates a complete update with all properties for the given subject.
@@ -24,7 +25,7 @@ internal static class SubjectUpdateFactory
         IInterceptorSubject subject,
         ISubjectUpdateProcessor[] processors)
     {
-        var builder = BuilderPool.Rent();
+        var builder = BuilderPool.Get();
         try
         {
             builder.Initialize(subject, processors);
@@ -33,7 +34,6 @@ internal static class SubjectUpdateFactory
         }
         finally
         {
-            builder.Clear();
             BuilderPool.Return(builder);
         }
     }
@@ -46,7 +46,7 @@ internal static class SubjectUpdateFactory
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
         ISubjectUpdateProcessor[] processors)
     {
-        var builder = BuilderPool.Rent();
+        var builder = BuilderPool.Get();
         try
         {
             builder.Initialize(rootSubject, processors);
@@ -60,7 +60,6 @@ internal static class SubjectUpdateFactory
         }
         finally
         {
-            builder.Clear();
             BuilderPool.Return(builder);
         }
     }
