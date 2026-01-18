@@ -254,7 +254,7 @@ Namotion.Interceptor is designed to be extended:
 | **Namotion.Interceptor.Registry** | Runtime property discovery, metadata, and dynamic properties | [Registry](docs/registry.md) |
 | **Namotion.Interceptor.Validation** | Property validation with data annotation support | |
 | **Namotion.Interceptor.Dynamic** | Create subjects from interfaces at runtime | [Dynamic](docs/dynamic.md) |
-| **Namotion.Interceptor.Hosting** | Hosted service lifecycle management | |
+| **Namotion.Interceptor.Hosting** | Hosted service lifecycle management | [Hosting](docs/hosting.md) |
 
 ### Connectors
 
