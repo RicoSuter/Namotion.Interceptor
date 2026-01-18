@@ -51,7 +51,10 @@ internal class SubscriptionManager : IAsyncDisposable
         Session session,
         CancellationToken cancellationToken)
     {
-        // Temporal separation: subscriptions added to _subscriptions AFTER initialization prevents health monitor races.
+        // Temporal separation: Subscriptions are added to _subscriptions collection AFTER full initialization.
+        // This prevents the SubscriptionHealthMonitor (running in ExecuteAsync background loop) from seeing
+        // subscriptions in a partially-initialized state where items haven't been created yet, which would
+        // trigger false-positive healing attempts during normal startup.
         _shuttingDown = false;
 
         // Clear any existing subscriptions and monitored items from previous session (reconnection scenario).

@@ -38,8 +38,19 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
 
     /// <summary>
     /// Gets the number of active sessions.
+    /// Thread-safe: Captures volatile reference before property chaining to prevent races during disposal.
     /// </summary>
-    internal int ActiveSessionCount => _server?.CurrentInstance?.SessionManager?.GetSessions()?.Count ?? 0;
+    internal int ActiveSessionCount
+    {
+        get
+        {
+            var server = _server;
+            var instance = server?.CurrentInstance;
+            var sessionManager = instance?.SessionManager;
+            var sessions = sessionManager?.GetSessions();
+            return sessions?.Count ?? 0;
+        }
+    }
 
     /// <summary>
     /// Gets the server start time.

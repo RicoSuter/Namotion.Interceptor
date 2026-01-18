@@ -116,7 +116,7 @@ internal sealed class PollingManager : IDisposable
             Volatile.Write(ref _pollingTask, task); // Ensure task assignment is visible to all threads
         }
 
-        _logger.LogInformation("OPC UA polling manager started with interval {Interval}ms", _configuration.PollingInterval.TotalMilliseconds);
+        _logger.LogDebug("OPC UA polling manager started with interval {Interval}ms", _configuration.PollingInterval.TotalMilliseconds);
     }
 
     /// <summary>

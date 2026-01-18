@@ -312,8 +312,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             if (_initialMonitoredItems is not null && _initialMonitoredItems.Count > 0)
             {
                 // Reset ServerId on all monitored items to force SDK to re-create them on the new server.
-                // The SDK skips items where Status.Created (which checks Id != 0) is true.
-                // After server restart, the old server-assigned IDs are no longer valid.
+                // After server restart, the old server-assigned IDs are no longer valid and attempting to
+                // reuse them would cause the SDK to skip creation (since Status.Created checks Id != 0).
+                // By resetting to 0, we ensure fresh monitored item creation with new server-assigned IDs.
                 foreach (var item in _initialMonitoredItems)
                 {
                     item.ServerId = 0;
