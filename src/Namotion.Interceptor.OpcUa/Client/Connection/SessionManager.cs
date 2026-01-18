@@ -17,7 +17,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
-    private readonly SessionReconnectHandler _reconnectHandler;
+    private SessionReconnectHandler _reconnectHandler;
 
     private Session? _session;
     private CancellationToken _stoppingToken;
@@ -33,9 +33,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     public Session? CurrentSession => Volatile.Read(ref _session);
 
     /// <summary>
-    /// Gets a value indicating whether the session is currently connected.
+    /// Gets a value indicating whether the session is currently connected and not reconnecting.
+    /// Returns true only if there is a session, it reports as connected, AND we're not in a reconnection cycle.
     /// </summary>
-    public bool IsConnected => Volatile.Read(ref _session) is not null;
+    public bool IsConnected =>
+        Volatile.Read(ref _isReconnecting) == 0 &&
+        (Volatile.Read(ref _session)?.Connected ?? false);
 
     /// <summary>
     /// Gets a value indicating whether the session is currently reconnecting.
@@ -137,6 +140,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
         newSession.KeepAlive -= OnKeepAlive;
         newSession.KeepAlive += OnKeepAlive;
+        newSession.KeepAliveInterval = (int)configuration.KeepAliveInterval.TotalMilliseconds;
 
         Volatile.Write(ref _session, newSession);
 
@@ -169,7 +173,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     private void OnKeepAlive(ISession sender, KeepAliveEventArgs e)
     {
-        if (ServiceResult.IsGood(e.Status) || 
+        if (ServiceResult.IsGood(e.Status) ||
             e.CurrentState is not (ServerState.Unknown or ServerState.Failed))
         {
             return;
@@ -319,12 +323,27 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     {
         lock (_reconnectingLock)
         {
-            // Double-check: still reconnecting AND session still null?
-            if (Volatile.Read(ref _isReconnecting) == 1 &&
-                Volatile.Read(ref _session) is null)
+            var session = Volatile.Read(ref _session);
+            var isReconnecting = Volatile.Read(ref _isReconnecting) == 1;
+            var sessionConnected = session?.Connected ?? false;
+            var reconnectHandlerState = _reconnectHandler.State;
+
+            // If reconnect handler is actively reconnecting, the session may show Connected=true
+            // but the handler hasn't completed yet. Check handler state as additional signal.
+            var handlerStalled = reconnectHandlerState is not SessionReconnectHandler.ReconnectState.Ready;
+
+            // Double-check: still reconnecting AND either:
+            // - session is null or disconnected, OR
+            // - reconnect handler is stalled (not Ready state)
+            if (isReconnecting && (session is null || !sessionConnected || handlerStalled))
             {
                 // Truly stalled - OnReconnectComplete never fired or failed:
                 // Safe to clear flag and allow manual recovery
+
+                // Reset the reconnect handler to allow future automatic reconnection attempts
+                // The old handler is stuck in Triggered/Reconnecting state and won't process new keep-alive events
+                ResetReconnectHandler();
+
                 Interlocked.Exchange(ref _isReconnecting, 0);
                 return true;
             }
@@ -332,6 +351,28 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             // Reconnection completed while we were waiting for lock - do nothing
             return false;
         }
+    }
+
+    /// <summary>
+    /// Disposes the current reconnect handler and creates a fresh one.
+    /// Called when stall detection determines the handler is stuck.
+    /// Must be called while holding _reconnectingLock.
+    /// </summary>
+    private void ResetReconnectHandler()
+    {
+        try
+        {
+            _reconnectHandler.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error disposing stalled reconnect handler.");
+        }
+
+        _reconnectHandler = new SessionReconnectHandler(
+            _configuration.TelemetryContext,
+            false,
+            (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
     }
 
     private async Task DisposeSessionAsync(Session session, CancellationToken cancellationToken)

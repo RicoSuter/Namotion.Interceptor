@@ -50,6 +50,14 @@ public class OpcUaClientConfiguration
     /// Failed monitored items (excluding design-time errors like BadNodeIdUnknown) are retried at this interval.
     /// </summary>
     public TimeSpan SubscriptionHealthCheckInterval { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Gets the number of health check iterations while reconnecting before triggering stall detection.
+    /// When the SDK's automatic reconnection appears stalled, manual reconnection is triggered after
+    /// this many iterations × SubscriptionHealthCheckInterval.
+    /// Default is 10 iterations. Lower values mean faster stall detection but less tolerance for slow reconnections.
+    /// </summary>
+    public int StallDetectionIterations { get; init; } = 10;
     
     /// <summary>
     /// Gets or sets an async predicate that is called when an unknown (not statically typed) OPC UA node or variable is found during browsing.
@@ -189,6 +197,22 @@ public class OpcUaClientConfiguration
     public TimeSpan SessionTimeout { get; init; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
+    /// Gets or sets the keep-alive interval for the OPC UA session.
+    /// This determines how often the client sends keep-alive messages to detect disconnection.
+    /// Shorter intervals allow faster disconnection detection but increase network traffic.
+    /// Default is 5 seconds.
+    /// </summary>
+    public TimeSpan KeepAliveInterval { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Gets or sets the operation timeout for OPC UA requests.
+    /// This determines how long to wait for a response before timing out.
+    /// Shorter timeouts allow faster disconnection detection but may cause false positives on slow networks.
+    /// Default is 60 seconds.
+    /// </summary>
+    public TimeSpan OperationTimeout { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// Gets or sets the maximum time the reconnect handler will attempt to reconnect before giving up.
     /// Default is 60 seconds.
     /// </summary>
@@ -272,7 +296,7 @@ public class OpcUaClientConfiguration
             },
             TransportQuotas = new TransportQuotas
             {
-                OperationTimeout = 60000,
+                OperationTimeout = (int)OperationTimeout.TotalMilliseconds,
                 MaxStringLength = 4_194_304,
                 MaxByteStringLength = 16_777_216,
                 MaxMessageSize = 16_777_216,
@@ -317,11 +341,18 @@ public class OpcUaClientConfiguration
                 nameof(WriteRetryQueueSize));
         }
 
-        if (SubscriptionHealthCheckInterval < TimeSpan.FromSeconds(5))
+        if (SubscriptionHealthCheckInterval < TimeSpan.FromSeconds(1))
         {
             throw new ArgumentException(
-                $"SubscriptionHealthCheckInterval must be at least {TimeSpan.FromSeconds(5).TotalSeconds}s (got: {SubscriptionHealthCheckInterval.TotalSeconds}s)",
+                $"SubscriptionHealthCheckInterval must be at least {TimeSpan.FromSeconds(1).TotalSeconds}s (got: {SubscriptionHealthCheckInterval.TotalSeconds}s)",
                 nameof(SubscriptionHealthCheckInterval));
+        }
+
+        if (StallDetectionIterations < 1)
+        {
+            throw new ArgumentException(
+                $"StallDetectionIterations must be at least 1, got: {StallDetectionIterations}",
+                nameof(StallDetectionIterations));
         }
 
         if (MaximumItemsPerSubscription <= 0)

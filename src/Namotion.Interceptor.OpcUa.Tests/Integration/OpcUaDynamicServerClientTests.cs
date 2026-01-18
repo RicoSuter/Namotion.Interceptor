@@ -8,6 +8,7 @@ using Xunit.Abstractions;
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
 [Collection("OPC UA Integration")]
+[Trait("Category", "Integration")]
 public class OpcUaDynamicServerClientTests
 {
     private readonly ITestOutputHelper _output;

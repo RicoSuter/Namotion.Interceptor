@@ -31,8 +31,19 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private int _reconnectingIterations; // Tracks health check iterations while reconnecting (for stall detection)
 
     private IReadOnlyList<MonitoredItem>? _initialMonitoredItems;
+    private OpcUaClientDiagnostics? _diagnostics;
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
+
+    /// <summary>
+    /// Gets diagnostic information about the client connection state.
+    /// </summary>
+    public OpcUaClientDiagnostics Diagnostics => _diagnostics ??= new OpcUaClientDiagnostics(this);
+
+    /// <summary>
+    /// Gets the session manager for internal diagnostics access.
+    /// </summary>
+    internal SessionManager? SessionManager => _sessionManager;
 
     internal SourceOwnershipManager Ownership => _ownership;
 
@@ -195,17 +206,20 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 if (sessionManager is not null && _isStarted)
                 {
                     var isReconnecting = sessionManager.IsReconnecting;
+                    var stallDetected = false;
                     if (isReconnecting)
                     {
                         var iterations = Interlocked.Increment(ref _reconnectingIterations);
-                        if (iterations > 10)
+                        var stallThreshold = _configuration.StallDetectionIterations;
+                        if (iterations > stallThreshold)
                         {
-                            // Timeout: 10 iterations × health check interval (default 10s) = ~100s
+                            // Timeout: StallDetectionIterations × SubscriptionHealthCheckInterval
                             if (sessionManager.TryForceResetIfStalled())
                             {
                                 _logger.LogWarning(
                                     "Stall confirmed: Reconnecting flag reset to allow manual recovery. " +
-                                    "Session will be recreated on next health check.");
+                                    "Triggering immediate session restart.");
+                                stallDetected = true;
                             }
 
                             Interlocked.Exchange(ref _reconnectingIterations, 0);
@@ -216,23 +230,31 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                         Interlocked.Exchange(ref _reconnectingIterations, 0); // Reset when not reconnecting
                     }
 
-                    var currentSession = sessionManager.CurrentSession;
-                    if (currentSession is not null)
+                    // Trigger manual reconnection if stall was detected
+                    if (stallDetected)
                     {
-                        // Temporal separation: subscriptions added to collection AFTER initialization (see SubscriptionManager.cs:112)
-                        await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
-                            sessionManager.Subscriptions,
-                            stoppingToken).ConfigureAwait(false);
-                    }
-                    else if (!isReconnecting)
-                    {
-                        _logger.LogWarning(
-                            "OPC UA session is dead with no active reconnection. " +
-                            "SessionReconnectHandler likely timed out after {Timeout}ms. " +
-                            "Restarting session manager...",
-                            _configuration.ReconnectHandlerTimeout);
-
                         await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        var currentSession = sessionManager.CurrentSession;
+                        if (currentSession is not null)
+                        {
+                            // Temporal separation: subscriptions added to collection AFTER initialization (see SubscriptionManager.cs:112)
+                            await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
+                                sessionManager.Subscriptions,
+                                stoppingToken).ConfigureAwait(false);
+                        }
+                        else if (!isReconnecting)
+                        {
+                            _logger.LogWarning(
+                                "OPC UA session is dead with no active reconnection. " +
+                                "SessionReconnectHandler likely timed out after {Timeout}ms. " +
+                                "Restarting session manager...",
+                                _configuration.ReconnectHandlerTimeout);
+
+                            await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
+                        }
                     }
                 }
 
@@ -289,6 +311,14 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
             if (_initialMonitoredItems is not null && _initialMonitoredItems.Count > 0)
             {
+                // Reset ServerId on all monitored items to force SDK to re-create them on the new server.
+                // The SDK skips items where Status.Created (which checks Id != 0) is true.
+                // After server restart, the old server-assigned IDs are no longer valid.
+                foreach (var item in _initialMonitoredItems)
+                {
+                    item.ServerId = 0;
+                }
+
                 await sessionManager.CreateSubscriptionsAsync(_initialMonitoredItems, session, cancellationToken).ConfigureAwait(false);
 
                 _logger.LogInformation(
