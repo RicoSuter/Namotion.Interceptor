@@ -287,12 +287,20 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 {
                     return; // Already disposing, skip reconnection work
                 }
+                
+                var propertyWriter = _propertyWriter;
+                if (propertyWriter is null)
+                {
+                    _logger.LogWarning("Property writer is null during reconnection completion. Initialization skipped.");
+                    return;
+                }
+                
                 var session = CurrentSession;
                 if (session is not null)
                 {
                     try
                     {
-                        await _propertyWriter.CompleteInitializationAsync(_stoppingToken).ConfigureAwait(false);
+                        await propertyWriter.CompleteInitializationAsync(_stoppingToken).ConfigureAwait(false);
                     }
                     catch (Exception exception)
                     {
@@ -310,7 +318,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 }
             }, _stoppingToken);
             
-            _logger.LogInformation("OPC UA session reconnect completed.");
+            _logger.LogDebug("OPC UA session reconnect completed successfully.");
         }
     }
 
@@ -435,6 +443,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Synchronous dispose - prefer DisposeAsync() for proper cleanup.
     /// This is only called if the caller doesn't check for IAsyncDisposable.
+    /// Delegates to DisposeAsync to prevent dual cleanup race conditions.
     /// </summary>
     public void Dispose()
     {
@@ -443,15 +452,32 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             return;
         }
 
-        try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
-        try { PollingManager?.Dispose(); } catch { /* best effort */ }
-
-        var sessionToDispose = _session;
-        if (sessionToDispose is not null)
+        // Delegate to async disposal with timeout to prevent dual cleanup issues
+        try
         {
-            sessionToDispose.KeepAlive -= OnKeepAlive;
-            try { sessionToDispose.Dispose(); } catch { /* best effort */ }
-            Volatile.Write(ref _session, null);
+            DisposeAsync().AsTask().Wait(_configuration.SessionDisposalTimeout);
+        }
+        catch (AggregateException ex) when (ex.InnerException is OperationCanceledException)
+        {
+            _logger.LogWarning(
+                "Synchronous disposal timed out after {Timeout}. Forcing immediate cleanup.",
+                _configuration.SessionDisposalTimeout);
+
+            // Force immediate best-effort cleanup if async disposal times out
+            try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
+            try { PollingManager?.Dispose(); } catch { /* best effort */ }
+
+            var sessionToDispose = _session;
+            if (sessionToDispose is not null)
+            {
+                sessionToDispose.KeepAlive -= OnKeepAlive;
+                try { sessionToDispose.Dispose(); } catch { /* best effort */ }
+                Volatile.Write(ref _session, null);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error during synchronous disposal.");
         }
     }
 }
