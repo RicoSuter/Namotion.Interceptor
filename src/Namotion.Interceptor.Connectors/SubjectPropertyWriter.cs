@@ -14,12 +14,19 @@ namespace Namotion.Interceptor.Connectors;
 /// </remarks>
 public sealed class SubjectPropertyWriter
 {
+    /// <summary>
+    /// Default maximum number of updates to buffer during initialization/reconnection.
+    /// </summary>
+    public const int DefaultMaxBufferedUpdates = 100_000;
+
     private readonly ISubjectSource _source;
     private readonly ILogger _logger;
     private readonly Func<CancellationToken, ValueTask<bool>>? _flushRetryQueueAsync;
+    private readonly int _maxBufferedUpdates;
     private readonly Lock _lock = new();
 
     private List<Action>? _updates = [];
+    private int _droppedUpdates;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubjectPropertyWriter"/> class.
@@ -27,11 +34,17 @@ public sealed class SubjectPropertyWriter
     /// <param name="source">The source associated with this writer.</param>
     /// <param name="flushRetryQueueAsync">Optional callback to flush pending outbound writes from the retry queue.</param>
     /// <param name="logger">The logger.</param>
-    public SubjectPropertyWriter(ISubjectSource source, Func<CancellationToken, ValueTask<bool>>? flushRetryQueueAsync, ILogger logger)
+    /// <param name="maxBufferedUpdates">Maximum updates to buffer during initialization. Oldest updates are dropped when exceeded.</param>
+    public SubjectPropertyWriter(
+        ISubjectSource source,
+        Func<CancellationToken, ValueTask<bool>>? flushRetryQueueAsync,
+        ILogger logger,
+        int maxBufferedUpdates = DefaultMaxBufferedUpdates)
     {
         _source = source;
         _logger = logger;
         _flushRetryQueueAsync = flushRetryQueueAsync;
+        _maxBufferedUpdates = maxBufferedUpdates;
     }
 
     /// <summary>
@@ -44,6 +57,7 @@ public sealed class SubjectPropertyWriter
         lock (_lock)
         {
             _updates = [];
+            _droppedUpdates = 0;
         }
     }
 
@@ -83,6 +97,17 @@ public sealed class SubjectPropertyWriter
             }
 
             _updates = null;
+            var droppedCount = _droppedUpdates;
+            _droppedUpdates = 0;
+
+            if (droppedCount > 0)
+            {
+                _logger.LogWarning(
+                    "Dropped {DroppedCount} buffered updates during reconnection (buffer limit: {MaxBuffered}). " +
+                    "Consider increasing MaxBufferedUpdates or reducing reconnection time.",
+                    droppedCount, _maxBufferedUpdates);
+            }
+
             foreach (var action in updates)
             {
                 try
@@ -116,6 +141,13 @@ public sealed class SubjectPropertyWriter
                 updates = _updates;
                 if (updates is not null)
                 {
+                    // Enforce buffer limit - drop oldest updates when exceeded
+                    if (updates.Count >= _maxBufferedUpdates)
+                    {
+                        updates.RemoveAt(0);
+                        _droppedUpdates++;
+                    }
+
                     // Still initializing, buffer the update (cold path, allocations acceptable)
                     AddBeforeInitializationUpdate(updates, state, update);
                     return;
