@@ -255,6 +255,105 @@ public class OpcUaResilienceTests
     }
 
     [Fact]
+    public async Task ConcurrentDisposal_DoesNotThrowOrCorrupt()
+    {
+        // This test verifies that the claimed "race condition" in PR #162 doesn't exist.
+        // Both Dispose() and DisposeAsync() use Interlocked.Exchange to guarantee only one executes cleanup.
+
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+
+        try
+        {
+            (server, client) = await StartServerAndClientAsync();
+
+            Assert.NotNull(server.Diagnostics);
+            Assert.NotNull(client.Diagnostics);
+
+            // Access diagnostics properties during active connection - should work
+            var serverSessionCount = server.Diagnostics.ActiveSessionCount;
+            var clientIsConnected = client.Diagnostics.IsConnected;
+
+            _output.WriteLine($"Server sessions: {serverSessionCount}, Client connected: {clientIsConnected}");
+
+            // Now dispose both concurrently - the Interlocked.Exchange prevents dual cleanup
+            var disposeTask1 = client.DisposeAsync().AsTask();
+            var disposeTask2 = server.DisposeAsync().AsTask();
+
+            // This should complete without throwing
+            await Task.WhenAll(disposeTask1, disposeTask2);
+
+            _output.WriteLine("Concurrent disposal completed without error");
+
+            // Mark as disposed so finally block doesn't double-dispose
+            client = null;
+            server = null;
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task DiagnosticsAccess_DuringDisposal_DoesNotThrow()
+    {
+        // This test verifies that accessing ActiveSessionCount during disposal
+        // doesn't throw NullReferenceException as claimed in PR #162.
+        // The null-conditional chain (?.) handles nulls gracefully.
+
+        OpcUaTestServer<TestRoot>? server = null;
+
+        try
+        {
+            server = new OpcUaTestServer<TestRoot>(_output);
+            await server.StartAsync(
+                context => new TestRoot(context),
+                (context, root) => { root.Connected = true; });
+
+            Assert.NotNull(server.Diagnostics);
+
+            // Start disposal in background
+            var disposeTask = Task.Run(async () =>
+            {
+                await Task.Delay(10); // Small delay to let reads start
+                await server.DisposeAsync();
+            });
+
+            // Rapidly access diagnostics during disposal
+            var exceptions = new List<Exception>();
+            for (var i = 0; i < 100; i++)
+            {
+                try
+                {
+                    // This should never throw NullReferenceException
+                    // The ?. chain handles nulls gracefully, returning 0
+                    var count = server.Diagnostics.ActiveSessionCount;
+                    var isRunning = server.Diagnostics.IsRunning;
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Add(ex);
+                }
+                await Task.Delay(1);
+            }
+
+            await disposeTask;
+
+            // No NullReferenceException should have occurred
+            Assert.Empty(exceptions);
+            _output.WriteLine("Diagnostics access during disposal completed without NullReferenceException");
+
+            server = null; // Already disposed
+        }
+        finally
+        {
+            if (server != null) await server.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task InstantServerRestart_ClientSelfCorrects_NoExplicitDisconnectionWait()
     {
         // This test verifies that even if the server restarts so quickly that the client

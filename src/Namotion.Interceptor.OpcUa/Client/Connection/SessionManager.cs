@@ -17,7 +17,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
-    private SessionReconnectHandler _reconnectHandler;
+    private volatile SessionReconnectHandler _reconnectHandler;
 
     private Session? _session;
     private CancellationToken _stoppingToken;
@@ -208,14 +208,18 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             _logger.LogInformation("OPC UA server connection lost. Beginning reconnect...");
             _propertyWriter.StartBuffering();
 
+            // Set flag before BeginReconnect to avoid window where external observers see IsReconnecting=false
+            Interlocked.Exchange(ref _isReconnecting, 1);
+
             var newState = _reconnectHandler.BeginReconnect(session, (int)_configuration.ReconnectInterval.TotalMilliseconds, OnReconnectComplete);
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
             {
-                Interlocked.Exchange(ref _isReconnecting, 1);
                 e.CancelKeepAlive = true;
             }
             else
             {
+                // BeginReconnect failed - reset flag
+                Interlocked.Exchange(ref _isReconnecting, 0);
                 _logger.LogError("Failed to begin OPC UA reconnect. Handler state: {State}.", newState);
             }
         }
@@ -310,7 +314,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 }
             }, _stoppingToken);
             
-            _logger.LogInformation("OPC UA session reconnect completed.");
+            _logger.LogDebug("OPC UA session reconnect completed.");
         }
     }
 
@@ -444,6 +448,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
+        try { SubscriptionManager.Dispose(); } catch { /* best effort */ }
         try { PollingManager?.Dispose(); } catch { /* best effort */ }
 
         var sessionToDispose = _session;

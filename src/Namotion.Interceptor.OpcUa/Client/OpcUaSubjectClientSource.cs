@@ -29,6 +29,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
     private int _reconnectingIterations; // Tracks health check iterations while reconnecting (for stall detection)
+    private int _consecutiveHealthCheckErrors; // Tracks errors for exponential backoff
 
     private IReadOnlyList<MonitoredItem>? _initialMonitoredItems;
     private OpcUaClientDiagnostics? _diagnostics;
@@ -258,6 +259,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     }
                 }
 
+                _consecutiveHealthCheckErrors = 0; // Reset on successful iteration
                 await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -266,9 +268,15 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
             catch (Exception ex)
             {
-                // Log error but continue health monitoring loop
-                _logger.LogError(ex, "Error during health check or session restart. Will retry.");
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
+                _consecutiveHealthCheckErrors++;
+
+                // Exponential backoff: 5s, 10s, 20s, 30s (capped)
+                var delaySeconds = Math.Min(5 * Math.Pow(2, _consecutiveHealthCheckErrors - 1), 30);
+                _logger.LogError(ex,
+                    "Error during health check or session restart (attempt {Attempt}). Retrying in {Delay}s.",
+                    _consecutiveHealthCheckErrors, delaySeconds);
+
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken).ConfigureAwait(false);
             }
         }
 

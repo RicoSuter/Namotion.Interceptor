@@ -91,8 +91,19 @@ internal sealed class PollingManager : IDisposable
 
     /// <summary>
     /// Gets whether the polling manager is currently running.
+    /// Returns false if disposed or if the polling task has completed/faulted.
     /// </summary>
-    public bool IsRunning => Volatile.Read(ref _pollingTask) != null && Volatile.Read(ref _disposed) == 0;
+    public bool IsRunning
+    {
+        get
+        {
+            if (Volatile.Read(ref _disposed) == 1)
+                return false;
+
+            var task = Volatile.Read(ref _pollingTask);
+            return task is not null && !task.IsCompleted;
+        }
+    }
 
     /// <summary>
     /// Starts the polling loop in the background.
@@ -116,7 +127,7 @@ internal sealed class PollingManager : IDisposable
             Volatile.Write(ref _pollingTask, task); // Ensure task assignment is visible to all threads
         }
 
-        _logger.LogInformation("OPC UA polling manager started with interval {Interval}ms", _configuration.PollingInterval.TotalMilliseconds);
+        _logger.LogDebug("OPC UA polling manager started with interval {Interval}ms", _configuration.PollingInterval.TotalMilliseconds);
     }
 
     /// <summary>
@@ -177,20 +188,34 @@ internal sealed class PollingManager : IDisposable
 
     private async Task PollLoopAsync(CancellationToken cancellationToken)
     {
-        try
+        while (!cancellationToken.IsCancellationRequested)
         {
-            while (await _timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            try
             {
-                await PollItemsAsync(cancellationToken).ConfigureAwait(false);
+                while (await _timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    await PollItemsAsync(cancellationToken).ConfigureAwait(false);
+                }
             }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Normal shutdown
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Fatal error in polling loop");
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Normal shutdown
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Fatal error in polling loop. Restarting after delay...");
+
+                // Wait before restarting to avoid tight failure loop
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
         }
     }
 
