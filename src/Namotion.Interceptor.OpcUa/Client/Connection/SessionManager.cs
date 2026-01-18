@@ -379,6 +379,20 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
     }
 
+    /// <summary>
+    /// Clears the current session to allow health check to trigger reconnection.
+    /// Called when initialization fails after session creation.
+    /// </summary>
+    public async Task ClearSessionAsync(CancellationToken cancellationToken)
+    {
+        var session = Volatile.Read(ref _session);
+        if (session is not null)
+        {
+            await DisposeSessionAsync(session, cancellationToken).ConfigureAwait(false);
+            Volatile.Write(ref _session, null);
+        }
+    }
+
     private async Task DisposeSessionAsync(Session session, CancellationToken cancellationToken)
     {
         session.KeepAlive -= OnKeepAlive;

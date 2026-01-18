@@ -48,9 +48,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     internal SourceOwnershipManager Ownership => _ownership;
 
-    internal bool IsReconnecting => _sessionManager?.IsReconnecting == true;
+    private bool IsReconnecting => _sessionManager?.IsReconnecting == true;
 
-    internal void RemoveItemsForSubject(IInterceptorSubject subject)
+    private void RemoveItemsForSubject(IInterceptorSubject subject)
     {
         _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
         _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
@@ -344,6 +344,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to restart session. Will retry on next health check.");
+
+            // Clear the session so health check can trigger a new reconnection attempt
+            await sessionManager.ClearSessionAsync(cancellationToken).ConfigureAwait(false);
+
             throw; // Re-throw to trigger retry in ExecuteAsync
         }
     }
