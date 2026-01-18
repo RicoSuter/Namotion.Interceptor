@@ -270,10 +270,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             {
                 _consecutiveHealthCheckErrors++;
 
-                // Exponential backoff: 5s, 10s, 20s, 30s (capped)
-                var delaySeconds = Math.Min(5 * Math.Pow(2, _consecutiveHealthCheckErrors - 1), 30);
+                // Exponential backoff with jitter: 5s, 10s, 20s, 30s (capped) + 0-2s random jitter
+                // Jitter prevents thundering herd when multiple clients fail simultaneously
+                var baseDelay = Math.Min(5 * Math.Pow(2, _consecutiveHealthCheckErrors - 1), 30);
+                var jitter = Random.Shared.NextDouble() * 2;
+                var delaySeconds = baseDelay + jitter;
                 _logger.LogError(ex,
-                    "Error during health check or session restart (attempt {Attempt}). Retrying in {Delay}s.",
+                    "Error during health check or session restart (attempt {Attempt}). Retrying in {Delay:F1}s.",
                     _consecutiveHealthCheckErrors, delaySeconds);
 
                 await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken).ConfigureAwait(false);

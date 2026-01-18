@@ -331,7 +331,19 @@ internal class SubscriptionManager : IAsyncDisposable, IDisposable
             }
         });
 
-        await Task.WhenAll(deleteTasks).ConfigureAwait(false);
+        // Use timeout to prevent indefinite hang if server is unresponsive
+        var disposalTimeout = _configuration.SessionDisposalTimeout;
+        try
+        {
+            await Task.WhenAll(deleteTasks).WaitAsync(disposalTimeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning(
+                "Subscription deletion timed out after {Timeout} during disposal. " +
+                "Some subscriptions may not have been cleanly removed from server.",
+                disposalTimeout);
+        }
     }
 
     /// <summary>

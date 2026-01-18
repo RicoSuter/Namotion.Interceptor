@@ -25,7 +25,7 @@ public sealed class SubjectPropertyWriter
     private readonly int _maxBufferedUpdates;
     private readonly Lock _lock = new();
 
-    private List<Action>? _updates = [];
+    private Queue<Action>? _updates = new();
     private int _droppedUpdates;
 
     /// <summary>
@@ -56,7 +56,7 @@ public sealed class SubjectPropertyWriter
     {
         lock (_lock)
         {
-            _updates = [];
+            _updates = new Queue<Action>();
             _droppedUpdates = 0;
         }
     }
@@ -141,15 +141,15 @@ public sealed class SubjectPropertyWriter
                 updates = _updates;
                 if (updates is not null)
                 {
-                    // Enforce buffer limit - drop oldest updates when exceeded
+                    // Enforce buffer limit - drop oldest updates when exceeded (O(1) with Queue)
                     if (updates.Count >= _maxBufferedUpdates)
                     {
-                        updates.RemoveAt(0);
+                        updates.Dequeue();
                         _droppedUpdates++;
                     }
 
                     // Still initializing, buffer the update (cold path, allocations acceptable)
-                    AddBeforeInitializationUpdate(updates, state, update);
+                    EnqueueUpdate(updates, state, update);
                     return;
                 }
             }
@@ -166,10 +166,10 @@ public sealed class SubjectPropertyWriter
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void AddBeforeInitializationUpdate<TState>(List<Action> beforeInitializationUpdates, TState state, Action<TState> update)
+    private static void EnqueueUpdate<TState>(Queue<Action> updates, TState state, Action<TState> update)
     {
         // The allocation for the closure happens only on the cold path (needs to be in an own non-inlined method
         // to avoid capturing unnecessary locals and causing allocations on the hot path).
-        beforeInitializationUpdates.Add(() => update(state));
+        updates.Enqueue(() => update(state));
     }
 }
