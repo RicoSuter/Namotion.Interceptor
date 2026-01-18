@@ -175,8 +175,11 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                     _lastError = ex;
                     _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", _consecutiveFailures);
 
-                    var delaySeconds = Math.Min(Math.Pow(2, _consecutiveFailures - 1), 30);
-                    await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken);
+                    // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s, 30s (capped) + 0-2s random jitter
+                    // Jitter prevents thundering herd when multiple servers fail simultaneously
+                    var baseDelay = Math.Min(Math.Pow(2, _consecutiveFailures - 1), 30);
+                    var jitter = Random.Shared.NextDouble() * 2;
+                    await Task.Delay(TimeSpan.FromSeconds(baseDelay + jitter), stoppingToken);
                 }
             }
             finally
@@ -214,7 +217,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         }
     }
 
-    private static void CleanCertificateStore(ApplicationInstance application)
+    private void CleanCertificateStore(ApplicationInstance application)
     {
         var path = application
             .ApplicationConfiguration
@@ -222,9 +225,23 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
             .ApplicationCertificate
             .StorePath;
 
-        if (Directory.Exists(path))
+        if (string.IsNullOrEmpty(path))
         {
-            Directory.Delete(path, true);
+            _logger.LogWarning("Certificate store path is empty, skipping cleanup.");
+            return;
+        }
+
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, true);
+                _logger.LogDebug("Cleaned certificate store at {Path}.", path);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to clean certificate store at {Path}. Continuing with existing certificates.", path);
         }
     }
 
