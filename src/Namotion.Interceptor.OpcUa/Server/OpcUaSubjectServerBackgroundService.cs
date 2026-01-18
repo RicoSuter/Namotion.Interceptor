@@ -22,6 +22,39 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
     private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaSubjectServer? _server;
     private int _consecutiveFailures;
+    private OpcUaServerDiagnostics? _diagnostics;
+    private DateTimeOffset? _startTime;
+    private Exception? _lastError;
+
+    /// <summary>
+    /// Gets diagnostic information about the server state.
+    /// </summary>
+    public OpcUaServerDiagnostics Diagnostics => _diagnostics ??= new OpcUaServerDiagnostics(this);
+
+    /// <summary>
+    /// Gets a value indicating whether the server is running.
+    /// </summary>
+    internal bool IsRunning => _server?.CurrentInstance != null;
+
+    /// <summary>
+    /// Gets the number of active sessions.
+    /// </summary>
+    internal int ActiveSessionCount => _server?.CurrentInstance?.SessionManager?.GetSessions()?.Count ?? 0;
+
+    /// <summary>
+    /// Gets the server start time.
+    /// </summary>
+    internal DateTimeOffset? StartTime => _startTime;
+
+    /// <summary>
+    /// Gets the last error.
+    /// </summary>
+    internal Exception? LastError => _lastError;
+
+    /// <summary>
+    /// Gets the consecutive failure count.
+    /// </summary>
+    internal int ConsecutiveFailures => _consecutiveFailures;
 
     public OpcUaSubjectServerBackgroundService(
         IInterceptorSubject subject,
@@ -34,7 +67,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         _configuration = configuration;
     }
 
-    internal bool IsPropertyIncluded(RegisteredSubjectProperty property)
+    private bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
         return _configuration.PathProvider.IsPropertyIncluded(property);
     }
@@ -115,16 +148,20 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                     await application.CheckApplicationInstanceCertificatesAsync(true, ct: stoppingToken).ConfigureAwait(false);
                     await application.StartAsync(server).ConfigureAwait(false);
 
+                    _startTime = DateTimeOffset.UtcNow;
+                    _consecutiveFailures = 0;
+                    _lastError = null;
+
                     using var changeQueueProcessor = new ChangeQueueProcessor(
                         source: this, _context,
                         propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
                         _configuration.BufferTime, _logger);
 
                     await changeQueueProcessor.ProcessAsync(stoppingToken);
-                    _consecutiveFailures = 0;
                 }
                 finally
                 {
+                    _startTime = null;
                     var serverToClean = _server;
                     _server = null;
                     serverToClean?.ClearPropertyData();
@@ -135,6 +172,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                 if (ex is not TaskCanceledException)
                 {
                     _consecutiveFailures++;
+                    _lastError = ex;
                     _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", _consecutiveFailures);
 
                     var delaySeconds = Math.Min(Math.Pow(2, _consecutiveFailures - 1), 30);

@@ -12,15 +12,18 @@ Industrial-grade OPC UA client designed for 24/7 operation with automatic recove
 ### Component Hierarchy
 
 ```
-SubjectSourceBackgroundService
+SubjectSourceBackgroundService (Namotion.Interceptor.Connectors)
+  ├─> ChangeQueueProcessor (buffers/deduplicates outgoing writes)
+  ├─> WriteRetryQueue (ring buffer for failed writes)
   └─> OpcUaSubjectClientSource (coordinator, health monitoring)
       ├─> SessionManager (session lifecycle, reconnection)
       │   ├─> SessionReconnectHandler (OPC Foundation SDK)
       │   ├─> SubscriptionManager (subscriptions + polling fallback)
       │   └─> PollingManager (circuit breaker, batch reads)
-      ├─> WriteFailureQueue (ring buffer for disconnection resilience)
       └─> SubscriptionHealthMonitor (auto-healing transient failures)
 ```
+
+**Note:** Write retry buffering (`WriteRetryQueue`) is handled at the connector level, not OPC UA specific. Failed writes are automatically queued and retried on reconnection.
 
 ### Thread-Safety Patterns
 
@@ -73,19 +76,16 @@ Exception-based error handling is simpler and equally robust compared to retry l
 
 ### Write Resilience
 
-**Write Retry Queue (Ring Buffer)**:
-- Buffered during disconnection (FIFO semantics)
+**Write Retry Queue** (provided by `Namotion.Interceptor.Connectors`):
+- Generic connector feature, not OPC UA specific
+- Ring buffer with FIFO semantics
 - Oldest writes dropped when capacity reached
 - Automatic flush after reconnection
 - Default: 1000 writes (configurable via `WriteRetryQueueSize`)
 
-**Implementation Note**: Ring buffer has documented temporary overshoot behavior - while loop may drop multiple items if concurrent enqueues occur during capacity check. This is acceptable as it's self-correcting and rare (requires concurrent burst exactly at capacity).
-
-**Potential Improvement**: Add Interlocked-based atomic count check to eliminate overshoot (low priority).
-
-**Partial Write Handling**:
+**OPC UA Write Handling**:
 - Write operations chunked by server limits
-- On chunk failure, only remaining items re-queued
+- On chunk failure, only remaining items re-queued to connector's retry queue
 - Transient errors auto-retry: `BadSessionIdInvalid`, `BadTimeout`, `BadTooManyOperations`
 - Permanent errors logged only: `BadNodeIdUnknown`, `BadTypeMismatch`, `BadWriteNotSupported`
 
@@ -318,3 +318,68 @@ When reviewing this codebase, focus on:
 **"Object pool needs maximum size"**
 - ⚠️ Debatable: Pool grows unbounded based on workload
 - ✅ Recommendation: Add optional max size for defense-in-depth (low priority)
+
+---
+
+## Missing Features
+
+The following features are **not yet implemented**:
+
+### Metrics and Observability
+
+**Status**: ❌ **Not implemented**
+
+No metrics are exposed for production monitoring.
+
+**What's needed**:
+- Connection state (connected/reconnecting/disconnected)
+- Reconnection attempts and durations
+- Write queue depth and overflow events
+- Subscription health (active/failed/polling)
+- Polling fallback statistics (items, latency)
+- Stall detection triggers
+
+**Integration options**: OpenTelemetry, Prometheus, custom metrics interface
+
+**Priority**: Medium - important for production visibility
+
+### Exponential Backoff for Reconnection
+
+**Status**: ❌ **Not implemented**
+
+Currently uses fixed reconnection intervals. The SDK's `SessionReconnectHandler` has basic exponential backoff, but stall detection triggers manual reconnection at fixed intervals.
+
+**What's needed**:
+- Exponential backoff for manual reconnection attempts
+- Maximum backoff ceiling
+- Jitter to prevent thundering herd
+
+**Priority**: Low - current fixed interval works for most scenarios
+
+### Backpressure Signaling
+
+**Status**: ❌ **Not implemented**
+
+No mechanism to signal upstream producers when write queue is filling up.
+
+**What's needed**:
+- Callback or observable when queue reaches threshold
+- Configurable threshold (e.g., 80% capacity)
+- Optional blocking mode for producers
+
+**Priority**: Low - ring buffer with drop-oldest is acceptable for most use cases
+
+### Server-Side Resilience
+
+**Status**: ⚠️ **Needs assessment**
+
+The OPC UA server implementation may need similar resilience patterns for 24/7 operation.
+
+**Potential needs**:
+- Session limit handling (reject vs queue)
+- Graceful shutdown notifications to clients
+- Client timeout detection
+- Resource cleanup for abandoned sessions
+- Health monitoring and self-healing
+
+**Priority**: Medium - depends on server deployment requirements

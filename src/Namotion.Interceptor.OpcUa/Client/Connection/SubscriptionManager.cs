@@ -54,6 +54,15 @@ internal class SubscriptionManager : IAsyncDisposable
         // Temporal separation: subscriptions added to _subscriptions AFTER initialization prevents health monitor races.
         _shuttingDown = false;
 
+        // Clear any existing subscriptions and monitored items from previous session (reconnection scenario).
+        // Old subscriptions are orphaned (belong to dead session), so we just need to remove our references.
+        foreach (var oldSubscription in _subscriptions.Keys)
+        {
+            oldSubscription.FastDataChangeCallback -= OnFastDataChange;
+        }
+        _subscriptions.Clear();
+        _monitoredItems.Clear();
+
         var itemCount = monitoredItems.Count;
         var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
         for (var i = 0; i < itemCount; i += maximumItemsPerSubscription)
@@ -105,7 +114,7 @@ internal class SubscriptionManager : IAsyncDisposable
             _subscriptions.TryAdd(subscription, 0);
         }
     }
-    
+
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
         var propertyWriter = _propertyWriter;
