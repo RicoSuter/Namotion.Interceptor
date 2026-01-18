@@ -39,7 +39,11 @@ public class OpcUaServerConfiguration
 
     /// <summary>
     /// Gets or sets a value indicating whether to clean up old certificates from the
-    /// application certificate store on connect. Defaults to true.
+    /// application certificate store on server startup. Defaults to true.
+    /// 
+    /// WARNING: Set to false in production environments. This is useful for development
+    /// and testing scenarios where certificate regeneration is desired, but should be
+    /// disabled in production to preserve certificates across restarts.
     /// </summary>
     public bool CleanCertificateStore { get; init; } = true;
 
