@@ -234,7 +234,7 @@ Namotion.Interceptor is designed to be extended:
 | **Read/Write Interceptors** | Add cross-cutting concerns like logging, caching, or transformation to property access | [Interceptors](docs/interceptor.md) |
 | **Lifecycle Handlers** | React to objects entering or leaving the object graph (cleanup, initialization) | [Tracking](docs/tracking.md) |
 | **Custom Connectors** | Synchronize with any external system (databases, message queues, APIs) | [Connectors](docs/connectors.md) |
-| **Property Validation** | Implement custom validation logic beyond data annotations | [Validation](docs/interceptor.md) |
+| **Property Validation** | Implement custom validation logic beyond data annotations | [Validation](docs/validation.md) |
 | **Dynamic Subjects** | Create trackable objects from interfaces at runtime without source generation | [Dynamic](docs/dynamic.md) |
 
 ## Packages
