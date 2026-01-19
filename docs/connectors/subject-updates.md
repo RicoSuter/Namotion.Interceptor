@@ -74,10 +74,6 @@ using (SubjectChangeContext.WithSource(source))
 subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 ```
 
-### Client-Side (TypeScript)
-
-See the TypeScript types at the end of this document. The apply logic follows the same two-phase approach described below.
-
 ## Property Update Kinds
 
 | Kind | Description |
