@@ -19,11 +19,11 @@ Subject updates use a **flat dictionary structure** where all subjects are store
   "subjects": {
     "1": {
       "name": { "kind": "Value", "value": "Parent" },
-      "child": { "kind": "Item", "id": "2" }
+      "child": { "kind": "Object", "id": "2" }
     },
     "2": {
       "name": { "kind": "Value", "value": "Child" },
-      "parent": { "kind": "Item", "id": "1" }
+      "parent": { "kind": "Object", "id": "1" }
     }
   }
 }
@@ -79,8 +79,9 @@ subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 | Kind | Description |
 |------|-------------|
 | `Value` | Scalar value (string, number, boolean, etc.) |
-| `Item` | Single nested subject (referenced by ID) |
-| `Collection` | Array or dictionary of subjects |
+| `Object` | Single nested subject (referenced by ID) |
+| `Collection` | Index-based array or list of subjects |
+| `Dictionary` | Key-based dictionary of subjects |
 
 ### Value Property
 
@@ -92,13 +93,13 @@ subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 }
 ```
 
-### Item Property
+### Object Property
 
 References another subject by ID:
 
 ```json
 {
-  "kind": "Item",
+  "kind": "Object",
   "id": "2"
 }
 ```
@@ -107,17 +108,32 @@ A null reference omits the `id` field:
 
 ```json
 {
-  "kind": "Item"
+  "kind": "Object"
 }
 ```
 
 ### Collection Property
 
+For index-based collections (arrays, lists):
+
 ```json
 {
   "kind": "Collection",
   "operations": [ ... ],
-  "collection": [ ... ],
+  "items": [ ... ],
+  "count": 5
+}
+```
+
+### Dictionary Property
+
+For key-based dictionaries. Works the same as Collection but uses string keys instead of integer indices, and does not support Move operations:
+
+```json
+{
+  "kind": "Dictionary",
+  "operations": [ ... ],
+  "items": [ ... ],
   "count": 5
 }
 ```
@@ -182,7 +198,7 @@ After: `[A, C]` where C.name = "Charles"
   "operations": [
     { "action": "Remove", "index": 1 }
   ],
-  "collection": [
+  "items": [
     { "index": 1, "id": "3" }
   ],
   "count": 2
@@ -252,17 +268,17 @@ The new item's data is in the `subjects` dictionary:
 {
   "kind": "Collection",
   "operations": [ { "action": "Remove", "index": 1 } ],
-  "collection": [ { "index": 0, "id": "2" } ],
+  "items": [ { "index": 0, "id": "2" } ],
   "count": 2
 }
 ```
 
-**Complete updates** (initial sync) have no `operations` - just all items in `collection`:
+**Complete updates** (initial sync) have no `operations` - just all items in `items`:
 
 ```json
 {
   "kind": "Collection",
-  "collection": [
+  "items": [
     { "index": 0, "id": "1" },
     { "index": 1, "id": "2" }
   ],
@@ -272,7 +288,7 @@ The new item's data is in the `subjects` dictionary:
 
 ### Applying Collection Updates
 
-When applying sparse property updates from the `collection` array, the `index` must be valid according to the declared `count`:
+When applying sparse property updates from the `items` array, the `index` must be valid according to the declared `count`:
 
 | Condition | Behavior |
 |-----------|----------|
@@ -280,7 +296,7 @@ When applying sparse property updates from the `collection` array, the `index` m
 | `index >= count` | **Error** - throws `InvalidOperationException` |
 | `count` not specified | Index validated against current collection size |
 
-**Important:** The `count` field declares the final expected size of the collection. Any `index` in the `collection` array must satisfy `index < count`. An index >= count indicates a malformed update (bug in the sender) and will throw an exception.
+**Important:** The `count` field declares the final expected size of the collection. Any `index` in the `items` array must satisfy `index < count`. An index >= count indicates a malformed update (bug in the sender) and will throw an exception.
 
 For complete updates (no `operations`), items at indices that don't exist locally are created sequentially. For partial updates, indices reference the final position after structural operations have been applied.
 
@@ -294,11 +310,11 @@ Circular references are handled naturally by the flat structure. Each subject ap
   "subjects": {
     "1": {
       "name": { "kind": "Value", "value": "Parent" },
-      "child": { "kind": "Item", "id": "2" }
+      "child": { "kind": "Object", "id": "2" }
     },
     "2": {
       "name": { "kind": "Value", "value": "Child" },
-      "parent": { "kind": "Item", "id": "1" }
+      "parent": { "kind": "Object", "id": "1" }
     }
   }
 }

@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// Applies collection and dictionary updates from <see cref="SubjectUpdate"/> instances.
 /// Handles structural operations (Insert, Remove, Move) and sparse property updates.
 /// </summary>
-internal static class SubjectCollectionUpdateApplier
+internal static class SubjectItemsUpdateApplier
 {
     /// <summary>
     /// Applies a collection (array/list) update to a property.
@@ -80,9 +80,9 @@ internal static class SubjectCollectionUpdateApplier
         }
 
         // Apply sparse property updates
-        if (propertyUpdate.Collection is { Count: > 0 })
+        if (propertyUpdate.Items is { Count: > 0 })
         {
-            foreach (var collectionUpdate in propertyUpdate.Collection)
+            foreach (var collectionUpdate in propertyUpdate.Items)
             {
                 var index = ConvertIndexToInt(collectionUpdate.Index);
 
@@ -177,9 +177,9 @@ internal static class SubjectCollectionUpdateApplier
         }
 
         // Apply sparse property updates
-        if (propertyUpdate.Collection is { Count: > 0 })
+        if (propertyUpdate.Items is { Count: > 0 })
         {
-            foreach (var collUpdate in propertyUpdate.Collection)
+            foreach (var collUpdate in propertyUpdate.Items)
             {
                 var key = ConvertDictionaryKey(collUpdate.Index);
 
