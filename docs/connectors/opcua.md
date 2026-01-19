@@ -375,7 +375,7 @@ builder.Services.AddOpcUaSubjectClient(
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
         PathProvider = new AttributeBasedPathProvider("opc", ".", null),
-        SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10) // Default: 10 seconds
+        SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5) // Default: 5 seconds
     });
 ```
 
@@ -389,6 +389,18 @@ builder.Services.AddOpcUaSubjectClient(
 - `SubscriptionHealthCheckInterval` minimum of 5 seconds enforced
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
+
+### Stall Detection
+
+When the SDK's reconnection handler gets stuck (e.g., server never responds), the client automatically detects the stall and forces a reconnection reset. Configure via `StallDetectionIterations` (default: 10) and `SubscriptionHealthCheckInterval` (default: 5s). Total stall timeout = iterations × interval (default: 50 seconds).
+
+## Diagnostics
+
+Monitor client and server health in production via the `Diagnostics` property on `OpcUaSubjectClientSource` and `OpcUaSubjectServerBackgroundService`.
+
+**Client diagnostics** (`OpcUaClientDiagnostics`): Connection state, session ID, subscription/monitored item counts, reconnection metrics, polling statistics.
+
+**Server diagnostics** (`OpcUaServerDiagnostics`): Running state, active session count, start time, consecutive failures, last error.
 
 ## Thread Safety
 
