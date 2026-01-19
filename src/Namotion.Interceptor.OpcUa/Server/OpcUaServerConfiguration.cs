@@ -67,6 +67,19 @@ public class OpcUaServerConfiguration
     public ITelemetryContext TelemetryContext { get; init; } = NullTelemetryContext.Instance;
 
     /// <summary>
+    /// Gets or sets a value indicating whether to automatically accept untrusted certificates.
+    /// Should only be set to true for testing or development scenarios.
+    /// Default is false for security.
+    /// </summary>
+    public bool AutoAcceptUntrustedCertificates { get; init; } = false;
+
+    /// <summary>
+    /// Gets or sets the base path for certificate stores.
+    /// Default is "pki". Change this to isolate certificate stores for parallel test execution.
+    /// </summary>
+    public string CertificateStoreBasePath { get; init; } = "pki";
+
+    /// <summary>
     /// Creates and configures an OPC UA application instance for the server.
     /// Override this method to customize application configuration, security settings, or certificate handling.
     /// </summary>
@@ -93,25 +106,25 @@ public class OpcUaServerConfiguration
                 ApplicationCertificate = new CertificateIdentifier
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/own",
+                    StorePath = $"{CertificateStoreBasePath}/own",
                     SubjectName = $"CN={ApplicationName}, O=Namotion"
                 },
                 TrustedIssuerCertificates = new CertificateTrustList
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/issuer"
+                    StorePath = $"{CertificateStoreBasePath}/issuer"
                 },
                 TrustedPeerCertificates = new CertificateTrustList
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/trusted"
+                    StorePath = $"{CertificateStoreBasePath}/trusted"
                 },
                 RejectedCertificateStore = new CertificateTrustList
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/rejected"
+                    StorePath = $"{CertificateStoreBasePath}/rejected"
                 },
-                AutoAcceptUntrustedCertificates = false,
+                AutoAcceptUntrustedCertificates = AutoAcceptUntrustedCertificates,
                 AddAppCertToTrustedStore = false,
                 SendCertificateChain = true,
                 RejectSHA1SignedCertificates = false, // allow for interoperability tests

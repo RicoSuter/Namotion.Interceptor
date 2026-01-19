@@ -37,4 +37,119 @@ public class OpcUaClientDiagnostics
     /// Gets the number of monitored items across all subscriptions.
     /// </summary>
     public int MonitoredItemCount => _source.SessionManager?.SubscriptionManager.MonitoredItems.Count ?? 0;
+
+    /// <summary>
+    /// Gets the total number of reconnection attempts (both successful and failed).
+    /// </summary>
+    public long TotalReconnectionAttempts => _source.TotalReconnectionAttempts;
+
+    /// <summary>
+    /// Gets the number of successful reconnections.
+    /// </summary>
+    public long SuccessfulReconnections => _source.SuccessfulReconnections;
+
+    /// <summary>
+    /// Gets the number of failed reconnection attempts.
+    /// </summary>
+    public long FailedReconnections => _source.FailedReconnections;
+
+    /// <summary>
+    /// Gets the timestamp of the last successful connection, or null if never connected.
+    /// </summary>
+    public DateTimeOffset? LastConnectedAt => _source.LastConnectedAt;
+
+    /// <summary>
+    /// Gets the timestamp when the connection was lost, or null if currently connected.
+    /// </summary>
+    public DateTimeOffset? LastDisconnectedAt => _source.LastDisconnectedAt;
+
+    /// <summary>
+    /// Gets the duration the client has been disconnected, or null if currently connected.
+    /// </summary>
+    public TimeSpan? DisconnectedDuration
+    {
+        get
+        {
+            // Capture once to avoid TOCTOU race where value could change between reads
+            var disconnectedAt = _source.LastDisconnectedAt;
+            return disconnectedAt.HasValue && !IsConnected
+                ? DateTimeOffset.UtcNow - disconnectedAt.Value
+                : null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the number of consecutive health check errors. Resets on success.
+    /// </summary>
+    public int ConsecutiveHealthCheckErrors => _source.ConsecutiveHealthCheckErrors;
+
+    /// <summary>
+    /// Gets the number of items being polled (fallback for nodes without subscription support).
+    /// </summary>
+    public int PollingItemCount => _source.SessionManager?.PollingManager?.PollingItemCount ?? 0;
+
+    /// <summary>
+    /// Gets polling diagnostics, or null if polling is disabled.
+    /// </summary>
+    public PollingDiagnostics? Polling
+    {
+        get
+        {
+            var pollingManager = _source.SessionManager?.PollingManager;
+            return pollingManager is not null ? new PollingDiagnostics(pollingManager) : null;
+        }
+    }
+}
+
+/// <summary>
+/// Provides diagnostic information about the polling fallback mechanism.
+/// </summary>
+public class PollingDiagnostics
+{
+    private readonly Polling.PollingManager _pollingManager;
+
+    internal PollingDiagnostics(Polling.PollingManager pollingManager)
+    {
+        _pollingManager = pollingManager;
+    }
+
+    /// <summary>
+    /// Gets the number of items currently being polled.
+    /// </summary>
+    public int ItemCount => _pollingManager.PollingItemCount;
+
+    /// <summary>
+    /// Gets the total number of successful read operations.
+    /// </summary>
+    public long TotalReads => _pollingManager.TotalReads;
+
+    /// <summary>
+    /// Gets the total number of failed read operations.
+    /// </summary>
+    public long FailedReads => _pollingManager.FailedReads;
+
+    /// <summary>
+    /// Gets the total number of value changes detected.
+    /// </summary>
+    public long ValueChanges => _pollingManager.ValueChanges;
+
+    /// <summary>
+    /// Gets the number of slow polls (poll duration exceeded interval).
+    /// </summary>
+    public long SlowPolls => _pollingManager.SlowPolls;
+
+    /// <summary>
+    /// Gets whether the circuit breaker is currently open.
+    /// </summary>
+    public bool IsCircuitBreakerOpen => _pollingManager.IsCircuitOpen;
+
+    /// <summary>
+    /// Gets the total number of circuit breaker trips.
+    /// </summary>
+    public long CircuitBreakerTrips => _pollingManager.CircuitBreakerTrips;
+
+    /// <summary>
+    /// Gets whether the polling loop is currently running.
+    /// </summary>
+    public bool IsRunning => _pollingManager.IsRunning;
 }

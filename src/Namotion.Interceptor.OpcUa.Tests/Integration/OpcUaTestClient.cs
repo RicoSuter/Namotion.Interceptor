@@ -51,18 +51,28 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
     public Task StartAsync(
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Func<TRoot, bool> isConnected,
-        string serverUrl = DefaultServerUrl)
+        string serverUrl = DefaultServerUrl,
+        string? certificateStoreBasePath = null)
     {
-        return StartAsync(createRoot, isConnected, new OpcUaTestClientConfiguration(), serverUrl);
+        return StartAsync(createRoot, isConnected, new OpcUaTestClientConfiguration(), serverUrl, certificateStoreBasePath);
     }
 
     public async Task StartAsync(
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Func<TRoot, bool> isConnected,
         OpcUaTestClientConfiguration configuration,
-        string serverUrl = DefaultServerUrl)
+        string serverUrl = DefaultServerUrl,
+        string? certificateStoreBasePath = null)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var builder = Host.CreateApplicationBuilder();
+
+        // Reduce shutdown timeout for faster test cleanup
+        builder.Services.Configure<HostOptions>(options =>
+        {
+            options.ShutdownTimeout = TimeSpan.FromSeconds(5);
+        });
+
         builder.Services.AddLogging(logging =>
         {
             logging.SetMinimumLevel(LogLevel.Debug);
@@ -104,7 +114,8 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                     SubscriptionHealthCheckInterval = configuration.SubscriptionHealthCheckInterval,
                     KeepAliveInterval = configuration.KeepAliveInterval,
                     OperationTimeout = configuration.OperationTimeout,
-                    StallDetectionIterations = configuration.StallDetectionIterations
+                    StallDetectionIterations = configuration.StallDetectionIterations,
+                    CertificateStoreBasePath = certificateStoreBasePath ?? "pki"
                 };
             });
 
@@ -122,27 +133,31 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         }
 
         await _host.StartAsync();
-        _output.WriteLine("Client started");
+        _output.WriteLine($"Client host started in {sw.ElapsedMilliseconds}ms");
 
         // Wait for client to connect using active waiting
+        // Use 60s timeout to allow for resource contention during parallel test execution
         await AsyncTestHelpers.WaitUntilAsync(
             () => Root != null && isConnected(Root),
-            timeout: TimeSpan.FromSeconds(15),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(200),
             message: "Client failed to connect to server");
 
-        _output.WriteLine("Client connected");
+        sw.Stop();
+        _output.WriteLine($"Client connected in {sw.ElapsedMilliseconds}ms total");
     }
 
     public async Task StopAsync()
     {
         if (_host != null)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             await _host.StopAsync();
             _host.Dispose();
             _host = null;
             Diagnostics = null;
-            _output.WriteLine("Client stopped");
+            sw.Stop();
+            _output.WriteLine($"Client stopped in {sw.ElapsedMilliseconds}ms");
         }
     }
 
