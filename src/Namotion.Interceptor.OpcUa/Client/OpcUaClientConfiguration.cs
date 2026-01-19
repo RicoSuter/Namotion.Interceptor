@@ -46,18 +46,18 @@ public class OpcUaClientConfiguration
     public int WriteRetryQueueSize { get; init; } = 1000;
 
     /// <summary>
-    /// Gets the interval for subscription health checks and auto-healing attempts. Default is 5 seconds.
+    /// Gets or sets the interval for subscription health checks and auto-healing attempts. Default is 5 seconds.
     /// Failed monitored items (excluding design-time errors like BadNodeIdUnknown) are retried at this interval.
     /// This also determines how quickly the health check loop picks up work deferred from SDK reconnection.
     /// </summary>
-    public TimeSpan SubscriptionHealthCheckInterval { get; init; } = TimeSpan.FromSeconds(5);
+    public TimeSpan SubscriptionHealthCheckInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Gets the number of health check iterations to wait before forcing a stall reset when SDK reconnection
+    /// Gets or sets the number of health check iterations to wait before forcing a stall reset when SDK reconnection
     /// appears stuck. Total stall detection time = StallDetectionIterations × SubscriptionHealthCheckInterval.
     /// Default is 10 iterations. Use lower values (e.g., 3) for faster recovery in tests.
     /// </summary>
-    public int StallDetectionIterations { get; init; } = 10;
+    public int StallDetectionIterations { get; set; } = 10;
 
     /// <summary>
     /// Gets or sets an async predicate that is called when an unknown (not statically typed) OPC UA node or variable is found during browsing.
@@ -228,7 +228,7 @@ public class OpcUaClientConfiguration
     /// Gets or sets the interval between reconnection attempts when connection is lost.
     /// Default is 5 seconds.
     /// </summary>
-    public TimeSpan ReconnectInterval { get; init; } = TimeSpan.FromSeconds(5);
+    public TimeSpan ReconnectInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Gets or sets the telemetry context for OPC UA operations.
