@@ -10,7 +10,6 @@ using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 using Opc.Ua;
-using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
@@ -19,7 +18,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 {
     private const string DefaultServerUrl = "opc.tcp://localhost:4840";
 
-    private readonly ITestOutputHelper _output;
+    private readonly TestLogger _logger;
     private IHost? _host;
     private IInterceptorSubjectContext? _context;
     private int _disposed; // 0 = not disposed, 1 = disposed
@@ -33,9 +32,9 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
     /// </summary>
     public OpcUaClientDiagnostics? Diagnostics { get; private set; }
 
-    public OpcUaTestClient(ITestOutputHelper output)
+    public OpcUaTestClient(TestLogger logger)
     {
-        _output = output;
+        _logger = logger;
     }
 
     public async Task StartAsync(
@@ -55,10 +54,9 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
         builder.Services.AddLogging(logging =>
         {
-            // Clear default providers to avoid EventLog disposal issues during test cleanup
             logging.ClearProviders();
             logging.SetMinimumLevel(LogLevel.Debug);
-            logging.AddConsole();
+            logging.AddXunit(_logger, "Client", LogLevel.Information);
         });
 
         _context = InterceptorSubjectContext
@@ -115,7 +113,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         }
 
         await _host.StartAsync();
-        _output.WriteLine($"Client host started in {sw.ElapsedMilliseconds}ms");
+        _logger.Log($"Client host started in {sw.ElapsedMilliseconds}ms");
 
         // Wait for client to connect using active waiting
         // Use 60s timeout to allow for resource contention during parallel test execution
@@ -126,7 +124,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
             message: "Client failed to connect to server");
 
         sw.Stop();
-        _output.WriteLine($"Client connected in {sw.ElapsedMilliseconds}ms total");
+        _logger.Log($"Client connected in {sw.ElapsedMilliseconds}ms total");
     }
 
     public async Task StopAsync()
@@ -145,7 +143,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                 Diagnostics = null;
             }
             sw.Stop();
-            _output.WriteLine($"Client stopped in {sw.ElapsedMilliseconds}ms");
+            _logger.Log($"Client stopped in {sw.ElapsedMilliseconds}ms");
         }
     }
 
@@ -163,12 +161,12 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
             {
                 await host.StopAsync(TimeSpan.FromSeconds(5));
                 host.Dispose();
-                _output.WriteLine("Client host disposed");
+                _logger.Log("Client disposed");
             }
         }
         catch (Exception ex)
         {
-            _output.WriteLine($"Error disposing client: {ex.Message}");
+            _logger.Log($"Error disposing client: {ex.Message}");
         }
     }
 }

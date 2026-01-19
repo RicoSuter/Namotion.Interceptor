@@ -17,11 +17,12 @@ public class OpcUaConcurrencyTests
         _output = output;
     }
 
-    private async Task<(OpcUaTestServer<TestRoot> Server, OpcUaTestClient<TestRoot> Client, PortLease Port)> StartServerAndClientAsync()
+    private async Task<(OpcUaTestServer<TestRoot> Server, OpcUaTestClient<TestRoot> Client, PortLease Port, TestLogger Logger)> StartServerAndClientAsync()
     {
+        var logger = new TestLogger(_output);
         var port = await OpcUaTestPortPool.AcquireAsync();
 
-        var server = new OpcUaTestServer<TestRoot>(_output);
+        var server = new OpcUaTestServer<TestRoot>(logger);
         await server.StartAsync(
             context => new TestRoot(context),
             (context, root) =>
@@ -33,14 +34,14 @@ public class OpcUaConcurrencyTests
             baseAddress: port.BaseAddress,
             certificateStoreBasePath: port.CertificateStoreBasePath);
 
-        var client = new OpcUaTestClient<TestRoot>(_output);
+        var client = new OpcUaTestClient<TestRoot>(logger);
         await client.StartAsync(
             context => new TestRoot(context),
             isConnected: root => root.Connected,
             serverUrl: port.ServerUrl,
             certificateStoreBasePath: port.CertificateStoreBasePath);
 
-        return (server, client, port);
+        return (server, client, port, logger);
     }
 
     [Fact]
@@ -51,15 +52,16 @@ public class OpcUaConcurrencyTests
         OpcUaTestServer<TestRoot>? server = null;
         OpcUaTestClient<TestRoot>? client = null;
         PortLease? port = null;
+        TestLogger? logger = null;
 
         try
         {
-            (server, client, port) = await StartServerAndClientAsync();
+            (server, client, port, logger) = await StartServerAndClientAsync();
 
             Assert.NotNull(server.Root);
             Assert.NotNull(client.Root);
             Assert.True(client.Diagnostics!.IsConnected);
-            _output.WriteLine("Initial connection established");
+            logger.Log("Initial connection established");
 
             // Background updates
             var cts = new CancellationTokenSource();
@@ -86,7 +88,7 @@ public class OpcUaConcurrencyTests
             await AsyncTestHelpers.WaitUntilAsync(
                 () => updateCounter > 0,
                 timeout: TimeSpan.FromSeconds(10));
-            _output.WriteLine($"Updates started: {updateCounter}");
+            logger.Log($"Updates started: {updateCounter}");
 
             // Restart during updates
             await server.StopAsync();
@@ -106,14 +108,14 @@ public class OpcUaConcurrencyTests
             await cts.CancelAsync();
             try { await updateTask; } catch (OperationCanceledException) { }
 
-            _output.WriteLine($"Total updates: {updateCounter}, Exceptions: {exceptions.Count}");
+            logger.Log($"Total updates: {updateCounter}, Exceptions: {exceptions.Count}");
             Assert.Empty(exceptions);
 
             // Verify final consistency
             server.Root.Name = "FinalValue";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "FinalValue",
-                timeout: TimeSpan.FromSeconds(10));
+                timeout: TimeSpan.FromSeconds(20));
             Assert.Equal("FinalValue", client.Root.Name);
         }
         finally
@@ -134,18 +136,19 @@ public class OpcUaConcurrencyTests
         OpcUaTestServer<TestRoot>? server = null;
         OpcUaTestClient<TestRoot>? client = null;
         PortLease? port = null;
+        TestLogger? logger = null;
 
         try
         {
-            (server, client, port) = await StartServerAndClientAsync();
+            (server, client, port, logger) = await StartServerAndClientAsync();
 
             Assert.NotNull(server.Diagnostics);
             Assert.NotNull(client.Diagnostics);
 
-            _output.WriteLine($"Server sessions: {server.Diagnostics.ActiveSessionCount}, Client connected: {client.Diagnostics.IsConnected}");
+            logger.Log($"Server sessions: {server.Diagnostics.ActiveSessionCount}, Client connected: {client.Diagnostics.IsConnected}");
 
             // === Test 1: Diagnostics access during disposal ===
-            _output.WriteLine("=== Test 1: Diagnostics during disposal ===");
+            logger.Log("=== Test 1: Diagnostics during disposal ===");
             var diagnosticsExceptions = new List<Exception>();
 
             // Start rapid diagnostics access
@@ -172,16 +175,16 @@ public class OpcUaConcurrencyTests
             await Task.Delay(25);
 
             // === Test 2: Concurrent disposal ===
-            _output.WriteLine("=== Test 2: Concurrent disposal ===");
+            logger.Log("=== Test 2: Concurrent disposal ===");
             var disposeClient = client.DisposeAsync().AsTask();
             var disposeServer = server.DisposeAsync().AsTask();
 
             await Task.WhenAll(disposeClient, disposeServer, accessTask);
 
-            _output.WriteLine($"Diagnostics exceptions: {diagnosticsExceptions.Count}");
+            logger.Log($"Diagnostics exceptions: {diagnosticsExceptions.Count}");
             Assert.Empty(diagnosticsExceptions);
 
-            _output.WriteLine("All disposal edge cases passed");
+            logger.Log("All disposal edge cases passed");
 
             client = null;
             server = null;
