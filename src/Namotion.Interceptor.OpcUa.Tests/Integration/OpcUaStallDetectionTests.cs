@@ -99,7 +99,8 @@ public class OpcUaStallDetectionTests
 
             // Wait for stall detection to trigger (6s with our config + some buffer)
             // Stall detection should reset the reconnection state
-            var stallDetectionTimeout = TimeSpan.FromSeconds(15);
+            // Note: Keep-alive detection takes ~10s (5s interval × 2 missed) + stall detection 6s = ~16s minimum
+            var stallDetectionTimeout = TimeSpan.FromSeconds(20);
             var startTime = DateTime.UtcNow;
 
             await AsyncTestHelpers.WaitUntilAsync(
@@ -126,9 +127,9 @@ public class OpcUaStallDetectionTests
             logger.Log($"Stall detection completed in {elapsed.TotalSeconds:F1}s");
 
             // Verify stall detection worked within expected timeframe
-            // With 2s × 3 iterations = 6s, should complete within ~10s
-            Assert.True(elapsed < TimeSpan.FromSeconds(12),
-                $"Stall detection should complete within 12s (actual: {elapsed.TotalSeconds:F1}s)");
+            // Keep-alive detection (~10s) + stall iterations (6s) = ~16s, allow buffer to 18s
+            Assert.True(elapsed < TimeSpan.FromSeconds(18),
+                $"Stall detection should complete within 18s (actual: {elapsed.TotalSeconds:F1}s)");
 
             logger.Log("Test passed - stall detection working correctly");
         }
