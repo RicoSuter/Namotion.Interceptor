@@ -379,11 +379,31 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Clears the current session to allow health check to trigger reconnection.
+    /// Clears the current session and resets the reconnect handler to allow health check to trigger reconnection.
     /// Called when initialization fails after session creation.
     /// </summary>
     public async Task ClearSessionAsync(CancellationToken cancellationToken)
     {
+        lock (_reconnectingLock)
+        {
+            // Reset the reconnect handler to prevent it from trying to use the disposed session
+            try
+            {
+                _reconnectHandler.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error disposing reconnect handler during session clear.");
+            }
+
+            _reconnectHandler = new SessionReconnectHandler(
+                _configuration.TelemetryContext,
+                false,
+                (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
+
+            Interlocked.Exchange(ref _isReconnecting, 0);
+        }
+
         var session = Volatile.Read(ref _session);
         if (session is not null)
         {
