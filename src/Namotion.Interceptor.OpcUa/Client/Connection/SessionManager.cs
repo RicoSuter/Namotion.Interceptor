@@ -28,6 +28,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
+    // Fields for deferred async work (handled by health check loop)
+    private Session? _pendingOldSession; // Old session needing disposal after reconnection
+    private bool _needsInitialization;   // Flag for health check to complete initialization
+
     /// <summary>
     /// Gets the current session. WARNING: Can change at any time due to reconnection. Never cache - read immediately before use.
     /// </summary>
@@ -45,6 +49,17 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// Gets a value indicating whether the session is currently reconnecting.
     /// </summary>
     public bool IsReconnecting => Volatile.Read(ref _isReconnecting) == 1;
+
+    /// <summary>
+    /// Gets a value indicating whether initialization needs to be completed by the health check loop.
+    /// Set when SDK reconnection succeeds with subscription transfer.
+    /// </summary>
+    public bool NeedsInitialization => _needsInitialization;
+
+    /// <summary>
+    /// Gets the pending old session that needs async disposal by the health check loop.
+    /// </summary>
+    public Session? PendingOldSession => _pendingOldSession;
 
     /// <summary>
     /// Gets the current subscriptions managed by the subscription manager.
@@ -240,7 +255,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     private void OnReconnectComplete(object? sender, EventArgs e)
     {
-        bool reconnectionSucceeded;
         lock (_reconnectingLock)
         {
             if (Volatile.Read(ref _disposed) == 1)
@@ -248,63 +262,46 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 return;
             }
 
-            var reconnectedSession = _reconnectHandler.Session;
+            var reconnectedSession = _reconnectHandler.Session as Session;
             if (reconnectedSession is null)
             {
-                _logger.LogError("Reconnect completed but received null OPC UA session. Will retry on next KeepAlive.");
+                _logger.LogWarning("Reconnect completed with null session.");
                 Interlocked.Exchange(ref _isReconnecting, 0);
                 return;
             }
 
             var oldSession = Volatile.Read(ref _session);
-            var isNewSession = !ReferenceEquals(oldSession, reconnectedSession);
-            if (isNewSession)
+            if (!ReferenceEquals(oldSession, reconnectedSession))
             {
                 _logger.LogInformation("Reconnect created new OPC UA session.");
 
-                var newSession = reconnectedSession as Session;
-                Volatile.Write(ref _session, newSession);
-
-                if (newSession is not null)
+                // Store old session for async disposal by health check
+                if (oldSession is not null)
                 {
-                    newSession.KeepAlive -= OnKeepAlive;
-                    newSession.KeepAlive += OnKeepAlive;
-
-                    var transferredSubscriptions = newSession.Subscriptions.ToList();
-                    if (transferredSubscriptions.Count > 0)
-                    {
-                        SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
-                        _logger.LogInformation("OPC UA session reconnected: Transferred {Count} subscriptions.", transferredSubscriptions.Count);
-                    }
-                    else
-                    {
-                        // No subscriptions transferred (server restart scenario)
-                        // Clear session and let health check trigger full reconnection via ReconnectSessionAsync
-                        // This avoids fire-and-forget complexity - health check already handles this case
-                        _logger.LogWarning(
-                            "OPC UA session reconnected but subscription transfer failed (server restart). " +
-                            "Clearing session to trigger full reconnection via health check.");
-
-                        Volatile.Write(ref _session, null);
-                        Interlocked.Exchange(ref _isReconnecting, 0);
-                        return;
-                    }
+                    _pendingOldSession = oldSession;
                 }
 
-                if (oldSession is not null && !ReferenceEquals(oldSession, newSession))
+                Volatile.Write(ref _session, reconnectedSession);
+                reconnectedSession.KeepAlive -= OnKeepAlive;
+                reconnectedSession.KeepAlive += OnKeepAlive;
+
+                // Check if subscriptions transferred
+                var transferredSubscriptions = reconnectedSession.Subscriptions.ToList();
+                if (transferredSubscriptions.Count > 0)
                 {
-                    // Fire-and-forget with exception observation to prevent unobserved task exceptions
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await DisposeSessionAsync(oldSession, _stoppingToken).ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "Error disposing old session during reconnection.");
-                        }
-                    }, _stoppingToken);
+                    SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
+                    _logger.LogInformation(
+                        "OPC UA session reconnected: Transferred {Count} subscriptions. Health check will complete initialization.",
+                        transferredSubscriptions.Count);
+                    _needsInitialization = true;
+                }
+                else
+                {
+                    // Transfer failed - clear session, health check will recreate
+                    _logger.LogWarning(
+                        "OPC UA session reconnected but subscription transfer failed (server restart). " +
+                        "Clearing session to trigger full reconnection via health check.");
+                    Volatile.Write(ref _session, null);
                 }
             }
             else
@@ -312,123 +309,73 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 _logger.LogInformation("Reconnect preserved existing OPC UA session. Subscriptions maintained.");
             }
 
-            reconnectionSucceeded = true;
             Interlocked.Exchange(ref _isReconnecting, 0);
-
-            // Record successful reconnection in diagnostics
-            _source.RecordSdkReconnectionSuccess();
-        }
-
-        // Call CompleteInitializationAsync after successful reconnection with subscription transfer
-        // If transfer failed, we returned early and health check will handle full reconnection
-        if (reconnectionSucceeded)
-        {
-            // Capture session reference before spawning task to avoid TOCTOU race
-            // (session could change between lock release and task execution)
-            var capturedSession = CurrentSession;
-            if (capturedSession is not null)
-            {
-                // Fire-and-forget with exception observation to prevent unobserved task exceptions
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        if (Volatile.Read(ref _disposed) == 1)
-                        {
-                            return; // Already disposing, skip reconnection work
-                        }
-                        await _propertyWriter.CompleteInitializationAsync(_stoppingToken).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // Normal cancellation during shutdown
-                    }
-                    catch (Exception exception)
-                    {
-                        _logger.LogError(exception, "Reconnect failed, closing session. Health check will trigger full restart.");
-                        try
-                        {
-                            await DisposeSessionAsync(capturedSession, _stoppingToken).ConfigureAwait(false);
-
-                            // Only clear session if it's still the same one we tried to initialize
-                            // Prevents race with concurrent reconnection or disposal
-                            var currentSession = Volatile.Read(ref _session);
-                            if (ReferenceEquals(currentSession, capturedSession))
-                            {
-                                Volatile.Write(ref _session, null);
-                            }
-                        }
-                        catch (Exception disposeEx)
-                        {
-                            _logger.LogDebug(disposeEx, "Error disposing session after reconnection failure.");
-                        }
-                    }
-                }, _stoppingToken);
-            }
-
-            _logger.LogDebug("OPC UA session reconnect completed.");
         }
     }
 
     /// <summary>
-    /// Attempts to force-reset the reconnecting flag if reconnection is truly stalled.
-    /// Uses lock and double-check to prevent race with delayed OnReconnectComplete.
+    /// Attempts to force-reset if reconnection is stalled.
+    /// Resets the SDK reconnect handler and clears state so health check can restart fresh.
     /// </summary>
-    /// <returns>True if flag was reset (stall confirmed), false if reconnection completed while waiting.</returns>
+    /// <returns>True if reset was performed, false otherwise.</returns>
     internal bool TryForceResetIfStalled()
     {
         lock (_reconnectingLock)
         {
-            var session = Volatile.Read(ref _session);
-            var isReconnecting = Volatile.Read(ref _isReconnecting) == 1;
-            var sessionConnected = session?.Connected ?? false;
-            var reconnectHandlerState = _reconnectHandler.State;
-
-            // If reconnect handler is actively reconnecting, the session may show Connected=true
-            // but the handler hasn't completed yet. Check handler state as additional signal.
-            var handlerStalled = reconnectHandlerState is not SessionReconnectHandler.ReconnectState.Ready;
-
-            // Double-check: still reconnecting AND either:
-            // - session is null or disconnected, OR
-            // - reconnect handler is stalled (not Ready state)
-            if (isReconnecting && (session is null || !sessionConnected || handlerStalled))
+            if (Volatile.Read(ref _isReconnecting) == 0)
             {
-                // Truly stalled - OnReconnectComplete never fired or failed:
-                // Safe to clear flag and allow manual recovery
-
-                // Reset the reconnect handler to allow future automatic reconnection attempts
-                // The old handler is stuck in Triggered/Reconnecting state and won't process new keep-alive events
-                ResetReconnectHandler();
-
-                Interlocked.Exchange(ref _isReconnecting, 0);
-                return true;
+                return false;
             }
 
-            // Reconnection completed while we were waiting for lock - do nothing
-            return false;
+            // Reset the SDK reconnect handler to prevent it from interfering
+            try
+            {
+                _reconnectHandler.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error disposing stalled reconnect handler.");
+            }
+
+            _reconnectHandler = new SessionReconnectHandler(
+                _configuration.TelemetryContext,
+                false,
+                (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
+
+            // Clear everything - health check will restart fresh
+            Volatile.Write(ref _session, null);
+            Interlocked.Exchange(ref _isReconnecting, 0);
+            return true;
         }
     }
 
     /// <summary>
-    /// Disposes the current reconnect handler and creates a fresh one.
-    /// Called when stall detection determines the handler is stuck.
-    /// Must be called while holding _reconnectingLock.
+    /// Disposes the pending old session asynchronously.
+    /// Called by health check loop after SDK reconnection completes.
     /// </summary>
-    private void ResetReconnectHandler()
+    public async Task DisposePendingOldSessionAsync(CancellationToken cancellationToken)
     {
-        try
+        var oldSession = _pendingOldSession;
+        if (oldSession is not null)
         {
-            _reconnectHandler.Dispose();
+            _pendingOldSession = null;
+            try
+            {
+                await DisposeSessionAsync(oldSession, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error disposing old session during reconnection cleanup.");
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error disposing stalled reconnect handler.");
-        }
+    }
 
-        _reconnectHandler = new SessionReconnectHandler(
-            _configuration.TelemetryContext,
-            false,
-            (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
+    /// <summary>
+    /// Clears the initialization flag after health check completes initialization.
+    /// </summary>
+    public void ClearInitializationFlag()
+    {
+        _needsInitialization = false;
     }
 
     /// <summary>

@@ -57,17 +57,14 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     internal long SuccessfulReconnections => Interlocked.Read(ref _successfulReconnections);
     internal long FailedReconnections => Interlocked.Read(ref _failedReconnections);
     internal DateTimeOffset? LastConnectedAt { get; private set; }
-    internal DateTimeOffset? LastDisconnectedAt { get; private set; }
-    internal int ConsecutiveHealthCheckErrors { get; private set; }
 
     /// <summary>
     /// Called by SessionManager when a reconnection attempt starts (via SDK's SessionReconnectHandler).
-    /// Updates diagnostics metrics to track the reconnection attempt and disconnection time.
+    /// Updates diagnostics metrics to track the reconnection attempt.
     /// </summary>
     internal void RecordReconnectionAttemptStart()
     {
         Interlocked.Increment(ref _totalReconnectionAttempts);
-        LastDisconnectedAt ??= DateTimeOffset.UtcNow;
     }
 
     /// <summary>
@@ -79,7 +76,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     {
         Interlocked.Increment(ref _successfulReconnections);
         LastConnectedAt = DateTimeOffset.UtcNow;
-        LastDisconnectedAt = null;
     }
 
     private bool IsReconnecting => _sessionManager?.IsReconnecting == true;
@@ -279,71 +275,89 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Single-threaded health check loop. Coordinates with automatic reconnection via IsReconnecting flag.
+        // All async work from SDK reconnection callbacks is deferred to this loop for simplicity.
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 var sessionManager = _sessionManager; // Capture reference to avoid TOCTOU
-                if (sessionManager is not null && _isStarted)
+                var propertyWriter = _propertyWriter;
+                if (sessionManager is not null && propertyWriter is not null && _isStarted)
                 {
-                    var isReconnecting = sessionManager.IsReconnecting;
-                    var stallDetected = false;
-                    if (isReconnecting)
+                    // 1. Cleanup pending old session from SDK reconnection
+                    if (sessionManager.PendingOldSession is not null)
                     {
-                        var iterations = Interlocked.Increment(ref _reconnectingIterations);
-                        var stallThreshold = _configuration.StallDetectionIterations;
-                        if (iterations > stallThreshold)
+                        await sessionManager.DisposePendingOldSessionAsync(stoppingToken).ConfigureAwait(false);
+                    }
+
+                    // 2. Complete initialization after SDK reconnection with subscription transfer
+                    if (sessionManager.NeedsInitialization)
+                    {
+                        try
                         {
-                            // Timeout: StallDetectionIterations × SubscriptionHealthCheckInterval
+                            await propertyWriter.CompleteInitializationAsync(stoppingToken).ConfigureAwait(false);
+                            sessionManager.ClearInitializationFlag();
+                            RecordSdkReconnectionSuccess();
+                            _logger.LogInformation("SDK reconnection initialization completed successfully.");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "SDK reconnection initialization failed. Clearing session for full restart.");
+                            sessionManager.ClearInitializationFlag();
+                            await sessionManager.ClearSessionAsync(stoppingToken).ConfigureAwait(false);
+                        }
+                    }
+
+                    // 3. Check session health and trigger reconnection if needed
+                    var isReconnecting = sessionManager.IsReconnecting;
+                    var currentSession = sessionManager.CurrentSession;
+                    var sessionIsConnected = currentSession?.Connected ?? false;
+
+                    if (currentSession is not null && sessionIsConnected && !isReconnecting)
+                    {
+                        // Session healthy - validate subscriptions
+                        Interlocked.Exchange(ref _reconnectingIterations, 0);
+                        await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
+                            sessionManager.Subscriptions,
+                            stoppingToken).ConfigureAwait(false);
+                    }
+                    else if (!isReconnecting && (currentSession is null || !sessionIsConnected))
+                    {
+                        // Session is dead and no reconnection in progress
+                        Interlocked.Exchange(ref _reconnectingIterations, 0);
+                        _logger.LogWarning(
+                            "OPC UA session is dead (session={HasSession}, connected={IsConnected}). " +
+                            "Starting manual reconnection...",
+                            currentSession is not null,
+                            sessionIsConnected);
+
+                        await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
+                    }
+                    else if (isReconnecting)
+                    {
+                        // SDK reconnection in progress - check for stall
+                        // Note: We check stall regardless of session.Connected state because the old
+                        // session's Connected property can return stale values during SDK reconnection.
+                        var iterations = Interlocked.Increment(ref _reconnectingIterations);
+                        if (iterations >= _configuration.StallDetectionIterations)
+                        {
+                            // SDK handler likely timed out or is stuck - force reset and trigger manual reconnection
                             if (sessionManager.TryForceResetIfStalled())
                             {
                                 _logger.LogWarning(
-                                    "Stall confirmed: Reconnecting flag reset to allow manual recovery. " +
-                                    "Triggering immediate session restart.");
-                                stallDetected = true;
+                                    "SDK reconnection stalled (session={HasSession}, connected={IsConnected}, iterations={Iterations}). " +
+                                    "Starting manual reconnection...",
+                                    currentSession is not null,
+                                    sessionIsConnected,
+                                    iterations);
+
+                                Interlocked.Exchange(ref _reconnectingIterations, 0);
+                                await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
                             }
-
-                            Interlocked.Exchange(ref _reconnectingIterations, 0);
-                        }
-                    }
-                    else
-                    {
-                        Interlocked.Exchange(ref _reconnectingIterations, 0); // Reset when not reconnecting
-                    }
-
-                    // Trigger manual reconnection if stall was detected
-                    if (stallDetected)
-                    {
-                        await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        var currentSession = sessionManager.CurrentSession;
-                        var sessionIsConnected = currentSession?.Connected ?? false;
-                        if (currentSession is not null && sessionIsConnected)
-                        {
-                            // Temporal separation: subscriptions added to collection AFTER initialization (see SubscriptionManager.cs:112)
-                            await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
-                                sessionManager.Subscriptions,
-                                stoppingToken).ConfigureAwait(false);
-                        }
-                        else if (!isReconnecting)
-                        {
-                            // Session is either null or disconnected, and SDK reconnect handler is not active
-                            _logger.LogWarning(
-                                "OPC UA session is dead (session={HasSession}, connected={IsConnected}) with no active reconnection. " +
-                                "SessionReconnectHandler likely timed out after {Timeout}ms. " +
-                                "Restarting session manager...",
-                                currentSession is not null,
-                                sessionIsConnected,
-                                _configuration.ReconnectHandlerTimeout);
-
-                            await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
                         }
                     }
                 }
 
-                ConsecutiveHealthCheckErrors = 0; // Reset on successful iteration
                 await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -352,19 +366,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
             catch (Exception ex)
             {
-                ConsecutiveHealthCheckErrors++;
-
-                // Exponential backoff with jitter: 5s, 10s, 20s, 30s (capped) + 0-2s random jitter
-                // Jitter prevents thundering herd when multiple clients fail simultaneously
-                var baseDelay = Math.Min(5 * Math.Pow(2, ConsecutiveHealthCheckErrors - 1), 30);
-                var jitter = Random.Shared.NextDouble() * 2;
-                var delaySeconds = baseDelay + jitter;
-
-                _logger.LogError(ex,
-                    "Error during health check or session restart (attempt {Attempt}). Retrying in {Delay:F1}s.",
-                    ConsecutiveHealthCheckErrors, delaySeconds);
-
-                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken).ConfigureAwait(false);
+                _logger.LogError(ex, "Error during health check or session restart. Retrying after delay.");
+                await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false);
             }
         }
 
@@ -372,7 +375,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     }
 
     /// <summary>
-    /// Restarts the session after SessionReconnectHandler timeout.
+    /// Restarts the session when connection is lost.
     /// Reuses existing SessionManager (CreateSessionAsync disposes old session internally).
     /// Thread-safe: Only called from single-threaded ExecuteAsync loop.
     /// </summary>
@@ -391,13 +394,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
 
         Interlocked.Increment(ref _totalReconnectionAttempts);
-        LastDisconnectedAt ??= DateTimeOffset.UtcNow; // Only set if not already set
 
         try
         {
-            _logger.LogInformation(
-                "Restarting OPC UA session after SessionReconnectHandler timeout ({Timeout}ms)...",
-                _configuration.ReconnectHandlerTimeout);
+            _logger.LogInformation("Restarting OPC UA session...");
 
             // Start collecting updates - any incoming subscription notifications will be buffered
             // until we complete the full state reload
@@ -423,7 +423,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
             Interlocked.Increment(ref _successfulReconnections);
             LastConnectedAt = DateTimeOffset.UtcNow;
-            LastDisconnectedAt = null; // Clear disconnected timestamp on successful reconnection
             _logger.LogInformation("Session restart complete.");
         }
         catch (Exception ex)

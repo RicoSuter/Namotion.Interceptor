@@ -2,12 +2,12 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Namotion.Interceptor.AspNetCore.Extensions;
 using Namotion.Interceptor.Dynamic;
+using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
-[Collection("OPC UA Integration")]
 [Trait("Category", "Integration")]
 public class OpcUaDynamicServerClientTests
 {
