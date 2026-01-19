@@ -5,6 +5,23 @@
 
 Industrial-grade OPC UA client designed for 24/7 operation with automatic recovery, write buffering, and comprehensive health monitoring.
 
+### Key Resilience Features
+
+- **Automatic reconnection** with SDK's `SessionReconnectHandler` + manual fallback
+- **Stall detection** forces reset when SDK handler gets stuck (configurable via `StallDetectionIterations`)
+- **Exponential backoff with jitter** for server startup retries (prevents thundering herd)
+- **Write buffering** during disconnection (configurable queue size)
+- **Polling fallback** for nodes that don't support subscriptions
+- **Circuit breaker** prevents resource exhaustion during persistent polling failures
+
+### Diagnostics
+
+Access via `OpcUaClientDiagnostics`:
+- Connection state: `IsConnected`, `IsReconnecting`, `SessionId`
+- Subscription metrics: `SubscriptionCount`, `MonitoredItemCount`
+- Reconnection history: `TotalReconnectionAttempts`, `SuccessfulReconnections`, `FailedReconnections`, `LastConnectedAt`
+- Polling metrics: `ItemCount`, `IsCircuitOpen`, `TotalReads`, `FailedReads`, `ValueChanges`
+
 ---
 
 ## Architecture
@@ -199,7 +216,6 @@ services.AddOpcUaSubjectClient<MySubject>(
 1. **Write Queue Overflow** - Oldest writes dropped when capacity exceeded. Size appropriately.
 2. **Polling Latency** - Default 1s delay. Not suitable for high-speed control loops.
 3. **Circuit Breaker All-or-Nothing** - When open, all polling suspended.
-4. **No Exponential Backoff** - Fixed 5s reconnection interval.
 
 ---
 
@@ -324,37 +340,6 @@ When reviewing this codebase, focus on:
 ## Missing Features
 
 The following features are **not yet implemented**:
-
-### Metrics and Observability
-
-**Status**: ❌ **Not implemented**
-
-No metrics are exposed for production monitoring.
-
-**What's needed**:
-- Connection state (connected/reconnecting/disconnected)
-- Reconnection attempts and durations
-- Write queue depth and overflow events
-- Subscription health (active/failed/polling)
-- Polling fallback statistics (items, latency)
-- Stall detection triggers
-
-**Integration options**: OpenTelemetry, Prometheus, custom metrics interface
-
-**Priority**: Medium - important for production visibility
-
-### Exponential Backoff for Reconnection
-
-**Status**: ❌ **Not implemented**
-
-Currently uses fixed reconnection intervals. The SDK's `SessionReconnectHandler` has basic exponential backoff, but stall detection triggers manual reconnection at fixed intervals.
-
-**What's needed**:
-- Exponential backoff for manual reconnection attempts
-- Maximum backoff ceiling
-- Jitter to prevent thundering herd
-
-**Priority**: Low - current fixed interval works for most scenarios
 
 ### Backpressure Signaling
 
