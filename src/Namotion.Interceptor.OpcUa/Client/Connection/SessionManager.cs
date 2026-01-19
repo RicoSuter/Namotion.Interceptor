@@ -13,6 +13,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Connection;
 /// </summary>
 internal sealed class SessionManager : IAsyncDisposable, IDisposable
 {
+    private readonly OpcUaSubjectClientSource _source;
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
@@ -62,6 +63,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     public SessionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
     {
+        _source = source;
         _propertyWriter = propertyWriter;
         _logger = logger;
         _configuration = configuration;
@@ -137,6 +139,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             ?? throw new InvalidOperationException(
                 $"Session factory returned unexpected type '{sessionResult?.GetType().FullName ?? "null"}'. " +
                 $"Expected '{typeof(Session).FullName}'. Ensure the configured SessionFactory returns a valid Session instance.");
+
+        // Enable SDK's built-in subscription transfer for seamless reconnection
+        // TransferSubscriptionsOnReconnect: SDK will automatically transfer subscriptions during reconnect
+        // DeleteSubscriptionsOnClose: Keep subscriptions on server during reconnection for transfer
+        newSession.TransferSubscriptionsOnReconnect = true;
+        newSession.DeleteSubscriptionsOnClose = false;
 
         newSession.KeepAlive -= OnKeepAlive;
         newSession.KeepAlive += OnKeepAlive;
@@ -215,6 +223,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
             {
                 e.CancelKeepAlive = true;
+                _source.RecordReconnectionAttemptStart();
             }
             else
             {
@@ -247,8 +256,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 return;
             }
 
-            var oldSession = _session;
-            var isNewSession = !ReferenceEquals(_session, reconnectedSession);
+            var oldSession = Volatile.Read(ref _session);
+            var isNewSession = !ReferenceEquals(oldSession, reconnectedSession);
             if (isNewSession)
             {
                 _logger.LogInformation("Reconnect created new OPC UA session.");
@@ -267,11 +276,35 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
                         _logger.LogInformation("OPC UA session reconnected: Transferred {Count} subscriptions.", transferredSubscriptions.Count);
                     }
+                    else
+                    {
+                        // No subscriptions transferred (server restart scenario)
+                        // Clear session and let health check trigger full reconnection via ReconnectSessionAsync
+                        // This avoids fire-and-forget complexity - health check already handles this case
+                        _logger.LogWarning(
+                            "OPC UA session reconnected but subscription transfer failed (server restart). " +
+                            "Clearing session to trigger full reconnection via health check.");
+
+                        Volatile.Write(ref _session, null);
+                        Interlocked.Exchange(ref _isReconnecting, 0);
+                        return;
+                    }
                 }
 
                 if (oldSession is not null && !ReferenceEquals(oldSession, newSession))
                 {
-                    Task.Run(() => DisposeSessionAsync(oldSession, _stoppingToken), _stoppingToken);
+                    // Fire-and-forget with exception observation to prevent unobserved task exceptions
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await DisposeSessionAsync(oldSession, _stoppingToken).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Error disposing old session during reconnection.");
+                        }
+                    }, _stoppingToken);
                 }
             }
             else
@@ -281,39 +314,58 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
             reconnectionSucceeded = true;
             Interlocked.Exchange(ref _isReconnecting, 0);
+
+            // Record successful reconnection in diagnostics
+            _source.RecordSdkReconnectionSuccess();
         }
 
+        // Call CompleteInitializationAsync after successful reconnection with subscription transfer
+        // If transfer failed, we returned early and health check will handle full reconnection
         if (reconnectionSucceeded)
         {
-            Task.Run(async () =>
+            // Capture session reference before spawning task to avoid TOCTOU race
+            // (session could change between lock release and task execution)
+            var capturedSession = CurrentSession;
+            if (capturedSession is not null)
             {
-                if (Volatile.Read(ref _disposed) == 1)
-                {
-                    return; // Already disposing, skip reconnection work
-                }
-                var session = CurrentSession;
-                if (session is not null)
+                // Fire-and-forget with exception observation to prevent unobserved task exceptions
+                _ = Task.Run(async () =>
                 {
                     try
                     {
+                        if (Volatile.Read(ref _disposed) == 1)
+                        {
+                            return; // Already disposing, skip reconnection work
+                        }
                         await _propertyWriter.CompleteInitializationAsync(_stoppingToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Normal cancellation during shutdown
                     }
                     catch (Exception exception)
                     {
                         _logger.LogError(exception, "Reconnect failed, closing session. Health check will trigger full restart.");
-                        await DisposeSessionAsync(session, _stoppingToken).ConfigureAwait(false);
-
-                        // Only clear session if it's still the same one we tried to initialize
-                        // Prevents race with concurrent reconnection or disposal
-                        var currentSession = Volatile.Read(ref _session);
-                        if (ReferenceEquals(currentSession, session))
+                        try
                         {
-                            Volatile.Write(ref _session, null);
+                            await DisposeSessionAsync(capturedSession, _stoppingToken).ConfigureAwait(false);
+
+                            // Only clear session if it's still the same one we tried to initialize
+                            // Prevents race with concurrent reconnection or disposal
+                            var currentSession = Volatile.Read(ref _session);
+                            if (ReferenceEquals(currentSession, capturedSession))
+                            {
+                                Volatile.Write(ref _session, null);
+                            }
+                        }
+                        catch (Exception disposeEx)
+                        {
+                            _logger.LogDebug(disposeEx, "Error disposing session after reconnection failure.");
                         }
                     }
-                }
-            }, _stoppingToken);
-            
+                }, _stoppingToken);
+            }
+
             _logger.LogDebug("OPC UA session reconnect completed.");
         }
     }
@@ -422,9 +474,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             return;
         }
 
-        try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
-        try { await SubscriptionManager.DisposeAsync().ConfigureAwait(false); } catch { /* best effort */ }
-        try { PollingManager?.Dispose(); } catch { /* best effort */ }
+        try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
+        try { await SubscriptionManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing subscription manager."); }
+        if (PollingManager is not null)
+        {
+            try { await PollingManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing polling manager."); }
+        }
 
         var sessionToDispose = _session;
         if (sessionToDispose is not null)
@@ -443,7 +498,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     timeout);
 
                 // Force immediate disposal without waiting for server acknowledgment
-                try { sessionToDispose.Dispose(); } catch { /* best effort */ }
+                try { sessionToDispose.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error force-disposing session."); }
             }
 
             Volatile.Write(ref _session, null);
@@ -461,15 +516,15 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             return;
         }
 
-        try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
-        try { SubscriptionManager.Dispose(); } catch { /* best effort */ }
-        try { PollingManager?.Dispose(); } catch { /* best effort */ }
+        try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
+        try { SubscriptionManager.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing subscription manager."); }
+        try { PollingManager?.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing polling manager."); }
 
         var sessionToDispose = _session;
         if (sessionToDispose is not null)
         {
             sessionToDispose.KeepAlive -= OnKeepAlive;
-            try { sessionToDispose.Dispose(); } catch { /* best effort */ }
+            try { sessionToDispose.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing session."); }
             Volatile.Write(ref _session, null);
         }
     }

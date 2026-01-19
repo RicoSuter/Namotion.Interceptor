@@ -153,6 +153,12 @@ public class OpcUaClientConfiguration
     public bool EnablePollingFallback { get; init; } = true;
 
     /// <summary>
+    /// Gets or sets the base path for certificate stores.
+    /// Default is "pki". Change this to isolate certificate stores for parallel test execution.
+    /// </summary>
+    public string CertificateStoreBasePath { get; init; } = "pki";
+
+    /// <summary>
     /// Gets or sets the polling interval for items that don't support subscriptions.
     /// Only used when EnablePollingFallback is true.
     /// Default is 1000ms (1 second).
@@ -278,18 +284,18 @@ public class OpcUaClientConfiguration
                 ApplicationCertificate = new CertificateIdentifier
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/own",
+                    StorePath = $"{CertificateStoreBasePath}/own",
                     SubjectName = $"CN={ApplicationName}, O=Namotion"
                 },
                 TrustedPeerCertificates = new CertificateTrustList
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/trusted"
+                    StorePath = $"{CertificateStoreBasePath}/trusted"
                 },
                 RejectedCertificateStore = new CertificateTrustList
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/rejected"
+                    StorePath = $"{CertificateStoreBasePath}/rejected"
                 },
                 AutoAcceptUntrustedCertificates = true,
                 AddAppCertToTrustedStore = true,

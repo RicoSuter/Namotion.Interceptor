@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Polling;
 /// Polling fallback for nodes that don't support subscriptions. Circuit breaker prevents resource exhaustion.
 /// Thread-safe. Start() is idempotent. Values reset on reconnection (some data loss during disconnection is expected).
 /// </summary>
-internal sealed class PollingManager : IDisposable
+internal sealed class PollingManager : IAsyncDisposable, IDisposable
 {
     private readonly OpcUaSubjectClientSource _source;
     private readonly ILogger _logger;
@@ -112,11 +112,12 @@ internal sealed class PollingManager : IDisposable
     /// <exception cref="ObjectDisposedException">Thrown if already disposed</exception>
     public void Start()
     {
-        if (Volatile.Read(ref _disposed) == 1)
-            throw new ObjectDisposedException(nameof(PollingManager));
-
         lock (_startLock)
         {
+            // Check disposal inside lock to prevent race with Dispose()
+            if (Volatile.Read(ref _disposed) == 1)
+                throw new ObjectDisposedException(nameof(PollingManager));
+
             if (Volatile.Read(ref _pollingTask) != null)
             {
                 _logger.LogDebug("Polling manager already started, ignoring duplicate start request");
@@ -264,7 +265,7 @@ internal sealed class PollingManager : IDisposable
 
         try
         {
-            // Get snapshot of items to poll - creates a copy to avoid concurrent modifications
+            // Get snapshot of items to poll
             var itemsToRead = _pollingItems.Values.ToArray();
 
             // Process in batches using direct indexing
@@ -310,8 +311,9 @@ internal sealed class PollingManager : IDisposable
         // Clear cached values on session change to force re-notification
         // Take snapshot to avoid TOCTOU issues with concurrent modifications
         // Use TryUpdate to handle concurrent removal safely (matching pattern in ProcessValueChange)
-        foreach (var (key, item) in _pollingItems.ToArray())
+        foreach (var item in _pollingItems.Values.ToArray())
         {
+            var key = item.NodeId.ToString();
             _pollingItems.TryUpdate(key, item with { LastValue = null }, item);
             // If TryUpdate fails, item was removed or modified concurrently - skip silently
         }
@@ -435,6 +437,39 @@ internal sealed class PollingManager : IDisposable
         }
     }
 
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+            return;
+
+        _logger.LogDebug("Disposing OPC UA polling manager (Total reads: {TotalReads}, Failed: {FailedReads}, Value changes: {ValueChanges}, Slow polls: {SlowPolls}, Circuit breaker trips: {Trips})",
+            _metrics.TotalReads, _metrics.FailedReads, _metrics.ValueChanges, _metrics.SlowPolls, _circuitBreaker.TripCount);
+
+        // Stop timer and cancel work
+        _timer.Dispose();
+        await _cts.CancelAsync();
+
+        // Wait for polling task to complete asynchronously (with timeout)
+        try
+        {
+            if (_pollingTask != null)
+            {
+                await _pollingTask.WaitAsync(_configuration.PollingDisposalTimeout).ConfigureAwait(false);
+            }
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning("Polling task did not complete within {Timeout} timeout", _configuration.PollingDisposalTimeout);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during cancellation
+        }
+
+        _cts.Dispose();
+        _pollingItems.Clear();
+    }
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
@@ -447,7 +482,7 @@ internal sealed class PollingManager : IDisposable
         _timer.Dispose();
         _cts.Cancel();
 
-        // Wait for polling task to complete (with timeout)
+        // Wait for polling task to complete (with timeout) - sync version for IDisposable
         try
         {
             if (_pollingTask != null && !_pollingTask.Wait(_configuration.PollingDisposalTimeout))
