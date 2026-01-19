@@ -136,13 +136,40 @@ Collections (arrays and dictionaries) use a **two-phase approach** that separate
 
 ### Phase 1: Structural Operations
 
-First, apply structural changes in order:
+Apply structural changes in two sub-phases:
 
-| Operation | Description |
-|-----------|-------------|
-| `Remove` | Remove item at index (arrays) or key (dictionaries) |
-| `Insert` | Insert new item at index/key (references subject by ID) |
-| `Move` | Move item from one index to another (arrays only, no item data) |
+**Sub-phase 1a: Remove and Insert operations** are applied sequentially in the order they appear:
+- `Remove` operations are sent in **descending index order** so each remove doesn't affect subsequent removes
+- `Insert` operations reference the final target position
+
+**Sub-phase 1b: Move operations** are applied atomically using snapshot semantics:
+- All moves reference the state **after** removes/inserts have been applied
+- Multiple moves are applied simultaneously (each move reads from the snapshot)
+- Move `fromIndex` accounts for prior removes (intermediate index, not original)
+
+| Operation | Index semantics |
+|-----------|-----------------|
+| `Remove` | Original index, descending order |
+| `Insert` | Final target index |
+| `Move` | `fromIndex`: intermediate (after removes), `index`: final target |
+
+**Example: Remove + Move**
+
+Transform `[A, B, C]` → `[C, B]` (remove A, swap remaining):
+
+```json
+{
+  "operations": [
+    { "action": "Remove", "index": 0 },
+    { "action": "Move", "fromIndex": 1, "index": 0 }
+  ]
+}
+```
+
+After `Remove(0)`: `[B, C]` (indices 0, 1)
+After `Move(from=1, to=0)`: `[C, B]`
+
+Note: The move's `fromIndex` is 1 (C's position after the remove), not 2 (C's original position).
 
 ### Phase 2: Property Updates
 
