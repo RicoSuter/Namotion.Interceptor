@@ -3,7 +3,7 @@
   Subjects: {
     1: {
       child: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 2
       },
@@ -34,14 +34,14 @@
     },
     2: {
       child: {
-        Kind: Item
+        Kind: Object
       },
       items: {
         Kind: Collection,
         Count: 0
       },
       lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       name: {
@@ -55,23 +55,23 @@
         }
       },
       parent: {
-        Kind: Item,
+        Kind: Object,
         Id: 1
       },
       self: {
-        Kind: Item
+        Kind: Object
       }
     },
     3: {
       child: {
-        Kind: Item
+        Kind: Object
       },
       items: {
         Kind: Collection,
         Count: 0
       },
       lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       name: {
@@ -85,11 +85,11 @@
         }
       },
       parent: {
-        Kind: Item,
+        Kind: Object,
         Id: 1
       },
       self: {
-        Kind: Item
+        Kind: Object
       }
     }
   }

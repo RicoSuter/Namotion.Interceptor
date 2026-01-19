@@ -3,12 +3,12 @@
   Subjects: {
     1: {
       Child: {
-        Kind: Item
+        Kind: Object
       },
       Items: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
-        Collection: [
+        Items: [
           {
             Index: 0,
             Id: 2
@@ -21,7 +21,7 @@
         Count: 2
       },
       Lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       Name: {
@@ -36,22 +36,22 @@
         }
       },
       Parent: {
-        Kind: Item
+        Kind: Object
       },
       Self: {
-        Kind: Item
+        Kind: Object
       }
     },
     2: {
       Child: {
-        Kind: Item
+        Kind: Object
       },
       Items: {
         Kind: Collection,
         Count: 0
       },
       Lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       Name: {
@@ -65,22 +65,22 @@
         }
       },
       Parent: {
-        Kind: Item
+        Kind: Object
       },
       Self: {
-        Kind: Item
+        Kind: Object
       }
     },
     3: {
       Child: {
-        Kind: Item
+        Kind: Object
       },
       Items: {
         Kind: Collection,
         Count: 0
       },
       Lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       Name: {
@@ -94,10 +94,10 @@
         }
       },
       Parent: {
-        Kind: Item
+        Kind: Object
       },
       Self: {
-        Kind: Item
+        Kind: Object
       }
     }
   }

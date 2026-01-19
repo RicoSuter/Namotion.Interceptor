@@ -7,7 +7,7 @@
         Count: 0
       },
       father: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 2
       },
@@ -36,7 +36,7 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
       }
     },
     2: {
@@ -45,7 +45,7 @@
         Count: 0
       },
       father: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 1
       },
@@ -73,7 +73,7 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
       }
     }
   }
