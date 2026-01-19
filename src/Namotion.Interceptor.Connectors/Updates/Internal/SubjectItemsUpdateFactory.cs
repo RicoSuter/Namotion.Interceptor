@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// Builds collection and dictionary updates for <see cref="SubjectUpdate"/> instances.
 /// Handles both complete updates (full snapshot) and diff updates (changes only).
 /// </summary>
-internal static class SubjectCollectionUpdateFactory
+internal static class SubjectItemsUpdateFactory
 {
     private static readonly ObjectPool<CollectionDiffBuilder> ChangeBuilderPool = new(() => new CollectionDiffBuilder());
 

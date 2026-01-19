@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// Applies collection and dictionary updates from <see cref="SubjectUpdate"/> instances.
 /// Handles structural operations (Insert, Remove, Move) and sparse property updates.
 /// </summary>
-internal static class SubjectCollectionUpdateApplier
+internal static class SubjectItemsUpdateApplier
 {
     /// <summary>
     /// Applies a collection (array/list) update to a property.
