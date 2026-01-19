@@ -1,9 +1,9 @@
-{
+﻿{
   Root: 1,
   Subjects: {
     1: {
       mother: {
-        Kind: Item,
+        Kind: Object,
         Id: 2
       }
     },

@@ -4,7 +4,7 @@
     1: {
       children: {
         Kind: Collection,
-        Collection: [
+        Items: [
           {
             Index: 0,
             Id: 3
@@ -16,7 +16,7 @@
         ]
       },
       father: {
-        Kind: Item,
+        Kind: Object,
         Id: 2
       },
       firstName: {

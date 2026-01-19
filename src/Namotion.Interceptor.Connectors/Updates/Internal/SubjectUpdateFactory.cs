@@ -205,7 +205,7 @@ internal static class SubjectUpdateFactory
         IInterceptorSubject? item,
         SubjectUpdateBuilder builder)
     {
-        update.Kind = SubjectPropertyUpdateKind.Item;
+        update.Kind = SubjectPropertyUpdateKind.Object;
 
         if (item is not null)
         {
@@ -274,8 +274,8 @@ internal static class SubjectUpdateFactory
     {
         if (parentProperties.TryGetValue(propertyName, out var existingUpdate))
         {
-            existingUpdate.Collection ??= [];
-            existingUpdate.Collection.Add(new SubjectPropertyCollectionUpdate
+            existingUpdate.Items ??= [];
+            existingUpdate.Items.Add(new SubjectPropertyItemUpdate
             {
                 Index = index,
                 Id = childId
@@ -286,7 +286,7 @@ internal static class SubjectUpdateFactory
             parentProperties[propertyName] = new SubjectPropertyUpdate
             {
                 Kind = SubjectPropertyUpdateKind.Collection,
-                Collection = [new SubjectPropertyCollectionUpdate { Index = index, Id = childId }]
+                Items = [new SubjectPropertyItemUpdate { Index = index, Id = childId }]
             };
         }
     }
@@ -304,7 +304,7 @@ internal static class SubjectUpdateFactory
         {
             parentProperties[propertyName] = new SubjectPropertyUpdate
             {
-                Kind = SubjectPropertyUpdateKind.Item,
+                Kind = SubjectPropertyUpdateKind.Object,
                 Id = childId
             };
         }

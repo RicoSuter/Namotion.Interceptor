@@ -175,13 +175,13 @@ public class SubjectUpdateCollectionTests
         Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
         Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
         Assert.Equal(SubjectPropertyUpdateKind.Collection, itemsUpdate!.Kind);
-        Assert.NotNull(itemsUpdate.Collection);
+        Assert.NotNull(itemsUpdate.Items);
 
         // This was the bug: only 1 item was included instead of all 100
-        Assert.Equal(100, itemsUpdate.Collection.Count);
+        Assert.Equal(100, itemsUpdate.Items.Count);
 
         // Verify all indices are present
-        var indices = itemsUpdate.Collection.Select(c => (int)c.Index!).OrderBy(i => i).ToList();
+        var indices = itemsUpdate.Items.Select(c => (int)c.Index!).OrderBy(i => i).ToList();
         Assert.Equal(Enumerable.Range(0, 100).ToList(), indices);
 
         // Verify all items have their property updates

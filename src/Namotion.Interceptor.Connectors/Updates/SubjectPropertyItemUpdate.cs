@@ -3,9 +3,9 @@ using System.Text.Json.Serialization;
 namespace Namotion.Interceptor.Connectors.Updates;
 
 /// <summary>
-/// Represents a sparse property update for a collection item at a specific index/key.
+/// Represents a sparse property update for an item at a specific index/key.
 /// </summary>
-public readonly struct SubjectPropertyCollectionUpdate
+public readonly struct SubjectPropertyItemUpdate
 {
     /// <summary>
     /// The target index (int for arrays) or key (string for dictionaries).
@@ -15,7 +15,7 @@ public readonly struct SubjectPropertyCollectionUpdate
     public required object Index { get; init; }
 
     /// <summary>
-    /// The subject ID for this collection item.
+    /// The subject ID for this item.
     /// References a subject in the Subjects dictionary.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

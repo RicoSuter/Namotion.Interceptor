@@ -26,7 +26,7 @@ internal static class SubjectCollectionUpdateFactory
 
         var items = collection as IReadOnlyList<IInterceptorSubject> ?? collection.ToList();
         update.Count = items.Count;
-        update.Collection = new List<SubjectPropertyCollectionUpdate>(items.Count);
+        update.Items = new List<SubjectPropertyItemUpdate>(items.Count);
 
         for (var i = 0; i < items.Count; i++)
         {
@@ -34,7 +34,7 @@ internal static class SubjectCollectionUpdateFactory
             var itemId = builder.GetOrCreateId(item);
             SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
 
-            update.Collection.Add(new SubjectPropertyCollectionUpdate
+            update.Items.Add(new SubjectPropertyItemUpdate
             {
                 Index = i,
                 Id = itemId
@@ -103,7 +103,7 @@ internal static class SubjectCollectionUpdateFactory
             }
 
             // Generate sparse updates for common items with property changes
-            List<SubjectPropertyCollectionUpdate>? updates = null;
+            List<SubjectPropertyItemUpdate>? updates = null;
             foreach (var item in changeBuilder.GetCommonItems())
             {
                 if (builder.SubjectHasUpdates(item))
@@ -111,7 +111,7 @@ internal static class SubjectCollectionUpdateFactory
                     var itemId = builder.GetOrCreateId(item);
                     var newIndex = changeBuilder.GetNewIndex(item);
                     updates ??= [];
-                    updates.Add(new SubjectPropertyCollectionUpdate
+                    updates.Add(new SubjectPropertyItemUpdate
                     {
                         Index = newIndex,
                         Id = itemId
@@ -120,7 +120,7 @@ internal static class SubjectCollectionUpdateFactory
             }
 
             update.Operations = operations;
-            update.Collection = updates;
+            update.Items = updates;
         }
         finally
         {
@@ -137,13 +137,13 @@ internal static class SubjectCollectionUpdateFactory
         IDictionary? dictionary,
         SubjectUpdateBuilder builder)
     {
-        update.Kind = SubjectPropertyUpdateKind.Collection;
+        update.Kind = SubjectPropertyUpdateKind.Dictionary;
 
         if (dictionary is null)
             return;
 
         update.Count = dictionary.Count;
-        update.Collection = new List<SubjectPropertyCollectionUpdate>(dictionary.Count);
+        update.Items = new List<SubjectPropertyItemUpdate>(dictionary.Count);
 
         foreach (DictionaryEntry entry in dictionary)
         {
@@ -152,7 +152,7 @@ internal static class SubjectCollectionUpdateFactory
                 var itemId = builder.GetOrCreateId(item);
                 SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
 
-                update.Collection.Add(new SubjectPropertyCollectionUpdate
+                update.Items.Add(new SubjectPropertyItemUpdate
                 {
                     Index = entry.Key,
                     Id = itemId
@@ -170,7 +170,7 @@ internal static class SubjectCollectionUpdateFactory
         IDictionary? newDict,
         SubjectUpdateBuilder builder)
     {
-        update.Kind = SubjectPropertyUpdateKind.Collection;
+        update.Kind = SubjectPropertyUpdateKind.Dictionary;
 
         if (newDict is null)
             return;
@@ -228,7 +228,7 @@ internal static class SubjectCollectionUpdateFactory
                     newKeysSet.Add(key);
             }
 
-            List<SubjectPropertyCollectionUpdate>? updates = null;
+            List<SubjectPropertyItemUpdate>? updates = null;
             foreach (DictionaryEntry entry in newDict)
             {
                 var key = entry.Key;
@@ -243,7 +243,7 @@ internal static class SubjectCollectionUpdateFactory
                 {
                     var itemId = builder.GetOrCreateId(item);
                     updates ??= [];
-                    updates.Add(new SubjectPropertyCollectionUpdate
+                    updates.Add(new SubjectPropertyItemUpdate
                     {
                         Index = key,
                         Id = itemId
@@ -252,7 +252,7 @@ internal static class SubjectCollectionUpdateFactory
             }
 
             update.Operations = operations;
-            update.Collection = updates;
+            update.Items = updates;
         }
         finally
         {
