@@ -90,20 +90,20 @@ internal static class SubjectUpdateApplier
                 break;
 
             case SubjectPropertyUpdateKind.Object:
-                ApplyItemUpdate(subject, registeredProperty, propertyUpdate, context);
+                ApplyObjectUpdate(subject, registeredProperty, propertyUpdate, context);
                 break;
 
             case SubjectPropertyUpdateKind.Collection:
-                SubjectCollectionUpdateApplier.ApplyCollectionUpdate(subject, registeredProperty, propertyUpdate, context);
+                SubjectItemsUpdateApplier.ApplyCollectionUpdate(subject, registeredProperty, propertyUpdate, context);
                 break;
 
             case SubjectPropertyUpdateKind.Dictionary:
-                SubjectCollectionUpdateApplier.ApplyDictionaryUpdate(subject, registeredProperty, propertyUpdate, context);
+                SubjectItemsUpdateApplier.ApplyDictionaryUpdate(subject, registeredProperty, propertyUpdate, context);
                 break;
         }
     }
 
-    private static void ApplyItemUpdate(
+    private static void ApplyObjectUpdate(
         IInterceptorSubject parent,
         RegisteredSubjectProperty property,
         SubjectPropertyUpdate propertyUpdate,

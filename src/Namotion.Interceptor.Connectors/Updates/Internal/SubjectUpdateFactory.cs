@@ -144,15 +144,15 @@ internal static class SubjectUpdateFactory
 
         if (property.IsSubjectDictionary)
         {
-            SubjectCollectionUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, builder);
+            SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, builder);
         }
         else if (property.IsSubjectCollection)
         {
-            SubjectCollectionUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, builder);
+            SubjectItemsUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, builder);
         }
         else if (property.IsSubjectReference)
         {
-            BuildItemReference(update, value as IInterceptorSubject, builder);
+            BuildObjectReference(update, value as IInterceptorSubject, builder);
         }
         else
         {
@@ -179,18 +179,18 @@ internal static class SubjectUpdateFactory
 
         if (property.IsSubjectDictionary)
         {
-            SubjectCollectionUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
+            SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
                 change.GetNewValue<IDictionary?>(), builder);
         }
         else if (property.IsSubjectCollection)
         {
-            SubjectCollectionUpdateFactory.BuildCollectionDiff(update,
+            SubjectItemsUpdateFactory.BuildCollectionDiff(update,
                 change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
                 change.GetNewValue<IEnumerable<IInterceptorSubject>?>(), builder);
         }
         else if (property.IsSubjectReference)
         {
-            BuildItemReference(update, change.GetNewValue<IInterceptorSubject?>(), builder);
+            BuildObjectReference(update, change.GetNewValue<IInterceptorSubject?>(), builder);
         }
         else
         {
@@ -200,7 +200,7 @@ internal static class SubjectUpdateFactory
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void BuildItemReference(
+    private static void BuildObjectReference(
         SubjectPropertyUpdate update,
         IInterceptorSubject? item,
         SubjectUpdateBuilder builder)
@@ -251,7 +251,7 @@ internal static class SubjectUpdateFactory
 
             if (parentInfo.Index is not null)
             {
-                AddCollectionItemToParent(parentProperties, parentProperty.Name, parentInfo.Index, childId);
+                AddCollectionOrDictionaryItemToParent(parentProperties, parentProperty.Name, parentInfo.Index, childId);
             }
             else
             {
@@ -266,7 +266,7 @@ internal static class SubjectUpdateFactory
     /// Adds a collection item reference to the parent's property update.
     /// Appends to existing collection update or creates a new one.
     /// </summary>
-    private static void AddCollectionItemToParent(
+    private static void AddCollectionOrDictionaryItemToParent(
         Dictionary<string, SubjectPropertyUpdate> parentProperties,
         string propertyName,
         object index,
