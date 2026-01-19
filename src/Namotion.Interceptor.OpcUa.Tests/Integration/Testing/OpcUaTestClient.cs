@@ -19,6 +19,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
     private const string DefaultServerUrl = "opc.tcp://localhost:4840";
 
     private readonly TestLogger _logger;
+    private readonly Action<OpcUaClientConfiguration>? _configureClient;
     private IHost? _host;
     private IInterceptorSubjectContext? _context;
     private int _disposed; // 0 = not disposed, 1 = disposed
@@ -32,9 +33,10 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
     /// </summary>
     public OpcUaClientDiagnostics? Diagnostics { get; private set; }
 
-    public OpcUaTestClient(TestLogger logger)
+    public OpcUaTestClient(TestLogger logger, Action<OpcUaClientConfiguration>? configureClient = null)
     {
         _logger = logger;
+        _configureClient = configureClient;
     }
 
     public async Task StartAsync(
@@ -79,7 +81,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                 var telemetryContext = DefaultTelemetry.Create(b =>
                     b.Services.AddSingleton(loggerFactory));
 
-                return new OpcUaClientConfiguration
+                var config = new OpcUaClientConfiguration
                 {
                     ServerUrl = serverUrl,
                     RootName = "Root",
@@ -97,6 +99,11 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                     StallDetectionIterations = 10,
                     CertificateStoreBasePath = certificateStoreBasePath ?? "pki"
                 };
+
+                // Allow tests to override configuration
+                _configureClient?.Invoke(config);
+
+                return config;
             });
 
         _host = builder.Build();

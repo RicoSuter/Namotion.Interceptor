@@ -586,7 +586,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// Determines if a write failure status code represents a transient error that should be retried.
     /// Returns true for transient errors (connectivity, timeouts, server load), false for permanent errors.
     /// </summary>
-    private static bool IsTransientWriteError(StatusCode statusCode)
+    internal static bool IsTransientWriteError(StatusCode statusCode)
     {
         // Permanent design-time errors: Don't retry
         if (statusCode == StatusCodes.BadNodeIdUnknown ||
