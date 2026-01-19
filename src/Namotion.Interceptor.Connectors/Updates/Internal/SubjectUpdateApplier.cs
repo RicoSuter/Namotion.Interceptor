@@ -89,15 +89,16 @@ internal static class SubjectUpdateApplier
                 }
                 break;
 
-            case SubjectPropertyUpdateKind.Item:
+            case SubjectPropertyUpdateKind.Object:
                 ApplyItemUpdate(subject, registeredProperty, propertyUpdate, context);
                 break;
 
             case SubjectPropertyUpdateKind.Collection:
-                if (registeredProperty.IsSubjectDictionary)
-                    SubjectCollectionUpdateApplier.ApplyDictionaryUpdate(subject, registeredProperty, propertyUpdate, context);
-                else
-                    SubjectCollectionUpdateApplier.ApplyCollectionUpdate(subject, registeredProperty, propertyUpdate, context);
+                SubjectCollectionUpdateApplier.ApplyCollectionUpdate(subject, registeredProperty, propertyUpdate, context);
+                break;
+
+            case SubjectPropertyUpdateKind.Dictionary:
+                SubjectCollectionUpdateApplier.ApplyDictionaryUpdate(subject, registeredProperty, propertyUpdate, context);
                 break;
         }
     }
