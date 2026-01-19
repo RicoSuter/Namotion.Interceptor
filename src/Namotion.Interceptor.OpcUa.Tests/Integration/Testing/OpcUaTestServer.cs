@@ -8,7 +8,6 @@ using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 using Opc.Ua;
-using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
@@ -17,30 +16,22 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 {
     private const string DefaultBaseAddress = "opc.tcp://localhost:4840/";
 
-    private readonly ITestOutputHelper _output;
+    private readonly TestLogger _logger;
     private IHost? _host;
     private IInterceptorSubjectContext? _context;
     private Func<IInterceptorSubjectContext, TRoot>? _createRoot;
     private Action<IInterceptorSubjectContext, TRoot>? _initializeDefaults;
     private string _baseAddress = DefaultBaseAddress;
     private string _certificateStoreBasePath = "pki";
-    private int _disposed; // 0 = not disposed, 1 = disposed
+    private int _disposed;
 
     public TRoot? Root { get; private set; }
-
-    /// <summary>
-    /// Gets the server's base address.
-    /// </summary>
     public string BaseAddress => _baseAddress;
-
-    /// <summary>
-    /// Gets the server diagnostics, or null if not started.
-    /// </summary>
     public OpcUaServerDiagnostics? Diagnostics { get; private set; }
 
-    public OpcUaTestServer(ITestOutputHelper output)
+    public OpcUaTestServer(TestLogger logger)
     {
-        _output = output;
+        _logger = logger;
     }
 
     public Task StartAsync(
@@ -62,7 +53,6 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var builder = Host.CreateApplicationBuilder();
 
-        // Reduce shutdown timeout for faster test cleanup
         builder.Services.Configure<HostOptions>(options =>
         {
             options.ShutdownTimeout = TimeSpan.FromSeconds(5);
@@ -70,10 +60,9 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
         builder.Services.AddLogging(logging =>
         {
-            // Clear default providers to avoid EventLog disposal issues during test cleanup
             logging.ClearProviders();
-            logging.SetMinimumLevel(LogLevel.Information);
-            logging.AddConsole();
+            logging.SetMinimumLevel(LogLevel.Debug);
+            logging.AddXunit(_logger, "Server", LogLevel.Information);
         });
 
         _context = InterceptorSubjectContext
@@ -104,18 +93,14 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                     PathProvider = new AttributeBasedPathProvider("opc"),
                     ValueConverter = new OpcUaValueConverter(),
                     TelemetryContext = telemetryContext,
-                    // Keep certificates across restarts to allow client reconnection
                     CleanCertificateStore = false,
-                    // Auto-accept client certificates in tests (matches client configuration)
                     AutoAcceptUntrustedCertificates = true,
-                    // Use port-specific certificate store for parallel test isolation
                     CertificateStoreBasePath = _certificateStoreBasePath
                 };
             });
 
         _host = builder.Build();
 
-        // Get diagnostics from the server service
         var serverService = _host.Services
             .GetServices<IHostedService>()
             .OfType<OpcUaSubjectServerBackgroundService>()
@@ -128,7 +113,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
         await _host.StartAsync();
         sw.Stop();
-        _output.WriteLine($"Server started in {sw.ElapsedMilliseconds}ms");
+        _logger.Log($"Server started in {sw.ElapsedMilliseconds}ms");
     }
 
     public async Task StopAsync()
@@ -147,28 +132,23 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                 Diagnostics = null;
             }
             sw.Stop();
-            _output.WriteLine($"Server stopped in {sw.ElapsedMilliseconds}ms");
+            _logger.Log($"Server stopped in {sw.ElapsedMilliseconds}ms");
         }
     }
 
-    /// <summary>
-    /// Restarts the server (stop and start again with same configuration).
-    /// </summary>
     public async Task RestartAsync()
     {
-        // Reset disposed flag to allow restart
         Interlocked.Exchange(ref _disposed, 0);
-        _output.WriteLine("Restarting server...");
+        _logger.Log("Restarting server...");
         await StopAsync();
         await StartInternalAsync();
-        _output.WriteLine("Server restarted");
     }
 
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
-            return; // Already disposed
+            return;
         }
 
         try
@@ -178,12 +158,12 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
             {
                 await host.StopAsync(TimeSpan.FromSeconds(5));
                 host.Dispose();
-                _output.WriteLine("Server host disposed");
+                _logger.Log("Server disposed");
             }
         }
         catch (Exception ex)
         {
-            _output.WriteLine($"Error disposing server: {ex.Message}");
+            _logger.Log($"Error disposing server: {ex.Message}");
         }
     }
 }

@@ -8,6 +8,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 public class OpcUaServerClientReadWriteTests
 {
     private readonly ITestOutputHelper _output;
+    private TestLogger? _logger;
 
     private OpcUaTestServer<TestRoot>? _server;
     private OpcUaTestClient<TestRoot>? _client;
@@ -82,12 +83,12 @@ public class OpcUaServerClientReadWriteTests
             Assert.NotNull(_client?.Root);
 
             // Test just one simple integer array
-            _output.WriteLine($"Server initial ScalarNumbers: [{string.Join(", ", _server.Root.ScalarNumbers)}]");
-            _output.WriteLine($"Client initial ScalarNumbers: [{string.Join(", ", _client.Root.ScalarNumbers)}]");
+            _logger!.Log($"Server initial ScalarNumbers: [{string.Join(", ", _server.Root.ScalarNumbers)}]");
+            _logger.Log($"Client initial ScalarNumbers: [{string.Join(", ", _client.Root.ScalarNumbers)}]");
 
             var newNumbers = new[] { 100, 200, 300 };
             _server.Root.ScalarNumbers = newNumbers;
-            _output.WriteLine($"Server updated ScalarNumbers: [{string.Join(", ", _server.Root.ScalarNumbers)}]");
+            _logger.Log($"Server updated ScalarNumbers: [{string.Join(", ", _server.Root.ScalarNumbers)}]");
 
             // Wait for array synchronization
             await AsyncTestHelpers.WaitUntilAsync(
@@ -95,13 +96,13 @@ public class OpcUaServerClientReadWriteTests
                 timeout: TimeSpan.FromSeconds(15),
                 message: "Client should receive server's array update");
 
-            _output.WriteLine($"Client ScalarNumbers after update: [{string.Join(", ", _client.Root.ScalarNumbers)}]");
+            _logger.Log($"Client ScalarNumbers after update: [{string.Join(", ", _client.Root.ScalarNumbers)}]");
 
             // If this fails, it indicates that either:
             // 1. Server-client sync is not working, OR
             // 2. The valueRank is incorrect and arrays can't sync properly
             Assert.Equal(newNumbers, _client.Root.ScalarNumbers);
-            _output.WriteLine($"Basic array sync: [{string.Join(", ", _client.Root.ScalarNumbers)}]");
+            _logger.Log($"Basic array sync: [{string.Join(", ", _client.Root.ScalarNumbers)}]");
         }
         finally
         {
@@ -114,9 +115,10 @@ public class OpcUaServerClientReadWriteTests
 
     private async Task StartServerAsync()
     {
+        _logger = new TestLogger(_output);
         _port = await OpcUaTestPortPool.AcquireAsync();
 
-        _server = new OpcUaTestServer<TestRoot>(_output);
+        _server = new OpcUaTestServer<TestRoot>(_logger);
         await _server.StartAsync(
             context => new TestRoot(context),
             (context, root) =>
@@ -138,7 +140,7 @@ public class OpcUaServerClientReadWriteTests
 
     private async Task StartClientAsync()
     {
-        _client = new OpcUaTestClient<TestRoot>(_output);
+        _client = new OpcUaTestClient<TestRoot>(_logger!);
         await _client.StartAsync(
             context => new TestRoot(context),
             isConnected: root => root.Connected,

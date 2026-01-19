@@ -9,6 +9,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 public class OpcUaTransactionTests
 {
     private readonly ITestOutputHelper _output;
+    private TestLogger? _logger;
 
     private OpcUaTestServer<TestRoot>? _server;
     private OpcUaTestClient<TestRoot>? _client;
@@ -108,9 +109,10 @@ public class OpcUaTransactionTests
 
     private async Task StartServerAsync()
     {
+        _logger = new TestLogger(_output);
         _port = await OpcUaTestPortPool.AcquireAsync();
 
-        _server = new OpcUaTestServer<TestRoot>(_output);
+        _server = new OpcUaTestServer<TestRoot>(_logger);
         await _server.StartAsync(
             context => new TestRoot(context),
             (context, root) =>
@@ -125,7 +127,7 @@ public class OpcUaTransactionTests
 
     private async Task StartClientAsync()
     {
-        _client = new OpcUaTestClient<TestRoot>(_output);
+        _client = new OpcUaTestClient<TestRoot>(_logger!);
         await _client.StartAsync(
             context => new TestRoot(context),
             isConnected: root => root.Connected,

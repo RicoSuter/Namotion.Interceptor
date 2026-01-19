@@ -17,11 +17,12 @@ public class OpcUaReconnectionTests
         _output = output;
     }
 
-    private async Task<(OpcUaTestServer<TestRoot> Server, OpcUaTestClient<TestRoot> Client, PortLease Port)> StartServerAndClientAsync()
+    private async Task<(OpcUaTestServer<TestRoot> Server, OpcUaTestClient<TestRoot> Client, PortLease Port, TestLogger Logger)> StartServerAndClientAsync()
     {
+        var logger = new TestLogger(_output);
         var port = await OpcUaTestPortPool.AcquireAsync();
 
-        var server = new OpcUaTestServer<TestRoot>(_output);
+        var server = new OpcUaTestServer<TestRoot>(logger);
         await server.StartAsync(
             context => new TestRoot(context),
             (context, root) =>
@@ -33,14 +34,14 @@ public class OpcUaReconnectionTests
             baseAddress: port.BaseAddress,
             certificateStoreBasePath: port.CertificateStoreBasePath);
 
-        var client = new OpcUaTestClient<TestRoot>(_output);
+        var client = new OpcUaTestClient<TestRoot>(logger);
         await client.StartAsync(
             context => new TestRoot(context),
             isConnected: root => root.Connected,
             serverUrl: port.ServerUrl,
             certificateStoreBasePath: port.CertificateStoreBasePath);
 
-        return (server, client, port);
+        return (server, client, port, logger);
     }
 
     [Fact]
@@ -54,10 +55,11 @@ public class OpcUaReconnectionTests
         OpcUaTestServer<TestRoot>? server = null;
         OpcUaTestClient<TestRoot>? client = null;
         PortLease? port = null;
+        TestLogger? logger = null;
 
         try
         {
-            (server, client, port) = await StartServerAndClientAsync();
+            (server, client, port, logger) = await StartServerAndClientAsync();
 
             Assert.NotNull(server.Root);
             Assert.NotNull(client.Root);
@@ -70,19 +72,19 @@ public class OpcUaReconnectionTests
                 () => client.Root.Name == "Initial",
                 timeout: TimeSpan.FromSeconds(30),
                 message: "Initial sync should complete");
-            _output.WriteLine("Initial sync verified");
+            logger.Log("Initial sync verified");
 
             var initialAttempts = client.Diagnostics.TotalReconnectionAttempts;
 
             // === Test 1: Restart WITH disconnection wait ===
-            _output.WriteLine("=== Test 1: Restart with disconnection wait ===");
+            logger.Log("=== Test 1: Restart with disconnection wait ===");
             await server.StopAsync();
 
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !client.Diagnostics.IsConnected,
                 timeout: TimeSpan.FromSeconds(30),
                 message: "Client should detect disconnection");
-            _output.WriteLine("Client detected disconnection");
+            logger.Log("Client detected disconnection");
 
             await server.RestartAsync();
 
@@ -91,10 +93,10 @@ public class OpcUaReconnectionTests
                 () => client.Root.Name == "AfterWaitRestart",
                 timeout: TimeSpan.FromSeconds(60),
                 message: "Data should flow after restart with wait");
-            _output.WriteLine($"Test 1 passed: {client.Root.Name}");
+            logger.Log($"Test 1 passed: {client.Root.Name}");
 
             // === Test 2: INSTANT restart without wait ===
-            _output.WriteLine("=== Test 2: Instant restart without wait ===");
+            logger.Log("=== Test 2: Instant restart without wait ===");
             await server.StopAsync();
             await server.RestartAsync(); // Immediate, no disconnection wait
 
@@ -103,22 +105,22 @@ public class OpcUaReconnectionTests
                 () => client.Root.Name == "AfterInstantRestart",
                 timeout: TimeSpan.FromSeconds(30),
                 message: "Data should flow after instant restart");
-            _output.WriteLine($"Test 2 passed: {client.Root.Name}");
+            logger.Log($"Test 2 passed: {client.Root.Name}");
 
             // === Test 3: Verify metrics accumulated ===
-            _output.WriteLine("=== Test 3: Verify metrics ===");
+            logger.Log("=== Test 3: Verify metrics ===");
             var finalAttempts = client.Diagnostics.TotalReconnectionAttempts;
             var successfulReconnections = client.Diagnostics.SuccessfulReconnections;
 
-            _output.WriteLine($"Reconnection attempts: {initialAttempts} -> {finalAttempts}");
-            _output.WriteLine($"Successful reconnections: {successfulReconnections}");
+            logger.Log($"Reconnection attempts: {initialAttempts} -> {finalAttempts}");
+            logger.Log($"Successful reconnections: {successfulReconnections}");
 
             Assert.True(finalAttempts > initialAttempts,
                 $"Reconnection attempts should have increased (was {initialAttempts}, now {finalAttempts})");
             Assert.True(successfulReconnections >= 1,
                 $"Should have at least 1 successful reconnection, had {successfulReconnections}");
 
-            _output.WriteLine("All tests passed");
+            logger.Log("All tests passed");
         }
         finally
         {
@@ -133,6 +135,7 @@ public class OpcUaReconnectionTests
     {
         // Verifies all subscriptions recreated after restart with many properties.
 
+        var logger = new TestLogger(_output);
         OpcUaTestServer<TestRoot>? server = null;
         OpcUaTestClient<TestRoot>? client = null;
         PortLease? port = null;
@@ -141,7 +144,7 @@ public class OpcUaReconnectionTests
         {
             port = await OpcUaTestPortPool.AcquireAsync();
 
-            server = new OpcUaTestServer<TestRoot>(_output);
+            server = new OpcUaTestServer<TestRoot>(logger);
             await server.StartAsync(
                 context => new TestRoot(context),
                 (context, root) =>
@@ -165,7 +168,7 @@ public class OpcUaReconnectionTests
                 baseAddress: port.BaseAddress,
                 certificateStoreBasePath: port.CertificateStoreBasePath);
 
-            client = new OpcUaTestClient<TestRoot>(_output);
+            client = new OpcUaTestClient<TestRoot>(logger);
             await client.StartAsync(
                 context => new TestRoot(context),
                 isConnected: root => root.Connected,
@@ -182,7 +185,7 @@ public class OpcUaReconnectionTests
                 message: "All people should sync");
 
             var monitoredCount = client.Diagnostics!.MonitoredItemCount;
-            _output.WriteLine($"Monitored items: {monitoredCount}");
+            logger.Log($"Monitored items: {monitoredCount}");
 
             // Restart
             await server.StopAsync();
@@ -203,7 +206,7 @@ public class OpcUaReconnectionTests
                 timeout: TimeSpan.FromSeconds(60),
                 message: "All properties should resync");
 
-            _output.WriteLine($"All {client.Diagnostics.MonitoredItemCount} items resynced");
+            logger.Log($"All {client.Diagnostics.MonitoredItemCount} items resynced");
         }
         finally
         {

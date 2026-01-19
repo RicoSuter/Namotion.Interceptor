@@ -12,6 +12,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 public class OpcUaDynamicServerClientTests
 {
     private readonly ITestOutputHelper _output;
+    private TestLogger? _logger;
 
     private OpcUaTestServer<TestRoot>? _server;
     private OpcUaTestClient<DynamicSubject>? _client;
@@ -59,7 +60,8 @@ public class OpcUaDynamicServerClientTests
 
     private async Task StartServerAsync()
     {
-        _server = new OpcUaTestServer<TestRoot>(_output);
+        _logger = new TestLogger(_output);
+        _server = new OpcUaTestServer<TestRoot>(_logger);
         await _server.StartAsync(
             context => new TestRoot(context),
             (_, root) =>
@@ -81,7 +83,7 @@ public class OpcUaDynamicServerClientTests
 
     private async Task StartClientAsync()
     {
-        _client = new OpcUaTestClient<DynamicSubject>(_output);
+        _client = new OpcUaTestClient<DynamicSubject>(_logger!);
         await _client.StartAsync(
             context => new DynamicSubject(context),
             isConnected: root => root.TryGetRegisteredProperty(nameof(TestRoot.Connected))?.GetValue() is true,
