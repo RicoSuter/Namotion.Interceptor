@@ -240,15 +240,15 @@ Namotion.Interceptor is designed to be extended:
 
 ### Core
 
-| Package | Description | Docs |
-|---------|-------------|------|
+| Package | Description | Documentation |
+|---------|-------------|---------------|
 | **Namotion.Interceptor** | Property interception with compile-time source generation | [Interceptors](docs/interceptor.md) |
 | **Namotion.Interceptor.Generator** | Source generator for `[InterceptorSubject]` classes (add as analyzer) | |
 
 ### Foundation
 
-| Package | Description | Docs |
-|---------|-------------|------|
+| Package | Description | Documentation |
+|---------|-------------|---------------|
 | **Namotion.Interceptor.Tracking** | Change tracking, derived properties, lifecycle events, transactions | [Tracking](docs/tracking.md) |
 | **Namotion.Interceptor.Registry** | Runtime property discovery, metadata, and dynamic properties | [Registry](docs/registry.md) |
 | **Namotion.Interceptor.Validation** | Property validation with data annotation support | [Validation](docs/validation.md) |
@@ -257,16 +257,16 @@ Namotion.Interceptor is designed to be extended:
 
 ### Connectors
 
-| Package | Description | Docs |
-|---------|-------------|------|
+| Package | Description | Documentation |
+|---------|-------------|---------------|
 | **Namotion.Interceptor.Connectors** | Base infrastructure for external system integration | [Connectors](docs/connectors.md) |
 | **Namotion.Interceptor.Mqtt** | Bidirectional MQTT synchronization | [MQTT](docs/connectors/mqtt.md) |
 | **Namotion.Interceptor.OpcUa** | OPC UA client and server integration | [OPC UA](docs/connectors/opcua.md) |
 
 ### Integrations
 
-| Package | Description | Docs |
-|---------|-------------|------|
+| Package | Description | Documentation |
+|---------|-------------|---------------|
 | **Namotion.Interceptor.AspNetCore** | ASP.NET Core integration for web APIs | [ASP.NET Core](docs/aspnetcore.md) |
 | **Namotion.Interceptor.Blazor** | Automatic re-rendering on property changes | [Blazor](docs/blazor.md) |
 | **Namotion.Interceptor.GraphQL** | GraphQL subscriptions for real-time updates | [GraphQL](docs/graphql.md) |
