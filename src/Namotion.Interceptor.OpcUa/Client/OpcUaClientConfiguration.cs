@@ -46,19 +46,19 @@ public class OpcUaClientConfiguration
     public int WriteRetryQueueSize { get; init; } = 1000;
 
     /// <summary>
-    /// Gets the interval for subscription health checks and auto-healing attempts. Default is 10 seconds.
+    /// Gets the interval for subscription health checks and auto-healing attempts. Default is 5 seconds.
     /// Failed monitored items (excluding design-time errors like BadNodeIdUnknown) are retried at this interval.
+    /// This also determines how quickly the health check loop picks up work deferred from SDK reconnection.
     /// </summary>
-    public TimeSpan SubscriptionHealthCheckInterval { get; init; } = TimeSpan.FromSeconds(10);
+    public TimeSpan SubscriptionHealthCheckInterval { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Gets the number of health check iterations while reconnecting before triggering stall detection.
-    /// When the SDK's automatic reconnection appears stalled, manual reconnection is triggered after
-    /// this many iterations × SubscriptionHealthCheckInterval.
-    /// Default is 10 iterations. Lower values mean faster stall detection but less tolerance for slow reconnections.
+    /// Gets the number of health check iterations to wait before forcing a stall reset when SDK reconnection
+    /// appears stuck. Total stall detection time = StallDetectionIterations × SubscriptionHealthCheckInterval.
+    /// Default is 10 iterations. Use lower values (e.g., 3) for faster recovery in tests.
     /// </summary>
     public int StallDetectionIterations { get; init; } = 10;
-    
+
     /// <summary>
     /// Gets or sets an async predicate that is called when an unknown (not statically typed) OPC UA node or variable is found during browsing.
     /// If the function returns true, the node is added as a dynamic property to the given subject.
@@ -352,13 +352,6 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"SubscriptionHealthCheckInterval must be at least {TimeSpan.FromSeconds(1).TotalSeconds}s (got: {SubscriptionHealthCheckInterval.TotalSeconds}s)",
                 nameof(SubscriptionHealthCheckInterval));
-        }
-
-        if (StallDetectionIterations < 1)
-        {
-            throw new ArgumentException(
-                $"StallDetectionIterations must be at least 1, got: {StallDetectionIterations}",
-                nameof(StallDetectionIterations));
         }
 
         if (MaximumItemsPerSubscription <= 0)

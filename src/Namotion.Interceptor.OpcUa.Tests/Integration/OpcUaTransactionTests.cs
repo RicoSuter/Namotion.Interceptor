@@ -1,10 +1,10 @@
+using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Transactions;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
-[Collection("OPC UA Integration")]
 [Trait("Category", "Integration")]
 public class OpcUaTransactionTests
 {

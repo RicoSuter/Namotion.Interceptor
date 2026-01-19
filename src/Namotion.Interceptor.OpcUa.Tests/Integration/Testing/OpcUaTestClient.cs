@@ -12,18 +12,7 @@ using Namotion.Interceptor.Validation;
 using Opc.Ua;
 using Xunit.Abstractions;
 
-namespace Namotion.Interceptor.OpcUa.Tests.Integration;
-
-public class OpcUaTestClientConfiguration
-{
-    public TimeSpan ReconnectInterval { get; init; } = TimeSpan.FromSeconds(5);
-    public TimeSpan ReconnectHandlerTimeout { get; init; } = TimeSpan.FromSeconds(60);
-    public TimeSpan SessionTimeout { get; init; } = TimeSpan.FromSeconds(60);
-    public TimeSpan SubscriptionHealthCheckInterval { get; init; } = TimeSpan.FromSeconds(10);
-    public TimeSpan KeepAliveInterval { get; init; } = TimeSpan.FromSeconds(5);
-    public TimeSpan OperationTimeout { get; init; } = TimeSpan.FromSeconds(60);
-    public int StallDetectionIterations { get; init; } = 10;
-}
+namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
 public class OpcUaTestClient<TRoot> : IAsyncDisposable
     where TRoot : class, IInterceptorSubject
@@ -33,6 +22,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
     private readonly ITestOutputHelper _output;
     private IHost? _host;
     private IInterceptorSubjectContext? _context;
+    private int _disposed; // 0 = not disposed, 1 = disposed
 
     public TRoot? Root { get; private set; }
 
@@ -48,19 +38,9 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         _output = output;
     }
 
-    public Task StartAsync(
-        Func<IInterceptorSubjectContext, TRoot> createRoot,
-        Func<TRoot, bool> isConnected,
-        string serverUrl = DefaultServerUrl,
-        string? certificateStoreBasePath = null)
-    {
-        return StartAsync(createRoot, isConnected, new OpcUaTestClientConfiguration(), serverUrl, certificateStoreBasePath);
-    }
-
     public async Task StartAsync(
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Func<TRoot, bool> isConnected,
-        OpcUaTestClientConfiguration configuration,
         string serverUrl = DefaultServerUrl,
         string? certificateStoreBasePath = null)
     {
@@ -75,6 +55,8 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
         builder.Services.AddLogging(logging =>
         {
+            // Clear default providers to avoid EventLog disposal issues during test cleanup
+            logging.ClearProviders();
             logging.SetMinimumLevel(LogLevel.Debug);
             logging.AddConsole();
         });
@@ -108,13 +90,13 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                     ValueConverter = new OpcUaValueConverter(),
                     SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                     TelemetryContext = telemetryContext,
-                    ReconnectInterval = configuration.ReconnectInterval,
-                    ReconnectHandlerTimeout = configuration.ReconnectHandlerTimeout,
-                    SessionTimeout = configuration.SessionTimeout,
-                    SubscriptionHealthCheckInterval = configuration.SubscriptionHealthCheckInterval,
-                    KeepAliveInterval = configuration.KeepAliveInterval,
-                    OperationTimeout = configuration.OperationTimeout,
-                    StallDetectionIterations = configuration.StallDetectionIterations,
+                    ReconnectInterval = TimeSpan.FromSeconds(5),
+                    ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
+                    SessionTimeout = TimeSpan.FromSeconds(5),
+                    SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5),
+                    KeepAliveInterval = TimeSpan.FromSeconds(5),
+                    OperationTimeout = TimeSpan.FromSeconds(5),
+                    StallDetectionIterations = 10,
                     CertificateStoreBasePath = certificateStoreBasePath ?? "pki"
                 };
             });
@@ -149,13 +131,19 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
     public async Task StopAsync()
     {
-        if (_host != null)
+        var host = Interlocked.Exchange(ref _host, null);
+        if (host != null)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            await _host.StopAsync();
-            _host.Dispose();
-            _host = null;
-            Diagnostics = null;
+            try
+            {
+                await host.StopAsync(TimeSpan.FromSeconds(5));
+            }
+            finally
+            {
+                host.Dispose();
+                Diagnostics = null;
+            }
             sw.Stop();
             _output.WriteLine($"Client stopped in {sw.ElapsedMilliseconds}ms");
         }
@@ -163,12 +151,18 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return; // Already disposed
+        }
+
         try
         {
-            if (_host != null)
+            var host = Interlocked.Exchange(ref _host, null);
+            if (host != null)
             {
-                await _host.StopAsync(TimeSpan.FromSeconds(5));
-                _host.Dispose();
+                await host.StopAsync(TimeSpan.FromSeconds(5));
+                host.Dispose();
                 _output.WriteLine("Client host disposed");
             }
         }

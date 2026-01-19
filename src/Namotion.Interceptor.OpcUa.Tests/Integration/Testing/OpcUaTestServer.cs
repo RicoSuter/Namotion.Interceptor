@@ -10,7 +10,7 @@ using Namotion.Interceptor.Validation;
 using Opc.Ua;
 using Xunit.Abstractions;
 
-namespace Namotion.Interceptor.OpcUa.Tests.Integration;
+namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
 public class OpcUaTestServer<TRoot> : IAsyncDisposable
     where TRoot : class, IInterceptorSubject
@@ -24,6 +24,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     private Action<IInterceptorSubjectContext, TRoot>? _initializeDefaults;
     private string _baseAddress = DefaultBaseAddress;
     private string _certificateStoreBasePath = "pki";
+    private int _disposed; // 0 = not disposed, 1 = disposed
 
     public TRoot? Root { get; private set; }
 
@@ -69,6 +70,8 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
         builder.Services.AddLogging(logging =>
         {
+            // Clear default providers to avoid EventLog disposal issues during test cleanup
+            logging.ClearProviders();
             logging.SetMinimumLevel(LogLevel.Information);
             logging.AddConsole();
         });
@@ -130,13 +133,19 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
     public async Task StopAsync()
     {
-        if (_host != null)
+        var host = Interlocked.Exchange(ref _host, null);
+        if (host != null)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            await _host.StopAsync();
-            _host.Dispose();
-            _host = null;
-            Diagnostics = null;
+            try
+            {
+                await host.StopAsync(TimeSpan.FromSeconds(5));
+            }
+            finally
+            {
+                host.Dispose();
+                Diagnostics = null;
+            }
             sw.Stop();
             _output.WriteLine($"Server stopped in {sw.ElapsedMilliseconds}ms");
         }
@@ -147,6 +156,8 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     /// </summary>
     public async Task RestartAsync()
     {
+        // Reset disposed flag to allow restart
+        Interlocked.Exchange(ref _disposed, 0);
         _output.WriteLine("Restarting server...");
         await StopAsync();
         await StartInternalAsync();
@@ -155,13 +166,18 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return; // Already disposed
+        }
+
         try
         {
-            if (_host != null)
+            var host = Interlocked.Exchange(ref _host, null);
+            if (host != null)
             {
-                await _host.StopAsync(TimeSpan.FromSeconds(5));
-                _host.Dispose();
-                _host = null;
+                await host.StopAsync(TimeSpan.FromSeconds(5));
+                host.Dispose();
                 _output.WriteLine("Server host disposed");
             }
         }

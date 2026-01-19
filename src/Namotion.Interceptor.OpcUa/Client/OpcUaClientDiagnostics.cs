@@ -59,31 +59,6 @@ public class OpcUaClientDiagnostics
     public DateTimeOffset? LastConnectedAt => _source.LastConnectedAt;
 
     /// <summary>
-    /// Gets the timestamp when the connection was lost, or null if currently connected.
-    /// </summary>
-    public DateTimeOffset? LastDisconnectedAt => _source.LastDisconnectedAt;
-
-    /// <summary>
-    /// Gets the duration the client has been disconnected, or null if currently connected.
-    /// </summary>
-    public TimeSpan? DisconnectedDuration
-    {
-        get
-        {
-            // Capture once to avoid TOCTOU race where value could change between reads
-            var disconnectedAt = _source.LastDisconnectedAt;
-            return disconnectedAt.HasValue && !IsConnected
-                ? DateTimeOffset.UtcNow - disconnectedAt.Value
-                : null;
-        }
-    }
-
-    /// <summary>
-    /// Gets the number of consecutive health check errors. Resets on success.
-    /// </summary>
-    public int ConsecutiveHealthCheckErrors => _source.ConsecutiveHealthCheckErrors;
-
-    /// <summary>
     /// Gets the number of items being polled (fallback for nodes without subscription support).
     /// </summary>
     public int PollingItemCount => _source.SessionManager?.PollingManager?.PollingItemCount ?? 0;

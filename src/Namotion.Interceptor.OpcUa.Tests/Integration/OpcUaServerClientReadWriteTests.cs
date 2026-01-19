@@ -1,9 +1,9 @@
+using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
-[Collection("OPC UA Integration")]
 [Trait("Category", "Integration")]
 public class OpcUaServerClientReadWriteTests
 {

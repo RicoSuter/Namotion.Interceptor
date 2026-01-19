@@ -1,26 +1,39 @@
-namespace Namotion.Interceptor.OpcUa.Tests.Integration;
+namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
 /// <summary>
 /// Manages a pool of ports for parallel OPC UA integration tests.
 /// Tests acquire a port at startup and release it when done.
-/// If all ports are in use, tests block until one becomes available.
+/// If all ports are in use, tests wait up to 30 seconds before timing out.
 /// </summary>
 public static class OpcUaTestPortPool
 {
     private const int BasePort = 4840;
     private const int PoolSize = 20;
+    private const int AcquisitionTimeoutMs = 30_000; // 30 seconds
 
     private static readonly SemaphoreSlim _semaphore = new(PoolSize, PoolSize);
     private static readonly bool[] _usedPorts = new bool[PoolSize];
     private static readonly object _lock = new();
 
     /// <summary>
-    /// Acquires a port from the pool. Blocks if all ports are in use.
+    /// Acquires a port from the pool. Times out after 30 seconds if all ports are in use.
     /// </summary>
     /// <returns>A PortLease that must be disposed when the test is done.</returns>
     public static async Task<PortLease> AcquireAsync(CancellationToken cancellationToken = default)
     {
-        await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(AcquisitionTimeoutMs);
+
+        try
+        {
+            await _semaphore.WaitAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"Failed to acquire port from pool within {AcquisitionTimeoutMs}ms. " +
+                $"All {PoolSize} ports may be in use. Ensure tests dispose their PortLease properly.");
+        }
 
         lock (_lock)
         {
@@ -35,6 +48,7 @@ public static class OpcUaTestPortPool
         }
 
         // Should never happen since semaphore controls access
+        _semaphore.Release();
         throw new InvalidOperationException("No ports available despite semaphore grant.");
     }
 
@@ -53,6 +67,7 @@ public static class OpcUaTestPortPool
 
 /// <summary>
 /// Represents a leased port that must be disposed when the test completes.
+/// Cleans up certificate store on disposal to prevent accumulation.
 /// </summary>
 public sealed class PortLease : IDisposable
 {
@@ -81,7 +96,28 @@ public sealed class PortLease : IDisposable
         if (!_disposed)
         {
             _disposed = true;
+
+            // Clean up certificate store to prevent disk accumulation
+            CleanupCertificateStore();
+
             OpcUaTestPortPool.Release(_index);
+        }
+    }
+
+    private void CleanupCertificateStore()
+    {
+        try
+        {
+            var certPath = Path.Combine(AppContext.BaseDirectory, CertificateStoreBasePath);
+            if (Directory.Exists(certPath))
+            {
+                Directory.Delete(certPath, recursive: true);
+            }
+        }
+        catch
+        {
+            // Ignore cleanup failures - directory may be locked by OS
+            // This is non-critical as each test uses isolated directories
         }
     }
 }
