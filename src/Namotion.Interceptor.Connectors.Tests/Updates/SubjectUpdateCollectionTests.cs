@@ -434,4 +434,121 @@ public class SubjectUpdateCollectionTests
         // Assert
         await Verify(update);
     }
+
+    [Fact]
+    public void WhenRemoveAndMoveCombined_ThenMoveIndicesAccountForRemovals()
+    {
+        // Arrange: [A, B, C] where we'll remove A and reorder B,C to C,B
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var childA = new CycleTestNode { Name = "ChildA" };
+        var childB = new CycleTestNode { Name = "ChildB" };
+        var childC = new CycleTestNode { Name = "ChildC" };
+        var node = new CycleTestNode(context) { Name = "Root", Items = [childA, childB, childC] };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - remove A and reorder to [C, B]
+        node.Items = [childC, childB];
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert - operations should use intermediate indices
+        Assert.NotNull(update.Subjects);
+        Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
+        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
+        Assert.NotNull(itemsUpdate!.Operations);
+
+        var removes = itemsUpdate.Operations.Where(op => op.Action == SubjectCollectionOperationType.Remove).ToList();
+        var moves = itemsUpdate.Operations.Where(op => op.Action == SubjectCollectionOperationType.Move).ToList();
+
+        Assert.Single(removes);
+        Assert.Equal(0, removes[0].Index); // A was at index 0
+
+        // Key assertion: Move indices must be valid AFTER the remove
+        // After removing A at index 0, array is [B, C] with indices [0, 1]
+        // Move indices should reference this intermediate state
+        foreach (var move in moves)
+        {
+            var fromIndex = move.FromIndex!.Value;
+            // After remove, max valid index is 1 (array has 2 items)
+            Assert.True(fromIndex <= 1, $"Move fromIndex {fromIndex} should be <= 1 after remove");
+        }
+    }
+
+    [Fact]
+    public void WhenRemoveAndMoveCombined_ThenApplyProducesCorrectResult()
+    {
+        // Arrange: Create source with [A, B, C]
+        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var childA = new CycleTestNode { Name = "ChildA" };
+        var childB = new CycleTestNode { Name = "ChildB" };
+        var childC = new CycleTestNode { Name = "ChildC" };
+        var source = new CycleTestNode(sourceContext) { Name = "Root", Items = [childA, childB, childC] };
+
+        var changes = new List<SubjectPropertyChange>();
+        sourceContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - remove A and reorder to [C, B]
+        source.Items = [childC, childB];
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+
+        // Create target with same initial state
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var targetA = new CycleTestNode { Name = "ChildA" };
+        var targetB = new CycleTestNode { Name = "ChildB" };
+        var targetC = new CycleTestNode { Name = "ChildC" };
+        var target = new CycleTestNode(targetContext) { Name = "Root", Items = [targetA, targetB, targetC] };
+
+        // Apply update
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target should have [C, B] (by name, since these are different instances)
+        Assert.Equal(2, target.Items.Count);
+        Assert.Equal("ChildC", target.Items[0].Name);
+        Assert.Equal("ChildB", target.Items[1].Name);
+    }
+
+    [Fact]
+    public void WhenMultipleRemovesAndMove_ThenIndicesAccountForAllRemovals()
+    {
+        // Arrange: [A, B, C, D, E] -> remove A and C, reorder remaining to [E, B, D]
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var childA = new CycleTestNode { Name = "A" };
+        var childB = new CycleTestNode { Name = "B" };
+        var childC = new CycleTestNode { Name = "C" };
+        var childD = new CycleTestNode { Name = "D" };
+        var childE = new CycleTestNode { Name = "E" };
+        var node = new CycleTestNode(context) { Name = "Root", Items = [childA, childB, childC, childD, childE] };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - remove A, C and reorder to [E, B, D]
+        node.Items = [childE, childB, childD];
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Create target and apply
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Items = [
+                new CycleTestNode { Name = "A" },
+                new CycleTestNode { Name = "B" },
+                new CycleTestNode { Name = "C" },
+                new CycleTestNode { Name = "D" },
+                new CycleTestNode { Name = "E" }
+            ]
+        };
+
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal(3, target.Items.Count);
+        Assert.Equal("E", target.Items[0].Name);
+        Assert.Equal("B", target.Items[1].Name);
+        Assert.Equal("D", target.Items[2].Name);
+    }
 }

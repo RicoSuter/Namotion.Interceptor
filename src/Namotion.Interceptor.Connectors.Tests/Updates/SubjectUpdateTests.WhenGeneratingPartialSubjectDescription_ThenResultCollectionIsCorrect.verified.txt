@@ -7,10 +7,10 @@
         Timestamp: {Scrubbed},
         Operations: [
           {
-            Index: 0
+            Index: 1
           },
           {
-            Index: 1
+            Index: 0
           }
         ],
         Collection: [
