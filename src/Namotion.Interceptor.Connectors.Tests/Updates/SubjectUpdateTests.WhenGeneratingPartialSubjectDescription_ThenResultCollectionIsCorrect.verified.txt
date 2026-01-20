@@ -7,13 +7,13 @@
         Timestamp: {Scrubbed},
         Operations: [
           {
-            Index: 0
+            Index: 1
           },
           {
-            Index: 1
+            Index: 0
           }
         ],
-        Collection: [
+        Items: [
           {
             Index: 1,
             Id: 3
@@ -26,12 +26,12 @@
         Count: 2
       },
       father: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 4
       },
       mother: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 2
       }
@@ -42,7 +42,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -69,7 +69,7 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
       }
     },
     3: {
@@ -78,7 +78,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -105,7 +105,7 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
       }
     },
     4: {
@@ -114,7 +114,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -140,7 +140,7 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
       }
     }
   }

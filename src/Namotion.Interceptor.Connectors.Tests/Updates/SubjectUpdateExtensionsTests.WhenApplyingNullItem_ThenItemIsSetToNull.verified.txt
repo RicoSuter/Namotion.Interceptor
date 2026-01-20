@@ -3,7 +3,7 @@
   Subjects: {
     1: {
       Father: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: DateTimeOffset_1
       }
     }
