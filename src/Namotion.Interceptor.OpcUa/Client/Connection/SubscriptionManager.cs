@@ -54,6 +54,15 @@ internal class SubscriptionManager : IAsyncDisposable
         // Temporal separation: subscriptions added to _subscriptions AFTER initialization prevents health monitor races.
         _shuttingDown = false;
 
+        // Clear any existing subscriptions and monitored items from previous session (reconnection scenario).
+        // Old subscriptions are orphaned (belong to dead session), so we just need to remove our references.
+        foreach (var oldSubscription in _subscriptions.Keys)
+        {
+            oldSubscription.FastDataChangeCallback -= OnFastDataChange;
+        }
+        _subscriptions.Clear();
+        _monitoredItems.Clear();
+
         var itemCount = monitoredItems.Count;
         var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
         for (var i = 0; i < itemCount; i += maximumItemsPerSubscription)
@@ -68,6 +77,8 @@ internal class SubscriptionManager : IAsyncDisposable
                 LifetimeCount = _configuration.SubscriptionLifetimeCount,
                 Priority = _configuration.SubscriptionPriority,
                 MaxNotificationsPerPublish = _configuration.SubscriptionMaximumNotificationsPerPublish,
+                RepublishAfterTransfer = true, // Enable SDK's automatic republish of missed messages after transfer
+                SequentialPublishing = _configuration.SubscriptionSequentialPublishing,
             };
 
             if (!session.AddSubscription(subscription))
@@ -105,7 +116,7 @@ internal class SubscriptionManager : IAsyncDisposable
             _subscriptions.TryAdd(subscription, 0);
         }
     }
-    
+
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
         var propertyWriter = _propertyWriter;
@@ -322,6 +333,18 @@ internal class SubscriptionManager : IAsyncDisposable
             }
         });
 
-        await Task.WhenAll(deleteTasks).ConfigureAwait(false);
+        // Use timeout to prevent indefinite hang if server is unresponsive
+        var disposalTimeout = _configuration.SessionDisposalTimeout;
+        try
+        {
+            await Task.WhenAll(deleteTasks).WaitAsync(disposalTimeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning(
+                "Subscription deletion timed out after {Timeout} during disposal. " +
+                "Some subscriptions may not have been cleanly removed from server.",
+                disposalTimeout);
+        }
     }
 }

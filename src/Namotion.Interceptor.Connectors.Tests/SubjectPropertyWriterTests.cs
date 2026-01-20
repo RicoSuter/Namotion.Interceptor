@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -191,4 +192,5 @@ public class SubjectPropertyWriterTests
         // Assert - buffered because _updates starts as [] (not null)
         Assert.Empty(updates);
     }
+
 }

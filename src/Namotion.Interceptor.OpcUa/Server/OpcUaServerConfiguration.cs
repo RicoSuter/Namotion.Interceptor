@@ -47,11 +47,6 @@ public class OpcUaServerConfiguration
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
     /// </summary>
     public TimeSpan? BufferTime { get; init; }
-    
-    /// <summary>
-    /// Gets or sets the retry time (default: 10s).
-    /// </summary>
-    public TimeSpan? RetryTime { get; init; }
 
     /// <summary>
     /// Gets or sets the base address for the OPC UA server.
@@ -65,6 +60,19 @@ public class OpcUaServerConfiguration
     /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
     /// </summary>
     public ITelemetryContext TelemetryContext { get; init; } = NullTelemetryContext.Instance;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to automatically accept untrusted certificates.
+    /// Should only be set to true for testing or development scenarios.
+    /// Default is false for security.
+    /// </summary>
+    public bool AutoAcceptUntrustedCertificates { get; init; } = false;
+
+    /// <summary>
+    /// Gets or sets the base path for certificate stores.
+    /// Default is "pki". Change this to isolate certificate stores for parallel test execution.
+    /// </summary>
+    public string CertificateStoreBasePath { get; init; } = "pki";
 
     /// <summary>
     /// Creates and configures an OPC UA application instance for the server.
@@ -93,25 +101,25 @@ public class OpcUaServerConfiguration
                 ApplicationCertificate = new CertificateIdentifier
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/own",
+                    StorePath = $"{CertificateStoreBasePath}/own",
                     SubjectName = $"CN={ApplicationName}, O=Namotion"
                 },
                 TrustedIssuerCertificates = new CertificateTrustList
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/issuer"
+                    StorePath = $"{CertificateStoreBasePath}/issuer"
                 },
                 TrustedPeerCertificates = new CertificateTrustList
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/trusted"
+                    StorePath = $"{CertificateStoreBasePath}/trusted"
                 },
                 RejectedCertificateStore = new CertificateTrustList
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/rejected"
+                    StorePath = $"{CertificateStoreBasePath}/rejected"
                 },
-                AutoAcceptUntrustedCertificates = false,
+                AutoAcceptUntrustedCertificates = AutoAcceptUntrustedCertificates,
                 AddAppCertToTrustedStore = false,
                 SendCertificateChain = true,
                 RejectSHA1SignedCertificates = false, // allow for interoperability tests

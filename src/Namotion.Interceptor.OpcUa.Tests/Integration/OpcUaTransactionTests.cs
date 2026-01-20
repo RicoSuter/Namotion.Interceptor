@@ -1,15 +1,19 @@
+using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Transactions;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
-[Collection("OPC UA Integration")]
+[Trait("Category", "Integration")]
 public class OpcUaTransactionTests
 {
     private readonly ITestOutputHelper _output;
+    private TestLogger? _logger;
 
     private OpcUaTestServer<TestRoot>? _server;
     private OpcUaTestClient<TestRoot>? _client;
+    private PortLease? _port;
 
     public OpcUaTransactionTests(ITestOutputHelper output)
     {
@@ -41,16 +45,18 @@ public class OpcUaTransactionTests
                 await transaction.CommitAsync(CancellationToken.None);
             }
 
-            // Allow time for OPC UA sync
-            await Task.Delay(1000);
-
-            // Assert - server should now have new value after commit
-            Assert.Equal("Transaction Value", _server.Root.Name);
+            // Wait for OPC UA sync
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => _server.Root.Name == "Transaction Value",
+                timeout: TimeSpan.FromSeconds(10),
+                message: "Server should receive committed transaction value");
         }
         finally
         {
             await (_client?.StopAsync() ?? Task.CompletedTask);
             await (_server?.StopAsync() ?? Task.CompletedTask);
+            _port?.Dispose();
+            _port = null;
         }
     }
 
@@ -82,8 +88,11 @@ public class OpcUaTransactionTests
                 await transaction.CommitAsync(CancellationToken.None);
             }
 
-            // Allow time for OPC UA sync
-            await Task.Delay(1000);
+            // Wait for OPC UA sync of all properties
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => _server.Root.Name == "Multi-Property Test" && _server.Root.Number == 123.45m,
+                timeout: TimeSpan.FromSeconds(10),
+                message: "Server should receive all committed transaction values");
 
             // Assert - server should now have all new values after commit
             Assert.Equal("Multi-Property Test", _server.Root.Name);
@@ -93,12 +102,17 @@ public class OpcUaTransactionTests
         {
             await (_client?.StopAsync() ?? Task.CompletedTask);
             await (_server?.StopAsync() ?? Task.CompletedTask);
+            _port?.Dispose();
+            _port = null;
         }
     }
 
     private async Task StartServerAsync()
     {
-        _server = new OpcUaTestServer<TestRoot>(_output);
+        _logger = new TestLogger(_output);
+        _port = await OpcUaTestPortPool.AcquireAsync();
+
+        _server = new OpcUaTestServer<TestRoot>(_logger);
         await _server.StartAsync(
             context => new TestRoot(context),
             (context, root) =>
@@ -106,14 +120,18 @@ public class OpcUaTransactionTests
                 root.Connected = true;
                 root.Name = "Initial Server Value";
                 root.Number = 0m;
-            });
+            },
+            baseAddress: _port.BaseAddress,
+            certificateStoreBasePath: _port.CertificateStoreBasePath);
     }
 
     private async Task StartClientAsync()
     {
-        _client = new OpcUaTestClient<TestRoot>(_output);
+        _client = new OpcUaTestClient<TestRoot>(_logger!);
         await _client.StartAsync(
             context => new TestRoot(context),
-            isConnected: root => root.Connected);
+            isConnected: root => root.Connected,
+            serverUrl: _port!.ServerUrl,
+            certificateStoreBasePath: _port.CertificateStoreBasePath);
     }
 }

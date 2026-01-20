@@ -13,19 +13,23 @@ namespace Namotion.Interceptor.OpcUa.Client.Connection;
 /// </summary>
 internal sealed class SessionManager : IAsyncDisposable, IDisposable
 {
+    private readonly OpcUaSubjectClientSource _source;
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
-    private readonly SessionReconnectHandler _reconnectHandler;
+    private volatile SessionReconnectHandler _reconnectHandler;
 
     private Session? _session;
-    private CancellationToken _stoppingToken;
 
     private readonly object _reconnectingLock = new();
 
     private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
+
+    // Fields for deferred async work (handled by health check loop)
+    private Session? _pendingOldSession; // Old session needing disposal after reconnection (accessed via Interlocked)
+    private int _needsInitialization;   // 0 = false, 1 = true (thread-safe via Interlocked)
 
     /// <summary>
     /// Gets the current session. WARNING: Can change at any time due to reconnection. Never cache - read immediately before use.
@@ -33,14 +37,28 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     public Session? CurrentSession => Volatile.Read(ref _session);
 
     /// <summary>
-    /// Gets a value indicating whether the session is currently connected.
+    /// Gets a value indicating whether the session is currently connected and not reconnecting.
+    /// Returns true only if there is a session, it reports as connected, AND we're not in a reconnection cycle.
     /// </summary>
-    public bool IsConnected => Volatile.Read(ref _session) is not null;
+    public bool IsConnected =>
+        Volatile.Read(ref _isReconnecting) == 0 &&
+        (Volatile.Read(ref _session)?.Connected ?? false);
 
     /// <summary>
     /// Gets a value indicating whether the session is currently reconnecting.
     /// </summary>
     public bool IsReconnecting => Volatile.Read(ref _isReconnecting) == 1;
+
+    /// <summary>
+    /// Gets a value indicating whether initialization needs to be completed by the health check loop.
+    /// Set when SDK reconnection succeeds with subscription transfer.
+    /// </summary>
+    public bool NeedsInitialization => Volatile.Read(ref _needsInitialization) == 1;
+
+    /// <summary>
+    /// Gets the pending old session that needs async disposal by the health check loop.
+    /// </summary>
+    public Session? PendingOldSession => Volatile.Read(ref _pendingOldSession);
 
     /// <summary>
     /// Gets the current subscriptions managed by the subscription manager.
@@ -59,6 +77,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     public SessionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
     {
+        _source = source;
         _propertyWriter = propertyWriter;
         _logger = logger;
         _configuration = configuration;
@@ -113,7 +132,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             application.ApplicationConfiguration,
             serverUri,
             endpoints,
-            useSecurity: false,
+            useSecurity: configuration.UseSecurity,
             configuration.TelemetryContext);
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
@@ -135,8 +154,19 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 $"Session factory returned unexpected type '{sessionResult?.GetType().FullName ?? "null"}'. " +
                 $"Expected '{typeof(Session).FullName}'. Ensure the configured SessionFactory returns a valid Session instance.");
 
+        // Enable SDK's built-in subscription transfer for seamless reconnection
+        // TransferSubscriptionsOnReconnect: SDK will automatically transfer subscriptions during reconnect
+        // DeleteSubscriptionsOnClose: Keep subscriptions on server during reconnection for transfer
+        newSession.TransferSubscriptionsOnReconnect = true;
+        newSession.DeleteSubscriptionsOnClose = false;
+
+        // MinPublishRequestCount: Keep multiple publish requests in flight for reliability
+        // OPC Foundation's reference client uses 3 to prevent message loss during traffic spikes
+        newSession.MinPublishRequestCount = configuration.MinPublishRequestCount;
+
         newSession.KeepAlive -= OnKeepAlive;
         newSession.KeepAlive += OnKeepAlive;
+        newSession.KeepAliveInterval = (int)configuration.KeepAliveInterval.TotalMilliseconds;
 
         Volatile.Write(ref _session, newSession);
 
@@ -152,8 +182,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         IReadOnlyList<MonitoredItem> monitoredItems,
         Session session, CancellationToken cancellationToken)
     {
-        _stoppingToken = cancellationToken;
-
         await SubscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
@@ -169,7 +197,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     private void OnKeepAlive(ISession sender, KeepAliveEventArgs e)
     {
-        if (ServiceResult.IsGood(e.Status) || 
+        if (ServiceResult.IsGood(e.Status) ||
             e.CurrentState is not (ServerState.Unknown or ServerState.Failed))
         {
             return;
@@ -204,14 +232,19 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             _logger.LogInformation("OPC UA server connection lost. Beginning reconnect...");
             _propertyWriter.StartBuffering();
 
+            // Set flag before BeginReconnect to avoid window where external observers see IsReconnecting=false
+            Interlocked.Exchange(ref _isReconnecting, 1);
+
             var newState = _reconnectHandler.BeginReconnect(session, (int)_configuration.ReconnectInterval.TotalMilliseconds, OnReconnectComplete);
             if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
             {
-                Interlocked.Exchange(ref _isReconnecting, 1);
                 e.CancelKeepAlive = true;
+                _source.RecordReconnectionAttemptStart();
             }
             else
             {
+                // BeginReconnect failed - reset flag
+                Interlocked.Exchange(ref _isReconnecting, 0);
                 _logger.LogError("Failed to begin OPC UA reconnect. Handler state: {State}.", newState);
             }
         }
@@ -223,7 +256,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     private void OnReconnectComplete(object? sender, EventArgs e)
     {
-        bool reconnectionSucceeded;
         lock (_reconnectingLock)
         {
             if (Volatile.Read(ref _disposed) == 1)
@@ -231,39 +263,46 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 return;
             }
 
-            var reconnectedSession = _reconnectHandler.Session;
+            var reconnectedSession = _reconnectHandler.Session as Session;
             if (reconnectedSession is null)
             {
-                _logger.LogError("Reconnect completed but received null OPC UA session. Will retry on next KeepAlive.");
+                _logger.LogWarning("Reconnect completed with null session.");
                 Interlocked.Exchange(ref _isReconnecting, 0);
                 return;
             }
 
-            var oldSession = _session;
-            var isNewSession = !ReferenceEquals(_session, reconnectedSession);
-            if (isNewSession)
+            var oldSession = Volatile.Read(ref _session);
+            if (!ReferenceEquals(oldSession, reconnectedSession))
             {
                 _logger.LogInformation("Reconnect created new OPC UA session.");
 
-                var newSession = reconnectedSession as Session;
-                Volatile.Write(ref _session, newSession);
-
-                if (newSession is not null)
+                // Store old session for async disposal by health check
+                if (oldSession is not null)
                 {
-                    newSession.KeepAlive -= OnKeepAlive;
-                    newSession.KeepAlive += OnKeepAlive;
-
-                    var transferredSubscriptions = newSession.Subscriptions.ToList();
-                    if (transferredSubscriptions.Count > 0)
-                    {
-                        SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
-                        _logger.LogInformation("OPC UA session reconnected: Transferred {Count} subscriptions.", transferredSubscriptions.Count);
-                    }
+                    Volatile.Write(ref _pendingOldSession, oldSession);
                 }
 
-                if (oldSession is not null && !ReferenceEquals(oldSession, newSession))
+                Volatile.Write(ref _session, reconnectedSession);
+                reconnectedSession.KeepAlive -= OnKeepAlive;
+                reconnectedSession.KeepAlive += OnKeepAlive;
+
+                // Check if subscriptions transferred
+                var transferredSubscriptions = reconnectedSession.Subscriptions.ToList();
+                if (transferredSubscriptions.Count > 0)
                 {
-                    Task.Run(() => DisposeSessionAsync(oldSession, _stoppingToken), _stoppingToken);
+                    SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
+                    _logger.LogInformation(
+                        "OPC UA session reconnected: Transferred {Count} subscriptions. Health check will complete initialization.",
+                        transferredSubscriptions.Count);
+                    Interlocked.Exchange(ref _needsInitialization, 1);
+                }
+                else
+                {
+                    // Transfer failed - clear session, health check will recreate
+                    _logger.LogWarning(
+                        "OPC UA session reconnected but subscription transfer failed (server restart). " +
+                        "Clearing session to trigger full reconnection via health check.");
+                    Volatile.Write(ref _session, null);
                 }
             }
             else
@@ -271,66 +310,110 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 _logger.LogInformation("Reconnect preserved existing OPC UA session. Subscriptions maintained.");
             }
 
-            reconnectionSucceeded = true;
             Interlocked.Exchange(ref _isReconnecting, 0);
-        }
-
-        if (reconnectionSucceeded)
-        {
-            Task.Run(async () =>
-            {
-                if (Volatile.Read(ref _disposed) == 1)
-                {
-                    return; // Already disposing, skip reconnection work
-                }
-                var session = CurrentSession;
-                if (session is not null)
-                {
-                    try
-                    {
-                        await _propertyWriter.CompleteInitializationAsync(_stoppingToken).ConfigureAwait(false);
-                    }
-                    catch (Exception exception)
-                    {
-                        _logger.LogError(exception, "Reconnect failed, closing session. Health check will trigger full restart.");
-                        await DisposeSessionAsync(session, _stoppingToken).ConfigureAwait(false);
-
-                        // Only clear session if it's still the same one we tried to initialize
-                        // Prevents race with concurrent reconnection or disposal
-                        var currentSession = Volatile.Read(ref _session);
-                        if (ReferenceEquals(currentSession, session))
-                        {
-                            Volatile.Write(ref _session, null);
-                        }
-                    }
-                }
-            }, _stoppingToken);
-            
-            _logger.LogInformation("OPC UA session reconnect completed.");
         }
     }
 
     /// <summary>
-    /// Attempts to force-reset the reconnecting flag if reconnection is truly stalled.
-    /// Uses lock and double-check to prevent race with delayed OnReconnectComplete.
+    /// Attempts to force-reset if reconnection is stalled.
+    /// Resets the SDK reconnect handler and clears state so health check can restart fresh.
     /// </summary>
-    /// <returns>True if flag was reset (stall confirmed), false if reconnection completed while waiting.</returns>
+    /// <returns>True if reset was performed, false otherwise.</returns>
     internal bool TryForceResetIfStalled()
     {
         lock (_reconnectingLock)
         {
-            // Double-check: still reconnecting AND session still null?
-            if (Volatile.Read(ref _isReconnecting) == 1 &&
-                Volatile.Read(ref _session) is null)
+            if (Volatile.Read(ref _isReconnecting) == 0)
             {
-                // Truly stalled - OnReconnectComplete never fired or failed:
-                // Safe to clear flag and allow manual recovery
-                Interlocked.Exchange(ref _isReconnecting, 0);
-                return true;
+                return false;
             }
 
-            // Reconnection completed while we were waiting for lock - do nothing
-            return false;
+            // Reset the SDK reconnect handler to prevent it from interfering
+            try
+            {
+                _reconnectHandler.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error disposing stalled reconnect handler.");
+            }
+
+            _reconnectHandler = new SessionReconnectHandler(
+                _configuration.TelemetryContext,
+                false,
+                (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
+
+            // Clear everything - health check will restart fresh
+            Volatile.Write(ref _session, null);
+            Interlocked.Exchange(ref _isReconnecting, 0);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Disposes the pending old session asynchronously.
+    /// Called by health check loop after SDK reconnection completes.
+    /// </summary>
+    public async Task DisposePendingOldSessionAsync(CancellationToken cancellationToken)
+    {
+        var oldSession = Interlocked.Exchange(ref _pendingOldSession, null);
+        if (oldSession is not null)
+        {
+            try
+            {
+                await DisposeSessionAsync(oldSession, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error disposing old session during reconnection cleanup.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Clears the initialization flag after health check completes initialization.
+    /// </summary>
+    public void ClearInitializationFlag()
+    {
+        Interlocked.Exchange(ref _needsInitialization, 0);
+    }
+
+    /// <summary>
+    /// Clears the current session and resets the reconnect handler to allow health check to trigger reconnection.
+    /// Called when initialization fails after session creation.
+    /// </summary>
+    public async Task ClearSessionAsync(CancellationToken cancellationToken)
+    {
+        Session? sessionToDispose;
+
+        lock (_reconnectingLock)
+        {
+            // Reset the reconnect handler to prevent it from trying to use the disposed session
+            try
+            {
+                _reconnectHandler.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error disposing reconnect handler during session clear.");
+            }
+
+            _reconnectHandler = new SessionReconnectHandler(
+                _configuration.TelemetryContext,
+                false,
+                (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
+
+            Interlocked.Exchange(ref _isReconnecting, 0);
+
+            // Read and clear session inside lock to prevent race with OnReconnectComplete
+            sessionToDispose = Volatile.Read(ref _session);
+            Volatile.Write(ref _session, null);
+        }
+
+        // Dispose outside lock to avoid blocking SDK callbacks
+        if (sessionToDispose is not null)
+        {
+            await DisposeSessionAsync(sessionToDispose, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -363,11 +446,21 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             return;
         }
 
-        try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
-        try { await SubscriptionManager.DisposeAsync().ConfigureAwait(false); } catch { /* best effort */ }
-        try { PollingManager?.Dispose(); } catch { /* best effort */ }
+        try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
+        try { await SubscriptionManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing subscription manager."); }
+        if (PollingManager is not null)
+        {
+            try { await PollingManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing polling manager."); }
+        }
 
-        var sessionToDispose = _session;
+        // Dispose pending old session from reconnection if it exists
+        var pendingSession = Interlocked.Exchange(ref _pendingOldSession, null);
+        if (pendingSession is not null)
+        {
+            try { pendingSession.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing pending old session."); }
+        }
+
+        var sessionToDispose = Volatile.Read(ref _session);
         if (sessionToDispose is not null)
         {
             var timeout = _configuration.SessionDisposalTimeout;
@@ -384,7 +477,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     timeout);
 
                 // Force immediate disposal without waiting for server acknowledgment
-                try { sessionToDispose.Dispose(); } catch { /* best effort */ }
+                try { sessionToDispose.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error force-disposing session."); }
             }
 
             Volatile.Write(ref _session, null);
@@ -392,25 +485,23 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Synchronous dispose - prefer DisposeAsync() for proper cleanup.
-    /// This is only called if the caller doesn't check for IAsyncDisposable.
+    /// Satisfies IDisposable for interface compatibility.
+    /// Delegates to DisposeAsync() via fire-and-forget to ensure cleanup.
+    /// SubjectSourceBackgroundService checks for IAsyncDisposable first, so this is never called in normal operation.
     /// </summary>
-    public void Dispose()
+    void IDisposable.Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        _logger.LogWarning("Sync Dispose() called on SessionManager - prefer DisposeAsync() for proper cleanup.");
+        _ = Task.Run(async () =>
         {
-            return;
-        }
-
-        try { _reconnectHandler.Dispose(); } catch { /* best effort */ }
-        try { PollingManager?.Dispose(); } catch { /* best effort */ }
-
-        var sessionToDispose = _session;
-        if (sessionToDispose is not null)
-        {
-            sessionToDispose.KeepAlive -= OnKeepAlive;
-            try { sessionToDispose.Dispose(); } catch { /* best effort */ }
-            Volatile.Write(ref _session, null);
-        }
+            try
+            {
+                await DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during fire-and-forget disposal of SessionManager.");
+            }
+        });
     }
 }
