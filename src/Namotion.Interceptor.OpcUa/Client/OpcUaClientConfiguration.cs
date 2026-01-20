@@ -150,6 +150,14 @@ public class OpcUaClientConfiguration
     public bool SubscriptionSequentialPublishing { get; init; } = false;
 
     /// <summary>
+    /// Gets or sets the minimum number of publish requests the client keeps outstanding at all times.
+    /// Higher values improve reliability during traffic spikes and brief network issues by ensuring
+    /// multiple requests are always in flight. The OPC UA .NET Standard library recommends 3 for production.
+    /// Default is 3 for optimal reliability.
+    /// </summary>
+    public int MinPublishRequestCount { get; init; } = 3;
+
+    /// <summary>
     /// Gets or sets the maximum references per node to read per browse request. 0 uses server default.
     /// </summary>
     public uint MaximumReferencesPerNode { get; init; } = 0;
@@ -458,6 +466,13 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"StallDetectionIterations must be at least 1, got: {StallDetectionIterations}",
                 nameof(StallDetectionIterations));
+        }
+
+        if (MinPublishRequestCount < 1)
+        {
+            throw new ArgumentException(
+                $"MinPublishRequestCount must be at least 1, got: {MinPublishRequestCount}",
+                nameof(MinPublishRequestCount));
         }
     }
 }

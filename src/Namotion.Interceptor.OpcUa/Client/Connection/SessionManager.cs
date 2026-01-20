@@ -160,6 +160,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         newSession.TransferSubscriptionsOnReconnect = true;
         newSession.DeleteSubscriptionsOnClose = false;
 
+        // MinPublishRequestCount: Keep multiple publish requests in flight for reliability
+        // OPC UA .NET Standard library recommends 3 for production to prevent message loss during traffic spikes
+        newSession.MinPublishRequestCount = configuration.MinPublishRequestCount;
+
         newSession.KeepAlive -= OnKeepAlive;
         newSession.KeepAlive += OnKeepAlive;
         newSession.KeepAliveInterval = (int)configuration.KeepAliveInterval.TotalMilliseconds;
