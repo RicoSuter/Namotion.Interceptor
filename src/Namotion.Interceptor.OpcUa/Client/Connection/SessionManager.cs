@@ -449,6 +449,13 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             try { await PollingManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing polling manager."); }
         }
 
+        // Dispose pending old session from reconnection if it exists
+        var pendingSession = Interlocked.Exchange(ref _pendingOldSession, null);
+        if (pendingSession is not null)
+        {
+            try { pendingSession.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing pending old session."); }
+        }
+
         var sessionToDispose = Volatile.Read(ref _session);
         if (sessionToDispose is not null)
         {
