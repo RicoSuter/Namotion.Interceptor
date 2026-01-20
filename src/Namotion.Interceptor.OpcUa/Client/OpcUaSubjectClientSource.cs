@@ -72,7 +72,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// Updates diagnostics metrics to track the successful reconnection.
     /// Note: Does not increment TotalReconnectionAttempts - that's done in RecordReconnectionAttemptStart.
     /// </summary>
-    internal void RecordSdkReconnectionSuccess()
+    private void RecordReconnectionSuccess()
     {
         Interlocked.Increment(ref _successfulReconnections);
         LastConnectedAt = DateTimeOffset.UtcNow;
@@ -247,25 +247,14 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// This recreates SDK objects on demand instead of holding them in memory.
     /// Called by SessionManager when subscription transfer fails after server restart.
     /// </summary>
-    internal IReadOnlyList<MonitoredItem> CreateMonitoredItemsForReconnection()
+    private IReadOnlyList<MonitoredItem> CreateMonitoredItemsForReconnection()
     {
         var ownedProperties = GetOwnedPropertiesWithNodeIds();
         var monitoredItems = new List<MonitoredItem>(ownedProperties.Count);
 
         foreach (var (property, nodeId) in ownedProperties)
         {
-            var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
-            var monitoredItem = new MonitoredItem(_configuration.TelemetryContext)
-            {
-                StartNodeId = nodeId,
-                AttributeId = Opc.Ua.Attributes.Value,
-                MonitoringMode = MonitoringMode.Reporting,
-                SamplingInterval = opcUaNodeAttribute?.SamplingInterval ?? _configuration.DefaultSamplingInterval,
-                QueueSize = opcUaNodeAttribute?.QueueSize ?? _configuration.DefaultQueueSize,
-                DiscardOldest = opcUaNodeAttribute?.DiscardOldest ?? _configuration.DefaultDiscardOldest,
-                Handle = property
-            };
-
+            var monitoredItem = _configuration.CreateMonitoredItem(nodeId, property);
             monitoredItems.Add(monitoredItem);
         }
 
@@ -297,7 +286,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                         {
                             await propertyWriter.CompleteInitializationAsync(stoppingToken).ConfigureAwait(false);
                             sessionManager.ClearInitializationFlag();
-                            RecordSdkReconnectionSuccess();
+                            RecordReconnectionSuccess();
                             _logger.LogInformation("SDK reconnection initialization completed successfully.");
                         }
                         catch (Exception ex)
@@ -510,7 +499,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         for (var i = 0; i < span.Length && resultIndex < results.Count; i++)
         {
             var change = span[i];
-            if (!IsWritableOpcUaProperty(change))
+            if (!TryGetWritableNodeId(change, out _, out _))
                 continue;
 
             if (!StatusCode.IsGood(results[resultIndex]))
@@ -535,11 +524,24 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             : WriteResult.Failure(failedChanges.ToArray(), error);
     }
 
-    private bool IsWritableOpcUaProperty(SubjectPropertyChange change)
+    private bool TryGetWritableNodeId(SubjectPropertyChange change, out NodeId nodeId, out RegisteredSubjectProperty registeredProperty)
     {
-        return change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeId)
-            && nodeId is NodeId
-            && change.Property.TryGetRegisteredProperty() is { HasSetter: true };
+        nodeId = null!;
+        registeredProperty = null!;
+
+        if (!change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var value) || value is not NodeId id)
+        {
+            return false;
+        }
+
+        if (change.Property.TryGetRegisteredProperty() is not { HasSetter: true } property)
+        {
+            return false;
+        }
+
+        nodeId = id;
+        registeredProperty = property;
+        return true;
     }
 
     private WriteValueCollection CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
@@ -550,19 +552,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         for (var i = 0; i < span.Length; i++)
         {
             var change = span[i];
-           
-            if (!IsWritableOpcUaProperty(change))
+
+            if (!TryGetWritableNodeId(change, out var nodeId, out var registeredProperty))
             {
                 continue;
             }
 
-            if (!change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var v) || v is not NodeId nodeId)
-            {
-                continue;
-            }
-
-            var registeredProperty = change.Property.GetRegisteredProperty();
-            var value = _configuration.ValueConverter.ConvertToNodeValue(
+            var convertedValue = _configuration.ValueConverter.ConvertToNodeValue(
                 change.GetNewValue<object?>(),
                 registeredProperty);
 
@@ -572,7 +568,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 AttributeId = Opc.Ua.Attributes.Value,
                 Value = new DataValue
                 {
-                    Value = value,
+                    Value = convertedValue,
                     StatusCode = StatusCodes.Good,
                     SourceTimestamp = change.ChangedTimestamp.UtcDateTime
                 }

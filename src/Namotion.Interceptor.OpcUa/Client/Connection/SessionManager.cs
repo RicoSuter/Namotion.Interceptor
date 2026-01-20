@@ -21,7 +21,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private volatile SessionReconnectHandler _reconnectHandler;
 
     private Session? _session;
-    private CancellationToken _stoppingToken;
 
     private readonly object _reconnectingLock = new();
 
@@ -179,8 +178,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         IReadOnlyList<MonitoredItem> monitoredItems,
         Session session, CancellationToken cancellationToken)
     {
-        _stoppingToken = cancellationToken;
-
         await SubscriptionManager.CreateBatchedSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
