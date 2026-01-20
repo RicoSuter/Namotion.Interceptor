@@ -161,7 +161,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         newSession.DeleteSubscriptionsOnClose = false;
 
         // MinPublishRequestCount: Keep multiple publish requests in flight for reliability
-        // OPC UA .NET Standard library recommends 3 for production to prevent message loss during traffic spikes
+        // OPC Foundation's reference client uses 3 to prevent message loss during traffic spikes
         newSession.MinPublishRequestCount = configuration.MinPublishRequestCount;
 
         newSession.KeepAlive -= OnKeepAlive;

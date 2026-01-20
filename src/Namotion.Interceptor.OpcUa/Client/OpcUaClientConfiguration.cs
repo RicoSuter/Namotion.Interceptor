@@ -152,7 +152,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the minimum number of publish requests the client keeps outstanding at all times.
     /// Higher values improve reliability during traffic spikes and brief network issues by ensuring
-    /// multiple requests are always in flight. The OPC UA .NET Standard library recommends 3 for production.
+    /// multiple requests are always in flight. The OPC Foundation's reference client uses 3.
     /// Default is 3 for optimal reliability.
     /// </summary>
     public int MinPublishRequestCount { get; init; } = 3;
