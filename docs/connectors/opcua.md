@@ -417,6 +417,40 @@ using (SubjectChangeContext.WithSource(opcUaSource))
 }
 ```
 
+## Security Considerations
+
+**Client security:**
+```csharp
+var config = new OpcUaClientConfiguration
+{
+    ServerUrl = "opc.tcp://plc.factory.com:4840",
+    UseSecurity = true,  // Enable signing and encryption (recommended for production)
+    // ... other settings
+};
+```
+
+When `UseSecurity = true`, the client prefers secure endpoints with message signing and encryption. The default is `false` for development convenience.
+
+**Server security:**
+By default, the server accepts anonymous connections without encryption. For production deployments requiring authentication:
+- Configure custom `UserTokenPolicies` in a derived `OpcUaServerConfiguration`
+- Use certificate-based authentication
+- Enable message signing and encryption
+
+## Resilience Configuration
+
+For 24/7 production use, the default configuration provides robust resilience:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `KeepAliveInterval` | 5s | How quickly disconnections are detected |
+| `ReconnectInterval` | 5s | Time between reconnection attempts |
+| `StallDetectionIterations` | 10 | Health checks before forcing stall reset |
+| `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
+| `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
+
+Total stall recovery time = `StallDetectionIterations` × `SubscriptionHealthCheckInterval` (default: 50s).
+
 ## Lifecycle Management
 
 ### Automatic Cleanup on Subject Detach
