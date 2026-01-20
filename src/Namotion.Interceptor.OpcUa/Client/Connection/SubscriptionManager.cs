@@ -11,7 +11,7 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client.Connection;
 
-internal class SubscriptionManager : IAsyncDisposable, IDisposable
+internal class SubscriptionManager : IAsyncDisposable
 {
     private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
         = new(() => new List<PropertyUpdate>(16));
@@ -344,23 +344,6 @@ internal class SubscriptionManager : IAsyncDisposable, IDisposable
                 "Subscription deletion timed out after {Timeout} during disposal. " +
                 "Some subscriptions may not have been cleanly removed from server.",
                 disposalTimeout);
-        }
-    }
-
-    /// <summary>
-    /// Synchronous dispose - prefer DisposeAsync() for proper cleanup.
-    /// This performs best-effort cleanup without waiting for server acknowledgment.
-    /// </summary>
-    public void Dispose()
-    {
-        _shuttingDown = true;
-
-        var subscriptions = _subscriptions.Keys.ToArray();
-        _subscriptions.Clear();
-
-        foreach (var subscription in subscriptions)
-        {
-            subscription.FastDataChangeCallback -= OnFastDataChange;
         }
     }
 }

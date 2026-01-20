@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Polling;
 /// Polling fallback for nodes that don't support subscriptions. Circuit breaker prevents resource exhaustion.
 /// Thread-safe. Start() is idempotent. Values reset on reconnection (some data loss during disconnection is expected).
 /// </summary>
-internal sealed class PollingManager : IAsyncDisposable, IDisposable
+internal sealed class PollingManager : IAsyncDisposable
 {
     private readonly OpcUaSubjectClientSource _source;
     private readonly ILogger _logger;
@@ -460,35 +460,6 @@ internal sealed class PollingManager : IAsyncDisposable, IDisposable
         catch (TimeoutException)
         {
             _logger.LogWarning("Polling task did not complete within {Timeout} timeout", _configuration.PollingDisposalTimeout);
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected during cancellation
-        }
-
-        _cts.Dispose();
-        _pollingItems.Clear();
-    }
-
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) == 1)
-            return;
-
-        _logger.LogDebug("Disposing OPC UA polling manager (Total reads: {TotalReads}, Failed: {FailedReads}, Value changes: {ValueChanges}, Slow polls: {SlowPolls}, Circuit breaker trips: {Trips})",
-            _metrics.TotalReads, _metrics.FailedReads, _metrics.ValueChanges, _metrics.SlowPolls, _circuitBreaker.TripCount);
-
-        // Stop timer and cancel work
-        _timer.Dispose();
-        _cts.Cancel();
-
-        // Wait for polling task to complete (with timeout) - sync version for IDisposable
-        try
-        {
-            if (_pollingTask != null && !_pollingTask.Wait(_configuration.PollingDisposalTimeout))
-            {
-                _logger.LogWarning("Polling task did not complete within {Timeout} timeout", _configuration.PollingDisposalTimeout);
-            }
         }
         catch (OperationCanceledException)
         {
